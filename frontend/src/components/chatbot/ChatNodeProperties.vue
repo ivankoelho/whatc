@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { ChatNode } from '@/services/api'
 import { useTeamsStore } from '@/stores/teams'
 import { Input } from '@/components/ui/input'
@@ -21,6 +22,7 @@ const emit = defineEmits<{
   'delete': []
 }>()
 
+const { t } = useI18n()
 const teamsStore = useTeamsStore()
 if (teamsStore.teams.length === 0) teamsStore.fetchTeams()
 
@@ -212,20 +214,20 @@ const gotoFlowTargets = computed(() =>
   (props.availableFlows || []).filter((f) => f.id !== props.currentFlowId),
 )
 
-const typeLabel: Record<string, string> = {
-  start: 'Start',
-  message: 'Message',
-  prompt: 'Prompt',
-  buttons: 'Buttons',
-  api_call: 'API Call',
-  condition: 'Condition',
-  timing: 'Timing',
-  transfer: 'Transfer',
-  end: 'End',
-  goto_flow: 'Go to Flow',
-  whatsapp_flow: 'WhatsApp Flow',
-  webhook: 'Webhook',
-}
+const typeLabel = computed<Record<string, string>>(() => ({
+  start: t('chatbot.properties.typeStart'),
+  message: t('chatbot.properties.typeMessage'),
+  prompt: t('chatbot.properties.typePrompt'),
+  buttons: t('chatbot.properties.typeButtons'),
+  api_call: t('chatbot.properties.typeApiCall'),
+  condition: t('chatbot.properties.typeCondition'),
+  timing: t('chatbot.properties.typeTiming'),
+  transfer: t('chatbot.properties.typeTransfer'),
+  end: t('chatbot.properties.typeEnd'),
+  goto_flow: t('chatbot.properties.typeGotoFlow'),
+  whatsapp_flow: t('chatbot.properties.typeWhatsappFlow'),
+  webhook: t('chatbot.properties.typeWebhook'),
+}))
 </script>
 
 <template>
@@ -239,55 +241,57 @@ const typeLabel: Record<string, string> = {
 
     <!-- Start: nothing to configure beyond the label. -->
     <p v-if="node.type === 'start'" class="text-xs text-muted-foreground">
-      Flow entry point. Wire its output to the first node that should run.
+      {{ t('chatbot.properties.startHint') }}
     </p>
 
     <!-- Label -->
     <div v-if="node.type !== 'start'" class="space-y-1.5">
-      <Label class="text-xs">Label</Label>
+      <Label class="text-xs">{{ t('chatbot.properties.label') }}</Label>
       <Input :model-value="node.label" @update:model-value="(v) => updateLabel(String(v ?? ''))" class="h-8 text-sm" />
     </div>
 
     <!-- text (message OR prompt) -->
     <template v-if="isTextNode">
       <div class="space-y-1.5">
-        <Label class="text-xs">Message</Label>
+        <Label class="text-xs">{{ t('chatbot.properties.message') }}</Label>
         <Textarea
           :model-value="textBodyValue"
           @update:model-value="(v: string) => updateTextBody(String(v ?? ''))"
-          placeholder="Enter your message"
+          :placeholder="t('chatbot.properties.messagePlaceholder')"
           class="min-h-[80px] text-xs"
         />
-        <p class="text-[10px] text-muted-foreground">Use double-brace placeholders (e.g. <code>customer_name</code>) to interpolate session variables.</p>
+        <i18n-t keypath="chatbot.properties.doubleBraceHint" tag="p" class="text-[10px] text-muted-foreground" scope="global">
+          <template #code><code>customer_name</code></template>
+        </i18n-t>
       </div>
       <div class="space-y-1.5">
-        <Label class="text-xs">Expected response</Label>
+        <Label class="text-xs">{{ t('chatbot.properties.expectedResponse') }}</Label>
         <Select :model-value="expectedResponse" @update:model-value="(v: any) => setExpectedResponse(v)">
           <SelectTrigger class="h-8 text-sm"><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="none">None (fire-and-forget)</SelectItem>
-            <SelectItem value="text">Text</SelectItem>
-            <SelectItem value="number">Number</SelectItem>
-            <SelectItem value="email">Email</SelectItem>
-            <SelectItem value="phone">Phone</SelectItem>
-            <SelectItem value="date">Date</SelectItem>
-            <SelectItem value="select">Selection</SelectItem>
+            <SelectItem value="none">{{ t('chatbot.properties.respNone') }}</SelectItem>
+            <SelectItem value="text">{{ t('chatbot.properties.respText') }}</SelectItem>
+            <SelectItem value="number">{{ t('chatbot.properties.respNumber') }}</SelectItem>
+            <SelectItem value="email">{{ t('chatbot.properties.respEmail') }}</SelectItem>
+            <SelectItem value="phone">{{ t('chatbot.properties.respPhone') }}</SelectItem>
+            <SelectItem value="date">{{ t('chatbot.properties.respDate') }}</SelectItem>
+            <SelectItem value="select">{{ t('chatbot.properties.respSelection') }}</SelectItem>
           </SelectContent>
         </Select>
-        <p class="text-[10px] text-muted-foreground">When set, the flow waits for the user's reply before continuing.</p>
+        <p class="text-[10px] text-muted-foreground">{{ t('chatbot.properties.waitsForReply') }}</p>
       </div>
       <template v-if="node.type === 'prompt'">
         <div class="space-y-1.5">
-          <Label class="text-xs">Store response as</Label>
+          <Label class="text-xs">{{ t('chatbot.properties.storeResponseAs') }}</Label>
           <Input
             :model-value="config.store_as || ''"
             @update:model-value="(v: string) => updateConfig('store_as', v)"
-            placeholder="variable_name"
+            :placeholder="t('chatbot.properties.variableNamePlaceholder')"
             class="h-8 text-sm font-mono"
           />
         </div>
         <div class="space-y-1.5">
-          <Label class="text-xs">Validation regex (optional)</Label>
+          <Label class="text-xs">{{ t('chatbot.properties.validationRegex') }}</Label>
           <Input
             :model-value="config.validation_regex || ''"
             @update:model-value="(v: string) => updateConfig('validation_regex', v)"
@@ -296,16 +300,16 @@ const typeLabel: Record<string, string> = {
           />
         </div>
         <div class="space-y-1.5">
-          <Label class="text-xs">Validation error message</Label>
+          <Label class="text-xs">{{ t('chatbot.properties.validationError') }}</Label>
           <Input
             :model-value="config.validation_error || ''"
             @update:model-value="(v: string) => updateConfig('validation_error', v)"
-            placeholder="Invalid input. Please try again."
+            :placeholder="t('chatbot.properties.validationErrorPlaceholder')"
             class="h-8 text-xs"
           />
         </div>
         <div class="space-y-1.5">
-          <Label class="text-xs">Max retries</Label>
+          <Label class="text-xs">{{ t('chatbot.properties.maxRetries') }}</Label>
           <Input
             type="number"
             :model-value="String(config.max_retries ?? 3)"
@@ -321,27 +325,27 @@ const typeLabel: Record<string, string> = {
     <!-- buttons -->
     <template v-if="node.type === 'buttons'">
       <div class="space-y-1.5">
-        <Label class="text-xs">Body</Label>
+        <Label class="text-xs">{{ t('chatbot.properties.body') }}</Label>
         <Textarea
           :model-value="config.body || ''"
           @update:model-value="(v: string) => updateConfig('body', v)"
-          placeholder="Message shown above the buttons"
+          :placeholder="t('chatbot.properties.bodyAboveButtons')"
           class="min-h-[60px] text-xs"
         />
       </div>
       <div class="space-y-1.5">
         <div class="flex items-center justify-between">
-          <Label class="text-xs">Button Options ({{ (config.buttons || []).length }}/{{ hasCtaButtons ? 2 : 10 }})</Label>
+          <Label class="text-xs">{{ t('chatbot.properties.buttonOptionsCount', { count: (config.buttons || []).length, max: hasCtaButtons ? 2 : 10 }) }}</Label>
         </div>
         <div class="flex gap-1">
           <Button variant="outline" size="sm" class="h-7 text-xs" :disabled="hasCtaButtons || replyCount >= 10" @click="addReplyButton">
-            <Plus class="h-3 w-3 mr-0.5" /> Reply
+            <Plus class="h-3 w-3 mr-0.5" /> {{ t('chatbot.properties.reply') }}
           </Button>
           <Button variant="outline" size="sm" class="h-7 text-xs" :disabled="hasReplyButtons || ctaCount >= 2" @click="addUrlButton">
-            <Plus class="h-3 w-3 mr-0.5" /> URL
+            <Plus class="h-3 w-3 mr-0.5" /> {{ t('chatbot.properties.url') }}
           </Button>
           <Button variant="outline" size="sm" class="h-7 text-xs" :disabled="hasReplyButtons || ctaCount >= 2" @click="addPhoneButton">
-            <Plus class="h-3 w-3 mr-0.5" /> Phone
+            <Plus class="h-3 w-3 mr-0.5" /> {{ t('chatbot.properties.phone') }}
           </Button>
         </div>
         <div v-for="(btn, idx) in (config.buttons || [])" :key="btn.id || idx" class="p-2 border rounded-md space-y-2 bg-muted/30">
@@ -350,7 +354,7 @@ const typeLabel: Record<string, string> = {
             <Input
               :model-value="btn.title || ''"
               @update:model-value="(v: string) => updateButton(Number(idx), 'title', v)"
-              placeholder="Button Title"
+              :placeholder="t('chatbot.properties.buttonTitle')"
               class="h-7 text-xs flex-1"
             />
             <Button variant="ghost" size="icon" class="h-6 w-6" @click="removeButton(Number(idx))">
@@ -360,48 +364,48 @@ const typeLabel: Record<string, string> = {
           <Input
             :model-value="btn.id || ''"
             @update:model-value="(v: string) => updateButton(Number(idx), 'id', v)"
-            placeholder="button_id"
+            :placeholder="t('chatbot.properties.buttonIdPlaceholder')"
             class="h-7 text-xs font-mono"
           />
           <Input
             v-if="btn.type === 'url'"
             :model-value="btn.url || ''"
             @update:model-value="(v: string) => updateButton(Number(idx), 'url', v)"
-            placeholder="https://example.com"
+            :placeholder="t('chatbot.properties.urlExamplePlaceholder')"
             class="h-7 text-xs font-mono"
           />
           <Input
             v-if="btn.type === 'phone'"
             :model-value="btn.phone_number || ''"
             @update:model-value="(v: string) => updateButton(Number(idx), 'phone_number', v)"
-            placeholder="+1234567890"
+            :placeholder="t('chatbot.properties.phoneNumberPlaceholder')"
             class="h-7 text-xs font-mono"
           />
         </div>
-        <p class="text-[10px] text-muted-foreground">Reply buttons (max 10) send the user's choice back. URL / Phone buttons (max 2 per node, mutually exclusive with Reply) open a link or call. Wire reply buttons to next nodes by dragging from the button handle on the canvas.</p>
+        <p class="text-[10px] text-muted-foreground">{{ t('chatbot.properties.replyButtonsHint') }}</p>
       </div>
 
       <!-- Input — buttons always expect a button selection; surface this
            for visual consistency with text nodes. -->
       <div class="pt-2 border-t space-y-1.5">
-        <Label class="text-xs">Expected response</Label>
+        <Label class="text-xs">{{ t('chatbot.properties.expectedResponse') }}</Label>
         <Select model-value="button" disabled>
           <SelectTrigger class="h-8 text-sm"><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="button">Selection (buttons)</SelectItem>
+            <SelectItem value="button">{{ t('chatbot.properties.selectionButtons') }}</SelectItem>
           </SelectContent>
         </Select>
       </div>
 
       <div class="space-y-1.5">
-        <Label class="text-xs">Store response as (optional)</Label>
+        <Label class="text-xs">{{ t('chatbot.properties.storeResponseAsOptional') }}</Label>
         <Input
           :model-value="config.store_as || ''"
           @update:model-value="(v: string) => updateConfig('store_as', v)"
-          placeholder="variable_name"
+          :placeholder="t('chatbot.properties.variableNamePlaceholder')"
           class="h-8 text-sm font-mono"
         />
-        <p class="text-[10px] text-muted-foreground">Saves the tapped button's title into this variable so later nodes can reference it.</p>
+        <p class="text-[10px] text-muted-foreground">{{ t('chatbot.properties.savesTappedButton') }}</p>
       </div>
 
     </template>
@@ -409,16 +413,16 @@ const typeLabel: Record<string, string> = {
     <!-- api_call -->
     <template v-if="node.type === 'api_call'">
       <div class="space-y-1.5">
-        <Label class="text-xs">URL</Label>
+        <Label class="text-xs">{{ t('chatbot.properties.url') }}</Label>
         <Input
           :model-value="config.url || ''"
           @update:model-value="(v: string) => updateConfig('url', v)"
-          placeholder="https://api.example.com/endpoint"
+          :placeholder="t('chatbot.properties.apiUrlPlaceholder')"
           class="h-8 text-xs font-mono"
         />
       </div>
       <div class="space-y-1.5">
-        <Label class="text-xs">Method</Label>
+        <Label class="text-xs">{{ t('chatbot.properties.method') }}</Label>
         <Select :model-value="config.method || 'GET'" @update:model-value="(v: any) => updateConfig('method', v)">
           <SelectTrigger class="h-8 text-sm"><SelectValue /></SelectTrigger>
           <SelectContent>
@@ -431,21 +435,21 @@ const typeLabel: Record<string, string> = {
       </div>
       <div class="space-y-1.5">
         <div class="flex items-center justify-between">
-          <Label class="text-xs">Headers</Label>
+          <Label class="text-xs">{{ t('chatbot.properties.headers') }}</Label>
           <Button variant="outline" size="sm" class="h-6 text-xs" @click="addHeader">
-            <Plus class="h-3 w-3 mr-1" /> Add
+            <Plus class="h-3 w-3 mr-1" /> {{ t('chatbot.properties.add') }}
           </Button>
         </div>
         <div v-for="(val, key) in (config.headers || {})" :key="String(key)" class="flex items-center gap-1">
-          <Input :model-value="String(key)" @update:model-value="(v: string) => updateHeaderKey(String(key), v)" placeholder="Key" class="h-7 text-xs flex-1" />
-          <Input :model-value="String(val)" @update:model-value="(v: string) => updateHeaderValue(String(key), v)" placeholder="Value" class="h-7 text-xs flex-1" />
+          <Input :model-value="String(key)" @update:model-value="(v: string) => updateHeaderKey(String(key), v)" :placeholder="t('chatbot.properties.keyPlaceholder')" class="h-7 text-xs flex-1" />
+          <Input :model-value="String(val)" @update:model-value="(v: string) => updateHeaderValue(String(key), v)" :placeholder="t('chatbot.properties.valuePlaceholder')" class="h-7 text-xs flex-1" />
           <Button variant="ghost" size="icon" class="h-6 w-6" @click="removeHeader(String(key))">
             <Trash2 class="h-3 w-3 text-destructive" />
           </Button>
         </div>
       </div>
       <div class="space-y-1.5">
-        <Label class="text-xs">Body</Label>
+        <Label class="text-xs">{{ t('chatbot.properties.body') }}</Label>
         <Textarea
           :model-value="config.body || ''"
           @update:model-value="(v: string) => updateConfig('body', v)"
@@ -455,50 +459,55 @@ const typeLabel: Record<string, string> = {
       </div>
       <div class="space-y-1.5">
         <div class="flex items-center justify-between">
-          <Label class="text-xs">Response mapping</Label>
+          <Label class="text-xs">{{ t('chatbot.properties.responseMapping') }}</Label>
           <Button variant="outline" size="sm" class="h-6 text-xs" @click="addResponseMapping">
-            <Plus class="h-3 w-3 mr-1" /> Add
+            <Plus class="h-3 w-3 mr-1" /> {{ t('chatbot.properties.add') }}
           </Button>
         </div>
-        <p class="text-[10px] text-muted-foreground">Map JSON paths into session variables (e.g. <code>data.user.name</code>).</p>
+        <i18n-t keypath="chatbot.properties.mapJsonHint" tag="p" class="text-[10px] text-muted-foreground" scope="global">
+          <template #code><code>data.user.name</code></template>
+        </i18n-t>
         <div v-for="(val, key) in (config.response_mapping || {})" :key="String(key)" class="flex items-center gap-1">
-          <Input :model-value="String(key)" @update:model-value="(v: string) => updateResponseMappingKey(String(key), v)" placeholder="var_name" class="h-7 text-xs flex-1 font-mono" />
-          <Input :model-value="String(val)" @update:model-value="(v: string) => updateResponseMappingValue(String(key), v)" placeholder="path.to.field" class="h-7 text-xs flex-1 font-mono" />
+          <Input :model-value="String(key)" @update:model-value="(v: string) => updateResponseMappingKey(String(key), v)" :placeholder="t('chatbot.properties.varNamePlaceholder')" class="h-7 text-xs flex-1 font-mono" />
+          <Input :model-value="String(val)" @update:model-value="(v: string) => updateResponseMappingValue(String(key), v)" :placeholder="t('chatbot.properties.pathPlaceholder')" class="h-7 text-xs flex-1 font-mono" />
           <Button variant="ghost" size="icon" class="h-6 w-6" @click="removeResponseMapping(String(key))">
             <Trash2 class="h-3 w-3 text-destructive" />
           </Button>
         </div>
       </div>
       <div class="space-y-1.5">
-        <Label class="text-xs">Message template (optional)</Label>
+        <Label class="text-xs">{{ t('chatbot.properties.messageTemplateOptional') }}</Label>
         <Textarea
           :model-value="config.message_template || ''"
           @update:model-value="(v: string) => updateConfig('message_template', v)"
-          placeholder="Hello {{user_name}}!"
+          :placeholder="t('chatbot.properties.messageTemplatePlaceholder')"
           class="min-h-[50px] text-xs"
         />
-        <p class="text-[10px] text-muted-foreground">Sent on 2xx response after mappings are applied.</p>
+        <p class="text-[10px] text-muted-foreground">{{ t('chatbot.properties.sentOn2xx') }}</p>
       </div>
     </template>
 
     <!-- condition -->
     <template v-if="node.type === 'condition'">
       <div class="space-y-1.5">
-        <Label class="text-xs">Expression</Label>
+        <Label class="text-xs">{{ t('chatbot.properties.expression') }}</Label>
         <Textarea
           :model-value="config.expression || ''"
           @update:model-value="(v: string) => updateConfig('expression', v)"
           placeholder='tier == "premium" and amount > 100'
           class="min-h-[60px] text-xs font-mono"
         />
-        <p class="text-[10px] text-muted-foreground">Routes via the <code>true</code> / <code>false</code> handle. Uses expr-lang syntax.</p>
+        <i18n-t keypath="chatbot.properties.routesViaTrueFalse" tag="p" class="text-[10px] text-muted-foreground" scope="global">
+          <template #trueHandle><code>true</code></template>
+          <template #falseHandle><code>false</code></template>
+        </i18n-t>
       </div>
     </template>
 
     <!-- timing -->
     <template v-if="node.type === 'timing'">
       <div class="space-y-1.5">
-        <Label class="text-xs">Schedule</Label>
+        <Label class="text-xs">{{ t('chatbot.properties.schedule') }}</Label>
         <div v-for="(entry, idx) in schedule" :key="idx" class="flex items-center gap-1.5 text-xs">
           <span class="w-12 capitalize">{{ entry.day.slice(0, 3) }}</span>
           <Switch :checked="entry.enabled" @update:checked="(v: boolean) => updateScheduleEntry(Number(idx), 'enabled', v)" />
@@ -518,27 +527,30 @@ const typeLabel: Record<string, string> = {
             class="h-8 text-xs w-28"
           />
         </div>
-        <p class="text-[10px] text-muted-foreground">Routes via <code>in_hours</code> / <code>out_of_hours</code>.</p>
+        <i18n-t keypath="chatbot.properties.routesViaHours" tag="p" class="text-[10px] text-muted-foreground" scope="global">
+          <template #inHours><code>in_hours</code></template>
+          <template #outOfHours><code>out_of_hours</code></template>
+        </i18n-t>
       </div>
     </template>
 
     <!-- transfer -->
     <template v-if="node.type === 'transfer'">
       <div class="space-y-1.5">
-        <Label class="text-xs">Body (sent before handoff)</Label>
+        <Label class="text-xs">{{ t('chatbot.properties.bodyBeforeHandoff') }}</Label>
         <Textarea
           :model-value="config.body || ''"
           @update:model-value="(v: string) => updateConfig('body', v)"
-          placeholder="Connecting you with a human..."
+          :placeholder="t('chatbot.properties.connectingHuman')"
           class="min-h-[50px] text-xs"
         />
       </div>
       <div class="space-y-1.5">
-        <Label class="text-xs">Team</Label>
+        <Label class="text-xs">{{ t('chatbot.properties.team') }}</Label>
         <Select :model-value="config.team_id || '_general'" @update:model-value="(v: any) => updateConfig('team_id', v)">
-          <SelectTrigger class="h-8 text-sm"><SelectValue placeholder="General queue" /></SelectTrigger>
+          <SelectTrigger class="h-8 text-sm"><SelectValue :placeholder="t('chatbot.properties.generalQueue')" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="_general">General queue</SelectItem>
+            <SelectItem value="_general">{{ t('chatbot.properties.generalQueue') }}</SelectItem>
             <SelectItem v-for="team in teamsStore.teams" :key="team.id" :value="team.id">
               {{ team.name }}
             </SelectItem>
@@ -546,11 +558,11 @@ const typeLabel: Record<string, string> = {
         </Select>
       </div>
       <div class="space-y-1.5">
-        <Label class="text-xs">Notes (for agents)</Label>
+        <Label class="text-xs">{{ t('chatbot.properties.notesForAgents') }}</Label>
         <Textarea
           :model-value="config.notes || ''"
           @update:model-value="(v: string) => updateConfig('notes', v)"
-          placeholder="Customer asked about: {{topic}}"
+          :placeholder="t('chatbot.properties.notesPlaceholder')"
           class="min-h-[50px] text-xs"
         />
       </div>
@@ -559,11 +571,11 @@ const typeLabel: Record<string, string> = {
     <!-- end -->
     <template v-if="node.type === 'end'">
       <div class="space-y-1.5">
-        <Label class="text-xs">Final message (optional)</Label>
+        <Label class="text-xs">{{ t('chatbot.properties.finalMessageOptional') }}</Label>
         <Textarea
           :model-value="config.message || ''"
           @update:model-value="(v: string) => updateConfig('message', v)"
-          placeholder="Sent when the flow ends. Leave blank for silent terminal."
+          :placeholder="t('chatbot.properties.finalMessagePlaceholder')"
           class="min-h-[60px] text-xs"
         />
       </div>
@@ -572,33 +584,33 @@ const typeLabel: Record<string, string> = {
     <!-- goto_flow -->
     <template v-if="node.type === 'goto_flow'">
       <div class="space-y-1.5">
-        <Label class="text-xs">Target flow</Label>
+        <Label class="text-xs">{{ t('chatbot.properties.targetFlow') }}</Label>
         <Select :model-value="config.flow_id || 'none'" @update:model-value="(v: any) => updateConfig('flow_id', v === 'none' ? '' : v)">
-          <SelectTrigger class="h-8 text-sm"><SelectValue placeholder="Select flow" /></SelectTrigger>
+          <SelectTrigger class="h-8 text-sm"><SelectValue :placeholder="t('chatbot.properties.selectFlow')" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="none">Select flow…</SelectItem>
+            <SelectItem value="none">{{ t('chatbot.properties.selectFlowEllipsis') }}</SelectItem>
             <SelectItem v-for="flow in gotoFlowTargets" :key="flow.id" :value="flow.id">
               {{ flow.name }}
             </SelectItem>
           </SelectContent>
         </Select>
-        <p class="text-[10px] text-muted-foreground">Session variables carry forward into the target flow.</p>
+        <p class="text-[10px] text-muted-foreground">{{ t('chatbot.properties.sessionVarsCarry') }}</p>
       </div>
     </template>
 
     <!-- whatsapp_flow -->
     <template v-if="node.type === 'whatsapp_flow'">
       <div class="space-y-1.5">
-        <Label class="text-xs">WhatsApp Flow ID</Label>
+        <Label class="text-xs">{{ t('chatbot.properties.whatsappFlowId') }}</Label>
         <Input
           :model-value="config.flow_id || ''"
           @update:model-value="(v: string) => updateConfig('flow_id', v)"
-          placeholder="Meta flow id"
+          :placeholder="t('chatbot.properties.metaFlowIdPlaceholder')"
           class="h-8 text-xs font-mono"
         />
       </div>
       <div class="space-y-1.5">
-        <Label class="text-xs">Header</Label>
+        <Label class="text-xs">{{ t('chatbot.properties.header') }}</Label>
         <Input
           :model-value="config.header || ''"
           @update:model-value="(v: string) => updateConfig('header', v)"
@@ -606,7 +618,7 @@ const typeLabel: Record<string, string> = {
         />
       </div>
       <div class="space-y-1.5">
-        <Label class="text-xs">Body</Label>
+        <Label class="text-xs">{{ t('chatbot.properties.body') }}</Label>
         <Textarea
           :model-value="config.body || ''"
           @update:model-value="(v: string) => updateConfig('body', v)"
@@ -614,11 +626,11 @@ const typeLabel: Record<string, string> = {
         />
       </div>
       <div class="space-y-1.5">
-        <Label class="text-xs">CTA label</Label>
+        <Label class="text-xs">{{ t('chatbot.properties.ctaLabel') }}</Label>
         <Input
           :model-value="config.cta || ''"
           @update:model-value="(v: string) => updateConfig('cta', v)"
-          placeholder="Open form"
+          :placeholder="t('chatbot.properties.openForm')"
           class="h-8 text-xs"
         />
       </div>
@@ -627,16 +639,16 @@ const typeLabel: Record<string, string> = {
     <!-- webhook -->
     <template v-if="node.type === 'webhook'">
       <div class="space-y-1.5">
-        <Label class="text-xs">URL</Label>
+        <Label class="text-xs">{{ t('chatbot.properties.url') }}</Label>
         <Input
           :model-value="config.url || ''"
           @update:model-value="(v: string) => updateConfig('url', v)"
-          placeholder="https://example.com/hook"
+          :placeholder="t('chatbot.properties.webhookUrlPlaceholder')"
           class="h-8 text-xs font-mono"
         />
       </div>
       <div class="space-y-1.5">
-        <Label class="text-xs">Method</Label>
+        <Label class="text-xs">{{ t('chatbot.properties.method') }}</Label>
         <Select :model-value="config.method || 'POST'" @update:model-value="(v: any) => updateConfig('method', v)">
           <SelectTrigger class="h-8 text-sm"><SelectValue /></SelectTrigger>
           <SelectContent>
@@ -649,21 +661,21 @@ const typeLabel: Record<string, string> = {
       </div>
       <div class="space-y-1.5">
         <div class="flex items-center justify-between">
-          <Label class="text-xs">Headers</Label>
+          <Label class="text-xs">{{ t('chatbot.properties.headers') }}</Label>
           <Button variant="outline" size="sm" class="h-6 text-xs" @click="addHeader">
-            <Plus class="h-3 w-3 mr-1" /> Add
+            <Plus class="h-3 w-3 mr-1" /> {{ t('chatbot.properties.add') }}
           </Button>
         </div>
         <div v-for="(val, key) in (config.headers || {})" :key="String(key)" class="flex items-center gap-1">
-          <Input :model-value="String(key)" @update:model-value="(v: string) => updateHeaderKey(String(key), v)" placeholder="Key" class="h-7 text-xs flex-1" />
-          <Input :model-value="String(val)" @update:model-value="(v: string) => updateHeaderValue(String(key), v)" placeholder="Value" class="h-7 text-xs flex-1" />
+          <Input :model-value="String(key)" @update:model-value="(v: string) => updateHeaderKey(String(key), v)" :placeholder="t('chatbot.properties.keyPlaceholder')" class="h-7 text-xs flex-1" />
+          <Input :model-value="String(val)" @update:model-value="(v: string) => updateHeaderValue(String(key), v)" :placeholder="t('chatbot.properties.valuePlaceholder')" class="h-7 text-xs flex-1" />
           <Button variant="ghost" size="icon" class="h-6 w-6" @click="removeHeader(String(key))">
             <Trash2 class="h-3 w-3 text-destructive" />
           </Button>
         </div>
       </div>
       <div class="space-y-1.5">
-        <Label class="text-xs">Body</Label>
+        <Label class="text-xs">{{ t('chatbot.properties.body') }}</Label>
         <Textarea
           :model-value="config.body || ''"
           @update:model-value="(v: string) => updateConfig('body', v)"
@@ -684,14 +696,14 @@ const typeLabel: Record<string, string> = {
       v-if="!['start', 'end', 'transfer', 'goto_flow', 'condition', 'buttons', 'timing'].includes(node.type)"
       class="pt-2 border-t space-y-1.5"
     >
-      <Label class="text-xs">Skip condition (optional)</Label>
+      <Label class="text-xs">{{ t('chatbot.properties.skipConditionOptional') }}</Label>
       <Input
         :model-value="config.skip_condition || ''"
         @update:model-value="(v: string) => updateConfig('skip_condition', v)"
         placeholder='tier == "premium"'
         class="h-8 text-xs font-mono"
       />
-      <p class="text-[10px] text-muted-foreground">Skip this node when the expression evaluates truthy — execution continues via the default edge.</p>
+      <p class="text-[10px] text-muted-foreground">{{ t('chatbot.properties.skipConditionHint') }}</p>
     </div>
   </div>
 </template>

@@ -1,4 +1,12 @@
 {
   "files": [],
-  "strings": []
+  "strings": [
+    "GET",
+    "POST",
+    "PUT",
+    "PATCH",
+    "true",
+    "false",
+    "data.user.name"
+  ]
 }
