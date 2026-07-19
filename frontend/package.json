@@ -14,7 +14,9 @@
     "test:e2e": "playwright test",
     "test:ui": "BASE_URL=http://localhost:8080 playwright test --ui",
     "test:debug": "BASE_URL=http://localhost:8080 playwright test --debug",
-    "test:report": "playwright show-report"
+    "test:report": "playwright show-report",
+    "i18n:keys": "node scripts/i18n-check-keys.mjs",
+    "i18n:scan": "node scripts/i18n-scan-hardcoded.mjs"
   },
   "dependencies": {
     "@radix-icons/vue": "^1.0.0",
