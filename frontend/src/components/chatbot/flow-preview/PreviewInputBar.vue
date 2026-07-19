@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Send, Mic } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -7,6 +8,8 @@ const props = defineProps<{
   disabled?: boolean
   placeholder?: string
 }>()
+
+const { t } = useI18n()
 
 const emit = defineEmits<{
   submit: [value: string]
@@ -19,17 +22,17 @@ const inputPlaceholder = computed(() => {
 
   switch (props.inputType) {
     case 'email':
-      return 'Enter your email address...'
+      return t('chatbot.preview.enterEmail')
     case 'phone':
-      return 'Enter your phone number...'
+      return t('chatbot.preview.enterPhone')
     case 'number':
-      return 'Enter a number...'
+      return t('chatbot.preview.enterNumber')
     case 'date':
-      return 'Enter a date (YYYY-MM-DD)...'
+      return t('chatbot.preview.enterDate')
     case 'text':
-      return 'Type a message...'
+      return t('chatbot.preview.typeMessagePlaceholder')
     default:
-      return 'Type a message...'
+      return t('chatbot.preview.typeMessagePlaceholder')
   }
 })
 
@@ -82,7 +85,7 @@ function handleKeydown(event: KeyboardEvent) {
         @keydown="handleKeydown"
       />
       <p v-else class="text-sm text-gray-400">
-        {{ disabled ? 'Waiting...' : 'Type a message' }}
+        {{ disabled ? t('chatbot.preview.waiting') : t('chatbot.preview.typeAMessage') }}
       </p>
     </div>
 

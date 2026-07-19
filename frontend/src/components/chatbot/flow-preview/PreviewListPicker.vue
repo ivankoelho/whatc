@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { ButtonConfig } from '@/types/flow-preview'
 import { ExternalLink, X, List } from 'lucide-vue-next'
+
+const { t } = useI18n()
 
 defineProps<{
   buttons: ButtonConfig[]
@@ -33,7 +36,7 @@ function handleSelect(button: ButtonConfig) {
       @click="isOpen = !isOpen"
     >
       <List class="h-4 w-4" />
-      Select an option
+      {{ t('chatbot.preview.selectAnOption') }}
     </button>
 
     <!-- List Picker Overlay - renders via slot in parent -->
@@ -58,7 +61,7 @@ function handleSelect(button: ButtonConfig) {
             >
               <X class="h-5 w-5" />
             </button>
-            <span class="font-medium text-sm">Select an option</span>
+            <span class="font-medium text-sm">{{ t('chatbot.preview.selectAnOption') }}</span>
             <div class="w-7" />
           </div>
 
@@ -83,7 +86,7 @@ function handleSelect(button: ButtonConfig) {
                 <span class="text-[10px] text-[#00a884] font-medium">{{ idx + 1 }}</span>
               </div>
               <span class="text-sm text-gray-800 dark:text-gray-200 flex-1">
-                {{ btn.title || `Option ${idx + 1}` }}
+                {{ btn.title || t('chatbot.preview.optionN', { n: idx + 1 }) }}
               </span>
               <ExternalLink v-if="btn.type === 'url'" class="h-3 w-3 text-gray-400" />
             </div>

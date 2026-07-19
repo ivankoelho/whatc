@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { MockApiResponse, FlowStep } from '@/types/flow-preview'
 import {
   Dialog,
@@ -31,6 +32,8 @@ const emit = defineEmits<{
   'update:open': [value: boolean]
   submit: [response: MockApiResponse | null]
 }>()
+
+const { t } = useI18n()
 
 const statusCode = ref('200')
 const responseBody = ref('')
@@ -75,7 +78,7 @@ watch(responseBody, (body) => {
     JSON.parse(body)
     parseError.value = ''
   } catch {
-    parseError.value = 'Invalid JSON'
+    parseError.value = t('chatbot.preview.invalidJson')
   }
 }, { immediate: true })
 
@@ -123,10 +126,10 @@ function handleSubmit() {
       <DialogHeader>
         <DialogTitle class="flex items-center gap-2">
           <Globe class="h-5 w-5 text-blue-500" />
-          Configure API Mock
+          {{ t('chatbot.preview.configureApiMock') }}
         </DialogTitle>
         <DialogDescription>
-          Configure the mock response for this API step. The response will be used to simulate the API call.
+          {{ t('chatbot.preview.configureApiMockDesc') }}
         </DialogDescription>
       </DialogHeader>
 
@@ -143,7 +146,7 @@ function handleSubmit() {
 
         <!-- Response Mapping Info -->
         <div v-if="responseMappingInfo.length > 0" class="text-xs">
-          <Label class="text-gray-500">Variables to extract:</Label>
+          <Label class="text-gray-500">{{ t('chatbot.preview.variablesToExtract') }}</Label>
           <div class="mt-1 flex flex-wrap gap-2">
             <span
               v-for="mapping in responseMappingInfo"
@@ -158,7 +161,7 @@ function handleSubmit() {
         <!-- Status Code -->
         <div class="grid grid-cols-2 gap-4">
           <div class="space-y-2">
-            <Label>Status Code</Label>
+            <Label>{{ t('chatbot.preview.statusCodeLabel') }}</Label>
             <Select v-model="statusCode">
               <SelectTrigger>
                 <SelectValue />
@@ -175,7 +178,7 @@ function handleSubmit() {
           </div>
 
           <div class="space-y-2">
-            <Label>Delay (ms)</Label>
+            <Label>{{ t('chatbot.preview.delayMs') }}</Label>
             <Input
               v-model="delay"
               type="number"
@@ -189,7 +192,7 @@ function handleSubmit() {
         <!-- Response Body -->
         <div class="space-y-2">
           <div class="flex items-center justify-between">
-            <Label>Response Body (JSON)</Label>
+            <Label>{{ t('chatbot.preview.responseBodyJson') }}</Label>
             <span
               v-if="parseError"
               class="text-xs text-red-500 flex items-center gap-1"
@@ -208,13 +211,13 @@ function handleSubmit() {
 
       <DialogFooter>
         <Button variant="outline" @click="handleClose">
-          Cancel
+          {{ t('chatbot.preview.cancel') }}
         </Button>
         <Button
           :disabled="!!parseError || !parsedResponse"
           @click="handleSubmit"
         >
-          Use Mock Response
+          {{ t('chatbot.preview.useMockResponse') }}
         </Button>
       </DialogFooter>
     </DialogContent>

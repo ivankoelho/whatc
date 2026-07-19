@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { SimulationMessage } from '@/types/flow-preview'
 import { Bug, Info } from 'lucide-vue-next'
 
 const props = defineProps<{
   message: SimulationMessage
 }>()
+
+const { t } = useI18n()
 
 const formattedTime = computed(() => {
   return props.message.timestamp.toLocaleTimeString('en-US', {
@@ -37,7 +40,7 @@ const isDebug = computed(() => props.message.type === 'debug')
 
       <!-- Show step name for debugging -->
       <p v-if="message.stepName" class="text-[10px] text-gray-400 mt-0.5 ml-1">
-        Step: {{ message.stepName }}
+        {{ t('chatbot.preview.stepLabel') }}: {{ message.stepName }}
       </p>
     </div>
   </div>
