@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { StopCircle } from 'lucide-vue-next'
 import BaseNode from '@/components/calling/nodes/BaseNode.vue'
 
 defineOptions({ inheritAttrs: false })
 
 const props = defineProps<{ data: any }>()
+const { t } = useI18n()
 
 const completionMessage = computed(() => {
   const msg = props.data?.config?.message || ''
@@ -15,13 +17,13 @@ const completionMessage = computed(() => {
 
 <template>
   <BaseNode
-    :label="data?.label || 'End'"
+    :label="data?.label || t('chatbot.nodes.end')"
     header-class="bg-slate-600"
     :output-handles="[]"
     :has-input="!data?.isEntryNode"
   >
     <template #icon><StopCircle class="w-4 h-4" /></template>
     <p v-if="completionMessage" class="truncate" :title="data?.config?.message || ''">{{ completionMessage }}</p>
-    <p v-else>End of flow</p>
+    <p v-else>{{ t('chatbot.nodes.endOfFlow') }}</p>
   </BaseNode>
 </template>

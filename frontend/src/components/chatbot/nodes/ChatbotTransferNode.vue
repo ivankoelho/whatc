@@ -1,17 +1,19 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { UserPlus } from 'lucide-vue-next'
 import BaseNode from '@/components/calling/nodes/BaseNode.vue'
 
 defineOptions({ inheritAttrs: false })
 
 const props = defineProps<{ data: any }>()
+const { t } = useI18n()
 
 const teamLabel = computed(() => {
   const cfg = props.data?.config || {}
   const teamId = cfg.team_id || cfg.transfer_config?.team_id
   const teamName = cfg.team_name || cfg.transfer_config?.team_name
-  if (!teamId || teamId === '_general') return 'General Queue'
+  if (!teamId || teamId === '_general') return t('chatbot.nodes.generalQueue')
   if (teamName) return teamName
   return teamId.length > 12 ? teamId.slice(0, 12) + '…' : teamId
 })
@@ -23,7 +25,7 @@ const notes = computed(() => {
 </script>
 
 <template>
-  <BaseNode :label="data?.label || 'Transfer'" header-class="bg-amber-600" :output-handles="[]" :has-input="!data?.isEntryNode">
+  <BaseNode :label="data?.label || t('chatbot.nodes.transfer')" header-class="bg-amber-600" :output-handles="[]" :has-input="!data?.isEntryNode">
     <template #icon><UserPlus class="w-4 h-4" /></template>
     <div>
       <p class="font-medium truncate" :title="teamLabel">→ {{ teamLabel }}</p>
