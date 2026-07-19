@@ -31,6 +31,7 @@ const localeNames: Record<string, { name: string; nativeName: string }> = {
   pl: { name: 'Polish', nativeName: 'Polski' },
   uk: { name: 'Ukrainian', nativeName: 'Українська' },
   ta: { name: 'Tamil', nativeName: 'தமிழ்' },
+  'pt-BR': { name: 'Portuguese (Brazil)', nativeName: 'Português (Brasil)' },
 
 }
 
@@ -52,19 +53,26 @@ for (const path in localeModules) {
 
 // Get saved locale or detect from browser
 function getDefaultLocale(): string {
-  // Check localStorage first
+  // Explicit saved preference wins.
   const saved = localStorage.getItem('locale')
   if (saved && messages[saved]) {
     return saved
   }
 
-  // Detect from browser
-  const browserLang = navigator.language.split('-')[0]
-  if (messages[browserLang]) {
-    return browserLang
+  // Any Portuguese browser variant (pt, pt-BR, pt-PT...) maps to pt-BR.
+  const browserLang = navigator.language.toLowerCase()
+  if (browserLang.startsWith('pt') && messages['pt-BR']) {
+    return 'pt-BR'
   }
 
-  return 'en'
+  // Otherwise honor an exact base-language match (e.g. en-US -> en).
+  const base = browserLang.split('-')[0]
+  if (messages[base]) {
+    return base
+  }
+
+  // Default for everyone else.
+  return messages['pt-BR'] ? 'pt-BR' : 'en'
 }
 
 export const i18n = createI18n({
