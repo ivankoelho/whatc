@@ -1,9 +1,12 @@
 package handlers_test
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/handlers"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/test/testutil"
 	"github.com/stretchr/testify/assert"
@@ -208,5 +211,112 @@ func TestApp_UpdateContactStatus(t *testing.T) {
 		var stored models.Contact
 		require.NoError(t, app.DB.First(&stored, "id = ?", foreign.ID).Error)
 		assert.Equal(t, models.ContactStatusNew, stored.ContactStatus)
+	})
+}
+
+func TestApp_ListContacts_StatusFilter(t *testing.T) {
+	t.Parallel()
+
+	// setup creates one contact in each status and returns the app plus ids.
+	setup := func(t *testing.T) (*handlers.App, uuid.UUID, uuid.UUID) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+		user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+
+		testutil.CreateTestContact(t, app.DB, org.ID) // stays 'new'
+		inProgress := testutil.CreateTestContact(t, app.DB, org.ID)
+		resolved := testutil.CreateTestContact(t, app.DB, org.ID)
+		require.NoError(t, app.DB.Model(inProgress).Update("contact_status", models.ContactStatusInProgress).Error)
+		require.NoError(t, app.DB.Model(resolved).Update("contact_status", models.ContactStatusResolved).Error)
+
+		return app, org.ID, user.ID
+	}
+
+	t.Run("filters by status and reports a matching total", func(t *testing.T) {
+		app, orgID, userID := setup(t)
+
+		req := testutil.NewGETRequest(t)
+		testutil.SetAuthContext(req, orgID, userID)
+		testutil.SetQueryParam(req, "status", "in_progress")
+
+		require.NoError(t, app.ListContacts(req))
+		assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+		var resp struct {
+			Data struct {
+				Contacts []handlers.ContactResponse `json:"contacts"`
+				Total    int64                      `json:"total"`
+			} `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &resp))
+		assert.Equal(t, int64(1), resp.Data.Total)
+		require.Len(t, resp.Data.Contacts, 1)
+		assert.Equal(t, models.ContactStatusInProgress, resp.Data.Contacts[0].ContactStatus)
+	})
+
+	t.Run("returns every contact when no status is given", func(t *testing.T) {
+		app, orgID, userID := setup(t)
+
+		req := testutil.NewGETRequest(t)
+		testutil.SetAuthContext(req, orgID, userID)
+
+		require.NoError(t, app.ListContacts(req))
+
+		var resp struct {
+			Data struct {
+				Total int64 `json:"total"`
+			} `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &resp))
+		assert.Equal(t, int64(3), resp.Data.Total)
+	})
+
+	t.Run("rejects an invalid status", func(t *testing.T) {
+		app, orgID, userID := setup(t)
+
+		req := testutil.NewGETRequest(t)
+		testutil.SetAuthContext(req, orgID, userID)
+		testutil.SetQueryParam(req, "status", "bogus")
+
+		require.NoError(t, app.ListContacts(req))
+		assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
+	})
+
+	t.Run("keeps the legacy status field untouched", func(t *testing.T) {
+		app, orgID, userID := setup(t)
+
+		req := testutil.NewGETRequest(t)
+		testutil.SetAuthContext(req, orgID, userID)
+
+		require.NoError(t, app.ListContacts(req))
+
+		var resp struct {
+			Data struct {
+				Contacts []handlers.ContactResponse `json:"contacts"`
+			} `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &resp))
+		require.NotEmpty(t, resp.Data.Contacts)
+		assert.Equal(t, "active", resp.Data.Contacts[0].Status,
+			"the legacy status field must keep returning 'active'")
+	})
+
+	t.Run("counts only new conversations", func(t *testing.T) {
+		app, orgID, userID := setup(t)
+
+		req := testutil.NewGETRequest(t)
+		testutil.SetAuthContext(req, orgID, userID)
+
+		require.NoError(t, app.GetContactStatusCounts(req))
+		assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+		var resp struct {
+			Data struct {
+				New int64 `json:"new"`
+			} `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &resp))
+		assert.Equal(t, int64(1), resp.Data.New)
 	})
 }

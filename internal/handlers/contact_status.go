@@ -11,6 +11,29 @@ import (
 	"github.com/zerodha/fastglue"
 )
 
+// GetContactStatusCounts returns conversation counts by status, scoped to what
+// the requesting user can actually see. Only 'new' is reported — it is the only
+// count the sidebar surfaces.
+func (a *App) GetContactStatusCounts(r *fastglue.Request) error {
+	orgID, userID, err := a.getOrgAndUserID(r)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+
+	query := a.ScopeToOrg(a.DB, userID, orgID)
+	query = a.scopeAssignedContact(query, userID, orgID)
+
+	var newCount int64
+	if err := query.Model(&models.Contact{}).
+		Where("contact_status = ?", models.ContactStatusNew).
+		Count(&newCount).Error; err != nil {
+		a.Log.Error("Failed to count contacts by status", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to count contacts", nil, "")
+	}
+
+	return r.SendEnvelope(map[string]any{"new": newCount})
+}
+
 // UpdateContactStatusRequest is the body of PUT /contacts/{id}/status.
 type UpdateContactStatusRequest struct {
 	ContactStatus models.ContactStatus `json:"contact_status"`
