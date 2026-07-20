@@ -93,6 +93,8 @@ import { getInitials, getAvatarGradient } from '@/lib/utils'
 import { useColorMode } from '@/composables/useColorMode'
 import { useInfiniteScroll } from '@/composables/useInfiniteScroll'
 import CannedResponsePicker from '@/components/chat/CannedResponsePicker.vue'
+import ConversationStatusFilter from '@/components/chat/ConversationStatusFilter.vue'
+import ConversationListItem from '@/components/chat/ConversationListItem.vue'
 import PreviewButtonGroup from '@/components/chatbot/flow-preview/PreviewButtonGroup.vue'
 import TemplatePicker from '@/components/chat/TemplatePicker.vue'
 import ContactInfoPanel from '@/components/chat/ContactInfoPanel.vue'
@@ -460,6 +462,9 @@ onMounted(async () => {
   if (tagsStore.tags.length === 0) {
     tagsStore.fetchTags().catch(() => {})
   }
+
+  // Seed the "New" pill counter; WebSocket events keep it current from here
+  contactsStore.fetchStatusCounts()
 
   if (contactId.value) {
     await selectContact(contactId.value)
@@ -1750,46 +1755,26 @@ async function sendMediaMessage() {
         </div>
       </div>
 
+      <!-- Status filter -->
+      <ConversationStatusFilter
+        :model-value="contactsStore.statusFilter"
+        :new-count="contactsStore.newCount"
+        @update:model-value="contactsStore.setStatusFilter"
+      />
+
       <!-- Contacts -->
       <ScrollArea :ref="(el: any) => contactsScroll.scrollAreaRef.value = el" orientation="vertical" class="flex-1">
         <div class="py-1 w-full">
-          <div
+          <ConversationListItem
             v-for="contact in contactsStore.sortedContacts"
             :key="contact.id"
-            :class="[
-              'flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-white/[0.04] light:hover:bg-gray-50 transition-colors',
-              contactsStore.currentContact?.id === contact.id && 'bg-white/[0.08] light:bg-gray-100'
-            ]"
+            :contact="contact"
+            :active="contactsStore.currentContact?.id === contact.id"
+            :format-time="formatContactTime"
+            :get-initials="getInitials"
+            :get-avatar-gradient="getAvatarGradient"
             @click="handleContactClick(contact)"
-          >
-            <Avatar class="h-9 w-9 ring-2 ring-white/[0.1] light:ring-gray-200">
-              <AvatarImage :src="contact.avatar_url" />
-              <AvatarFallback :class="'text-xs bg-gradient-to-br text-white ' + getAvatarGradient(contact.name || contact.phone_number)">
-                {{ getInitials(contact.name || contact.phone_number) }}
-              </AvatarFallback>
-            </Avatar>
-            <div class="flex-1 min-w-0">
-              <div class="flex items-center justify-between gap-2">
-                <p
-                  class="flex-1 min-w-0 text-sm font-medium truncate text-white light:text-gray-900"
-                  :title="contact.name || contact.phone_number"
-                >
-                  {{ contact.name || contact.phone_number }}
-                </p>
-                <span class="flex-shrink-0 text-[11px] text-white/40 light:text-gray-500">
-                  {{ formatContactTime(contact.last_message_at) }}
-                </span>
-              </div>
-              <div class="flex items-center justify-between gap-2">
-                <p class="flex-1 min-w-0 text-xs text-white/50 light:text-gray-500 truncate">
-                  {{ contact.phone_number }}
-                </p>
-                <Badge v-if="contact.unread_count > 0" class="flex-shrink-0 h-5 text-[10px] bg-emerald-500/20 text-emerald-400 light:bg-emerald-100 light:text-emerald-700">
-                  {{ contact.unread_count }}
-                </Badge>
-              </div>
-            </div>
-          </div>
+          />
 
           <!-- Loading indicator for infinite scroll -->
           <div v-if="contactsStore.isLoadingMoreContacts" class="p-3 text-center">
