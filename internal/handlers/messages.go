@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/audit"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/templateutil"
 	"github.com/shridarpatil/whatomate/internal/utils"
@@ -505,22 +506,23 @@ func (a *App) broadcastNewMessage(orgID uuid.UUID, msg *models.Message, contact 
 	}
 
 	payload := map[string]any{
-		"id":               msg.ID.String(),
-		"contact_id":       contact.ID.String(),
-		"assigned_user_id": assignedUserIDStr,
-		"profile_name":     profileName,
-		"direction":        msg.Direction,
-		"message_type":     msg.MessageType,
-		"content":          map[string]string{"body": msg.Content},
-		"media_url":        msg.MediaURL,
-		"media_mime_type":  msg.MediaMimeType,
-		"media_filename":   msg.MediaFilename,
-		"interactive_data": msg.InteractiveData,
-		"status":           msg.Status,
-		"wamid":            msg.WhatsAppMessageID,
-		"created_at":       msg.CreatedAt,
-		"updated_at":       msg.UpdatedAt,
-		"is_reply":         msg.IsReply,
+		"id":                msg.ID.String(),
+		"contact_id":        contact.ID.String(),
+		"assigned_user_id":  assignedUserIDStr,
+		"profile_name":      profileName,
+		"direction":         msg.Direction,
+		"message_type":      msg.MessageType,
+		"content":           map[string]string{"body": msg.Content},
+		"media_url":         msg.MediaURL,
+		"media_mime_type":   msg.MediaMimeType,
+		"media_filename":    msg.MediaFilename,
+		"interactive_data":  msg.InteractiveData,
+		"status":            msg.Status,
+		"wamid":             msg.WhatsAppMessageID,
+		"created_at":        msg.CreatedAt,
+		"updated_at":        msg.UpdatedAt,
+		"is_reply":          msg.IsReply,
+		"sent_by_user_name": a.senderNameForBroadcast(msg),
 	}
 
 	// Add interactive data
@@ -990,4 +992,14 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 		UpdatedAt:       message.UpdatedAt,
 	}
 	return r.SendEnvelope(response)
+}
+
+// senderNameForBroadcast resolves the agent name for a websocket payload.
+// The message being broadcast was just created and has no preloaded relation,
+// so the name is fetched directly.
+func (a *App) senderNameForBroadcast(msg *models.Message) string {
+	if msg.SentByUserID == nil {
+		return ""
+	}
+	return audit.GetUserName(a.DB, *msg.SentByUserID)
 }
