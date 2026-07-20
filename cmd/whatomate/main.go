@@ -719,6 +719,10 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.PUT("/api/chatbot/flows/{id}", app.UpdateChatbotFlow)
 	g.DELETE("/api/chatbot/flows/{id}", app.DeleteChatbotFlow)
 
+	// Chatbot Flow export/import (portable JSON between installations)
+	g.POST("/api/chatbot/export", app.ChatbotExport)
+	g.POST("/api/chatbot/import", app.ChatbotImport)
+
 	// AI Contexts
 	g.GET("/api/chatbot/ai-contexts", app.ListAIContexts)
 	g.POST("/api/chatbot/ai-contexts", app.CreateAIContext)

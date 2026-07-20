@@ -10,8 +10,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { chatbotService } from '@/services/api'
 import { toast } from 'vue-sonner'
 import { PageHeader, DataTable, DeleteConfirmDialog, SearchInput, IconButton, ErrorState, type Column } from '@/components/shared'
+import ExportImportModal from '@/components/chatbot/ExportImportModal.vue'
 import { getErrorMessage } from '@/lib/api-utils'
-import { Plus, Pencil, Trash2, Workflow } from 'lucide-vue-next'
+import { Plus, Pencil, Trash2, Workflow, Download, Upload } from 'lucide-vue-next'
 import { useDebounceFn } from '@vueuse/core'
 
 const { t } = useI18n()
@@ -34,6 +35,19 @@ const searchQuery = ref('')
 const deleteDialogOpen = ref(false)
 const isDeleting = ref(false)
 const flowToDelete = ref<ChatbotFlow | null>(null)
+
+// Export/import modal
+const exportImportOpen = ref(false)
+const exportImportTab = ref<'export' | 'import'>('export')
+
+function openExportImport(tab: 'export' | 'import') {
+  exportImportTab.value = tab
+  exportImportOpen.value = true
+}
+
+function onImported() {
+  fetchFlows()
+}
 
 // Pagination state
 const currentPage = ref(1)
@@ -141,12 +155,26 @@ async function confirmDeleteFlow() {
       :breadcrumbs="[{ label: $t('chatbotFlows.backToChatbot'), href: '/chatbot' }, { label: $t('nav.flows') }]"
     >
       <template #actions>
+        <Button variant="outline" size="sm" @click="openExportImport('export')">
+          <Download class="h-4 w-4 mr-2" />
+          {{ $t('common.export') }}
+        </Button>
+        <Button variant="outline" size="sm" @click="openExportImport('import')">
+          <Upload class="h-4 w-4 mr-2" />
+          {{ $t('common.import') }}
+        </Button>
         <Button variant="outline" size="sm" @click="createFlow">
           <Plus class="h-4 w-4 mr-2" />
           {{ $t('chatbotFlows.createFlow') }}
         </Button>
       </template>
     </PageHeader>
+
+    <ExportImportModal
+      v-model:open="exportImportOpen"
+      :initial-tab="exportImportTab"
+      @imported="onImported"
+    />
 
     <ScrollArea class="flex-1">
       <div class="p-6">
