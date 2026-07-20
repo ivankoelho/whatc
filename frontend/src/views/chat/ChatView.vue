@@ -584,7 +584,16 @@ function updateStickyDate(scrollContainer: HTMLElement) {
 }
 
 // Watch for route changes
-watch(contactId, async (newId) => {
+watch(contactId, async (newId, oldId) => {
+  // The open contact is changing (covers every way a conversation gets
+  // opened — sidebar click, the WS toast's "View" action, agent-transfer
+  // navigation, deep links — since they all route through this param).
+  // Clear the outgoing contact's typing entry so a not-yet-expired
+  // indicator can't flash back in if the same contact is reopened shortly
+  // after (the store's TTL alone doesn't guarantee that).
+  if (oldId && oldId !== newId) {
+    contactsStore.clearTyping(oldId)
+  }
   if (newId) {
     notesStore.notes = []
     notesStore.hasMore = false
@@ -740,8 +749,9 @@ async function switchAccount(accountName: string) {
 }
 
 function handleContactClick(contact: Contact) {
-  const previousId = contactsStore.currentContact?.id
-  if (previousId) contactsStore.clearTyping(previousId)
+  // Typing cleanup for the outgoing contact now happens in the contactId
+  // watcher above, which fires for every route into this view (this click,
+  // the WS toast's "View" action, agent-transfer navigation, deep links).
   router.push(`/chat/${contact.id}`)
 }
 
