@@ -45,6 +45,7 @@ function showNotification(title: string, body: string, contactId: string) {
 const WS_TYPE_AUTH = 'auth'
 const WS_TYPE_NEW_MESSAGE = 'new_message'
 const WS_TYPE_STATUS_UPDATE = 'status_update'
+const WS_TYPE_CONTACT_STATUS_CHANGED = 'contact_status_changed'
 const WS_TYPE_SET_CONTACT = 'set_contact'
 const WS_TYPE_PING = 'ping'
 const WS_TYPE_PONG = 'pong'
@@ -225,6 +226,9 @@ class WebSocketService {
           break
         case WS_TYPE_STATUS_UPDATE:
           this.handleStatusUpdate(store, message.payload)
+          break
+        case WS_TYPE_CONTACT_STATUS_CHANGED:
+          store.applyStatusChange(message.payload)
           break
         case WS_TYPE_AGENT_TRANSFER:
           this.handleAgentTransfer(message.payload)

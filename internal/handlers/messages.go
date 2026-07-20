@@ -260,6 +260,18 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 	preview := a.getMessagePreview(req)
 	a.updateContactLastMessage(req.Contact, preview)
 
+	// An agent replying is what starts the service, and the only thing that
+	// takes a conversation out of the 'new' queue. Chatbot sends carry no
+	// SentByUserID and deliberately do not count.
+	if opts.SentByUserID != nil {
+		if _, err := a.transitionContactStatus(req.Contact,
+			models.ContactStatusInProgress,
+			[]models.ContactStatus{models.ContactStatusNew},
+			opts.SentByUserID); err != nil {
+			a.Log.Error("Failed to auto-transition contact status", "error", err, "contact_id", req.Contact.ID)
+		}
+	}
+
 	return msg, nil
 }
 

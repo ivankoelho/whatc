@@ -623,12 +623,15 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 
 	// Contacts
 	g.GET("/api/contacts", app.ListContacts)
+	// Registered before /api/contacts/{id} so "counts" is not captured as an id
+	g.GET("/api/contacts/counts", app.GetContactStatusCounts)
 	g.POST("/api/contacts", app.CreateContact)
 	g.GET("/api/contacts/{id}", app.GetContact)
 	g.PUT("/api/contacts/{id}", app.UpdateContact)
 	g.DELETE("/api/contacts/{id}", app.DeleteContact)
 	g.PUT("/api/contacts/{id}/assign", app.AssignContact)
 	g.PUT("/api/contacts/{id}/tags", app.UpdateContactTags)
+	g.PUT("/api/contacts/{id}/status", app.UpdateContactStatus)
 	g.GET("/api/contacts/{id}/session-data", app.GetContactSessionData)
 
 	// Generic Import/Export

@@ -214,6 +214,12 @@ func RunMigrationWithProgress(db *gorm.DB, adminCfg *config.DefaultAdminConfig) 
 		return err
 	}
 
+	// Derive contact_status for contacts that predate the column
+	if err := BackfillContactStatus(silentDB); err != nil {
+		fmt.Printf("\n  \033[31m✗ Failed to backfill contact_status\033[0m\n\n")
+		return err
+	}
+
 	printProgress(currentStep, totalSteps)
 	fmt.Printf("\n  \033[32m✓ Migration completed\033[0m\n\n")
 
@@ -242,6 +248,16 @@ func getIndexes() []string {
 		`CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_org_phone ON contacts(organization_id, phone_number)`,
 		`CREATE INDEX IF NOT EXISTS idx_contacts_assigned_read ON contacts(assigned_user_id, is_read)`,
+		// Contact status: CHECK constraint. Safe to apply before the backfill —
+		// AutoMigrate creates the column NOT NULL DEFAULT 'new', so every existing
+		// row already satisfies it. Postgres has no ADD CONSTRAINT IF NOT EXISTS.
+		`DO $$ BEGIN
+			ALTER TABLE contacts ADD CONSTRAINT chk_contacts_contact_status
+				CHECK (contact_status IN ('new','in_progress','resolved'));
+		EXCEPTION WHEN duplicate_object THEN NULL;
+		END $$`,
+		// Composite index matching the ListContacts filter + ordering exactly
+		`CREATE INDEX IF NOT EXISTS idx_contacts_org_status_lastmsg ON contacts(organization_id, contact_status, last_message_at DESC NULLS LAST)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_phone_status ON chatbot_sessions(organization_id, phone_number, status)`,
 		`CREATE INDEX IF NOT EXISTS idx_keyword_rules_priority ON keyword_rules(organization_id, is_enabled, priority DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_agent_transfers_active ON agent_transfers(organization_id, phone_number, status)`,
@@ -384,6 +400,37 @@ func MigrateUserOrganizations(db *gorm.DB) error {
 		FROM users u
 		LEFT JOIN user_organizations uo ON uo.user_id = u.id AND uo.organization_id = u.organization_id AND uo.deleted_at IS NULL
 		WHERE uo.id IS NULL AND u.deleted_at IS NULL
+	`).Error
+}
+
+// BackfillContactStatus derives contact_status for existing contacts.
+// Guarded by contact_status = 'new' (the column default), so it is idempotent
+// and can never overwrite a status an agent actually set.
+func BackfillContactStatus(db *gorm.DB) error {
+	// Active conversations: a recent inbound message, or still unread.
+	if err := db.Exec(`
+		UPDATE contacts
+		SET contact_status = 'in_progress'
+		WHERE contact_status = 'new'
+		  AND deleted_at IS NULL
+		  AND (
+		        (last_inbound_at IS NOT NULL AND last_inbound_at > NOW() - INTERVAL '24 hours')
+		     OR is_read = false
+		  )
+	`).Error; err != nil {
+		return err
+	}
+
+	// Contacts with message history but no recent activity are considered done.
+	return db.Exec(`
+		UPDATE contacts c
+		SET contact_status = 'resolved'
+		WHERE c.contact_status = 'new'
+		  AND c.deleted_at IS NULL
+		  AND EXISTS (
+		        SELECT 1 FROM messages m
+		        WHERE m.contact_id = c.id AND m.deleted_at IS NULL
+		  )
 	`).Error
 }
 

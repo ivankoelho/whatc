@@ -24,24 +24,27 @@ import (
 
 // ContactResponse represents a contact with additional fields for the frontend
 type ContactResponse struct {
-	ID                 uuid.UUID  `json:"id"`
-	PhoneNumber        string     `json:"phone_number"`
-	Name               string     `json:"name"`
-	ProfileName        string     `json:"profile_name"`
-	AvatarURL          string     `json:"avatar_url"`
-	Status             string     `json:"status"`
-	Tags               []string   `json:"tags"`
-	Metadata           any        `json:"metadata"`
-	LastMessageAt      *time.Time `json:"last_message_at"`
-	LastMessagePreview string     `json:"last_message_preview"`
-	UnreadCount        int        `json:"unread_count"`
-	AssignedUserID     *uuid.UUID `json:"assigned_user_id,omitempty"`
-	WhatsAppAccount    string     `json:"whatsapp_account,omitempty"`
-	LastInboundAt      *time.Time `json:"last_inbound_at,omitempty"`
-	ServiceWindowOpen  bool       `json:"service_window_open"`
-	MarketingOptOut    bool       `json:"marketing_opt_out"`
-	CreatedAt          time.Time  `json:"created_at"`
-	UpdatedAt          time.Time  `json:"updated_at"`
+	ID          uuid.UUID `json:"id"`
+	PhoneNumber string    `json:"phone_number"`
+	Name        string    `json:"name"`
+	ProfileName string    `json:"profile_name"`
+	AvatarURL   string    `json:"avatar_url"`
+	// Status is a legacy field, always "active". Kept untouched so existing
+	// integrations do not break; ContactStatus is the real service state.
+	Status             string               `json:"status"`
+	ContactStatus      models.ContactStatus `json:"contact_status"`
+	Tags               []string             `json:"tags"`
+	Metadata           any                  `json:"metadata"`
+	LastMessageAt      *time.Time           `json:"last_message_at"`
+	LastMessagePreview string               `json:"last_message_preview"`
+	UnreadCount        int                  `json:"unread_count"`
+	AssignedUserID     *uuid.UUID           `json:"assigned_user_id,omitempty"`
+	WhatsAppAccount    string               `json:"whatsapp_account,omitempty"`
+	LastInboundAt      *time.Time           `json:"last_inbound_at,omitempty"`
+	ServiceWindowOpen  bool                 `json:"service_window_open"`
+	MarketingOptOut    bool                 `json:"marketing_opt_out"`
+	CreatedAt          time.Time            `json:"created_at"`
+	UpdatedAt          time.Time            `json:"updated_at"`
 }
 
 // MessageResponse represents a message for the frontend
@@ -94,6 +97,11 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 	pg := parsePagination(r)
 	search := string(r.RequestCtx.QueryArgs().Peek("search"))
 	tagsParam := string(r.RequestCtx.QueryArgs().Peek("tags"))
+	statusParam := string(r.RequestCtx.QueryArgs().Peek("status"))
+	if statusParam != "" && !models.ContactStatus(statusParam).IsValid() {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest,
+			"status must be one of: new, in_progress, resolved", nil, "")
+	}
 
 	var contacts []models.Contact
 	query := a.ScopeToOrg(a.DB, userID, orgID)
@@ -131,6 +139,10 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 		if len(conditions) > 0 {
 			query = query.Where("("+strings.Join(conditions, " OR ")+")", args...)
 		}
+	}
+
+	if statusParam != "" {
+		query = query.Where("contact_status = ?", statusParam)
 	}
 
 	// Order by last message time (most recent first)
@@ -180,6 +192,7 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 			Name:               profileName,
 			ProfileName:        profileName,
 			Status:             "active",
+			ContactStatus:      c.ContactStatus,
 			Tags:               tags,
 			Metadata:           c.Metadata,
 			LastMessageAt:      c.LastMessageAt,
@@ -1580,6 +1593,7 @@ func (a *App) buildContactResponse(contact *models.Contact, orgID uuid.UUID) Con
 		Name:               profileName,
 		ProfileName:        profileName,
 		Status:             "active",
+		ContactStatus:      contact.ContactStatus,
 		Tags:               tags,
 		Metadata:           contact.Metadata,
 		LastMessageAt:      contact.LastMessageAt,
