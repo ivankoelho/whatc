@@ -86,6 +86,8 @@ import {
   Globe,
   Code,
   RotateCw,
+  RotateCcw,
+  CheckCircle2,
   Filter,
   StickyNote
 } from 'lucide-vue-next'
@@ -207,6 +209,30 @@ const executingActionId = ref<string | null>(null)
 
 // Tags filter state
 const isTagFilterOpen = ref(false)
+
+// Conversation status state
+const isChangingStatus = ref(false)
+const isConversationResolved = computed(
+  () => contactsStore.currentContact?.contact_status === 'resolved'
+)
+
+async function toggleConversationStatus() {
+  const contact = contactsStore.currentContact
+  if (!contact || isChangingStatus.value) return
+
+  const next = isConversationResolved.value ? 'in_progress' : 'resolved'
+  isChangingStatus.value = true
+  try {
+    await contactsStore.updateContactStatus(contact.id, next)
+    toast.success(next === 'resolved'
+      ? t('chat.conversationResolved')
+      : t('chat.conversationReopened'))
+  } catch {
+    toast.error(t('chat.statusChangeFailed'))
+  } finally {
+    isChangingStatus.value = false
+  }
+}
 
 // Service window state
 const isServiceWindowExpired = computed(() => {
@@ -1873,6 +1899,21 @@ async function sendMediaMessage() {
               </TooltipTrigger>
               <TooltipContent>{{ action.name }}</TooltipContent>
             </Tooltip>
+            <!-- Labelled, not icon-only: resolving a conversation is a
+                 consequential action and deserves a visible name. -->
+            <Button
+              variant="ghost"
+              size="sm"
+              class="h-8 gap-1.5 px-2 text-xs font-medium"
+              :class="isConversationResolved
+                ? 'text-white/60 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100'
+                : 'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 light:text-emerald-600 light:hover:bg-emerald-50'"
+              :disabled="isChangingStatus"
+              @click="toggleConversationStatus"
+            >
+              <component :is="isConversationResolved ? RotateCcw : CheckCircle2" class="h-4 w-4" />
+              <span>{{ isConversationResolved ? $t('chat.reopenConversation') : $t('chat.resolveConversation') }}</span>
+            </Button>
             <Tooltip>
               <TooltipTrigger as-child>
                 <Button
