@@ -302,6 +302,22 @@ function updateAtBottom(el: HTMLElement) {
 
 const contactId = computed(() => route.params.contactId as string | undefined)
 
+// Agent currently typing a reply in the active conversation, if any
+const typingAgent = computed(() => {
+  const contactId = contactsStore.currentContact?.id
+  if (!contactId) return null
+  return contactsStore.typingByContact[contactId] || null
+})
+
+// Show the agent name only when the sender changes from the previous message.
+// Repeating the same name on consecutive bubbles is noise.
+function shouldShowSenderName(message: Message, index: number): boolean {
+  if (message.direction !== 'outgoing' || !message.sent_by_user_name) return false
+  if (index === 0) return true
+  const previous = contactsStore.messages[index - 1]
+  return previous.direction !== 'outgoing' || previous.sent_by_user_name !== message.sent_by_user_name
+}
+
 // Get active transfer for current contact from the store (reactive)
 const activeTransfer = computed(() => {
   if (!contactsStore.currentContact) return null
@@ -724,6 +740,8 @@ async function switchAccount(accountName: string) {
 }
 
 function handleContactClick(contact: Contact) {
+  const previousId = contactsStore.currentContact?.id
+  if (previousId) contactsStore.clearTyping(previousId)
   router.push(`/chat/${contact.id}`)
 }
 
@@ -2075,6 +2093,13 @@ async function sendMediaMessage() {
                   message.direction === 'outgoing' ? 'chat-bubble-outgoing' : 'chat-bubble-incoming'
                 ]"
               >
+                <!-- Which agent sent this, shown once per run of messages -->
+                <div
+                  v-if="shouldShowSenderName(message, index)"
+                  class="text-[11px] font-medium text-white/50 light:text-gray-500 mb-0.5"
+                >
+                  {{ message.sent_by_user_name }}
+                </div>
                 <!-- Reply preview (if this message is replying to another) -->
                 <div
                   v-if="message.is_reply && message.reply_to_message"
@@ -2396,6 +2421,19 @@ async function sendMediaMessage() {
               </div>
             </div>
             </template>
+            <!-- Another agent is composing a reply in this conversation -->
+            <div
+              v-if="typingAgent"
+              class="flex items-center gap-1.5 px-3 py-1.5 text-xs text-white/50 light:text-gray-500"
+              aria-live="polite"
+            >
+              <span class="flex gap-0.5">
+                <span class="w-1 h-1 rounded-full bg-white/40 light:bg-gray-400 animate-bounce [animation-delay:0ms]" />
+                <span class="w-1 h-1 rounded-full bg-white/40 light:bg-gray-400 animate-bounce [animation-delay:150ms]" />
+                <span class="w-1 h-1 rounded-full bg-white/40 light:bg-gray-400 animate-bounce [animation-delay:300ms]" />
+              </span>
+              {{ $t('chat.agentTyping', { name: typingAgent.user_name }) }}
+            </div>
             <div ref="messagesEndRef" />
           </div>
         </ScrollArea>
