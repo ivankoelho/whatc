@@ -320,3 +320,79 @@ func TestApp_ListContacts_StatusFilter(t *testing.T) {
 		assert.Equal(t, int64(1), resp.Data.New)
 	})
 }
+
+// TestContactStatusAutoTransitions covers the rule each automatic trigger
+// applies: inbound reopens 'resolved' but never touches 'new'; an agent reply
+// is what moves 'new' forward.
+func TestContactStatusAutoTransitions(t *testing.T) {
+	t.Parallel()
+
+	t.Run("inbound reopens a resolved conversation", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		require.NoError(t, app.DB.Model(contact).Update("contact_status", models.ContactStatusResolved).Error)
+		contact.ContactStatus = models.ContactStatusResolved
+
+		changed, err := app.TransitionContactStatusForTest(contact,
+			models.ContactStatusInProgress,
+			[]models.ContactStatus{models.ContactStatusResolved},
+			nil)
+
+		require.NoError(t, err)
+		assert.True(t, changed)
+		assert.Equal(t, models.ContactStatusInProgress, contact.ContactStatus)
+	})
+
+	t.Run("inbound leaves a new conversation in the queue", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		contact := testutil.CreateTestContact(t, app.DB, org.ID) // 'new'
+
+		changed, err := app.TransitionContactStatusForTest(contact,
+			models.ContactStatusInProgress,
+			[]models.ContactStatus{models.ContactStatusResolved},
+			nil)
+
+		require.NoError(t, err)
+		assert.False(t, changed)
+
+		var stored models.Contact
+		require.NoError(t, app.DB.First(&stored, "id = ?", contact.ID).Error)
+		assert.Equal(t, models.ContactStatusNew, stored.ContactStatus,
+			"an inbound message must not pull a contact out of the 'new' queue")
+	})
+
+	t.Run("agent reply takes a new conversation into progress", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		user := testutil.CreateTestUser(t, app.DB, org.ID)
+		contact := testutil.CreateTestContact(t, app.DB, org.ID) // 'new'
+
+		changed, err := app.TransitionContactStatusForTest(contact,
+			models.ContactStatusInProgress,
+			[]models.ContactStatus{models.ContactStatusNew},
+			&user.ID)
+
+		require.NoError(t, err)
+		assert.True(t, changed)
+		assert.Equal(t, models.ContactStatusInProgress, contact.ContactStatus)
+	})
+
+	t.Run("agent reply does not disturb a resolved conversation", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		user := testutil.CreateTestUser(t, app.DB, org.ID)
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		require.NoError(t, app.DB.Model(contact).Update("contact_status", models.ContactStatusResolved).Error)
+		contact.ContactStatus = models.ContactStatusResolved
+
+		changed, err := app.TransitionContactStatusForTest(contact,
+			models.ContactStatusInProgress,
+			[]models.ContactStatus{models.ContactStatusNew},
+			&user.ID)
+
+		require.NoError(t, err)
+		assert.False(t, changed)
+	})
+}

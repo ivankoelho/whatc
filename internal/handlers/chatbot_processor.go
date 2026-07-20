@@ -1608,6 +1608,15 @@ func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *mode
 		"last_inbound_at":      now,
 	})
 
+	// An inbound message reopens a resolved conversation. A 'new' contact stays
+	// 'new' — it only leaves the queue when an agent actually replies.
+	if _, err := a.transitionContactStatus(contact,
+		models.ContactStatusInProgress,
+		[]models.ContactStatus{models.ContactStatusResolved},
+		nil); err != nil {
+		a.Log.Error("Failed to auto-transition contact status", "error", err, "contact_id", contact.ID)
+	}
+
 	a.Log.Info("Saved incoming message", "message_id", message.ID, "contact_id", contact.ID, "media_url", message.MediaURL)
 
 	// Broadcast new message via WebSocket
