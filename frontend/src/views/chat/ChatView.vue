@@ -104,6 +104,7 @@ import ConversationNotes from '@/components/chat/ConversationNotes.vue'
 import CallButton from '@/components/calling/CallButton.vue'
 import { useNotesStore } from '@/stores/notes'
 import { useHeaderMedia } from '@/composables/useHeaderMedia'
+import { useTypingNotifier } from '@/composables/useTypingNotifier'
 import { CreateContactDialog } from '@/components/shared'
 import HeaderMediaUpload from '@/components/shared/HeaderMediaUpload.vue'
 import { Info } from 'lucide-vue-next'
@@ -112,6 +113,7 @@ const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const contactsStore = useContactsStore()
+const { notifyTyping } = useTypingNotifier()
 const authStore = useAuthStore()
 const usersStore = useUsersStore()
 const transfersStore = useTransfersStore()
@@ -299,6 +301,22 @@ function updateAtBottom(el: HTMLElement) {
 }
 
 const contactId = computed(() => route.params.contactId as string | undefined)
+
+// Agent currently typing a reply in the active conversation, if any
+const typingAgent = computed(() => {
+  const contactId = contactsStore.currentContact?.id
+  if (!contactId) return null
+  return contactsStore.typingByContact[contactId] || null
+})
+
+// Show the agent name only when the sender changes from the previous message.
+// Repeating the same name on consecutive bubbles is noise.
+function shouldShowSenderName(message: Message, index: number): boolean {
+  if (message.direction !== 'outgoing' || !message.sent_by_user_name) return false
+  if (index === 0) return true
+  const previous = contactsStore.messages[index - 1]
+  return previous.direction !== 'outgoing' || previous.sent_by_user_name !== message.sent_by_user_name
+}
 
 // Get active transfer for current contact from the store (reactive)
 const activeTransfer = computed(() => {
@@ -521,6 +539,14 @@ function onUserActive() {
 }
 
 onUnmounted(() => {
+  // Leaving the chat view entirely: the route-param watcher only clears the
+  // *outgoing* contact when switching between conversations, so the one still
+  // open here would keep a live typing entry. The 3s TTL covers it in
+  // practice; clear it so store state cannot outlive the view.
+  const openContactId = contactsStore.currentContact?.id
+  if (openContactId) {
+    contactsStore.clearTyping(openContactId)
+  }
   wsService.setCurrentContact(null)
   // Clear current contact when leaving chat view so notifications work on other pages
   contactsStore.setCurrentContact(null)
@@ -566,7 +592,16 @@ function updateStickyDate(scrollContainer: HTMLElement) {
 }
 
 // Watch for route changes
-watch(contactId, async (newId) => {
+watch(contactId, async (newId, oldId) => {
+  // The open contact is changing (covers every way a conversation gets
+  // opened — sidebar click, the WS toast's "View" action, agent-transfer
+  // navigation, deep links — since they all route through this param).
+  // Clear the outgoing contact's typing entry so a not-yet-expired
+  // indicator can't flash back in if the same contact is reopened shortly
+  // after (the store's TTL alone doesn't guarantee that).
+  if (oldId && oldId !== newId) {
+    contactsStore.clearTyping(oldId)
+  }
   if (newId) {
     notesStore.notes = []
     notesStore.hasMore = false
@@ -722,6 +757,9 @@ async function switchAccount(accountName: string) {
 }
 
 function handleContactClick(contact: Contact) {
+  // Typing cleanup for the outgoing contact now happens in the contactId
+  // watcher above, which fires for every route into this view (this click,
+  // the WS toast's "View" action, agent-transfer navigation, deep links).
   router.push(`/chat/${contact.id}`)
 }
 
@@ -789,6 +827,12 @@ function autoResizeTextarea() {
   if (!textarea) return
   textarea.style.height = 'auto'
   textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px'
+}
+
+function handleComposerInput() {
+  autoResizeTextarea()
+  const contactId = contactsStore.currentContact?.id
+  if (contactId) notifyTyping(contactId)
 }
 
 function resetTextareaHeight() {
@@ -2067,6 +2111,13 @@ async function sendMediaMessage() {
                   message.direction === 'outgoing' ? 'chat-bubble-outgoing' : 'chat-bubble-incoming'
                 ]"
               >
+                <!-- Which agent sent this, shown once per run of messages -->
+                <div
+                  v-if="shouldShowSenderName(message, index)"
+                  class="text-[11px] font-medium text-white/50 light:text-gray-500 mb-0.5"
+                >
+                  {{ message.sent_by_user_name }}
+                </div>
                 <!-- Reply preview (if this message is replying to another) -->
                 <div
                   v-if="message.is_reply && message.reply_to_message"
@@ -2388,6 +2439,19 @@ async function sendMediaMessage() {
               </div>
             </div>
             </template>
+            <!-- Another agent is composing a reply in this conversation -->
+            <div
+              v-if="typingAgent"
+              class="flex items-center gap-1.5 px-3 py-1.5 text-xs text-white/50 light:text-gray-500"
+              aria-live="polite"
+            >
+              <span class="flex gap-0.5">
+                <span class="w-1 h-1 rounded-full bg-white/40 light:bg-gray-400 animate-bounce [animation-delay:0ms]" />
+                <span class="w-1 h-1 rounded-full bg-white/40 light:bg-gray-400 animate-bounce [animation-delay:150ms]" />
+                <span class="w-1 h-1 rounded-full bg-white/40 light:bg-gray-400 animate-bounce [animation-delay:300ms]" />
+              </span>
+              {{ $t('chat.agentTyping', { name: typingAgent.user_name }) }}
+            </div>
             <div ref="messagesEndRef" />
           </div>
         </ScrollArea>
@@ -2494,7 +2558,7 @@ async function sendMediaMessage() {
               rows="1"
               class="flex-1 bg-transparent text-[14px] text-white light:text-gray-900 placeholder:text-white/30 light:placeholder:text-gray-400 focus:outline-none resize-none min-h-[36px] max-h-[120px] py-2 overflow-y-auto"
               @keydown.enter.exact.prevent="sendMessage"
-              @input="autoResizeTextarea"
+              @input="handleComposerInput"
             />
             <button type="submit" class="w-9 h-9 rounded-lg bg-emerald-600 hover:bg-emerald-500 light:bg-emerald-500 light:hover:bg-emerald-600 flex items-center justify-center transition-colors disabled:opacity-50" :disabled="!messageInput.trim() || isSending">
               <Send class="w-4 h-4 text-white" />

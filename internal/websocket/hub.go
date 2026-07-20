@@ -152,8 +152,15 @@ func (h *Hub) broadcastMessage(msg BroadcastMessage) {
 		// Iterate through all clients (tabs) for each user
 		for client := range userClients {
 			// If ContactID is specified, only send to clients viewing that contact
-			if msg.ContactID != uuid.Nil && client.currentContact != nil && *client.currentContact != msg.ContactID {
-				continue
+			if msg.ContactID != uuid.Nil {
+				if client.currentContact == nil {
+					// No contact selected: strict senders skip, legacy senders deliver
+					if msg.RequireContactMatch {
+						continue
+					}
+				} else if *client.currentContact != msg.ContactID {
+					continue
+				}
 			}
 
 			select {
@@ -191,6 +198,18 @@ func (h *Hub) BroadcastToContact(orgID, contactID uuid.UUID, msg WSMessage) {
 		OrgID:     orgID,
 		ContactID: contactID,
 		Message:   msg,
+	})
+}
+
+// BroadcastToContactViewers sends a message only to clients that have
+// explicitly selected this contact. Unlike BroadcastToContact, a client with
+// no contact selected receives nothing.
+func (h *Hub) BroadcastToContactViewers(orgID, contactID uuid.UUID, msg WSMessage) {
+	h.Broadcast(BroadcastMessage{
+		OrgID:               orgID,
+		ContactID:           contactID,
+		RequireContactMatch: true,
+		Message:             msg,
 	})
 }
 

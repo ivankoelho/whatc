@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import { contactsService, messagesService } from '@/services/api'
+import { useAuthStore } from '@/stores/auth'
 
 // Phones are stored without leading + or whitespace (see CreateContact in
 // internal/handlers/contacts.go). Strip them from a digit-only query so a user
@@ -85,11 +86,20 @@ export interface Message {
   reply_to_message?: ReplyPreview
   reactions?: Reaction[]
   whatsapp_account?: string
+  sent_by_user_id?: string
+  sent_by_user_name?: string
   created_at: string
   updated_at: string
 }
 
+export interface TypingAgent {
+  user_id: string
+  user_name: string
+  at: number
+}
+
 export const useContactsStore = defineStore('contacts', () => {
+  const authStore = useAuthStore()
   const contacts = ref<Contact[]>([])
   const currentContact = ref<Contact | null>(null)
   const messages = ref<Message[]>([])
@@ -103,6 +113,15 @@ export const useContactsStore = defineStore('contacts', () => {
   const newCount = ref(0)
   const replyingTo = ref<Message | null>(null)
   const accountFilter = ref<string | null>(null)
+
+  // Record, not Map: Map is not reactive in Vue 3.
+  const typingByContact = ref<Record<string, TypingAgent>>({})
+
+  // Timer handles live outside the ref on purpose — they are scheduling
+  // detail, not UI state, and must not trigger re-renders.
+  const typingTimers: Record<string, ReturnType<typeof setTimeout>> = {}
+
+  const TYPING_TTL_MS = 3000
 
   // Contacts pagination
   const contactsPage = ref(1)
@@ -325,9 +344,23 @@ export const useContactsStore = defineStore('contacts', () => {
     }
 
     // Check if message already exists
-    const exists = messages.value.some(m => m.id === message.id)
-    if (!exists) {
+    const index = messages.value.findIndex(m => m.id === message.id)
+    if (index === -1) {
       messages.value.push(message)
+      return
+    }
+
+    // The same message reaches us twice on the sender's own client: once from
+    // the POST /messages response (whose MessageResponse omits the sender
+    // identity) and once from the org-wide websocket broadcast (which carries
+    // it). Whichever lands second must be able to fill the gap, or the
+    // sender's own bubble stays unlabelled until a reload.
+    if (message.sent_by_user_name && !messages.value[index].sent_by_user_name) {
+      messages.value[index] = {
+        ...messages.value[index],
+        sent_by_user_id: message.sent_by_user_id ?? messages.value[index].sent_by_user_id,
+        sent_by_user_name: message.sent_by_user_name,
+      }
     }
   }
 
@@ -444,6 +477,43 @@ export const useContactsStore = defineStore('contacts', () => {
     }
   }
 
+  function clearTyping(contactId: string) {
+    if (typingTimers[contactId]) {
+      clearTimeout(typingTimers[contactId])
+      delete typingTimers[contactId]
+    }
+    if (typingByContact.value[contactId]) {
+      delete typingByContact.value[contactId]
+    }
+  }
+
+  // applyAgentTyping records that an agent is typing on a contact and schedules
+  // its expiry. Each new event restarts the countdown, so no explicit
+  // "stopped typing" signal is needed — and a closed tab or dropped connection
+  // cannot leave the indicator stuck.
+  function applyAgentTyping(payload: {
+    contact_id: string
+    user_id: string
+    user_name: string
+  }) {
+    // Never show the current user their own typing
+    if (payload.user_id === authStore.user?.id) return
+
+    typingByContact.value[payload.contact_id] = {
+      user_id: payload.user_id,
+      user_name: payload.user_name,
+      at: Date.now()
+    }
+
+    if (typingTimers[payload.contact_id]) {
+      clearTimeout(typingTimers[payload.contact_id])
+    }
+    typingTimers[payload.contact_id] = setTimeout(() => {
+      delete typingByContact.value[payload.contact_id]
+      delete typingTimers[payload.contact_id]
+    }, TYPING_TTL_MS)
+  }
+
   return {
     contacts,
     currentContact,
@@ -483,6 +553,9 @@ export const useContactsStore = defineStore('contacts', () => {
     setReplyingTo,
     clearReplyingTo,
     updateMessageReactions,
-    updateContactTags
+    updateContactTags,
+    typingByContact,
+    applyAgentTyping,
+    clearTyping
   }
 })

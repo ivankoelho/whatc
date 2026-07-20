@@ -505,22 +505,29 @@ func (a *App) broadcastNewMessage(orgID uuid.UUID, msg *models.Message, contact 
 	}
 
 	payload := map[string]any{
-		"id":               msg.ID.String(),
-		"contact_id":       contact.ID.String(),
-		"assigned_user_id": assignedUserIDStr,
-		"profile_name":     profileName,
-		"direction":        msg.Direction,
-		"message_type":     msg.MessageType,
-		"content":          map[string]string{"body": msg.Content},
-		"media_url":        msg.MediaURL,
-		"media_mime_type":  msg.MediaMimeType,
-		"media_filename":   msg.MediaFilename,
-		"interactive_data": msg.InteractiveData,
-		"status":           msg.Status,
-		"wamid":            msg.WhatsAppMessageID,
-		"created_at":       msg.CreatedAt,
-		"updated_at":       msg.UpdatedAt,
-		"is_reply":         msg.IsReply,
+		"id":                msg.ID.String(),
+		"contact_id":        contact.ID.String(),
+		"assigned_user_id":  assignedUserIDStr,
+		"profile_name":      profileName,
+		"direction":         msg.Direction,
+		"message_type":      msg.MessageType,
+		"content":           map[string]string{"body": msg.Content},
+		"media_url":         msg.MediaURL,
+		"media_mime_type":   msg.MediaMimeType,
+		"media_filename":    msg.MediaFilename,
+		"interactive_data":  msg.InteractiveData,
+		"status":            msg.Status,
+		"wamid":             msg.WhatsAppMessageID,
+		"created_at":        msg.CreatedAt,
+		"updated_at":        msg.UpdatedAt,
+		"is_reply":          msg.IsReply,
+		"sent_by_user_name": a.senderNameForBroadcast(msg),
+	}
+
+	// Sent alongside the name so the client can tell "the agent who sent this"
+	// apart from "an agent with the same display name" without a lookup.
+	if msg.SentByUserID != nil {
+		payload["sent_by_user_id"] = msg.SentByUserID.String()
 	}
 
 	// Add interactive data
@@ -990,4 +997,23 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 		UpdatedAt:       message.UpdatedAt,
 	}
 	return r.SendEnvelope(response)
+}
+
+// senderNameForBroadcast resolves the agent name for a websocket payload.
+// The message being broadcast was just created and has no preloaded relation,
+// so the name is fetched directly.
+//
+// It must agree with senderName(), the REST-side producer of the same field:
+// no agent (chatbot, campaign, API) and a blank display name both yield "",
+// which the UI renders as an unlabelled bubble. audit.GetUserName is
+// deliberately not used here — its "Unknown" fallback belongs to the audit
+// log, and leaking it here would make a message read "Unknown" live and
+// unlabelled after a refresh.
+func (a *App) senderNameForBroadcast(msg *models.Message) string {
+	if msg.SentByUserID == nil {
+		return ""
+	}
+	var name string
+	a.DB.Model(&models.User{}).Where("id = ?", *msg.SentByUserID).Pluck("full_name", &name)
+	return name
 }
