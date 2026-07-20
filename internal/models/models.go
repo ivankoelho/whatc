@@ -352,6 +352,10 @@ type Contact struct {
 	LastMessageAt      *time.Time `json:"last_message_at,omitempty"`
 	LastMessagePreview string     `gorm:"type:text" json:"last_message_preview"`
 	IsRead             bool       `gorm:"default:true" json:"is_read"`
+	// ContactStatus is the service state of the conversation. A contact stays
+	// 'new' until an agent actually replies — an inbound message alone does not
+	// pull it out of the queue.
+	ContactStatus ContactStatus `gorm:"size:20;not null;default:'new'" json:"contact_status"`
 	Tags               JSONBArray `gorm:"type:jsonb;default:'[]'" json:"tags"`
 	Metadata           JSONB      `gorm:"type:jsonb;default:'{}'" json:"metadata"`
 	LastInboundAt      *time.Time `json:"last_inbound_at,omitempty"` // When customer last sent a message (for 24h window tracking)
