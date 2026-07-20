@@ -189,8 +189,11 @@ export const accountsService = {
 }
 
 export const contactsService = {
-  list: (params?: { search?: string; page?: number; limit?: number; tags?: string }) =>
+  list: (params?: { search?: string; page?: number; limit?: number; tags?: string; status?: string }) =>
     api.get('/contacts', { params }),
+  statusCounts: () => api.get('/contacts/counts'),
+  updateStatus: (id: string, status: 'new' | 'in_progress' | 'resolved') =>
+    api.put(`/contacts/${id}/status`, { contact_status: status }),
   get: (id: string) => api.get(`/contacts/${id}`),
   create: (data: any) => api.post('/contacts', data),
   update: (id: string, data: any) => api.put(`/contacts/${id}`, data),

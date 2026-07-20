@@ -14,13 +14,20 @@ function normalizeContactSearch(raw: string): string {
   return trimmed
 }
 
+export type ContactStatus = 'new' | 'in_progress' | 'resolved'
+export type ContactStatusFilter = 'all' | ContactStatus
+
 export interface Contact {
   id: string
   phone_number: string
   name: string
   profile_name?: string
   avatar_url?: string
+  // `status` is legacy and always "active"; contact_status is the real
+  // service state of the conversation.
   status: string
+  contact_status: ContactStatus
+  last_message_preview?: string
   tags: string[]
   metadata: Record<string, any>
   last_message_at?: string
@@ -92,6 +99,8 @@ export const useContactsStore = defineStore('contacts', () => {
   const hasMoreMessages = ref(false)
   const searchQuery = ref('')
   const selectedTags = ref<string[]>([])
+  const statusFilter = ref<ContactStatusFilter>('all')
+  const newCount = ref(0)
   const replyingTo = ref<Message | null>(null)
   const accountFilter = ref<string | null>(null)
 
@@ -118,10 +127,12 @@ export const useContactsStore = defineStore('contacts', () => {
     isLoading.value = true
     try {
       const tagsParam = selectedTags.value.length > 0 ? selectedTags.value.join(',') : undefined
+      const statusParam = statusFilter.value === 'all' ? undefined : statusFilter.value
       const response = await contactsService.list({
         page: 1,
         limit: contactsLimit.value,
         tags: tagsParam,
+        status: statusParam,
         ...params
       })
       // API returns { status: "success", data: { contacts: [...], total: number } }
@@ -144,10 +155,14 @@ export const useContactsStore = defineStore('contacts', () => {
       const nextPage = contactsPage.value + 1
       const tagsParam = selectedTags.value.length > 0 ? selectedTags.value.join(',') : undefined
       const search = normalizeContactSearch(searchQuery.value) || undefined
+      // The status filter has to travel with pagination too, or scrolling
+      // silently mixes other statuses back into a filtered list.
+      const statusParam = statusFilter.value === 'all' ? undefined : statusFilter.value
       const response = await contactsService.list({
         page: nextPage,
         limit: contactsLimit.value,
         tags: tagsParam,
+        status: statusParam,
         search
       })
       const data = response.data.data || response.data
@@ -374,6 +389,61 @@ export const useContactsStore = defineStore('contacts', () => {
     }, 300)
   })
 
+  async function setStatusFilter(status: ContactStatusFilter) {
+    if (statusFilter.value === status) return
+    statusFilter.value = status
+    const search = normalizeContactSearch(searchQuery.value) || undefined
+    await fetchContacts({ search })
+  }
+
+  async function fetchStatusCounts() {
+    try {
+      const response = await contactsService.statusCounts()
+      const data = response.data.data || response.data
+      newCount.value = data.new ?? 0
+    } catch (error) {
+      console.error('Failed to fetch status counts:', error)
+    }
+  }
+
+  async function updateContactStatus(id: string, status: ContactStatus) {
+    await contactsService.updateStatus(id, status)
+    // The WebSocket event does the list bookkeeping. Update the open chat
+    // straight away so the header button does not lag behind the click.
+    if (currentContact.value?.id === id) {
+      currentContact.value.contact_status = status
+    }
+  }
+
+  // applyStatusChange reconciles a contact_status_changed event with the list.
+  function applyStatusChange(payload: {
+    contact_id: string
+    old_status: string
+    new_status: string
+  }) {
+    const status = payload.new_status as ContactStatus
+
+    if (payload.old_status === 'new' && status !== 'new') {
+      newCount.value = Math.max(0, newCount.value - 1)
+    } else if (payload.old_status !== 'new' && status === 'new') {
+      newCount.value += 1
+    }
+
+    const contact = contacts.value.find(c => c.id === payload.contact_id)
+    if (contact) {
+      contact.contact_status = status
+      // Drop it from the list once it no longer matches the active filter.
+      if (statusFilter.value !== 'all' && statusFilter.value !== status) {
+        contacts.value = contacts.value.filter(c => c.id !== payload.contact_id)
+        contactsTotal.value = Math.max(0, contactsTotal.value - 1)
+      }
+    }
+
+    if (currentContact.value?.id === payload.contact_id) {
+      currentContact.value.contact_status = status
+    }
+  }
+
   return {
     contacts,
     currentContact,
@@ -384,6 +454,12 @@ export const useContactsStore = defineStore('contacts', () => {
     hasMoreMessages,
     searchQuery,
     selectedTags,
+    statusFilter,
+    newCount,
+    setStatusFilter,
+    fetchStatusCounts,
+    updateContactStatus,
+    applyStatusChange,
     replyingTo,
     filteredContacts,
     sortedContacts,

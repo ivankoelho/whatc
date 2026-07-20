@@ -1,6 +1,10 @@
 package websocket
 
-import "github.com/google/uuid"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 // WSMessage represents a WebSocket message
 type WSMessage struct {
@@ -14,6 +18,8 @@ const (
 	TypeNewMessage    = "new_message"
 	TypeStatusUpdate  = "status_update"
 	TypeContactUpdate = "contact_update"
+	// TypeContactStatusChanged carries ContactStatusChangedPayload
+	TypeContactStatusChanged = "contact_status_changed"
 	TypeSetContact    = "set_contact"
 	TypePing          = "ping"
 	TypePong          = "pong"
@@ -71,6 +77,17 @@ type BroadcastMessage struct {
 	UserID    uuid.UUID // Optional: only send to specific user
 	ContactID uuid.UUID // Optional: only send to users viewing this contact
 	Message   WSMessage
+}
+
+// ContactStatusChangedPayload is the payload for contact_status_changed events.
+// Typed struct on purpose — a bare map would compile against Payload's `any`
+// and only fail at runtime in the UI.
+type ContactStatusChangedPayload struct {
+	ContactID       uuid.UUID  `json:"contact_id"`
+	OldStatus       string     `json:"old_status"`
+	NewStatus       string     `json:"new_status"`
+	ChangedByUserID *uuid.UUID `json:"changed_by_user_id,omitempty"`
+	ChangedAt       time.Time  `json:"changed_at"`
 }
 
 // AuthPayload is the payload for auth messages from client
