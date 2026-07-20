@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ArrowUp } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
+
+const { t } = useI18n()
 
 const props = withDefaults(defineProps<{
   target?: string
@@ -42,7 +45,7 @@ onUnmounted(() => {
       variant="secondary"
       size="icon"
       class="fixed bottom-6 right-6 z-40 h-10 w-10 rounded-full shadow-lg shadow-black/20 ring-1 ring-white/[0.1] light:ring-gray-200 light:shadow-gray-300/30"
-      aria-label="Scroll to top"
+      :aria-label="t('common.scrollToTop')"
       @click="scrollToTop"
     >
       <ArrowUp class="h-4 w-4" />

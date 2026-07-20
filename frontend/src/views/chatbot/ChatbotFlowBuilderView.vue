@@ -858,8 +858,8 @@ onMounted(async () => {
                         </Select>
                       </div>
                       <div class="flex-1">
-                        <Label class="text-[10px]">URL</Label>
-                        <Input v-model="completionConfig.url" placeholder="https://example.com/hook" class="h-7 text-xs font-mono" />
+                        <Label class="text-[10px]">{{ $t('flowBuilder.url') }}</Label>
+                        <Input v-model="completionConfig.url" :placeholder="$t('chatbot.properties.webhookUrlPlaceholder')" class="h-7 text-xs font-mono" />
                       </div>
                     </div>
                     <div class="space-y-2">
@@ -873,13 +873,13 @@ onMounted(async () => {
                         <Input
                           :model-value="String(key)"
                           @update:model-value="(v: string) => updateCompletionHeaderKey(String(key), v)"
-                          placeholder="Key"
+                          :placeholder="$t('flowBuilder.keyPlaceholder')"
                           class="h-6 text-[10px] flex-1"
                         />
                         <Input
                           :model-value="String(val)"
                           @update:model-value="(v: string) => updateCompletionHeaderValue(String(key), v)"
-                          placeholder="Value"
+                          :placeholder="$t('flowBuilder.valuePlaceholder')"
                           class="h-6 text-[10px] flex-1"
                         />
                         <Button variant="ghost" size="icon" class="h-5 w-5" @click="removeCompletionHeader(String(key))">
@@ -888,7 +888,7 @@ onMounted(async () => {
                       </div>
                     </div>
                     <div class="space-y-1">
-                      <Label class="text-[10px]">Body</Label>
+                      <Label class="text-[10px]">{{ $t('flowBuilder.bodyOptional') }}</Label>
                       <Textarea v-model="completionConfig.body" :rows="2" class="text-[10px] font-mono" />
                     </div>
                   </div>
@@ -901,7 +901,7 @@ onMounted(async () => {
             <!-- Contact panel display config -->
             <Collapsible v-model:open="panelConfigOpen">
               <CollapsibleTrigger class="flex items-center justify-between w-full py-1 text-sm font-medium">
-                Contact panel display
+                {{ $t('flowBuilder.contactPanelDisplay') }}
                 <component :is="panelConfigOpen ? ChevronDown : ChevronRight" class="h-4 w-4" />
               </CollapsibleTrigger>
               <CollapsibleContent class="pt-3">
@@ -917,7 +917,7 @@ onMounted(async () => {
               <Separator />
               <Collapsible v-model:open="activityOpen">
                 <CollapsibleTrigger class="flex items-center justify-between w-full py-1 text-sm font-medium">
-                  Activity
+                  {{ $t('flowBuilder.activity') }}
                   <component :is="activityOpen ? ChevronDown : ChevronRight" class="h-4 w-4" />
                 </CollapsibleTrigger>
                 <CollapsibleContent class="pt-3 space-y-3">
@@ -939,7 +939,7 @@ onMounted(async () => {
     <!-- Preview overlay -->
     <Dialog v-model:open="showPreview">
       <DialogContent class="max-w-[1100px] w-[95vw] h-[92vh] p-0 flex flex-col">
-        <DialogTitle class="sr-only">Flow preview</DialogTitle>
+        <DialogTitle class="sr-only">{{ $t('chatbot.preview.flowPreview') }}</DialogTitle>
         <InteractivePreview
           :graph="previewGraph"
           :flow-data="{ name, description, trigger_keywords: triggerKeywords, initial_message: initialMessage, completion_message: completionMessage, enabled, steps: [] } as any"

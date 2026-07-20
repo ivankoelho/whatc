@@ -119,7 +119,7 @@ const handleLogout = async () => {
         variant="ghost"
         size="icon"
         class="h-8 w-8 text-white/70 hover:text-white hover:bg-white/[0.08] light:text-gray-600 light:hover:text-gray-900 light:hover:bg-gray-100"
-        aria-label="Toggle menu"
+        :aria-label="$t('nav.toggleMenu')"
         :aria-expanded="isMobileMenuOpen"
         @click="isMobileMenuOpen = !isMobileMenuOpen"
       >
@@ -145,7 +145,7 @@ const handleLogout = async () => {
         isCollapsed ? 'w-64 md:w-16' : 'w-64'
       ]"
       role="navigation"
-      aria-label="Main navigation"
+      :aria-label="$t('nav.mainNavigation')"
     >
       <!-- Logo (hidden on mobile, shown in header instead) -->
       <div class="hidden md:flex h-12 items-center justify-between px-3 border-b border-white/[0.08] light:border-gray-200">

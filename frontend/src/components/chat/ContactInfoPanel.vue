@@ -254,7 +254,7 @@ async function updateContactTags(tags: string[]) {
 
     <!-- Header -->
     <div class="h-12 px-3 border-b flex items-center justify-between">
-      <h3 class="font-medium text-sm">Contact Info</h3>
+      <h3 class="font-medium text-sm">{{ $t('chat.contactInfo') }}</h3>
       <Button variant="ghost" size="icon" class="h-8 w-8" @click="emit('close')">
         <X class="h-4 w-4" />
       </Button>
@@ -284,7 +284,7 @@ async function updateContactTags(tags: string[]) {
           <div class="flex items-center justify-between py-2">
             <h5 class="text-sm font-medium flex items-center gap-2">
               <Tags class="h-4 w-4 text-muted-foreground" />
-              Tags
+              {{ $t('contacts.tags') }}
             </h5>
             <Popover v-if="canEditTags" v-model:open="tagSelectorOpen">
               <PopoverTrigger as-child>
@@ -294,11 +294,11 @@ async function updateContactTags(tags: string[]) {
               </PopoverTrigger>
               <PopoverContent class="w-[200px] p-0" align="end">
                 <Command>
-                  <CommandInput placeholder="Search tags..." />
+                  <CommandInput :placeholder="$t('contacts.searchTags')" />
                   <CommandList>
                     <CommandEmpty>
                       <div class="py-4 text-center text-sm text-muted-foreground">
-                        No tags found
+                        {{ $t('contacts.noTagsFound') }}
                       </div>
                     </CommandEmpty>
                     <CommandGroup>
@@ -341,7 +341,7 @@ async function updateContactTags(tags: string[]) {
                 </button>
               </TagBadge>
             </template>
-            <span v-else class="text-sm text-muted-foreground">No tags</span>
+            <span v-else class="text-sm text-muted-foreground">{{ $t('contacts.noTags') }}</span>
             <Loader2 v-if="isUpdatingTags" class="h-4 w-4 animate-spin text-muted-foreground" />
           </div>
         </div>
@@ -351,7 +351,7 @@ async function updateContactTags(tags: string[]) {
           <!-- General section: top-level primitives -->
           <MetadataSection
             v-if="metadataPrimitives.length > 0"
-            label="General"
+            :label="$t('chat.generalSection')"
             :data="Object.fromEntries(metadataPrimitives)"
           />
           <!-- Object / array sections -->
@@ -366,8 +366,8 @@ async function updateContactTags(tags: string[]) {
         <!-- No Session Data or no panel config -->
         <div v-if="!props.sessionData || sortedSections.length === 0" class="text-center py-6 text-muted-foreground border-t">
           <User class="h-8 w-8 mx-auto mb-2 opacity-50" />
-          <p class="text-sm">No data configured</p>
-          <p class="text-xs mt-1">Configure panel display in the chatbot flow settings.</p>
+          <p class="text-sm">{{ $t('chat.noDataConfigured') }}</p>
+          <p class="text-xs mt-1">{{ $t('chat.configurePanelHint') }}</p>
         </div>
 
         <!-- Session Data with panel config -->

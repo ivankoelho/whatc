@@ -336,10 +336,10 @@ function getProgressPercentage(campaign: Campaign): number {
                       <span class="text-xs text-muted-foreground">{{ getProgressPercentage(campaign) }}%</span>
                     </div>
                     <div class="flex items-center gap-3 text-xs">
-                      <span title="Recipients"><Users class="h-3 w-3 inline mr-0.5" />{{ campaign.total_recipients }}</span>
-                      <span class="text-green-600" title="Delivered">{{ campaign.delivered_count }}</span>
-                      <span class="text-blue-600" title="Read">{{ campaign.read_count }}</span>
-                      <span v-if="campaign.failed_count > 0" class="text-destructive" title="Failed">{{ campaign.failed_count }}</span>
+                      <span :title="$t('campaigns.recipients')"><Users class="h-3 w-3 inline mr-0.5" />{{ campaign.total_recipients }}</span>
+                      <span class="text-green-600" :title="$t('campaigns.delivered')">{{ campaign.delivered_count }}</span>
+                      <span class="text-blue-600" :title="$t('campaigns.read')">{{ campaign.read_count }}</span>
+                      <span v-if="campaign.failed_count > 0" class="text-destructive" :title="$t('campaigns.failed')">{{ campaign.failed_count }}</span>
                     </div>
                   </div>
                 </template>

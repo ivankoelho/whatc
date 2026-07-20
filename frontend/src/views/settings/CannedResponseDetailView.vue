@@ -327,14 +327,14 @@ onMounted(() => { loadResponse() })
         <CardContent class="space-y-4">
           <div class="space-y-1.5">
             <Label class="text-xs">{{ $t('cannedResponses.name') }} <span class="text-destructive">*</span></Label>
-            <Input v-model="form.name" placeholder="Welcome Message" :disabled="!canWrite" />
+            <Input v-model="form.name" :placeholder="$t('cannedResponses.namePlaceholder')" :disabled="!canWrite" />
           </div>
           <div class="grid grid-cols-2 gap-4">
             <div class="space-y-1.5">
               <Label class="text-xs">{{ $t('cannedResponses.shortcut') }}</Label>
               <div class="relative">
                 <span class="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">/</span>
-                <Input v-model="form.shortcut" placeholder="welcome" class="pl-7" :disabled="!canWrite" />
+                <Input v-model="form.shortcut" :placeholder="$t('cannedResponses.shortcutPlaceholder')" class="pl-7" :disabled="!canWrite" />
               </div>
               <p class="text-[11px] text-muted-foreground">{{ $t('cannedResponses.shortcutHint') }}</p>
             </div>

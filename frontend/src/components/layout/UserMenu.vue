@@ -172,7 +172,7 @@ const handleLogout = () => {
             'flex items-center justify-start w-full h-auto px-2 py-1.5 gap-2 hover:bg-white/[0.04] light:hover:bg-gray-100',
             collapsed && 'md:justify-center'
           ]"
-          aria-label="User menu"
+          :aria-label="$t('userMenu.ariaUserMenu')"
         >
           <Avatar class="h-7 w-7 ring-2 ring-white/[0.1] light:ring-gray-200">
             <AvatarImage :src="undefined" />
@@ -211,7 +211,7 @@ const handleLogout = () => {
           <Switch
             :checked="authStore.isAvailable"
             :disabled="isUpdatingAvailability || isCheckingTransfers"
-            aria-label="Toggle availability status"
+            :aria-label="$t('userMenu.ariaToggleAvailability')"
             @update:checked="handleAvailabilityChange"
           />
         </div>

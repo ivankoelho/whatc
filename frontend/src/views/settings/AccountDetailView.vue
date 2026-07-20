@@ -465,14 +465,14 @@ onMounted(async () => {
           <Label class="text-xs text-muted-foreground">{{ $t('accounts.webhookUrl', 'Webhook URL') }}</Label>
           <div class="flex items-center gap-2 mt-1">
             <code class="px-2 py-1 bg-muted rounded text-xs font-mono flex-1 truncate">{{ webhookUrl }}</code>
-            <IconButton :icon="Copy" label="Copy" @click="copyToClipboard(webhookUrl)" />
+            <IconButton :icon="Copy" :label="$t('common.copy')" @click="copyToClipboard(webhookUrl)" />
           </div>
         </div>
         <div>
           <Label class="text-xs text-muted-foreground">{{ $t('accounts.verifyToken', 'Verify Token') }}</Label>
           <div class="flex items-center gap-2 mt-1">
             <code class="px-2 py-1 bg-muted rounded text-xs font-mono flex-1 truncate">{{ account?.webhook_verify_token }}</code>
-            <IconButton :icon="Copy" label="Copy" @click="copyToClipboard(account?.webhook_verify_token || '')" />
+            <IconButton :icon="Copy" :label="$t('common.copy')" @click="copyToClipboard(account?.webhook_verify_token || '')" />
           </div>
         </div>
       </CardContent>
@@ -502,10 +502,10 @@ onMounted(async () => {
         </CardHeader>
         <CardContent>
           <ol class="list-decimal list-inside space-y-2.5 text-sm text-muted-foreground">
-            <li>{{ $t('accounts.setupStep1', 'Go to') }} <a href="https://developers.facebook.com" target="_blank" class="text-primary hover:underline">Meta Developer Console</a> {{ $t('accounts.setupStep1End', 'and create an app') }}</li>
+            <li>{{ $t('accounts.setupStep1', 'Go to') }} <a href="https://developers.facebook.com" target="_blank" class="text-primary hover:underline">{{ $t('accounts.metaDevConsole') }}</a> {{ $t('accounts.setupStep1End', 'and create an app') }}</li>
             <li>{{ $t('accounts.setupStep2', 'Add WhatsApp product to your app') }}</li>
             <li>{{ $t('accounts.setupStep3', 'Copy') }} <strong>{{ $t('accounts.setupStep3Bold1', 'Phone Number ID') }}</strong> {{ $t('accounts.setupStep3And', 'and') }} <strong>{{ $t('accounts.setupStep3Bold2', 'Business Account ID') }}</strong></li>
-            <li>{{ $t('accounts.setupStep4', 'Generate a permanent token from') }} <a href="https://business.facebook.com/settings/system-users" target="_blank" class="text-primary hover:underline">Business Settings</a></li>
+            <li>{{ $t('accounts.setupStep4', 'Generate a permanent token from') }} <a href="https://business.facebook.com/settings/system-users" target="_blank" class="text-primary hover:underline">{{ $t('accounts.businessSettingsLink') }}</a></li>
             <li>{{ $t('accounts.setupStep5', 'Configure the webhook URL and verify token in Meta dashboard') }}</li>
             <li>{{ $t('accounts.setupStep6', 'Click Test Connection to verify') }}</li>
           </ol>

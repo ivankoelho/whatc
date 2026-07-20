@@ -1708,7 +1708,7 @@ async function sendMediaMessage() {
                     class="h-6 px-2 text-xs"
                     @click="clearTagFilter"
                   >
-                    Clear
+                    {{ $t('common.clear') }}
                   </Button>
                 </div>
                 <Separator />
@@ -1837,7 +1837,7 @@ async function sendMediaMessage() {
                   {{ contactsStore.currentContact.name || contactsStore.currentContact.phone_number }}
                 </p>
                 <Badge v-if="activeTransferId" class="text-[10px] h-5 bg-orange-500/20 text-orange-400 light:bg-orange-100 light:text-orange-700">
-                  Paused
+                  {{ $t('chat.paused') }}
                 </Badge>
                 <Badge v-if="contactsStore.currentContact?.marketing_opt_out" class="text-[10px] h-5 bg-red-500/20 text-red-400 light:bg-red-100 light:text-red-700" :title="$t('chat.marketingOptOut')">
                   {{ $t('chat.marketingOptOut', 'Marketing Opt-out') }}
@@ -2146,7 +2146,7 @@ async function sendMediaMessage() {
                       <p v-if="getLocationData(message)?.name" class="text-sm font-medium truncate">
                         {{ getLocationData(message)?.name }}
                       </p>
-                      <p v-else class="text-sm font-medium">Location</p>
+                      <p v-else class="text-sm font-medium">{{ $t('chat.location') }}</p>
                       <p v-if="getLocationData(message)?.address" class="text-xs text-muted-foreground truncate">
                         {{ getLocationData(message)?.address }}
                       </p>
@@ -2354,7 +2354,7 @@ async function sendMediaMessage() {
                   class="h-6 w-6 text-destructive hover:text-destructive"
                   :disabled="retryingMessageId === message.id"
                   @click="retryMessage(message)"
-                  title="Retry sending"
+                  :title="$t('chat.retrySending')"
                 >
                   <Loader2 v-if="retryingMessageId === message.id" class="h-3 w-3 animate-spin" />
                   <RotateCw v-else class="h-3 w-3" />

@@ -116,7 +116,12 @@
     "loadMore": "Carregar mais",
     "stay": "Ficar",
     "unsavedChangesDesc": "Você tem alterações não salvas. Tem certeza de que deseja sair?",
-    "unsavedChangesTitle": "Alterações não salvas"
+    "unsavedChangesTitle": "Alterações não salvas",
+    "deleteItemTitle": "Excluir item",
+    "deleteThisItem": "Tem certeza de que deseja excluir este item? Esta ação não pode ser desfeita.",
+    "deleteNamed": "Tem certeza de que deseja excluir \"{name}\"? Esta ação não pode ser desfeita.",
+    "clickToUploadFile": "Clique para enviar arquivo",
+    "scrollToTop": "Ir para o topo"
   },
   "auth": {
     "login": "Entrar",
@@ -278,7 +283,8 @@
     "skipToMain": "Ir para o conteúdo principal",
     "expandSidebar": "Expandir barra lateral",
     "collapseSidebar": "Recolher barra lateral",
-    "toggleMenu": "Alternar menu"
+    "toggleMenu": "Alternar menu",
+    "mainNavigation": "Navegação principal"
   },
   "userMenu": {
     "myAccount": "Minha conta",
@@ -295,7 +301,9 @@
     "failedUpdateAvailability": "Falha ao atualizar disponibilidade",
     "awayWarningTitle": "Transferências ativas serão devolvidas à fila",
     "awayWarningDesc": "Você tem {count} transferência(s) ativa(s) atribuída(s) a você. Definir seu status como \"Ausente\" irá devolvê-las à fila para outros agentes.",
-    "goAway": "Ficar ausente"
+    "goAway": "Ficar ausente",
+    "ariaUserMenu": "Menu do usuário",
+    "ariaToggleAvailability": "Alternar status de disponibilidade"
   },
   "chat": {
     "marketingOptOut": "Recusa de marketing",
@@ -427,8 +435,12 @@
     "urlButtonParam": "Botão de URL \"{button}\" - valor dinâmico",
     "urlButtonParamPlaceholder": "Insira o valor dinâmico da URL",
     "preview": "Pré-visualização",
+    "noDataConfigured": "Nenhum dado configurado",
+    "configurePanelHint": "Configure a exibição do painel nas configurações do fluxo do chatbot.",
+    "generalSection": "Geral",
     "serviceWindowExpired": "A janela de mensagens de 24 horas expirou. Somente mensagens de modelo podem ser enviadas até o cliente responder.",
-    "sendTemplateAction": "Enviar modelo"
+    "sendTemplateAction": "Enviar modelo",
+    "retrySending": "Tentar enviar novamente"
   },
   "contacts": {
     "title": "Contatos",
@@ -474,7 +486,8 @@
     "searchTags": "Buscar etiquetas...",
     "noTagsFound": "Nenhuma etiqueta encontrada",
     "whatsappAccount": "Conta do WhatsApp",
-    "selectAccount": "Selecionar conta..."
+    "selectAccount": "Selecionar conta...",
+    "noTags": "Sem etiquetas"
   },
   "importExport": {
     "title": "Importar/Exportar {resource}",
@@ -588,7 +601,11 @@
     "metaAppCredentialsDesc": "Defina configurações específicas do app Meta para o Cadastro Incorporado do WhatsApp. Deixe o segredo em branco para manter o existente.",
     "metaAppId": "ID do app Meta",
     "metaConfigId": "ID de config. do Meta",
-    "metaAppSecret": "Segredo do app Meta"
+    "metaAppSecret": "Segredo do app Meta",
+    "themeLight": "Tema claro",
+    "themeDark": "Tema escuro",
+    "themeSystem": "Tema do sistema",
+    "themeColor": "Tema de cor"
   },
   "users": {
     "title": "Gerenciamento de usuários",
@@ -690,7 +707,8 @@
     "superAdminCanEdit": "Como super admin, você pode modificar as permissões desta função do sistema.",
     "updateRoleDesc": "Atualize o nome, a descrição e as permissões da função.",
     "createRoleDesc": "Crie uma nova função com permissões personalizadas.",
-    "roleNameRequired": "O nome da função é obrigatório"
+    "roleNameRequired": "O nome da função é obrigatório",
+    "noPermissionsSeeded": "Nenhuma permissão disponível. Verifique se as permissões foram inicializadas no banco de dados."
   },
   "teams": {
     "title": "Equipes",
@@ -768,7 +786,11 @@
     "createDesc": "Crie uma nova organização para gerenciar um espaço de trabalho separado.",
     "namePlaceholder": "Nome da organização",
     "created": "Organização criada",
-    "createFailed": "Falha ao criar organização"
+    "createFailed": "Falha ao criar organização",
+    "organization": "Organização",
+    "loading": "Carregando...",
+    "noOrganizations": "Nenhuma organização encontrada",
+    "selectOrganization": "Selecionar organização"
   },
   "tags": {
     "title": "Etiquetas",
@@ -971,7 +993,26 @@
     "autofillText": "Texto de preenchimento automático",
     "packageName": "Nome do pacote",
     "signatureHash": "Hash de assinatura",
-    "deleteConfirm": "Tem certeza? Esta ação não pode ser desfeita."
+    "deleteConfirm": "Tem certeza? Esta ação não pode ser desfeita.",
+    "mediaJpegPng": "JPEG ou PNG, máx. 5MB",
+    "mediaMp4": "MP4, máx. 16MB",
+    "mediaPdf": "PDF, máx. 100MB",
+    "selectDeliveryMethod": "Selecionar método de entrega",
+    "copyCode": "Copiar código",
+    "oneTapAutofill": "Preenchimento com um toque (apenas Android)",
+    "zeroTap": "Zero toque (apenas Android)",
+    "copyCodeDesc": "O usuário toca em um botão para copiar o código para a área de transferência.",
+    "oneTapDesc": "O usuário toca em um botão para preencher o código automaticamente no seu app. Requer configuração do app.",
+    "zeroTapDesc": "O código é entregue ao seu app automaticamente. Requer configuração do app.",
+    "authPresetInfo": "Modelos de autenticação usam texto predefinido fixo definido pela Meta.",
+    "minutesRange": "minutos (1-90)",
+    "zeroTapConsent": "Ao selecionar zero toque, entendo que o uso da autenticação zero toque pela minha empresa está sujeito aos",
+    "whatsappBusinessTerms": "Termos de Serviço do WhatsApp Business",
+    "addApp": "Adicionar app",
+    "navigateAction": "Navegar",
+    "dataExchange": "Troca de dados",
+    "oneTap": "Um toque",
+    "zeroTapShort": "Zero toque"
   },
   "sso": {
     "title": "Login único (SSO)",
@@ -1135,7 +1176,9 @@
     "copyContent": "Copiar conteúdo",
     "editResponse": "Editar resposta",
     "deleteResponse": "Excluir resposta",
-    "errorLoadingResponses": "Falha ao carregar respostas prontas. Tente novamente."
+    "errorLoadingResponses": "Falha ao carregar respostas prontas. Tente novamente.",
+    "namePlaceholder": "Mensagem de boas-vindas",
+    "shortcutPlaceholder": "boasvindas"
   },
   "auditLogs": {
     "title": "Registros de auditoria",
@@ -1161,7 +1204,16 @@
     "noChanges": "Nenhuma alteração de campo registrada.",
     "detailDesc": "Histórico completo de alterações deste recurso.",
     "resourceType": "Tipo de recurso",
-    "viewResource": "Ver recurso"
+    "viewResource": "Ver recurso",
+    "resAccount": "Conta",
+    "resAiContext": "Contexto de IA",
+    "resCampaign": "Campanha",
+    "resChatbotSettings": "Configurações do chatbot",
+    "resChatbotFlow": "Fluxo de chatbot",
+    "resIvrFlow": "Fluxo de URA",
+    "resKeywordRule": "Regra de palavra-chave",
+    "resTeam": "Equipe",
+    "resTemplate": "Modelo"
   },
   "customActions": {
     "title": "Ações personalizadas",
@@ -1385,7 +1437,8 @@
     "account": "Conta",
     "appId": "ID do app",
     "defaults": "Padrões",
-    "status": "Status"
+    "status": "Status",
+    "businessSettingsLink": "Configurações do Negócio"
   },
   "dashboard": {
     "title": "Painel",
@@ -2642,7 +2695,9 @@
     "sectionLabelPlaceholder": "Rótulo da seção",
     "addFieldPlaceholder": "+ Adicionar",
     "exampleUrlPlaceholder": "https://exemplo.com",
-    "dataPathPlaceholder": "data.path"
+    "dataPathPlaceholder": "data.path",
+    "contactPanelDisplay": "Exibição do painel do contato",
+    "activity": "Atividade"
   },
   "calling": {
     "callLogs": "Histórico de chamadas",

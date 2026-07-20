@@ -116,7 +116,12 @@
     "loadMore": "Load more",
     "stay": "Stay",
     "unsavedChangesDesc": "You have unsaved changes. Are you sure you want to leave?",
-    "unsavedChangesTitle": "Unsaved Changes"
+    "unsavedChangesTitle": "Unsaved Changes",
+    "deleteItemTitle": "Delete Item",
+    "deleteThisItem": "Are you sure you want to delete this item? This action cannot be undone.",
+    "deleteNamed": "Are you sure you want to delete \"{name}\"? This action cannot be undone.",
+    "clickToUploadFile": "Click to upload file",
+    "scrollToTop": "Scroll to top"
   },
   "auth": {
     "login": "Login",
@@ -278,7 +283,8 @@
     "skipToMain": "Skip to main content",
     "expandSidebar": "Expand sidebar",
     "collapseSidebar": "Collapse sidebar",
-    "toggleMenu": "Toggle menu"
+    "toggleMenu": "Toggle menu",
+    "mainNavigation": "Main navigation"
   },
   "userMenu": {
     "myAccount": "My Account",
@@ -295,7 +301,9 @@
     "failedUpdateAvailability": "Failed to update availability",
     "awayWarningTitle": "Active Transfers Will Be Returned to Queue",
     "awayWarningDesc": "You have {count} active transfer(s) assigned to you. Setting your status to \"Away\" will return them to the queue for other agents to pick up.",
-    "goAway": "Go Away"
+    "goAway": "Go Away",
+    "ariaUserMenu": "User menu",
+    "ariaToggleAvailability": "Toggle availability status"
   },
   "chat": {
     "marketingOptOut": "Marketing Opt-out",
@@ -427,8 +435,12 @@
     "urlButtonParam": "URL Button \"{button}\" - dynamic value",
     "urlButtonParamPlaceholder": "Enter dynamic URL value",
     "preview": "Preview",
+    "noDataConfigured": "No data configured",
+    "configurePanelHint": "Configure panel display in the chatbot flow settings.",
+    "generalSection": "General",
     "serviceWindowExpired": "The 24-hour messaging window has expired. Only template messages can be sent until the customer replies.",
-    "sendTemplateAction": "Send Template"
+    "sendTemplateAction": "Send Template",
+    "retrySending": "Retry sending"
   },
   "contacts": {
     "title": "Contacts",
@@ -474,7 +486,8 @@
     "searchTags": "Search tags...",
     "noTagsFound": "No tags found",
     "whatsappAccount": "WhatsApp Account",
-    "selectAccount": "Select account..."
+    "selectAccount": "Select account...",
+    "noTags": "No tags"
   },
   "importExport": {
     "title": "Import/Export {resource}",
@@ -588,7 +601,11 @@
     "metaAppCredentialsDesc": "Set tenant-specific Meta App configurations for WhatsApp Embedded Signup. Leave secret blank to keep existing.",
     "metaAppId": "Meta App ID",
     "metaConfigId": "Meta Config ID",
-    "metaAppSecret": "Meta App Secret"
+    "metaAppSecret": "Meta App Secret",
+    "themeLight": "Light theme",
+    "themeDark": "Dark theme",
+    "themeSystem": "System theme",
+    "themeColor": "Color theme"
   },
   "users": {
     "title": "User Management",
@@ -690,7 +707,8 @@
     "superAdminCanEdit": "As a super admin, you can modify permissions for this system role.",
     "updateRoleDesc": "Update the role name, description, and permissions.",
     "createRoleDesc": "Create a new role with custom permissions.",
-    "roleNameRequired": "Role name is required"
+    "roleNameRequired": "Role name is required",
+    "noPermissionsSeeded": "No permissions available. Please check if permissions are seeded in the database."
   },
   "teams": {
     "title": "Teams",
@@ -768,7 +786,11 @@
     "createDesc": "Create a new organization to manage a separate workspace.",
     "namePlaceholder": "Organization name",
     "created": "Organization created",
-    "createFailed": "Failed to create organization"
+    "createFailed": "Failed to create organization",
+    "organization": "Organization",
+    "loading": "Loading...",
+    "noOrganizations": "No organizations found",
+    "selectOrganization": "Select organization"
   },
   "tags": {
     "title": "Tags",
@@ -971,7 +993,26 @@
     "autofillText": "Autofill Text",
     "packageName": "Package Name",
     "signatureHash": "Signature Hash",
-    "deleteConfirm": "Are you sure? This action cannot be undone."
+    "deleteConfirm": "Are you sure? This action cannot be undone.",
+    "mediaJpegPng": "JPEG or PNG, max 5MB",
+    "mediaMp4": "MP4, max 16MB",
+    "mediaPdf": "PDF, max 100MB",
+    "selectDeliveryMethod": "Select delivery method",
+    "copyCode": "Copy Code",
+    "oneTapAutofill": "One-Tap Autofill (Android only)",
+    "zeroTap": "Zero-Tap (Android only)",
+    "copyCodeDesc": "User taps a button to copy the code to clipboard.",
+    "oneTapDesc": "User taps a button to autofill the code in your app. Requires app configuration.",
+    "zeroTapDesc": "Code is delivered to your app automatically. Requires app configuration.",
+    "authPresetInfo": "Authentication templates use fixed preset text defined by Meta.",
+    "minutesRange": "minutes (1-90)",
+    "zeroTapConsent": "By selecting zero-tap, I understand that my business's use of zero-tap authentication is subject to the",
+    "whatsappBusinessTerms": "WhatsApp Business Terms of Service",
+    "addApp": "Add App",
+    "navigateAction": "Navigate",
+    "dataExchange": "Data Exchange",
+    "oneTap": "One Tap",
+    "zeroTapShort": "Zero Tap"
   },
   "sso": {
     "title": "Single Sign-On (SSO)",
@@ -1135,7 +1176,9 @@
     "copyContent": "Copy content",
     "editResponse": "Edit response",
     "deleteResponse": "Delete response",
-    "errorLoadingResponses": "Failed to load canned responses. Please try again."
+    "errorLoadingResponses": "Failed to load canned responses. Please try again.",
+    "namePlaceholder": "Welcome Message",
+    "shortcutPlaceholder": "welcome"
   },
   "auditLogs": {
     "title": "Audit Logs",
@@ -1161,7 +1204,16 @@
     "noChanges": "No field-level changes recorded.",
     "detailDesc": "Full change history for this resource.",
     "resourceType": "Resource Type",
-    "viewResource": "View Resource"
+    "viewResource": "View Resource",
+    "resAccount": "Account",
+    "resAiContext": "AI Context",
+    "resCampaign": "Campaign",
+    "resChatbotSettings": "Chatbot Settings",
+    "resChatbotFlow": "Chatbot Flow",
+    "resIvrFlow": "IVR Flow",
+    "resKeywordRule": "Keyword Rule",
+    "resTeam": "Team",
+    "resTemplate": "Template"
   },
   "customActions": {
     "title": "Custom Actions",
@@ -1385,7 +1437,8 @@
     "account": "Account",
     "appId": "App ID",
     "defaults": "Defaults",
-    "status": "Status"
+    "status": "Status",
+    "businessSettingsLink": "Business Settings"
   },
   "dashboard": {
     "title": "Dashboard",
@@ -2642,7 +2695,9 @@
     "sectionLabelPlaceholder": "Section Label",
     "addFieldPlaceholder": "+ Add",
     "exampleUrlPlaceholder": "https://example.com",
-    "dataPathPlaceholder": "data.path"
+    "dataPathPlaceholder": "data.path",
+    "contactPanelDisplay": "Contact panel display",
+    "activity": "Activity"
   },
   "calling": {
     "callLogs": "Call Logs",

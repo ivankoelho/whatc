@@ -162,15 +162,15 @@ onMounted(async () => {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">{{ t('auditLogs.allResources') }}</SelectItem>
-                      <SelectItem value="account">Account</SelectItem>
-                      <SelectItem value="ai_context">AI Context</SelectItem>
-                      <SelectItem value="campaign">Campaign</SelectItem>
-                      <SelectItem value="chatbot_settings">Chatbot Settings</SelectItem>
-                      <SelectItem value="chatbot_flow">Chatbot Flow</SelectItem>
-                      <SelectItem value="ivr_flow">IVR Flow</SelectItem>
-                      <SelectItem value="keyword_rule">Keyword Rule</SelectItem>
-                      <SelectItem value="team">Team</SelectItem>
-                      <SelectItem value="template">Template</SelectItem>
+                      <SelectItem value="account">{{ $t('auditLogs.resAccount') }}</SelectItem>
+                      <SelectItem value="ai_context">{{ $t('auditLogs.resAiContext') }}</SelectItem>
+                      <SelectItem value="campaign">{{ $t('auditLogs.resCampaign') }}</SelectItem>
+                      <SelectItem value="chatbot_settings">{{ $t('auditLogs.resChatbotSettings') }}</SelectItem>
+                      <SelectItem value="chatbot_flow">{{ $t('auditLogs.resChatbotFlow') }}</SelectItem>
+                      <SelectItem value="ivr_flow">{{ $t('auditLogs.resIvrFlow') }}</SelectItem>
+                      <SelectItem value="keyword_rule">{{ $t('auditLogs.resKeywordRule') }}</SelectItem>
+                      <SelectItem value="team">{{ $t('auditLogs.resTeam') }}</SelectItem>
+                      <SelectItem value="template">{{ $t('auditLogs.resTemplate') }}</SelectItem>
                     </SelectContent>
                   </Select>
                   <DateRangePicker

@@ -143,7 +143,7 @@ watch(() => props.selectedPermissions, (newPerms, oldPerms) => {
   <div class="space-y-2">
     <!-- Empty state -->
     <div v-if="permissionGroups.length === 0" class="text-center py-8 text-muted-foreground border rounded-lg">
-      <p>No permissions available. Please check if permissions are seeded in the database.</p>
+      <p>{{ $t('roles.noPermissionsSeeded') }}</p>
     </div>
 
     <!-- Permission groups -->

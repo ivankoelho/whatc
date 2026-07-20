@@ -39,7 +39,9 @@ for (const file of walk(srcDir)) {
   let m
   while ((m = textRe.exec(src))) {
     const s = m[1].trim()
-    if (s.includes('{{') || allowSet.has(s)) continue
+    // Skip bindings and code fragments (e.g. `=> fetchItems()` bleeding into
+    // the next tag): real UI copy never contains `{{`, `()`, or `=>`.
+    if (s.includes('{{') || s.includes('()') || s.includes('=>') || allowSet.has(s)) continue
     hits.push(s)
   }
   while ((m = attrRe.exec(src))) {
