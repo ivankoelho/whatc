@@ -348,6 +348,7 @@
     "addReaction": "Add reaction",
     "filterByTags": "Filter by tags",
     "filterAll": "All",
+    "agentTyping": "{name} is typing…",
     "statusNew": "New",
     "statusInProgress": "In progress",
     "statusResolved": "Resolved",

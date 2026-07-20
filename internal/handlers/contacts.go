@@ -66,6 +66,8 @@ type MessageResponse struct {
 	ReplyToMessage   *ReplyPreview        `json:"reply_to_message,omitempty"`
 	Reactions        []ReactionInfo       `json:"reactions,omitempty"`
 	WhatsAppAccount  string               `json:"whatsapp_account,omitempty"`
+	SentByUserID     *uuid.UUID           `json:"sent_by_user_id,omitempty"`
+	SentByUserName   string               `json:"sent_by_user_name,omitempty"`
 	CreatedAt        time.Time            `json:"created_at"`
 	UpdatedAt        time.Time            `json:"updated_at"`
 }
@@ -330,7 +332,7 @@ func (a *App) GetMessages(r *fastglue.Request) error {
 		}
 		// For loading older messages, order DESC and limit, then reverse
 		var messages []models.Message
-		if err := msgQuery.Preload("ReplyToMessage").Order("created_at DESC").Limit(limit).Find(&messages).Error; err != nil {
+		if err := msgQuery.Preload("ReplyToMessage").Preload("SentByUser").Order("created_at DESC").Limit(limit).Find(&messages).Error; err != nil {
 			a.Log.Error("Failed to list messages", "error", err)
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list messages", nil, "")
 		}
@@ -366,7 +368,7 @@ func (a *App) GetMessages(r *fastglue.Request) error {
 	}
 
 	var messages []models.Message
-	if err := msgQuery.Preload("ReplyToMessage").Order("created_at ASC").Offset(offset).Limit(queryLimit).Find(&messages).Error; err != nil {
+	if err := msgQuery.Preload("ReplyToMessage").Preload("SentByUser").Order("created_at ASC").Offset(offset).Limit(queryLimit).Find(&messages).Error; err != nil {
 		a.Log.Error("Failed to list messages", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list messages", nil, "")
 	}
@@ -410,6 +412,8 @@ func (a *App) buildMessagesResponse(messages []models.Message) []MessageResponse
 			Error:           m.ErrorMessage,
 			IsReply:         m.IsReply,
 			WhatsAppAccount: m.WhatsAppAccount,
+			SentByUserID:    m.SentByUserID,
+			SentByUserName:  senderName(&m),
 			CreatedAt:       m.CreatedAt,
 			UpdatedAt:       m.UpdatedAt,
 		}
@@ -1607,4 +1611,13 @@ func (a *App) buildContactResponse(contact *models.Contact, orgID uuid.UUID) Con
 		CreatedAt:          contact.CreatedAt,
 		UpdatedAt:          contact.UpdatedAt,
 	}
+}
+
+// senderName returns the display name of the agent who sent an outgoing
+// message, or "" for messages with no agent (chatbot, campaign, API).
+func senderName(m *models.Message) string {
+	if m.SentByUser == nil {
+		return ""
+	}
+	return m.SentByUser.FullName
 }

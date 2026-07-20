@@ -46,6 +46,7 @@ const WS_TYPE_AUTH = 'auth'
 const WS_TYPE_NEW_MESSAGE = 'new_message'
 const WS_TYPE_STATUS_UPDATE = 'status_update'
 const WS_TYPE_CONTACT_STATUS_CHANGED = 'contact_status_changed'
+const WS_TYPE_AGENT_TYPING = 'agent_typing'
 const WS_TYPE_SET_CONTACT = 'set_contact'
 const WS_TYPE_PING = 'ping'
 const WS_TYPE_PONG = 'pong'
@@ -108,6 +109,11 @@ class WebSocketService {
   private hasConnectedBefore = false
   private campaignStatsCallbacks: ((payload: any) => void)[] = []
   private getTokenFn: (() => Promise<string | null>) | null = null
+  // Contact the user is currently viewing. Held here (not just on the server)
+  // because set_contact is per-connection state the server loses on every
+  // socket drop, and send() silently discards anything queued while the
+  // socket is not OPEN.
+  private currentContactId: string | null = null
 
   async connect(getToken?: () => Promise<string | null>) {
     // isConnecting covers the async token-fetch window below, during which
@@ -171,6 +177,24 @@ class WebSocketService {
         this.reconnectAttempts = 0
         this.startPing()
 
+        // Re-register the open conversation. set_contact lives on the server's
+        // per-connection Client, so after any drop (device wake, network blip,
+        // deploy) the server has currentContact == nil and stops delivering
+        // typing events to this session — silently, since org-wide broadcasts
+        // such as new messages keep arriving. This also covers the cold
+        // deep-link race where ChatView's onMounted fired set_contact while
+        // the socket was still CONNECTING and send() dropped it.
+        //
+        // Ordering is safe: the auth frame above is written to the same socket
+        // first, and the server reads its first frame as auth before entering
+        // the loop that handles set_contact.
+        if (this.currentContactId) {
+          this.send({
+            type: WS_TYPE_SET_CONTACT,
+            payload: { contact_id: this.currentContactId }
+          })
+        }
+
         // Force refresh data after reconnection to sync any missed updates
         if (isReconnection) {
           this.refreshStaleData()
@@ -198,6 +222,9 @@ class WebSocketService {
   }
 
   disconnect() {
+    // Deliberate close (e.g. logout): drop the remembered conversation so a
+    // later login on the same singleton cannot re-register a stale contact.
+    this.currentContactId = null
     this.stopPing()
     this.removeLifecycleListeners() // Drop wake listeners; connect() reinstalls on next login.
     this.intentionalClose = true // Prevent reconnect (deliberate close, e.g. logout)
@@ -229,6 +256,9 @@ class WebSocketService {
           break
         case WS_TYPE_CONTACT_STATUS_CHANGED:
           store.applyStatusChange(message.payload)
+          break
+        case WS_TYPE_AGENT_TYPING:
+          store.applyAgentTyping(message.payload)
           break
         case WS_TYPE_AGENT_TRANSFER:
           this.handleAgentTransfer(message.payload)
@@ -319,6 +349,11 @@ class WebSocketService {
         reply_to_message_id: payload.reply_to_message_id,
         reply_to_message: payload.reply_to_message,
         reactions: payload.reactions,
+        // Which agent sent this. The broadcast is the only producer that
+        // carries it on a live message — the POST /messages response omits
+        // it — so dropping it here left every bubble unlabelled until reload.
+        sent_by_user_id: payload.sent_by_user_id,
+        sent_by_user_name: payload.sent_by_user_name,
         created_at: payload.created_at,
         updated_at: payload.updated_at
       })
@@ -667,6 +702,7 @@ class WebSocketService {
   }
 
   setCurrentContact(contactId: string | null) {
+    this.currentContactId = contactId
     this.send({
       type: WS_TYPE_SET_CONTACT,
       payload: { contact_id: contactId || '' }

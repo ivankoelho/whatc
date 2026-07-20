@@ -348,6 +348,7 @@
     "addReaction": "Adicionar reação",
     "filterByTags": "Filtrar por etiquetas",
     "filterAll": "Todos",
+    "agentTyping": "{name} está digitando…",
     "statusNew": "Novo",
     "statusInProgress": "Em andamento",
     "statusResolved": "Concluído",
