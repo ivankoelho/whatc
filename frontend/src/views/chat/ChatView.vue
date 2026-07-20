@@ -104,6 +104,7 @@ import ConversationNotes from '@/components/chat/ConversationNotes.vue'
 import CallButton from '@/components/calling/CallButton.vue'
 import { useNotesStore } from '@/stores/notes'
 import { useHeaderMedia } from '@/composables/useHeaderMedia'
+import { useTypingNotifier } from '@/composables/useTypingNotifier'
 import { CreateContactDialog } from '@/components/shared'
 import HeaderMediaUpload from '@/components/shared/HeaderMediaUpload.vue'
 import { Info } from 'lucide-vue-next'
@@ -112,6 +113,7 @@ const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const contactsStore = useContactsStore()
+const { notifyTyping } = useTypingNotifier()
 const authStore = useAuthStore()
 const usersStore = useUsersStore()
 const transfersStore = useTransfersStore()
@@ -789,6 +791,12 @@ function autoResizeTextarea() {
   if (!textarea) return
   textarea.style.height = 'auto'
   textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px'
+}
+
+function handleComposerInput() {
+  autoResizeTextarea()
+  const contactId = contactsStore.currentContact?.id
+  if (contactId) notifyTyping(contactId)
 }
 
 function resetTextareaHeight() {
@@ -2494,7 +2502,7 @@ async function sendMediaMessage() {
               rows="1"
               class="flex-1 bg-transparent text-[14px] text-white light:text-gray-900 placeholder:text-white/30 light:placeholder:text-gray-400 focus:outline-none resize-none min-h-[36px] max-h-[120px] py-2 overflow-y-auto"
               @keydown.enter.exact.prevent="sendMessage"
-              @input="autoResizeTextarea"
+              @input="handleComposerInput"
             />
             <button type="submit" class="w-9 h-9 rounded-lg bg-emerald-600 hover:bg-emerald-500 light:bg-emerald-500 light:hover:bg-emerald-600 flex items-center justify-center transition-colors disabled:opacity-50" :disabled="!messageInput.trim() || isSending">
               <Send class="w-4 h-4 text-white" />
