@@ -10,10 +10,8 @@ preserve_hierarchy: true
 files:
   # Source English file
   - source: /src/i18n/locales/en.json
-    translation: /src/i18n/locales/%two_letters_code%.json
-    # Skip English as it's the source
-    languages_mapping:
-      two_letters_code:
-        en: en
+    # Use the full locale code so Brazilian Portuguese resolves to
+    # pt-BR.json (the app's locale filename), not pt.json.
+    translation: /src/i18n/locales/%locale%.json
     # Update strings instead of replacing
     update_option: update_as_unapproved

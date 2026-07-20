@@ -1,3 +1,4 @@
 files:
   - source: /frontend/src/i18n/locales/en.json
-    translation: /frontend/src/i18n/locales/%two_letters_code%.json
+    # Full locale code so Brazilian Portuguese maps to pt-BR.json.
+    translation: /frontend/src/i18n/locales/%locale%.json
