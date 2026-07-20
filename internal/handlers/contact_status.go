@@ -7,7 +7,56 @@ import (
 	"github.com/shridarpatil/whatomate/internal/audit"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/websocket"
+	"github.com/valyala/fasthttp"
+	"github.com/zerodha/fastglue"
 )
+
+// UpdateContactStatusRequest is the body of PUT /contacts/{id}/status.
+type UpdateContactStatusRequest struct {
+	ContactStatus models.ContactStatus `json:"contact_status"`
+}
+
+// UpdateContactStatus manually sets a conversation's service status.
+func (a *App) UpdateContactStatus(r *fastglue.Request) error {
+	orgID, userID, err := a.getOrgAndUserID(r)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+
+	if !a.HasPermission(userID, models.ResourceContacts, models.ActionWrite, orgID) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You do not have permission to change contact status", nil, "")
+	}
+
+	contactID, err := parsePathUUID(r, "id", "contact")
+	if err != nil {
+		return nil
+	}
+
+	var req UpdateContactStatusRequest
+	if err := a.decodeRequest(r, &req); err != nil {
+		return nil
+	}
+
+	if !req.ContactStatus.IsValid() {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest,
+			"contact_status must be one of: new, in_progress, resolved", nil, "")
+	}
+
+	contact, err := findByIDAndOrg[models.Contact](a.DB, r, contactID, orgID, "Contact")
+	if err != nil {
+		return nil
+	}
+
+	if _, err := a.transitionContactStatus(contact, req.ContactStatus, nil, &userID); err != nil {
+		a.Log.Error("Failed to update contact status", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update contact status", nil, "")
+	}
+
+	return r.SendEnvelope(map[string]any{
+		"id":             contact.ID,
+		"contact_status": contact.ContactStatus,
+	})
+}
 
 // transitionContactStatus moves a contact to a new status, but only if its
 // current status is in `from` (an empty `from` allows any origin).
