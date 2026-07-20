@@ -539,6 +539,14 @@ function onUserActive() {
 }
 
 onUnmounted(() => {
+  // Leaving the chat view entirely: the route-param watcher only clears the
+  // *outgoing* contact when switching between conversations, so the one still
+  // open here would keep a live typing entry. The 3s TTL covers it in
+  // practice; clear it so store state cannot outlive the view.
+  const openContactId = contactsStore.currentContact?.id
+  if (openContactId) {
+    contactsStore.clearTyping(openContactId)
+  }
   wsService.setCurrentContact(null)
   // Clear current contact when leaving chat view so notifications work on other pages
   contactsStore.setCurrentContact(null)

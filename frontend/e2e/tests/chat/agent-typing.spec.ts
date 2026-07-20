@@ -16,6 +16,7 @@ test.describe('Agent Typing', () => {
   test.setTimeout(90000)
 
   let contactId: string
+  let accountName: string
 
   test.beforeAll(async () => {
     const reqContext = await playwrightRequest.newContext()
@@ -23,6 +24,30 @@ test.describe('Agent Typing', () => {
     await api.loginAsAdmin()
     const contact = await api.createContact(scope.phone(), scope.name('contact'))
     contactId = contact.id
+
+    // A send is rejected with "Failed to resolve WhatsApp account" unless the
+    // org has one, so the outgoing-bubble test needs one to exist. The
+    // upstream Meta call fails with these dummy credentials, but the message
+    // row is created and broadcast before the send is attempted, which is all
+    // this spec asserts on.
+    let accounts: any[] = []
+    try {
+      accounts = await api.getWhatsAppAccounts()
+    } catch {
+      // ignore
+    }
+    if (accounts.length === 0) {
+      const uid = Date.now().toString().slice(-8)
+      await api.createWhatsAppAccount({
+        name: `e2e-typing-${uid}`,
+        phone_id: `phone-${uid}`,
+        business_id: `biz-${uid}`,
+        access_token: `token-${uid}`
+      })
+      accounts = await api.getWhatsAppAccounts()
+    }
+    accountName = accounts[0].name
+
     await reqContext.dispose()
   })
 
@@ -71,15 +96,37 @@ test.describe('Agent Typing', () => {
     }
   })
 
-  test('shows the agent name on an outgoing bubble', async ({ page }) => {
-    await loginAsAdmin(page)
+  test('shows the sending agent name on an outgoing bubble', async ({ page }) => {
+    // Deliberately watch as the *manager* while the *admin* sends. The sidebar
+    // user menu always renders the logged-in user's full name, so an assertion
+    // on the viewer's own name passes even with the bubble label deleted.
+    // Asserting a different agent's name, scoped to .chat-bubble-outgoing,
+    // cannot be satisfied by anything outside the bubble.
+    await loginAsManager(page)
     const chatPage = new ChatPage(page)
     await chatPage.goto(contactId)
 
-    await page.locator('textarea').first().fill('mensagem do agente')
-    await page.keyboard.press('Enter')
+    // Sanity: the sidebar shows the viewer, not the sender.
+    await expect(page.getByText('Test Manager').first()).toBeVisible({ timeout: 10000 })
 
-    // The bubble carries the sending agent's display name
-    await expect(page.getByText('Test Admin').first()).toBeVisible({ timeout: 10000 })
+    const body = scope.name('bubble-msg')
+    const reqContext = await playwrightRequest.newContext()
+    try {
+      const api = new ApiHelper(reqContext)
+      await api.loginAsAdmin()
+      const res = await api.post(`/api/contacts/${contactId}/messages`, {
+        type: 'text',
+        content: { body },
+        whatsapp_account: accountName,
+      })
+      expect(res.status()).toBe(200)
+    } finally {
+      await reqContext.dispose()
+    }
+
+    // The name has to arrive on the live websocket broadcast — no reload here.
+    const bubble = page.locator('.chat-bubble-outgoing').filter({ hasText: body })
+    await expect(bubble).toBeVisible({ timeout: 15000 })
+    await expect(bubble.getByText('Test Admin')).toBeVisible({ timeout: 15000 })
   })
 })

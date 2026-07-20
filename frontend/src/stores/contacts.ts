@@ -344,9 +344,23 @@ export const useContactsStore = defineStore('contacts', () => {
     }
 
     // Check if message already exists
-    const exists = messages.value.some(m => m.id === message.id)
-    if (!exists) {
+    const index = messages.value.findIndex(m => m.id === message.id)
+    if (index === -1) {
       messages.value.push(message)
+      return
+    }
+
+    // The same message reaches us twice on the sender's own client: once from
+    // the POST /messages response (whose MessageResponse omits the sender
+    // identity) and once from the org-wide websocket broadcast (which carries
+    // it). Whichever lands second must be able to fill the gap, or the
+    // sender's own bubble stays unlabelled until a reload.
+    if (message.sent_by_user_name && !messages.value[index].sent_by_user_name) {
+      messages.value[index] = {
+        ...messages.value[index],
+        sent_by_user_id: message.sent_by_user_id ?? messages.value[index].sent_by_user_id,
+        sent_by_user_name: message.sent_by_user_name,
+      }
     }
   }
 

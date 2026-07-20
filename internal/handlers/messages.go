@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/shridarpatil/whatomate/internal/audit"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/templateutil"
 	"github.com/shridarpatil/whatomate/internal/utils"
@@ -525,6 +524,12 @@ func (a *App) broadcastNewMessage(orgID uuid.UUID, msg *models.Message, contact 
 		"sent_by_user_name": a.senderNameForBroadcast(msg),
 	}
 
+	// Sent alongside the name so the client can tell "the agent who sent this"
+	// apart from "an agent with the same display name" without a lookup.
+	if msg.SentByUserID != nil {
+		payload["sent_by_user_id"] = msg.SentByUserID.String()
+	}
+
 	// Add interactive data
 	if msg.InteractiveData != nil {
 		payload["interactive_data"] = msg.InteractiveData
@@ -997,9 +1002,18 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 // senderNameForBroadcast resolves the agent name for a websocket payload.
 // The message being broadcast was just created and has no preloaded relation,
 // so the name is fetched directly.
+//
+// It must agree with senderName(), the REST-side producer of the same field:
+// no agent (chatbot, campaign, API) and a blank display name both yield "",
+// which the UI renders as an unlabelled bubble. audit.GetUserName is
+// deliberately not used here — its "Unknown" fallback belongs to the audit
+// log, and leaking it here would make a message read "Unknown" live and
+// unlabelled after a refresh.
 func (a *App) senderNameForBroadcast(msg *models.Message) string {
 	if msg.SentByUserID == nil {
 		return ""
 	}
-	return audit.GetUserName(a.DB, *msg.SentByUserID)
+	var name string
+	a.DB.Model(&models.User{}).Where("id = ?", *msg.SentByUserID).Pluck("full_name", &name)
+	return name
 }

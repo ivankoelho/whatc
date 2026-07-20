@@ -147,4 +147,41 @@ func TestApp_GetMessages_IncludesSenderName(t *testing.T) {
 		require.Len(t, resp.Data.Messages, 1)
 		assert.Empty(t, resp.Data.Messages[0].SentByUserName)
 	})
+
+	// The websocket broadcast and the REST response are two independent
+	// producers of sent_by_user_name. If they disagree, the same message
+	// renders one way live and another way after a refresh, and the
+	// sender-grouping helper alternates across a run from the same user.
+	t.Run("broadcast and REST agree on the name", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+		named := testutil.CreateTestUser(t, app.DB, org.ID,
+			testutil.WithRoleID(&adminRole.ID), testutil.WithFullName("Ana Ribeiro"))
+		blank := testutil.CreateTestUser(t, app.DB, org.ID,
+			testutil.WithRoleID(&adminRole.ID), testutil.WithFullName(""))
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+
+		newMsg := func(sender *uuid.UUID) *models.Message {
+			return &models.Message{
+				BaseModel:      models.BaseModel{ID: uuid.New()},
+				OrganizationID: org.ID,
+				ContactID:      contact.ID,
+				Direction:      models.DirectionOutgoing,
+				MessageType:    models.MessageTypeText,
+				SentByUserID:   sender,
+			}
+		}
+
+		// Named agent: both producers return the display name.
+		assert.Equal(t, "Ana Ribeiro", app.SenderNameForBroadcastForTest(newMsg(&named.ID)))
+
+		// No agent at all (chatbot, campaign, API): unlabelled bubble.
+		assert.Empty(t, app.SenderNameForBroadcastForTest(newMsg(nil)))
+		assert.Empty(t, handlers.SenderNameForTest(newMsg(nil)))
+
+		// Blank display name must NOT invent a label. audit.GetUserName would
+		// return "Unknown" here; the chat broadcast deliberately does not.
+		assert.Empty(t, app.SenderNameForBroadcastForTest(newMsg(&blank.ID)))
+	})
 }
