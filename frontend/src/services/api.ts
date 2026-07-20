@@ -393,6 +393,10 @@ export const chatbotService = {
   updateFlow: (id: string, data: any) => api.put(`/chatbot/flows/${id}`, data),
   deleteFlow: (id: string) => api.delete(`/chatbot/flows/${id}`),
 
+  // Flow export/import (portable JSON between installations)
+  exportFlow: (flowId: string) => api.post('/chatbot/export', { flow_id: flowId }),
+  importFlow: (payload: any) => api.post('/chatbot/import', payload),
+
   // AI Contexts
   listAIContexts: (params?: { search?: string; page?: number; limit?: number }) =>
     api.get<{ contexts: any[]; total?: number }>('/chatbot/ai-contexts', { params }),
