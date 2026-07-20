@@ -20,9 +20,11 @@ const (
 	TypeContactUpdate = "contact_update"
 	// TypeContactStatusChanged carries ContactStatusChangedPayload
 	TypeContactStatusChanged = "contact_status_changed"
-	TypeSetContact    = "set_contact"
-	TypePing          = "ping"
-	TypePong          = "pong"
+	// TypeAgentTyping carries AgentTypingPayload
+	TypeAgentTyping = "agent_typing"
+	TypeSetContact  = "set_contact"
+	TypePing        = "ping"
+	TypePong        = "pong"
 
 	// Agent transfer types
 	TypeAgentTransfer       = "agent_transfer"
@@ -77,6 +79,11 @@ type BroadcastMessage struct {
 	UserID    uuid.UUID // Optional: only send to specific user
 	ContactID uuid.UUID // Optional: only send to users viewing this contact
 	Message   WSMessage
+
+	// RequireContactMatch restricts delivery to clients that have explicitly
+	// selected ContactID. Without it, clients with no contact selected also
+	// receive the message — the historical behaviour BroadcastToContact relies on.
+	RequireContactMatch bool
 }
 
 // ContactStatusChangedPayload is the payload for contact_status_changed events.
@@ -88,6 +95,14 @@ type ContactStatusChangedPayload struct {
 	NewStatus       string     `json:"new_status"`
 	ChangedByUserID *uuid.UUID `json:"changed_by_user_id,omitempty"`
 	ChangedAt       time.Time  `json:"changed_at"`
+}
+
+// AgentTypingPayload is the payload for agent_typing events.
+type AgentTypingPayload struct {
+	ContactID uuid.UUID `json:"contact_id"`
+	UserID    uuid.UUID `json:"user_id"`
+	UserName  string    `json:"user_name"`
+	At        time.Time `json:"at"`
 }
 
 // AuthPayload is the payload for auth messages from client
