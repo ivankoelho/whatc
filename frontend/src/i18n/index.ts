@@ -82,6 +82,10 @@ export const i18n = createI18n({
   messages,
 })
 
+// Reflect the initial locale on <html lang> for accessibility/SEO. setLocale()
+// keeps it in sync afterwards; this covers the very first render.
+document.documentElement.setAttribute('lang', i18n.global.locale.value)
+
 // Helper to change locale
 export function setLocale(locale: string) {
   if (!messages[locale]) {
