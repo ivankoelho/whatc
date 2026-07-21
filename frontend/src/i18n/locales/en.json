@@ -1924,6 +1924,8 @@
     "reminderPlaceholder": "Hi! We noticed you haven't replied. Is there anything else we can help you with?",
     "clientAutoCloseMessage": "Auto-Close Message",
     "clientAutoClosePlaceholder": "This conversation has been closed due to inactivity. Feel free to message us again!",
+    "closeInactiveAttendances": "Close inactive attendances",
+    "closeInactiveAttendancesDesc": "Also auto-close human attendances left idle, using the same inactivity window.",
     "aiSettings": "AI Settings",
     "aiSettingsDesc": "Configure AI-powered responses for your chatbot",
     "enableAiResponses": "Enable AI Responses",

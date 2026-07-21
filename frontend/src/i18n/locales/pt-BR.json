@@ -1924,6 +1924,8 @@
     "reminderPlaceholder": "Olá! Notamos que você não respondeu. Há mais algo em que possamos ajudar?",
     "clientAutoCloseMessage": "Mensagem de fechamento automático",
     "clientAutoClosePlaceholder": "Esta conversa foi encerrada por inatividade. Sinta-se à vontade para nos escrever novamente!",
+    "closeInactiveAttendances": "Encerrar atendimentos inativos",
+    "closeInactiveAttendancesDesc": "Encerra também atendimentos humanos parados, usando a mesma janela de inatividade.",
     "aiSettings": "Configurações de IA",
     "aiSettingsDesc": "Configure respostas baseadas em IA para o seu chatbot",
     "enableAiResponses": "Ativar respostas de IA",

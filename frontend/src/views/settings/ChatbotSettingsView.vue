@@ -165,7 +165,8 @@ const slaSettings = ref({
   client_reminder_minutes: 30,
   client_reminder_message: '',
   client_auto_close_minutes: 60,
-  client_auto_close_message: ''
+  client_auto_close_message: '',
+  close_inactive_attendances: false
 })
 
 const isClientReminderEnabled = ref(false)
@@ -267,7 +268,8 @@ onMounted(async () => {
         client_reminder_minutes: chatbotData.settings.client_reminder_minutes || 30,
         client_reminder_message: chatbotData.settings.client_reminder_message || '',
         client_auto_close_minutes: chatbotData.settings.client_auto_close_minutes || 60,
-        client_auto_close_message: chatbotData.settings.client_auto_close_message || ''
+        client_auto_close_message: chatbotData.settings.client_auto_close_message || '',
+        close_inactive_attendances: chatbotData.settings.close_inactive_attendances === true
       }
     }
   } catch (error) {
@@ -387,7 +389,8 @@ async function saveSLASettings() {
       client_reminder_minutes: slaSettings.value.client_reminder_minutes,
       client_reminder_message: slaSettings.value.client_reminder_message,
       client_auto_close_minutes: slaSettings.value.client_auto_close_minutes,
-      client_auto_close_message: slaSettings.value.client_auto_close_message
+      client_auto_close_message: slaSettings.value.client_auto_close_message,
+      close_inactive_attendances: slaSettings.value.close_inactive_attendances
     })
     toast.success(t('chatbotSettings.slaSettingsSaved'))
     refreshActivityLog(slaLogKey)
@@ -882,6 +885,17 @@ function removeEscalationUser(userId: string) {
                         v-model="slaSettings.client_auto_close_message"
                         :placeholder="$t('chatbotSettings.clientAutoClosePlaceholder') + '...'"
                         :rows="2"
+                      />
+                    </div>
+
+                    <div class="flex items-center justify-between pt-2">
+                      <div>
+                        <p class="font-medium">{{ $t('chatbotSettings.closeInactiveAttendances') }}</p>
+                        <p class="text-sm text-muted-foreground">{{ $t('chatbotSettings.closeInactiveAttendancesDesc') }}</p>
+                      </div>
+                      <Switch
+                        :checked="slaSettings.close_inactive_attendances"
+                        @update:checked="(val: boolean) => slaSettings.close_inactive_attendances = val"
                       />
                     </div>
                   </div>

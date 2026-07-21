@@ -90,17 +90,19 @@ func (p *SLAProcessor) processOrganizationSLA(settings models.ChatbotSettings, n
 		p.markSLABreached(orgID, now)
 	}
 
-	// 4. Handle client inactivity: chatbot reminders/auto-close, and closing
-	// human attendances idle past the same window.
+	// 4. Handle client inactivity. The two passes have separate opt-in gates:
 	//
-	// Both passes are gated on ReminderEnabled (default false) because that is
-	// the switch the UI exposes — the minute fields live inside the "Client
-	// Inactivity Reminders" card, and AutoCloseMinutes carries a `default:60`
-	// at the column level. Gating the attendance pass on the minutes alone
-	// would make it opt-out and close every attendance idle over an hour on
-	// the first tick after deploy, message included.
+	//   - Chatbot reminders/auto-close ride ReminderEnabled (default false),
+	//     the switch on the "Client Inactivity Reminders" card.
+	//   - Closing idle human attendances rides its own CloseInactiveAttendances
+	//     (default false). It must NOT share the reminder gate: any org already
+	//     using chatbot reminders would otherwise get every human attendance
+	//     idle past AutoCloseMinutes (default:60) mass-closed — customer message
+	//     included — on the first tick after deploy.
 	if settings.ClientInactivity.ReminderEnabled {
 		p.processClientInactivity(orgID, settings, now)
+	}
+	if settings.ClientInactivity.CloseInactiveAttendances {
 		p.closeInactiveAttendances(orgID, settings, now)
 	}
 }

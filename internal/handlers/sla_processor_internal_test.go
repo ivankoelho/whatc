@@ -501,11 +501,10 @@ func TestCloseInactiveAttendances(t *testing.T) {
 		assert.NotNil(t, storedContact.AssignedUserID, "the contact must stay with the agent who just picked up")
 	})
 
-	t.Run("does not run at all when client inactivity is disabled", func(t *testing.T) {
-		// The minute fields live behind the "Client Inactivity Reminders"
-		// switch, and AutoCloseMinutes defaults to 60 for every org. Without
-		// the ReminderEnabled gate the pass is opt-out and mass-closes every
-		// idle attendance on the first tick after deploy.
+	// idleSwept builds an org + a stale, idle attendance ready to be closed by
+	// the inactivity sweep, so the gating subtests differ only in settings.
+	idleSwept := func(t *testing.T) (*App, models.ChatbotSettings, uuid.UUID) {
+		t.Helper()
 		app := newSLATestApp(t)
 		org := testutil.CreateTestOrganization(t, app.DB)
 		agent := testutil.CreateTestUser(t, app.DB, org.ID)
@@ -530,20 +529,54 @@ func TestCloseInactiveAttendances(t *testing.T) {
 		require.NoError(t, app.DB.Create(&transfer).Error)
 
 		settings := models.ChatbotSettings{OrganizationID: org.ID}
-		settings.ClientInactivity.ReminderEnabled = false
 		settings.ClientInactivity.AutoCloseMinutes = 60
+		return app, settings, transfer.ID
+	}
+
+	t.Run("does not run at all when client inactivity is disabled", func(t *testing.T) {
+		// The sweep now has its own opt-in gate, CloseInactiveAttendances
+		// (default false). With everything off, nothing may close.
+		app, settings, transferID := idleSwept(t)
+		settings.ClientInactivity.ReminderEnabled = false
+		settings.ClientInactivity.CloseInactiveAttendances = false
 
 		proc := NewSLAProcessor(app, time.Minute)
 		proc.processOrganizationSLA(settings, time.Now())
 
 		var stored models.AgentTransfer
-		require.NoError(t, app.DB.First(&stored, "id = ?", transfer.ID).Error)
+		require.NoError(t, app.DB.First(&stored, "id = ?", transferID).Error)
 		assert.Equal(t, models.TransferStatusActive, stored.Status,
-			"the inactivity pass must be opt-in: nothing may close while client inactivity is off")
+			"the inactivity pass must be opt-in: nothing may close while it is off")
+	})
 
-		var storedContact models.Contact
-		require.NoError(t, app.DB.First(&storedContact, "id = ?", contact.ID).Error)
-		assert.NotNil(t, storedContact.AssignedUserID, "the contact must stay assigned")
+	t.Run("does not fire when close_inactive_attendances is off even with reminders on", func(t *testing.T) {
+		// Enabling chatbot reminders must not drag the human-attendance sweep
+		// along: the sweep rides only CloseInactiveAttendances.
+		app, settings, transferID := idleSwept(t)
+		settings.ClientInactivity.ReminderEnabled = true
+		settings.ClientInactivity.CloseInactiveAttendances = false
+
+		proc := NewSLAProcessor(app, time.Minute)
+		proc.processOrganizationSLA(settings, time.Now())
+
+		var stored models.AgentTransfer
+		require.NoError(t, app.DB.First(&stored, "id = ?", transferID).Error)
+		assert.Equal(t, models.TransferStatusActive, stored.Status,
+			"reminders on but sweep off: the attendance must stay active")
+	})
+
+	t.Run("fires when close_inactive_attendances is on", func(t *testing.T) {
+		app, settings, transferID := idleSwept(t)
+		settings.ClientInactivity.ReminderEnabled = false
+		settings.ClientInactivity.CloseInactiveAttendances = true
+
+		proc := NewSLAProcessor(app, time.Minute)
+		proc.processOrganizationSLA(settings, time.Now())
+
+		var stored models.AgentTransfer
+		require.NoError(t, app.DB.First(&stored, "id = ?", transferID).Error)
+		assert.Equal(t, models.TransferStatusExpired, stored.Status,
+			"the sweep must fire when its own flag is on")
 	})
 
 	t.Run("does nothing when auto-close is disabled", func(t *testing.T) {
