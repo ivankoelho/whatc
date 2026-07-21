@@ -70,7 +70,13 @@ func (a *App) UpdateContactStatus(r *fastglue.Request) error {
 		return nil
 	}
 
-	if _, err := a.transitionContactStatus(contact, req.ContactStatus, nil, &userID); err != nil {
+	// Resolving is a close: it must free the contact, not merely flip a label.
+	if req.ContactStatus == models.ContactStatusResolved {
+		if err := a.releaseContact(contact, &userID, "manual resolve"); err != nil {
+			a.Log.Error("Failed to release contact", "error", err)
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update contact status", nil, "")
+		}
+	} else if _, err := a.transitionContactStatus(contact, req.ContactStatus, nil, &userID); err != nil {
 		a.Log.Error("Failed to update contact status", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update contact status", nil, "")
 	}
@@ -142,4 +148,32 @@ func (a *App) transitionContactStatus(
 	}
 
 	return true, nil
+}
+
+// releaseContact frees a contact at the end of an attendance: it clears the
+// relationship manager and marks the conversation resolved, so the next
+// inbound message starts a fresh cycle through the flow instead of returning
+// to whoever happened to serve it last.
+//
+// actorID is the user who closed the attendance, or nil for automatic closes
+// (SLA, inactivity) — AuditLog.UserID is NOT NULL, so only actor-driven
+// closes produce an audit entry.
+//
+// Idempotent: releasing an already-free contact is a no-op.
+func (a *App) releaseContact(contact *models.Contact, actorID *uuid.UUID, reason string) error {
+	if contact.AssignedUserID != nil {
+		if err := a.DB.Model(&models.Contact{}).
+			Where("id = ?", contact.ID).
+			Update("assigned_user_id", nil).Error; err != nil {
+			return err
+		}
+		contact.AssignedUserID = nil
+	}
+
+	if _, err := a.transitionContactStatus(contact, models.ContactStatusResolved, nil, actorID); err != nil {
+		return err
+	}
+
+	a.Log.Info("Contact released", "contact_id", contact.ID, "reason", reason)
+	return nil
 }

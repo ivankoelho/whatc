@@ -122,6 +122,85 @@ func TestTransitionContactStatus(t *testing.T) {
 	})
 }
 
+func TestReleaseContact(t *testing.T) {
+	t.Parallel()
+
+	t.Run("clears the assigned agent and resolves the conversation", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		agent := testutil.CreateTestUser(t, app.DB, org.ID)
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		require.NoError(t, app.DB.Model(contact).Updates(map[string]any{
+			"assigned_user_id": agent.ID,
+			"contact_status":   models.ContactStatusInProgress,
+		}).Error)
+		contact.AssignedUserID = &agent.ID
+		contact.ContactStatus = models.ContactStatusInProgress
+
+		require.NoError(t, app.ReleaseContactForTest(contact, nil, "test"))
+
+		var stored models.Contact
+		require.NoError(t, app.DB.First(&stored, "id = ?", contact.ID).Error)
+		assert.Nil(t, stored.AssignedUserID, "closing must not leave the contact pinned")
+		assert.Equal(t, models.ContactStatusResolved, stored.ContactStatus)
+	})
+
+	t.Run("is idempotent on an already free contact", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		require.NoError(t, app.DB.Model(contact).Update("contact_status", models.ContactStatusResolved).Error)
+		contact.ContactStatus = models.ContactStatusResolved
+
+		require.NoError(t, app.ReleaseContactForTest(contact, nil, "test"))
+
+		var stored models.Contact
+		require.NoError(t, app.DB.First(&stored, "id = ?", contact.ID).Error)
+		assert.Nil(t, stored.AssignedUserID)
+		assert.Equal(t, models.ContactStatusResolved, stored.ContactStatus)
+	})
+
+	t.Run("records the actor when a person closed it", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		user := testutil.CreateTestUser(t, app.DB, org.ID)
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+
+		require.NoError(t, app.ReleaseContactForTest(contact, &user.ID, "manual close"))
+
+		require.Eventually(t, func() bool {
+			var count int64
+			app.DB.Model(&models.AuditLog{}).
+				Where("resource_type = ? AND resource_id = ? AND user_id = ?", "contact", contact.ID, user.ID).
+				Count(&count)
+			return count == 1
+		}, 3*time.Second, 50*time.Millisecond)
+	})
+}
+
+func TestUpdateContactStatus_ResolveReleasesContact(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+	agent := testutil.CreateTestUser(t, app.DB, org.ID)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(contact).Update("assigned_user_id", agent.ID).Error)
+
+	req := testutil.NewJSONRequest(t, map[string]any{"contact_status": "resolved"})
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	testutil.SetPathParam(req, "id", contact.ID.String())
+
+	require.NoError(t, app.UpdateContactStatus(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var stored models.Contact
+	require.NoError(t, app.DB.First(&stored, "id = ?", contact.ID).Error)
+	assert.Nil(t, stored.AssignedUserID, "resolving must free the contact")
+}
+
 func TestApp_UpdateContactStatus(t *testing.T) {
 	t.Parallel()
 
