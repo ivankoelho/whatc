@@ -135,7 +135,7 @@ e cancelar a sessão de chatbot ativa, exatamente como o nó de transferência j
 
 ### 4. Remover atribuição como operação explícita
 
-`POST /api/transfers/{id}/unassign`, reaproveitando a lógica já testada de `ReturnAgentTransfersToQueue`: limpa `AgentTransfer.AgentID`, devolve à fila da equipe e limpa `Contact.AssignedUserID` **apenas** se ele apontar para o agente removido. Exige permissão de escrita em transferências.
+`PUT /api/chatbot/transfers/{id}/unassign`, reaproveitando a lógica já testada de `ReturnAgentTransfersToQueue`: limpa `AgentTransfer.AgentID`, devolve à fila da equipe e limpa `Contact.AssignedUserID` **apenas** se ele apontar para o agente removido. Exige permissão de escrita em transferências.
 
 Com isso as quatro operações do modelo conceitual existem: transferir para equipe, transferir para agente, atribuir, remover atribuição.
 
@@ -172,7 +172,7 @@ internal/models/constants.go              TransferSourceAgentInitiated
 internal/handlers/agent_transfers.go      ResumeFromTransfer; novo UnassignTransfer
 internal/handlers/sla_processor.go        auto-close libera; inatividade cobre transferências
 internal/models/chatbot.go                renomeia o campo Go do flag de lembrete
-cmd/whatomate/main.go                     rota POST /api/transfers/{id}/unassign
+cmd/whatomate/main.go                     rota PUT /api/chatbot/transfers/{id}/unassign
 frontend/src/views/settings/…Chatbot…     rótulos e validação do formulário
 frontend/src/i18n/locales/{en,pt-BR}.json strings
 + testes nos pacotes tocados

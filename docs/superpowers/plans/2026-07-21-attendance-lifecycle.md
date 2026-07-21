@@ -789,7 +789,7 @@ git commit -m "feat(sla): close idle human attendances and free the contact"
 
 ---
 
-### Task 5: `POST /api/transfers/{id}/unassign`
+### Task 5: `PUT /api/chatbot/transfers/{id}/unassign`
 
 **Files:**
 - Modify: `internal/handlers/agent_transfers.go`
@@ -798,7 +798,7 @@ git commit -m "feat(sla): close idle human attendances and free the contact"
 
 **Interfaces:**
 - Consumes: nada das tasks anteriores
-- Produces: `func (a *App) UnassignTransfer(r *fastglue.Request) error`, rota `POST /api/transfers/{id}/unassign`
+- Produces: `func (a *App) UnassignTransfer(r *fastglue.Request) error`, rota `PUT /api/chatbot/transfers/{id}/unassign`
 
 - [ ] **Step 1: Escrever os testes (falhando)**
 
@@ -976,7 +976,7 @@ func (a *App) UnassignTransfer(r *fastglue.Request) error {
 Em `cmd/whatomate/main.go`, junto às demais rotas de transferência (procurar `"/api/transfers/{id}/assign"` e inserir logo abaixo):
 
 ```go
-	g.POST("/api/transfers/{id}/unassign", app.UnassignTransfer)
+	g.PUT("/api/chatbot/transfers/{id}/unassign", app.UnassignTransfer)
 ```
 
 - [ ] **Step 5: Rodar os testes**
