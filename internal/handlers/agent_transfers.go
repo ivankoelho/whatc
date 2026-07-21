@@ -849,6 +849,56 @@ func (a *App) AssignAgentTransfer(r *fastglue.Request) error {
 	})
 }
 
+// UnassignTransfer removes the responsible agent from an attendance and returns
+// it to the team queue, leaving the attendance itself open.
+//
+// The relationship manager on the contact is cleared only when it points at the
+// agent being removed — the same conservative rule ReturnAgentTransfersToQueue
+// uses, so a manually set manager is never wiped as a side effect.
+func (a *App) UnassignTransfer(r *fastglue.Request) error {
+	orgID, userID, err := a.getOrgAndUserID(r)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+
+	if !a.HasPermission(userID, models.ResourceTransfers, models.ActionWrite, orgID) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You do not have permission to unassign transfers", nil, "")
+	}
+
+	transferID, err := parsePathUUID(r, "id", "transfer")
+	if err != nil {
+		return nil
+	}
+
+	transfer, err := findByIDAndOrg[models.AgentTransfer](a.DB, r, transferID, orgID, "Transfer")
+	if err != nil {
+		return nil
+	}
+
+	if transfer.Status != models.TransferStatusActive {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Transfer is not active", nil, "")
+	}
+
+	previousAgentID := transfer.AgentID
+	if err := a.DB.Model(transfer).Update("agent_id", nil).Error; err != nil {
+		a.Log.Error("Failed to unassign transfer", "error", err, "transfer_id", transfer.ID)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to unassign transfer", nil, "")
+	}
+	transfer.AgentID = nil
+
+	if previousAgentID != nil {
+		a.DB.Model(&models.Contact{}).
+			Where("id = ? AND assigned_user_id = ?", transfer.ContactID, *previousAgentID).
+			Update("assigned_user_id", nil)
+	}
+
+	a.broadcastTransferAssigned(transfer)
+
+	return r.SendEnvelope(map[string]any{
+		"message": "Transfer returned to the team queue",
+	})
+}
+
 // PickNextTransfer allows an agent to pick the next unassigned transfer from the queue
 func (a *App) PickNextTransfer(r *fastglue.Request) error {
 	orgID, userID, err := a.getOrgAndUserID(r)

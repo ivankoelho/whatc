@@ -1019,3 +1019,107 @@ func TestApp_ReturnAgentTransfersToQueue_ClearsAssignmentWhenItPointsAtAgent(t *
 	assert.Nil(t, readContactAssignedUser(t, app, contact.ID),
 		"assignment pointing at the offline agent must be cleared")
 }
+
+func TestApp_UnassignTransfer(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns the attendance to the team queue", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+		user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+		agent := testutil.CreateTestUser(t, app.DB, org.ID)
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		require.NoError(t, app.DB.Model(contact).Update("assigned_user_id", agent.ID).Error)
+
+		transfer := models.AgentTransfer{
+			BaseModel:      models.BaseModel{ID: uuid.New()},
+			OrganizationID: org.ID,
+			ContactID:      contact.ID,
+			PhoneNumber:    contact.PhoneNumber,
+			Status:         models.TransferStatusActive,
+			Source:         models.TransferSourceManual,
+			AgentID:        &agent.ID,
+			TransferredAt:  time.Now(),
+		}
+		require.NoError(t, app.DB.Create(&transfer).Error)
+
+		req := testutil.NewJSONRequest(t, nil)
+		testutil.SetAuthContext(req, org.ID, user.ID)
+		testutil.SetPathParam(req, "id", transfer.ID.String())
+
+		require.NoError(t, app.UnassignTransfer(req))
+		assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+		var stored models.AgentTransfer
+		require.NoError(t, app.DB.First(&stored, "id = ?", transfer.ID).Error)
+		assert.Nil(t, stored.AgentID)
+		assert.Equal(t, models.TransferStatusActive, stored.Status, "it stays open, just unassigned")
+
+		var storedContact models.Contact
+		require.NoError(t, app.DB.First(&storedContact, "id = ?", contact.ID).Error)
+		assert.Nil(t, storedContact.AssignedUserID)
+	})
+
+	t.Run("preserves a relationship manager pointing at someone else", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+		user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+		agent := testutil.CreateTestUser(t, app.DB, org.ID)
+		other := testutil.CreateTestUser(t, app.DB, org.ID)
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		require.NoError(t, app.DB.Model(contact).Update("assigned_user_id", other.ID).Error)
+
+		transfer := models.AgentTransfer{
+			BaseModel:      models.BaseModel{ID: uuid.New()},
+			OrganizationID: org.ID,
+			ContactID:      contact.ID,
+			PhoneNumber:    contact.PhoneNumber,
+			Status:         models.TransferStatusActive,
+			Source:         models.TransferSourceManual,
+			AgentID:        &agent.ID,
+			TransferredAt:  time.Now(),
+		}
+		require.NoError(t, app.DB.Create(&transfer).Error)
+
+		req := testutil.NewJSONRequest(t, nil)
+		testutil.SetAuthContext(req, org.ID, user.ID)
+		testutil.SetPathParam(req, "id", transfer.ID.String())
+
+		require.NoError(t, app.UnassignTransfer(req))
+
+		var storedContact models.Contact
+		require.NoError(t, app.DB.First(&storedContact, "id = ?", contact.ID).Error)
+		require.NotNil(t, storedContact.AssignedUserID)
+		assert.Equal(t, other.ID, *storedContact.AssignedUserID,
+			"unassigning one agent must not wipe another agent's relationship")
+	})
+
+	t.Run("denies a user without transfer write permission", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		user := testutil.CreateTestUser(t, app.DB, org.ID) // no role
+		agent := testutil.CreateTestUser(t, app.DB, org.ID)
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+
+		transfer := models.AgentTransfer{
+			BaseModel:      models.BaseModel{ID: uuid.New()},
+			OrganizationID: org.ID,
+			ContactID:      contact.ID,
+			PhoneNumber:    contact.PhoneNumber,
+			Status:         models.TransferStatusActive,
+			Source:         models.TransferSourceManual,
+			AgentID:        &agent.ID,
+			TransferredAt:  time.Now(),
+		}
+		require.NoError(t, app.DB.Create(&transfer).Error)
+
+		req := testutil.NewJSONRequest(t, nil)
+		testutil.SetAuthContext(req, org.ID, user.ID)
+		testutil.SetPathParam(req, "id", transfer.ID.String())
+
+		require.NoError(t, app.UnassignTransfer(req))
+		assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(req))
+	})
+}
