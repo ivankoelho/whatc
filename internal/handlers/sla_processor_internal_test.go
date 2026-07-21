@@ -454,6 +454,53 @@ func TestCloseInactiveAttendances(t *testing.T) {
 		assert.NotNil(t, storedContact.AssignedUserID, "the contact must stay with its agent")
 	})
 
+	t.Run("leaves a just-picked-up attendance alone even when the transfer is old", func(t *testing.T) {
+		// A transfer sat in a queue for 90 minutes, then an agent picked it up a
+		// minute ago. Both transferred_at and last_message_at are well past the
+		// window, but picked_up_at is recent — closing here would sweep the
+		// attendance out from under the agent who just took it and tell the
+		// customer they were inactive.
+		app := newSLATestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		agent := testutil.CreateTestUser(t, app.DB, org.ID)
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+
+		old := time.Now().Add(-90 * time.Minute)
+		require.NoError(t, app.DB.Model(contact).Updates(map[string]any{
+			"assigned_user_id": agent.ID,
+			"last_message_at":  old,
+		}).Error)
+
+		pickedUp := time.Now().Add(-1 * time.Minute)
+		transfer := models.AgentTransfer{
+			BaseModel:      models.BaseModel{ID: uuid.New()},
+			OrganizationID: org.ID,
+			ContactID:      contact.ID,
+			PhoneNumber:    contact.PhoneNumber,
+			Status:         models.TransferStatusActive,
+			Source:         models.TransferSourceManual,
+			AgentID:        &agent.ID,
+			TransferredAt:  old,
+			SLA:            models.SLATracking{PickedUpAt: &pickedUp},
+		}
+		require.NoError(t, app.DB.Create(&transfer).Error)
+
+		settings := models.ChatbotSettings{OrganizationID: org.ID}
+		settings.ClientInactivity.AutoCloseMinutes = 60
+
+		proc := NewSLAProcessor(app, time.Minute)
+		proc.closeInactiveAttendances(org.ID, settings, time.Now())
+
+		var stored models.AgentTransfer
+		require.NoError(t, app.DB.First(&stored, "id = ?", transfer.ID).Error)
+		assert.Equal(t, models.TransferStatusActive, stored.Status,
+			"a just-picked-up attendance must not be closed even when the transfer is old")
+
+		var storedContact models.Contact
+		require.NoError(t, app.DB.First(&storedContact, "id = ?", contact.ID).Error)
+		assert.NotNil(t, storedContact.AssignedUserID, "the contact must stay with the agent who just picked up")
+	})
+
 	t.Run("does not run at all when client inactivity is disabled", func(t *testing.T) {
 		// The minute fields live behind the "Client Inactivity Reminders"
 		// switch, and AutoCloseMinutes defaults to 60 for every org. Without

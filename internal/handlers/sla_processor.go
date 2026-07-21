@@ -537,6 +537,14 @@ func (p *SLAProcessor) processClientInactivity(orgID uuid.UUID, settings models.
 // attendance an agent opened seconds ago on a conversation that happened to be
 // quiet, and tell the customer they had been inactive. This is the equivalent
 // of the agentRespondedSince guard autoCloseExpiredTransfers uses.
+//
+// transferred_at is not enough on its own: a transfer can sit in a queue for
+// an hour before an agent picks it up, and PickNextTransfer / AssignAgentTransfer
+// record the pickup in picked_up_at without touching transferred_at. Guarding
+// on transferred_at alone would close an attendance the moment an agent takes
+// it off a queue that filled up long ago — the agent-age must therefore be the
+// most recent of transferred_at and picked_up_at, so a just-picked-up
+// attendance is spared even when the transfer itself is old.
 func (p *SLAProcessor) closeInactiveAttendances(orgID uuid.UUID, settings models.ChatbotSettings, now time.Time) {
 	if settings.ClientInactivity.AutoCloseMinutes <= 0 {
 		return
@@ -550,6 +558,7 @@ func (p *SLAProcessor) closeInactiveAttendances(orgID uuid.UUID, settings models
 		Where("agent_transfers.organization_id = ? AND agent_transfers.status = ?",
 			orgID, models.TransferStatusActive).
 		Where("agent_transfers.transferred_at < ?", threshold).
+		Where("(agent_transfers.picked_up_at IS NULL OR agent_transfers.picked_up_at < ?)", threshold).
 		Where("contacts.last_message_at IS NOT NULL AND contacts.last_message_at < ?", threshold).
 		Find(&transfers).Error; err != nil {
 		p.app.Log.Error("Failed to find inactive attendances", "error", err, "org_id", orgID)
