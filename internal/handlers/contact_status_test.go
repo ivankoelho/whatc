@@ -527,3 +527,57 @@ func TestResumeFromTransferReleasesContact(t *testing.T) {
 	assert.Nil(t, stored.AssignedUserID, "closing an attendance must free the contact")
 	assert.Equal(t, models.ContactStatusResolved, stored.ContactStatus)
 }
+
+// TestResumeFromTransferSkipsReleaseWhenContactLoadFails proves the fix for
+// the unchecked contact load in ResumeFromTransfer: when the contact record
+// can't be loaded (simulated here via soft-delete, which makes a plain
+// `.First` return ErrRecordNotFound without violating the contact_id FK),
+// the handler must not call releaseContact with a zero-value Contact. Doing
+// so would silently "succeed" (no assignment to clear, an UPDATE matching
+// zero rows, a "Contact released" log line) while leaving the real contact
+// permanently pinned to its agent — exactly the bug this test guards against.
+func TestResumeFromTransferSkipsReleaseWhenContactLoadFails(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+	agent := testutil.CreateTestUser(t, app.DB, org.ID)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(contact).Update("assigned_user_id", agent.ID).Error)
+
+	transfer := models.AgentTransfer{
+		BaseModel:      models.BaseModel{ID: uuid.New()},
+		OrganizationID: org.ID,
+		ContactID:      contact.ID,
+		PhoneNumber:    contact.PhoneNumber,
+		Status:         models.TransferStatusActive,
+		Source:         models.TransferSourceManual,
+		AgentID:        &agent.ID,
+		TransferredAt:  time.Now(),
+	}
+	require.NoError(t, app.DB.Create(&transfer).Error)
+
+	// Soft-delete the contact so the handler's `.Where("id = ?", ...).First(...)`
+	// fails with ErrRecordNotFound, the same as a genuinely missing/unreadable
+	// row — the contact_id FK constraint means the row can't simply not exist,
+	// but gorm's default scope excludes soft-deleted rows just the same.
+	require.NoError(t, app.DB.Delete(contact).Error)
+
+	req := testutil.NewJSONRequest(t, nil)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	testutil.SetPathParam(req, "id", transfer.ID.String())
+
+	require.NoError(t, app.ResumeFromTransfer(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	// The bug: releaseContact called on a zero-value Contact would not touch
+	// this row at all (it would UPDATE a nonexistent uuid.Nil row instead).
+	// Assert the real contact's assignment survives untouched, proving the
+	// handler skipped the release rather than silently no-op'ing on it.
+	var stored models.Contact
+	require.NoError(t, app.DB.Unscoped().First(&stored, "id = ?", contact.ID).Error)
+	require.NotNil(t, stored.AssignedUserID, "a failed contact load must not be treated as a successful release")
+	assert.Equal(t, agent.ID, *stored.AssignedUserID, "the agent assignment must be untouched when the contact couldn't be loaded")
+}

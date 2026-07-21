@@ -660,14 +660,22 @@ func (a *App) ResumeFromTransfer(r *fastglue.Request) error {
 	// Broadcast WebSocket notification
 	a.broadcastTransferResumed(transfer)
 
-	// Get contact for webhook data
+	// Get contact for webhook data and release. The load error must be
+	// checked: on failure `contact` stays the zero value (ID == uuid.Nil,
+	// AssignedUserID == nil), and releaseContact would silently "succeed" on
+	// it — no assignment to clear, an UPDATE ... WHERE id = zero-uuid that
+	// matches zero rows, and a "Contact released" log line that looks fine.
+	// The real contact would stay pinned to the agent with nothing anywhere
+	// signalling the failure, so a failed load must skip the release instead.
 	var contact models.Contact
-	a.DB.Where("id = ?", transfer.ContactID).First(&contact)
-
-	// Closing an attendance frees the contact: the next inbound message must
-	// start a fresh cycle through the flow, not return to whoever served it last.
-	if err := a.releaseContact(&contact, &userID, "attendance closed"); err != nil {
-		a.Log.Error("Failed to release contact on close", "error", err, "contact_id", contact.ID)
+	if err := a.DB.Where("id = ?", transfer.ContactID).First(&contact).Error; err != nil {
+		a.Log.Error("Failed to load contact for transfer resume; skipping release", "error", err, "transfer_id", transfer.ID, "contact_id", transfer.ContactID)
+	} else {
+		// Closing an attendance frees the contact: the next inbound message must
+		// start a fresh cycle through the flow, not return to whoever served it last.
+		if err := a.releaseContact(&contact, &userID, "attendance closed"); err != nil {
+			a.Log.Error("Failed to release contact on close", "error", err, "contact_id", contact.ID)
+		}
 	}
 
 	// Dispatch webhook for transfer resumed
