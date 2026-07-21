@@ -217,6 +217,57 @@ func TestUpdateContactStatus_ResolveReleasesContact(t *testing.T) {
 	assert.Nil(t, stored.AssignedUserID, "resolving must free the contact")
 }
 
+// TestUpdateContactStatus_ResolveClosesAttendance guards the other half of the
+// close: resolving used to free the contact while leaving its AgentTransfer
+// `active` and still carrying an AgentID. hasActiveAgentTransfer then kept the
+// chatbot out of the conversation while nobody owned it.
+func TestUpdateContactStatus_ResolveClosesAttendance(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+	agent := testutil.CreateTestUser(t, app.DB, org.ID)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(contact).Updates(map[string]any{
+		"assigned_user_id": agent.ID,
+		"contact_status":   models.ContactStatusInProgress,
+	}).Error)
+
+	transfer := models.AgentTransfer{
+		BaseModel:      models.BaseModel{ID: uuid.New()},
+		OrganizationID: org.ID,
+		ContactID:      contact.ID,
+		PhoneNumber:    contact.PhoneNumber,
+		Status:         models.TransferStatusActive,
+		Source:         models.TransferSourceManual,
+		AgentID:        &agent.ID,
+		TransferredAt:  time.Now(),
+	}
+	require.NoError(t, app.DB.Create(&transfer).Error)
+
+	req := testutil.NewJSONRequest(t, map[string]any{"contact_status": "resolved"})
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	testutil.SetPathParam(req, "id", contact.ID.String())
+
+	require.NoError(t, app.UpdateContactStatus(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var storedTransfer models.AgentTransfer
+	require.NoError(t, app.DB.First(&storedTransfer, "id = ?", transfer.ID).Error)
+	assert.Equal(t, models.TransferStatusResumed, storedTransfer.Status,
+		"resolving is a close: the attendance must not stay active")
+	require.NotNil(t, storedTransfer.ResumedAt)
+	require.NotNil(t, storedTransfer.ResumedBy)
+	assert.Equal(t, user.ID, *storedTransfer.ResumedBy)
+
+	var stored models.Contact
+	require.NoError(t, app.DB.First(&stored, "id = ?", contact.ID).Error)
+	assert.Nil(t, stored.AssignedUserID, "resolving must free the contact")
+	assert.Equal(t, models.ContactStatusResolved, stored.ContactStatus)
+}
+
 func TestApp_UpdateContactStatus(t *testing.T) {
 	t.Parallel()
 

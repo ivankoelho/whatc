@@ -410,6 +410,95 @@ func TestCloseInactiveAttendances(t *testing.T) {
 		assert.Equal(t, models.ContactStatusInProgress, storedContact.ContactStatus)
 	})
 
+	t.Run("leaves a freshly opened attendance alone", func(t *testing.T) {
+		// An agent picks up a conversation that has been quiet for 90 minutes.
+		// Opening an attendance writes no message, so contacts.last_message_at
+		// alone would have the very next tick close it and tell the customer
+		// they were inactive. The attendance itself must also be older than the
+		// threshold before it can be closed.
+		app := newSLATestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		agent := testutil.CreateTestUser(t, app.DB, org.ID)
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+
+		require.NoError(t, app.DB.Model(contact).Updates(map[string]any{
+			"assigned_user_id": agent.ID,
+			"last_message_at":  time.Now().Add(-90 * time.Minute),
+		}).Error)
+
+		transfer := models.AgentTransfer{
+			BaseModel:      models.BaseModel{ID: uuid.New()},
+			OrganizationID: org.ID,
+			ContactID:      contact.ID,
+			PhoneNumber:    contact.PhoneNumber,
+			Status:         models.TransferStatusActive,
+			Source:         models.TransferSourceManual,
+			AgentID:        &agent.ID,
+			TransferredAt:  time.Now(),
+		}
+		require.NoError(t, app.DB.Create(&transfer).Error)
+
+		settings := models.ChatbotSettings{OrganizationID: org.ID}
+		settings.ClientInactivity.AutoCloseMinutes = 60
+
+		proc := NewSLAProcessor(app, time.Minute)
+		proc.closeInactiveAttendances(org.ID, settings, time.Now())
+
+		var stored models.AgentTransfer
+		require.NoError(t, app.DB.First(&stored, "id = ?", transfer.ID).Error)
+		assert.Equal(t, models.TransferStatusActive, stored.Status,
+			"an attendance opened moments ago must not be closed for customer inactivity")
+
+		var storedContact models.Contact
+		require.NoError(t, app.DB.First(&storedContact, "id = ?", contact.ID).Error)
+		assert.NotNil(t, storedContact.AssignedUserID, "the contact must stay with its agent")
+	})
+
+	t.Run("does not run at all when client inactivity is disabled", func(t *testing.T) {
+		// The minute fields live behind the "Client Inactivity Reminders"
+		// switch, and AutoCloseMinutes defaults to 60 for every org. Without
+		// the ReminderEnabled gate the pass is opt-out and mass-closes every
+		// idle attendance on the first tick after deploy.
+		app := newSLATestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		agent := testutil.CreateTestUser(t, app.DB, org.ID)
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+
+		idle := time.Now().Add(-90 * time.Minute)
+		require.NoError(t, app.DB.Model(contact).Updates(map[string]any{
+			"assigned_user_id": agent.ID,
+			"last_message_at":  idle,
+		}).Error)
+
+		transfer := models.AgentTransfer{
+			BaseModel:      models.BaseModel{ID: uuid.New()},
+			OrganizationID: org.ID,
+			ContactID:      contact.ID,
+			PhoneNumber:    contact.PhoneNumber,
+			Status:         models.TransferStatusActive,
+			Source:         models.TransferSourceManual,
+			AgentID:        &agent.ID,
+			TransferredAt:  idle,
+		}
+		require.NoError(t, app.DB.Create(&transfer).Error)
+
+		settings := models.ChatbotSettings{OrganizationID: org.ID}
+		settings.ClientInactivity.ReminderEnabled = false
+		settings.ClientInactivity.AutoCloseMinutes = 60
+
+		proc := NewSLAProcessor(app, time.Minute)
+		proc.processOrganizationSLA(settings, time.Now())
+
+		var stored models.AgentTransfer
+		require.NoError(t, app.DB.First(&stored, "id = ?", transfer.ID).Error)
+		assert.Equal(t, models.TransferStatusActive, stored.Status,
+			"the inactivity pass must be opt-in: nothing may close while client inactivity is off")
+
+		var storedContact models.Contact
+		require.NoError(t, app.DB.First(&storedContact, "id = ?", contact.ID).Error)
+		assert.NotNil(t, storedContact.AssignedUserID, "the contact must stay assigned")
+	})
+
 	t.Run("does nothing when auto-close is disabled", func(t *testing.T) {
 		app := newSLATestApp(t)
 		org := testutil.CreateTestOrganization(t, app.DB)

@@ -71,10 +71,14 @@ func (a *App) UpdateContactStatus(r *fastglue.Request) error {
 		return nil
 	}
 
-	// Resolving is a close: it must free the contact, not merely flip a label.
+	// Resolving is a close: it must close the attendance and free the contact,
+	// not merely flip a label. Freeing the contact alone would leave the
+	// AgentTransfer `active` and still carrying an AgentID — hasActiveAgentTransfer
+	// would keep the chatbot out of a conversation that nobody owns.
 	if req.ContactStatus == models.ContactStatusResolved {
-		if err := a.releaseContact(contact, &userID, "manual resolve"); err != nil {
-			a.Log.Error("Failed to release contact", "error", err)
+		if err := a.closeActiveAttendanceForContact(contact, &userID, "manual resolve"); err != nil {
+			a.Log.Error("Failed to close attendance on resolve", "error", err,
+				"org_id", orgID, "contact_id", contact.ID)
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update contact status", nil, "")
 		}
 	} else if _, err := a.transitionContactStatus(contact, req.ContactStatus, nil, &userID); err != nil {
@@ -202,39 +206,65 @@ func (a *App) notifyContactStatusChange(
 // transaction commits, so a rollback never produces a notification for a
 // change that did not persist.
 func (a *App) releaseContact(contact *models.Contact, actorID *uuid.UUID, reason string) error {
-	wasAssigned := contact.AssignedUserID != nil
-	var statusChanged bool
-	var oldStatus models.ContactStatus
+	previousStatus := contact.ContactStatus
 
+	var commit func()
 	err := a.DB.Transaction(func(tx *gorm.DB) error {
-		if wasAssigned {
-			if err := tx.Model(&models.Contact{}).
-				Where("id = ?", contact.ID).
-				Update("assigned_user_id", nil).Error; err != nil {
-				return err
-			}
-		}
-
-		changed, old, err := a.transitionContactStatusDB(tx, contact, models.ContactStatusResolved, nil)
-		if err != nil {
-			return err
-		}
-		statusChanged = changed
-		oldStatus = old
-		return nil
+		fn, err := a.releaseContactTx(tx, contact, actorID, reason)
+		commit = fn
+		return err
 	})
 	if err != nil {
+		// transitionContactStatusDB updates the in-memory struct as it writes;
+		// a rollback must not leave the caller holding a status that never
+		// persisted.
+		contact.ContactStatus = previousStatus
 		return err
 	}
 
-	if wasAssigned {
-		contact.AssignedUserID = nil
-	}
-
-	if statusChanged {
-		a.notifyContactStatusChange(contact, oldStatus, models.ContactStatusResolved, actorID)
-	}
-
-	a.Log.Info("Contact released", "contact_id", contact.ID, "reason", reason)
+	commit()
 	return nil
+}
+
+// releaseContactTx performs the release writes on the given transaction —
+// which may be a.DB or an open transaction — and returns the notifier that
+// applies the in-memory changes and fires the audit entry / broadcast.
+//
+// The notifier must be called only once the transaction has committed:
+// announcing the release before commit would broadcast a change that might
+// still roll back. Callers that fail the transaction must simply drop it.
+//
+// Existing to let a close and its release share one transaction: marking a
+// transfer closed and then failing to free the contact leaves a conversation
+// that no automatic pass will ever revisit (the transfer is no longer active),
+// with the contact silently pinned to an agent who is no longer serving it.
+func (a *App) releaseContactTx(
+	tx *gorm.DB,
+	contact *models.Contact,
+	actorID *uuid.UUID,
+	reason string,
+) (func(), error) {
+	wasAssigned := contact.AssignedUserID != nil
+	if wasAssigned {
+		if err := tx.Model(&models.Contact{}).
+			Where("id = ?", contact.ID).
+			Update("assigned_user_id", nil).Error; err != nil {
+			return nil, err
+		}
+	}
+
+	statusChanged, oldStatus, err := a.transitionContactStatusDB(tx, contact, models.ContactStatusResolved, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return func() {
+		if wasAssigned {
+			contact.AssignedUserID = nil
+		}
+		if statusChanged {
+			a.notifyContactStatusChange(contact, oldStatus, models.ContactStatusResolved, actorID)
+		}
+		a.Log.Info("Contact released", "contact_id", contact.ID, "reason", reason)
+	}, nil
 }

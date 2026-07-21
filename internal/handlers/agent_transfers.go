@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/websocket"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
@@ -622,6 +624,99 @@ func (a *App) CreateAgentTransfer(r *fastglue.Request) error {
 	})
 }
 
+// closeAttendance applies `updates` to a transfer and releases its contact in
+// a single transaction, then fires the release notifications.
+//
+// Atomicity is the point. Every close path used to mark the transfer closed
+// first and merely log a failed release. That combination is unrecoverable:
+// the transfer is no longer `active`, so no pass ever looks at it again, while
+// the contact stays pinned to its agent and `in_progress` — the exact state
+// this branch exists to eliminate. Rolling both writes back instead leaves the
+// attendance open, which every close path (SLA tick, inactivity tick, the
+// agent pressing close again) will naturally retry.
+//
+// `contact` may be nil when the contact row could not be loaded: there is then
+// nothing to release, and the transfer is closed on its own. Callers load the
+// contact themselves so they can decide what a failed load means.
+func (a *App) closeAttendance(
+	transfer *models.AgentTransfer,
+	contact *models.Contact,
+	updates map[string]any,
+	actorID *uuid.UUID,
+	reason string,
+) error {
+	var previousStatus models.ContactStatus
+	if contact != nil {
+		previousStatus = contact.ContactStatus
+	}
+
+	var commit func()
+	err := a.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.AgentTransfer{}).
+			Where("id = ?", transfer.ID).
+			Updates(updates).Error; err != nil {
+			return err
+		}
+		if contact == nil {
+			return nil
+		}
+		fn, err := a.releaseContactTx(tx, contact, actorID, reason)
+		commit = fn
+		return err
+	})
+	if err != nil {
+		if contact != nil {
+			contact.ContactStatus = previousStatus
+		}
+		return err
+	}
+
+	if commit != nil {
+		commit()
+	}
+	return nil
+}
+
+// closeActiveAttendanceForContact closes the contact's active attendance, if
+// it has one, and frees the contact — the close as seen from the contact side
+// rather than from a transfer id. Used by the "resolve" action, which is a
+// close and must therefore leave nothing open behind it.
+//
+// A contact with no active attendance is simply released.
+func (a *App) closeActiveAttendanceForContact(contact *models.Contact, actorID *uuid.UUID, reason string) error {
+	var transfer models.AgentTransfer
+	err := a.DB.Where("organization_id = ? AND contact_id = ? AND status = ?",
+		contact.OrganizationID, contact.ID, models.TransferStatusActive).
+		Order("transferred_at DESC").
+		First(&transfer).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return a.releaseContact(contact, actorID, reason)
+	}
+	if err != nil {
+		return err
+	}
+
+	// Same close as ResumeFromTransfer performs, so there is one notion of a
+	// closed attendance regardless of which button produced it.
+	now := time.Now()
+	if err := a.closeAttendance(&transfer, contact, map[string]any{
+		"status":     models.TransferStatusResumed,
+		"resumed_at": now,
+		"resumed_by": actorID,
+	}, actorID, reason); err != nil {
+		return err
+	}
+	transfer.Status = models.TransferStatusResumed
+	transfer.ResumedAt = &now
+	transfer.ResumedBy = actorID
+
+	// Clear chatbot tracking so client inactivity SLA doesn't trigger after the
+	// attendance is closed.
+	a.ClearContactChatbotTracking(contact.ID)
+	a.broadcastTransferResumed(&transfer)
+	return nil
+}
+
 // ResumeFromTransfer resumes chatbot processing for a transferred contact
 func (a *App) ResumeFromTransfer(r *fastglue.Request) error {
 	orgID, userID, err := a.getOrgAndUserID(r)
@@ -643,23 +738,6 @@ func (a *App) ResumeFromTransfer(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Transfer is not active", nil, "")
 	}
 
-	// Update transfer
-	now := time.Now()
-	transfer.Status = models.TransferStatusResumed
-	transfer.ResumedAt = &now
-	transfer.ResumedBy = &userID
-
-	if err := a.DB.Save(transfer).Error; err != nil {
-		a.Log.Error("Failed to resume transfer", "error", err, "transfer_id", transfer.ID)
-		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to resume transfer", nil, "")
-	}
-
-	// Clear chatbot tracking so client inactivity SLA doesn't trigger after transfer is closed
-	a.ClearContactChatbotTracking(transfer.ContactID)
-
-	// Broadcast WebSocket notification
-	a.broadcastTransferResumed(transfer)
-
 	// Get contact for webhook data and release. The load error must be
 	// checked: on failure `contact` stays the zero value (ID == uuid.Nil,
 	// AssignedUserID == nil), and releaseContact would silently "succeed" on
@@ -668,15 +746,41 @@ func (a *App) ResumeFromTransfer(r *fastglue.Request) error {
 	// The real contact would stay pinned to the agent with nothing anywhere
 	// signalling the failure, so a failed load must skip the release instead.
 	var contact models.Contact
+	var toRelease *models.Contact
 	if err := a.DB.Where("id = ?", transfer.ContactID).First(&contact).Error; err != nil {
 		a.Log.Error("Failed to load contact for transfer resume; skipping release", "error", err, "transfer_id", transfer.ID, "contact_id", transfer.ContactID)
 	} else {
 		// Closing an attendance frees the contact: the next inbound message must
 		// start a fresh cycle through the flow, not return to whoever served it last.
-		if err := a.releaseContact(&contact, &userID, "attendance closed"); err != nil {
-			a.Log.Error("Failed to release contact on close", "error", err, "contact_id", contact.ID)
-		}
+		toRelease = &contact
 	}
+
+	// Close and release together. If the release fails the close rolls back
+	// with it and the attendance stays open, so the agent can retry — better
+	// than a 200 over a half-closed conversation nobody owns.
+	now := time.Now()
+	if err := a.closeAttendance(transfer, toRelease, map[string]any{
+		"status":     models.TransferStatusResumed,
+		"resumed_at": now,
+		"resumed_by": userID,
+	}, &userID, "attendance closed"); err != nil {
+		a.Log.Error("Failed to close attendance; nothing was changed",
+			"error", err,
+			"org_id", orgID,
+			"contact_id", transfer.ContactID,
+			"transfer_id", transfer.ID,
+		)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to resume transfer", nil, "")
+	}
+	transfer.Status = models.TransferStatusResumed
+	transfer.ResumedAt = &now
+	transfer.ResumedBy = &userID
+
+	// Clear chatbot tracking so client inactivity SLA doesn't trigger after transfer is closed
+	a.ClearContactChatbotTracking(transfer.ContactID)
+
+	// Broadcast WebSocket notification
+	a.broadcastTransferResumed(transfer)
 
 	// Dispatch webhook for transfer resumed
 	a.DispatchWebhook(orgID, models.WebhookEventTransferResumed, TransferEventData{
