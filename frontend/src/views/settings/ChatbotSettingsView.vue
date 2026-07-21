@@ -174,6 +174,15 @@ watch(isClientReminderEnabled, (newValue) => {
   slaSettings.value.client_reminder_enabled = newValue
 })
 
+// A close time at or below the reminder means the reminder is never sent,
+// since the attendance would already be closed by the time it would fire.
+const inactivityError = computed(() => {
+  const reminder = slaSettings.value.client_reminder_minutes
+  const close = slaSettings.value.client_auto_close_minutes
+  if (!close || !reminder) return ''
+  return close <= reminder ? t('chatbotSettings.inactivityOrderError') : ''
+})
+
 const isSLAEnabled = ref(false)
 const availableUsers = ref<{ id: string; full_name: string }[]>([])
 const escalationComboboxOpen = ref(false)
@@ -358,6 +367,11 @@ async function saveAISettings() {
 }
 
 async function saveSLASettings() {
+  if (inactivityError.value) {
+    toast.error(inactivityError.value)
+    return
+  }
+
   isSubmitting.value = true
   try {
     await chatbotService.updateSettings({
@@ -844,6 +858,12 @@ function removeEscalationUser(userId: string) {
                         <Label>{{ $t('chatbotSettings.autoCloseAfter') }}</Label>
                         <Input v-model.number="slaSettings.client_auto_close_minutes" type="number" min="1" max="1440" />
                         <p class="text-xs text-muted-foreground">{{ $t('chatbotSettings.autoCloseAfterHint') }}</p>
+                        <p
+                          v-if="inactivityError"
+                          class="text-xs text-destructive rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2"
+                        >
+                          {{ inactivityError }}
+                        </p>
                       </div>
                     </div>
 
@@ -868,7 +888,7 @@ function removeEscalationUser(userId: string) {
                 </div>
 
                 <div class="flex justify-end pt-2">
-                  <Button @click="saveSLASettings" :disabled="isSubmitting">
+                  <Button @click="saveSLASettings" :disabled="isSubmitting || !!inactivityError">
                     <Loader2 v-if="isSubmitting" class="mr-2 h-4 w-4 animate-spin" />
                     {{ $t('chatbotSettings.saveChanges') }}
                   </Button>
