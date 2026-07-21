@@ -260,6 +260,14 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 	preview := a.getMessagePreview(req)
 	a.updateContactLastMessage(req.Contact, preview)
 
+	// A human messaging the customer owns the conversation. Without an
+	// attendance record the chatbot takes over the customer's reply — the
+	// bug this fixes. Campaigns bypass this function entirely and chatbot
+	// sends leave SentByUserID nil, so neither opens an attendance.
+	if opts.SentByUserID != nil {
+		a.createAgentInitiatedTransfer(req.Account, req.Contact, *opts.SentByUserID)
+	}
+
 	// An agent replying is what starts the service, and the only thing that
 	// takes a conversation out of the 'new' queue. Chatbot sends carry no
 	// SentByUserID and deliberately do not count.

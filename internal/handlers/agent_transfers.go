@@ -1257,6 +1257,40 @@ func (a *App) createTransferToQueue(account *models.WhatsAppAccount, contact *mo
 	a.Log.Info("Transfer created to agent queue", "transfer_id", transfer.ID, "contact_id", contact.ID, "source", source)
 }
 
+// createAgentInitiatedTransfer opens an attendance when an agent messages a
+// contact that has none. The system models "a human owns this conversation"
+// solely as an active AgentTransfer, and no send path used to create one — so
+// the chatbot hijacked the customer's reply.
+//
+// Deliberately does NOT suppress outside business hours, unlike
+// createTransferToQueue: an agent messaging a customer at 11pm is a human
+// choosing to work, not an automated handoff.
+func (a *App) createAgentInitiatedTransfer(account *models.WhatsAppAccount, contact *models.Contact, agentID uuid.UUID) {
+	if a.hasActiveAgentTransfer(account.OrganizationID, contact.ID) {
+		return
+	}
+
+	settings, _ := a.getChatbotSettingsCached(account.OrganizationID, account.Name)
+
+	transfer := models.AgentTransfer{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  account.OrganizationID,
+		ContactID:       contact.ID,
+		WhatsAppAccount: account.Name,
+		PhoneNumber:     contact.PhoneNumber,
+		Status:          models.TransferStatusActive,
+		Source:          models.TransferSourceAgentInitiated,
+		AgentID:         &agentID,
+		TransferredAt:   time.Now(),
+	}
+
+	// endChatbotSession = true: human intervention wins over the bot.
+	if err := a.saveAndFinalizeTransfer(&transfer, account, contact, settings, true); err != nil {
+		a.Log.Error("Failed to open agent-initiated attendance",
+			"error", err, "contact_id", contact.ID, "agent_id", agentID)
+	}
+}
+
 // createTransferFromKeyword creates an agent transfer triggered by a keyword rule
 func (a *App) createTransferFromKeyword(account *models.WhatsAppAccount, contact *models.Contact) {
 	if a.hasActiveAgentTransfer(account.OrganizationID, contact.ID) {

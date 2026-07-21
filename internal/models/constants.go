@@ -143,6 +143,11 @@ const (
 	TransferSourceFlow            TransferSource = "flow"
 	TransferSourceKeyword         TransferSource = "keyword"
 	TransferSourceChatbotDisabled TransferSource = "chatbot_disabled"
+
+	// TransferSourceAgentInitiated marks an attendance opened because an agent
+	// messaged the customer first. Without this record the chatbot would take
+	// over the customer's reply.
+	TransferSourceAgentInitiated TransferSource = "agent_initiated"
 )
 
 // CampaignStatus represents bulk message campaign states
