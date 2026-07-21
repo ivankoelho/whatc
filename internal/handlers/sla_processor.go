@@ -533,7 +533,7 @@ func (p *SLAProcessor) closeInactiveAttendances(orgID uuid.UUID, settings models
 
 	var transfers []models.AgentTransfer
 	if err := p.app.DB.
-		Joins("JOIN contacts ON contacts.id = agent_transfers.contact_id").
+		Joins("JOIN contacts ON contacts.id = agent_transfers.contact_id AND contacts.deleted_at IS NULL").
 		Where("agent_transfers.organization_id = ? AND agent_transfers.status = ?",
 			orgID, models.TransferStatusActive).
 		Where("contacts.last_message_at IS NOT NULL AND contacts.last_message_at < ?", threshold).

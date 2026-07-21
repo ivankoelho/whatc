@@ -364,6 +364,52 @@ func TestCloseInactiveAttendances(t *testing.T) {
 		assert.Equal(t, models.TransferStatusActive, stored.Status)
 	})
 
+	t.Run("leaves a soft-deleted contact's attendance untouched", func(t *testing.T) {
+		app := newSLATestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		agent := testutil.CreateTestUser(t, app.DB, org.ID)
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+
+		idle := time.Now().Add(-90 * time.Minute)
+		require.NoError(t, app.DB.Model(contact).Updates(map[string]any{
+			"assigned_user_id": agent.ID,
+			"last_message_at":  idle,
+			"contact_status":   models.ContactStatusInProgress,
+		}).Error)
+
+		transfer := models.AgentTransfer{
+			BaseModel:      models.BaseModel{ID: uuid.New()},
+			OrganizationID: org.ID,
+			ContactID:      contact.ID,
+			PhoneNumber:    contact.PhoneNumber,
+			Status:         models.TransferStatusActive,
+			Source:         models.TransferSourceManual,
+			AgentID:        &agent.ID,
+			TransferredAt:  idle,
+		}
+		require.NoError(t, app.DB.Create(&transfer).Error)
+
+		// Soft-delete the contact without closing its active transfer —
+		// mirrors DeleteContact, which does not release active transfers.
+		require.NoError(t, app.DB.Delete(contact).Error)
+
+		settings := models.ChatbotSettings{OrganizationID: org.ID}
+		settings.ClientInactivity.AutoCloseMinutes = 60
+
+		proc := NewSLAProcessor(app, time.Minute)
+		proc.closeInactiveAttendances(org.ID, settings, time.Now())
+
+		var storedTransfer models.AgentTransfer
+		require.NoError(t, app.DB.First(&storedTransfer, "id = ?", transfer.ID).Error)
+		assert.Equal(t, models.TransferStatusActive, storedTransfer.Status,
+			"a soft-deleted contact's transfer must not be swept up by the inactivity closer")
+
+		var storedContact models.Contact
+		require.NoError(t, app.DB.Unscoped().First(&storedContact, "id = ?", contact.ID).Error)
+		assert.NotNil(t, storedContact.AssignedUserID, "soft-deleted contact must be left untouched")
+		assert.Equal(t, models.ContactStatusInProgress, storedContact.ContactStatus)
+	})
+
 	t.Run("does nothing when auto-close is disabled", func(t *testing.T) {
 		app := newSLATestApp(t)
 		org := testutil.CreateTestOrganization(t, app.DB)
