@@ -291,6 +291,110 @@ func TestSLAEscalationSkippedWhenAgentActive(t *testing.T) {
 		"escalation_at should be extended into the future")
 }
 
+// --- closeInactiveAttendances ---
+
+func TestCloseInactiveAttendances(t *testing.T) {
+	t.Run("closes an attendance idle beyond the threshold and frees the contact", func(t *testing.T) {
+		app := newSLATestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		agent := testutil.CreateTestUser(t, app.DB, org.ID)
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+
+		idle := time.Now().Add(-90 * time.Minute)
+		require.NoError(t, app.DB.Model(contact).Updates(map[string]any{
+			"assigned_user_id": agent.ID,
+			"last_message_at":  idle,
+		}).Error)
+
+		transfer := models.AgentTransfer{
+			BaseModel:      models.BaseModel{ID: uuid.New()},
+			OrganizationID: org.ID,
+			ContactID:      contact.ID,
+			PhoneNumber:    contact.PhoneNumber,
+			Status:         models.TransferStatusActive,
+			Source:         models.TransferSourceManual,
+			AgentID:        &agent.ID,
+			TransferredAt:  idle,
+		}
+		require.NoError(t, app.DB.Create(&transfer).Error)
+
+		settings := models.ChatbotSettings{OrganizationID: org.ID}
+		settings.ClientInactivity.AutoCloseMinutes = 60
+
+		proc := NewSLAProcessor(app, time.Minute)
+		proc.closeInactiveAttendances(org.ID, settings, time.Now())
+
+		var storedTransfer models.AgentTransfer
+		require.NoError(t, app.DB.First(&storedTransfer, "id = ?", transfer.ID).Error)
+		assert.Equal(t, models.TransferStatusExpired, storedTransfer.Status)
+
+		var storedContact models.Contact
+		require.NoError(t, app.DB.First(&storedContact, "id = ?", contact.ID).Error)
+		assert.Nil(t, storedContact.AssignedUserID)
+		assert.Equal(t, models.ContactStatusResolved, storedContact.ContactStatus)
+	})
+
+	t.Run("leaves a recently active attendance alone", func(t *testing.T) {
+		app := newSLATestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		agent := testutil.CreateTestUser(t, app.DB, org.ID)
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		require.NoError(t, app.DB.Model(contact).Update("last_message_at", time.Now().Add(-5*time.Minute)).Error)
+
+		transfer := models.AgentTransfer{
+			BaseModel:      models.BaseModel{ID: uuid.New()},
+			OrganizationID: org.ID,
+			ContactID:      contact.ID,
+			PhoneNumber:    contact.PhoneNumber,
+			Status:         models.TransferStatusActive,
+			Source:         models.TransferSourceManual,
+			AgentID:        &agent.ID,
+			TransferredAt:  time.Now(),
+		}
+		require.NoError(t, app.DB.Create(&transfer).Error)
+
+		settings := models.ChatbotSettings{OrganizationID: org.ID}
+		settings.ClientInactivity.AutoCloseMinutes = 60
+
+		proc := NewSLAProcessor(app, time.Minute)
+		proc.closeInactiveAttendances(org.ID, settings, time.Now())
+
+		var stored models.AgentTransfer
+		require.NoError(t, app.DB.First(&stored, "id = ?", transfer.ID).Error)
+		assert.Equal(t, models.TransferStatusActive, stored.Status)
+	})
+
+	t.Run("does nothing when auto-close is disabled", func(t *testing.T) {
+		app := newSLATestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		agent := testutil.CreateTestUser(t, app.DB, org.ID)
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		require.NoError(t, app.DB.Model(contact).Update("last_message_at", time.Now().Add(-10*time.Hour)).Error)
+
+		transfer := models.AgentTransfer{
+			BaseModel:      models.BaseModel{ID: uuid.New()},
+			OrganizationID: org.ID,
+			ContactID:      contact.ID,
+			PhoneNumber:    contact.PhoneNumber,
+			Status:         models.TransferStatusActive,
+			Source:         models.TransferSourceManual,
+			AgentID:        &agent.ID,
+			TransferredAt:  time.Now().Add(-10 * time.Hour),
+		}
+		require.NoError(t, app.DB.Create(&transfer).Error)
+
+		settings := models.ChatbotSettings{OrganizationID: org.ID}
+		settings.ClientInactivity.AutoCloseMinutes = 0
+
+		proc := NewSLAProcessor(app, time.Minute)
+		proc.closeInactiveAttendances(org.ID, settings, time.Now())
+
+		var stored models.AgentTransfer
+		require.NoError(t, app.DB.First(&stored, "id = ?", transfer.ID).Error)
+		assert.Equal(t, models.TransferStatusActive, stored.Status)
+	})
+}
+
 // --- escalateTransfers: fires when no agent response ---
 
 func TestSLAEscalationFiresWhenNoAgentResponse(t *testing.T) {

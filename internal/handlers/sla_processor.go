@@ -94,6 +94,9 @@ func (p *SLAProcessor) processOrganizationSLA(settings models.ChatbotSettings, n
 	if settings.ClientInactivity.ReminderEnabled {
 		p.processClientInactivity(orgID, settings, now)
 	}
+
+	// 5. Close human attendances idle past the inactivity window
+	p.closeInactiveAttendances(orgID, settings, now)
 }
 
 // autoCloseExpiredTransfers closes transfers that have exceeded their expiry time
@@ -509,6 +512,61 @@ func (p *SLAProcessor) processClientInactivity(orgID uuid.UUID, settings models.
 				p.sendChatbotReminder(contact, settings)
 			}
 		}
+	}
+}
+
+// closeInactiveAttendances closes human attendances with no message in either
+// direction for AutoCloseMinutes, then applies the same release rules as a
+// manual close.
+//
+// processClientInactivity cannot cover this: it selects on
+// chatbot_last_message_at, which ClearContactChatbotTracking zeroes the moment
+// a contact moves to a human — so attendances never entered that loop. Here the
+// anchor is Contact.LastMessageAt, which is what "no interaction" means in a
+// conversation between people.
+func (p *SLAProcessor) closeInactiveAttendances(orgID uuid.UUID, settings models.ChatbotSettings, now time.Time) {
+	if settings.ClientInactivity.AutoCloseMinutes <= 0 {
+		return
+	}
+
+	threshold := now.Add(-time.Duration(settings.ClientInactivity.AutoCloseMinutes) * time.Minute)
+
+	var transfers []models.AgentTransfer
+	if err := p.app.DB.
+		Joins("JOIN contacts ON contacts.id = agent_transfers.contact_id").
+		Where("agent_transfers.organization_id = ? AND agent_transfers.status = ?",
+			orgID, models.TransferStatusActive).
+		Where("contacts.last_message_at IS NOT NULL AND contacts.last_message_at < ?", threshold).
+		Find(&transfers).Error; err != nil {
+		p.app.Log.Error("Failed to find inactive attendances", "error", err, "org_id", orgID)
+		return
+	}
+
+	for i := range transfers {
+		transfer := transfers[i]
+
+		if settings.ClientInactivity.AutoCloseMessage != "" {
+			p.sendSLATextToCustomer(transfer, "inactivity auto-close message", settings.ClientInactivity.AutoCloseMessage)
+		}
+
+		if err := p.app.DB.Model(&transfer).Updates(map[string]any{
+			"status":     models.TransferStatusExpired,
+			"resumed_at": now,
+			"notes":      transfer.Notes + "\n[Auto-closed: no interaction within the inactivity window]",
+		}).Error; err != nil {
+			p.app.Log.Error("Failed to close inactive attendance", "error", err, "transfer_id", transfer.ID)
+			continue
+		}
+
+		var contact models.Contact
+		if err := p.app.DB.First(&contact, "id = ?", transfer.ContactID).Error; err == nil {
+			if err := p.app.releaseContact(&contact, nil, "inactivity auto-close"); err != nil {
+				p.app.Log.Error("Failed to release contact on inactivity close",
+					"error", err, "contact_id", contact.ID)
+			}
+		}
+
+		p.broadcastTransferUpdate(transfer, websocket.TypeTransferExpired)
 	}
 }
 
