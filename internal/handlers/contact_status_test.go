@@ -145,19 +145,35 @@ func TestReleaseContact(t *testing.T) {
 		assert.Equal(t, models.ContactStatusResolved, stored.ContactStatus)
 	})
 
-	t.Run("is idempotent on an already free contact", func(t *testing.T) {
+	t.Run("is idempotent on an already-resolved contact that is still assigned", func(t *testing.T) {
 		app := newTestApp(t)
 		org := testutil.CreateTestOrganization(t, app.DB)
+		agent := testutil.CreateTestUser(t, app.DB, org.ID)
 		contact := testutil.CreateTestContact(t, app.DB, org.ID)
-		require.NoError(t, app.DB.Model(contact).Update("contact_status", models.ContactStatusResolved).Error)
+		require.NoError(t, app.DB.Model(contact).Updates(map[string]any{
+			"assigned_user_id": agent.ID,
+			"contact_status":   models.ContactStatusResolved,
+		}).Error)
+		contact.AssignedUserID = &agent.ID
 		contact.ContactStatus = models.ContactStatusResolved
 
 		require.NoError(t, app.ReleaseContactForTest(contact, nil, "test"))
 
 		var stored models.Contact
 		require.NoError(t, app.DB.First(&stored, "id = ?", contact.ID).Error)
-		assert.Nil(t, stored.AssignedUserID)
+		assert.Nil(t, stored.AssignedUserID, "release must clear the assignment even though the status was already resolved")
 		assert.Equal(t, models.ContactStatusResolved, stored.ContactStatus)
+
+		// The status transition is a no-op (already resolved), so
+		// transitionContactStatus's short-circuit must mean no audit entry is
+		// written for it — only a real change produces one.
+		time.Sleep(300 * time.Millisecond) // give any stray goroutine a chance
+		var count int64
+		app.DB.Model(&models.AuditLog{}).
+			Where("resource_type = ? AND resource_id = ?", "contact", contact.ID).
+			Count(&count)
+		assert.Equal(t, int64(0), count,
+			"a no-op status transition must not write a duplicate audit entry")
 	})
 
 	t.Run("records the actor when a person closed it", func(t *testing.T) {

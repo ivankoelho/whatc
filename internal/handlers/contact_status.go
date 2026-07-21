@@ -9,6 +9,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/websocket"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
+	"gorm.io/gorm"
 )
 
 // GetContactStatusCounts returns conversation counts by status, scoped to what
@@ -105,32 +106,66 @@ func (a *App) transitionContactStatus(
 	from []models.ContactStatus,
 	actorID *uuid.UUID,
 ) (bool, error) {
-	oldStatus := contact.ContactStatus
-	if oldStatus == to {
-		return false, nil
+	changed, oldStatus, err := a.transitionContactStatusDB(a.DB, contact, to, from)
+	if err != nil || !changed {
+		return changed, err
 	}
 
-	q := a.DB.Model(&models.Contact{}).Where("id = ?", contact.ID)
+	a.notifyContactStatusChange(contact, oldStatus, to, actorID)
+	return true, nil
+}
+
+// transitionContactStatusDB performs the conditional status UPDATE against db
+// — which may be a.DB or an open transaction — with no side effects (no audit
+// entry, no broadcast). Callers that run this inside a transaction must call
+// notifyContactStatusChange themselves once the transaction has committed:
+// firing the audit/broadcast before commit would announce a change that
+// might still roll back.
+//
+// Returns whether a row actually changed and the status the contact held
+// before the update (needed by notifyContactStatusChange).
+func (a *App) transitionContactStatusDB(
+	db *gorm.DB,
+	contact *models.Contact,
+	to models.ContactStatus,
+	from []models.ContactStatus,
+) (bool, models.ContactStatus, error) {
+	oldStatus := contact.ContactStatus
+	if oldStatus == to {
+		return false, oldStatus, nil
+	}
+
+	q := db.Model(&models.Contact{}).Where("id = ?", contact.ID)
 	if len(from) > 0 {
 		q = q.Where("contact_status IN ?", from)
 	}
 
 	res := q.Update("contact_status", to)
 	if res.Error != nil {
-		return false, res.Error
+		return false, oldStatus, res.Error
 	}
 	if res.RowsAffected == 0 {
-		return false, nil
+		return false, oldStatus, nil
 	}
 
 	contact.ContactStatus = to
+	return true, oldStatus, nil
+}
 
+// notifyContactStatusChange writes the audit entry (when actorID is set) and
+// broadcasts the status change over the websocket. Must only be called after
+// the write that produced the change has durably committed.
+func (a *App) notifyContactStatusChange(
+	contact *models.Contact,
+	oldStatus, newStatus models.ContactStatus,
+	actorID *uuid.UUID,
+) {
 	if actorID != nil {
 		userName := audit.GetUserName(a.DB, *actorID)
 		audit.LogAudit(a.DB, contact.OrganizationID, *actorID, userName,
 			"contact", contact.ID, models.AuditActionUpdated,
 			map[string]any{"contact_status": string(oldStatus)},
-			map[string]any{"contact_status": string(to)},
+			map[string]any{"contact_status": string(newStatus)},
 		)
 	}
 
@@ -140,14 +175,12 @@ func (a *App) transitionContactStatus(
 			Payload: websocket.ContactStatusChangedPayload{
 				ContactID:       contact.ID,
 				OldStatus:       string(oldStatus),
-				NewStatus:       string(to),
+				NewStatus:       string(newStatus),
 				ChangedByUserID: actorID,
 				ChangedAt:       time.Now(),
 			},
 		})
 	}
-
-	return true, nil
 }
 
 // releaseContact frees a contact at the end of an attendance: it clears the
@@ -160,18 +193,46 @@ func (a *App) transitionContactStatus(
 // closes produce an audit entry.
 //
 // Idempotent: releasing an already-free contact is a no-op.
+//
+// Both writes — clearing assigned_user_id and resolving the status — happen
+// inside a single transaction. Without that, a failure on the second write
+// would leave the contact unassigned but not resolved: an orphaned
+// conversation nobody owns and no automatic routing picks up. The audit entry
+// and websocket broadcast for the status change fire only after the
+// transaction commits, so a rollback never produces a notification for a
+// change that did not persist.
 func (a *App) releaseContact(contact *models.Contact, actorID *uuid.UUID, reason string) error {
-	if contact.AssignedUserID != nil {
-		if err := a.DB.Model(&models.Contact{}).
-			Where("id = ?", contact.ID).
-			Update("assigned_user_id", nil).Error; err != nil {
+	wasAssigned := contact.AssignedUserID != nil
+	var statusChanged bool
+	var oldStatus models.ContactStatus
+
+	err := a.DB.Transaction(func(tx *gorm.DB) error {
+		if wasAssigned {
+			if err := tx.Model(&models.Contact{}).
+				Where("id = ?", contact.ID).
+				Update("assigned_user_id", nil).Error; err != nil {
+				return err
+			}
+		}
+
+		changed, old, err := a.transitionContactStatusDB(tx, contact, models.ContactStatusResolved, nil)
+		if err != nil {
 			return err
 		}
+		statusChanged = changed
+		oldStatus = old
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	if wasAssigned {
 		contact.AssignedUserID = nil
 	}
 
-	if _, err := a.transitionContactStatus(contact, models.ContactStatusResolved, nil, actorID); err != nil {
-		return err
+	if statusChanged {
+		a.notifyContactStatusChange(contact, oldStatus, models.ContactStatusResolved, actorID)
 	}
 
 	a.Log.Info("Contact released", "contact_id", contact.ID, "reason", reason)
