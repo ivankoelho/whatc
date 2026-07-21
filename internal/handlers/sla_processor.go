@@ -145,6 +145,16 @@ func (p *SLAProcessor) autoCloseExpiredTransfers(orgID uuid.UUID, settings model
 			continue
 		}
 
+		// Same release rules as a manual close — an automatic close must not
+		// leave the contact pinned to the agent who never answered.
+		var contact models.Contact
+		if err := p.app.DB.First(&contact, "id = ?", transfer.ContactID).Error; err == nil {
+			if err := p.app.releaseContact(&contact, nil, "SLA auto-close"); err != nil {
+				p.app.Log.Error("Failed to release contact on SLA auto-close",
+					"error", err, "contact_id", contact.ID)
+			}
+		}
+
 		closedCount++
 		p.app.Log.Info("Transfer auto-closed due to expiry",
 			"transfer_id", transfer.ID,

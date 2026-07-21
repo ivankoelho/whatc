@@ -664,6 +664,12 @@ func (a *App) ResumeFromTransfer(r *fastglue.Request) error {
 	var contact models.Contact
 	a.DB.Where("id = ?", transfer.ContactID).First(&contact)
 
+	// Closing an attendance frees the contact: the next inbound message must
+	// start a fresh cycle through the flow, not return to whoever served it last.
+	if err := a.releaseContact(&contact, &userID, "attendance closed"); err != nil {
+		a.Log.Error("Failed to release contact on close", "error", err, "contact_id", contact.ID)
+	}
+
 	// Dispatch webhook for transfer resumed
 	a.DispatchWebhook(orgID, models.WebhookEventTransferResumed, TransferEventData{
 		TransferID:      transfer.ID.String(),

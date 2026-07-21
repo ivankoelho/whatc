@@ -207,6 +207,43 @@ func TestSLAAutoCloseFiresWhenNoAgentResponse(t *testing.T) {
 	assert.Equal(t, models.TransferStatusExpired, updated.Status, "transfer should be expired")
 }
 
+// --- autoCloseExpiredTransfers: releases the contact on auto-close ---
+
+func TestSLAAutoCloseReleasesContact(t *testing.T) {
+	app := newSLATestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	agent := testutil.CreateTestUser(t, app.DB, org.ID)
+	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+
+	require.NoError(t, app.DB.Model(contact).Updates(map[string]any{
+		"assigned_user_id": agent.ID,
+		"contact_status":   models.ContactStatusInProgress,
+	}).Error)
+
+	// Transfer expired 1 hour ago, no agent messages at all
+	expiresAt := time.Now().Add(-1 * time.Hour)
+	createSLATestTransfer(t, app, org.ID, contact.ID, agent.ID, account.Name, models.SLATracking{
+		ExpiresAt: &expiresAt,
+	})
+
+	settings := models.ChatbotSettings{
+		OrganizationID: org.ID,
+		SLA: models.SLAConfig{
+			Enabled:        true,
+			AutoCloseHours: 2,
+		},
+	}
+
+	proc := NewSLAProcessor(app, time.Minute)
+	proc.autoCloseExpiredTransfers(org.ID, settings, time.Now())
+
+	var stored models.Contact
+	require.NoError(t, app.DB.First(&stored, "id = ?", contact.ID).Error)
+	assert.Nil(t, stored.AssignedUserID, "SLA auto-close must free the contact, same as a manual close")
+	assert.Equal(t, models.ContactStatusResolved, stored.ContactStatus)
+}
+
 // --- escalateTransfers: skipped when agent active ---
 
 func TestSLAEscalationSkippedWhenAgentActive(t *testing.T) {

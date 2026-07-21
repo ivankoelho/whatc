@@ -491,3 +491,39 @@ func TestContactStatusAutoTransitions(t *testing.T) {
 		assert.False(t, changed)
 	})
 }
+
+func TestResumeFromTransferReleasesContact(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+	agent := testutil.CreateTestUser(t, app.DB, org.ID)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(contact).Update("assigned_user_id", agent.ID).Error)
+
+	transfer := models.AgentTransfer{
+		BaseModel:      models.BaseModel{ID: uuid.New()},
+		OrganizationID: org.ID,
+		ContactID:      contact.ID,
+		PhoneNumber:    contact.PhoneNumber,
+		Status:         models.TransferStatusActive,
+		Source:         models.TransferSourceManual,
+		AgentID:        &agent.ID,
+		TransferredAt:  time.Now(),
+	}
+	require.NoError(t, app.DB.Create(&transfer).Error)
+
+	req := testutil.NewJSONRequest(t, nil)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	testutil.SetPathParam(req, "id", transfer.ID.String())
+
+	require.NoError(t, app.ResumeFromTransfer(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var stored models.Contact
+	require.NoError(t, app.DB.First(&stored, "id = ?", contact.ID).Error)
+	assert.Nil(t, stored.AssignedUserID, "closing an attendance must free the contact")
+	assert.Equal(t, models.ContactStatusResolved, stored.ContactStatus)
+}
