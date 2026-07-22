@@ -75,24 +75,43 @@ func (p *SLAProcessor) processStaleTransfers() {
 func (p *SLAProcessor) processOrganizationSLA(settings models.ChatbotSettings, now time.Time) {
 	orgID := settings.OrganizationID
 
-	// 1. Auto-close expired transfers
-	if settings.SLA.AutoCloseHours > 0 {
-		p.autoCloseExpiredTransfers(orgID, settings, now)
+	// SLA-only passes. getSLAEnabledSettingsCached also loads orgs that opted
+	// into the inactivity sweep without SLA, so every genuine SLA feature must
+	// stay behind this gate — otherwise an org that only wanted the sweep would
+	// silently get expired-transfer auto-close, escalation, breach marking, and
+	// chatbot inactivity reminders switched on with it.
+	if settings.SLA.Enabled {
+		// 1. Auto-close expired transfers
+		if settings.SLA.AutoCloseHours > 0 {
+			p.autoCloseExpiredTransfers(orgID, settings, now)
+		}
+
+		// 2. Escalate transfers past escalation deadline
+		if settings.SLA.EscalationMinutes > 0 {
+			p.escalateTransfers(orgID, settings, now)
+		}
+
+		// 3. Mark SLA breached for transfers past response deadline
+		if settings.SLA.ResponseMinutes > 0 {
+			p.markSLABreached(orgID, now)
+		}
+
+		// 4. Chatbot client-inactivity reminders/auto-close. Rides its own
+		//    ReminderEnabled switch (the "Client Inactivity Reminders" card), but
+		//    remains an SLA feature: it only runs for SLA-enabled orgs.
+		if settings.ClientInactivity.ReminderEnabled {
+			p.processClientInactivity(orgID, settings, now)
+		}
 	}
 
-	// 2. Escalate transfers past escalation deadline
-	if settings.SLA.EscalationMinutes > 0 {
-		p.escalateTransfers(orgID, settings, now)
-	}
-
-	// 3. Mark SLA breached for transfers past response deadline
-	if settings.SLA.ResponseMinutes > 0 {
-		p.markSLABreached(orgID, now)
-	}
-
-	// 4. Handle client inactivity (reminders and auto-close)
-	if settings.ClientInactivity.ReminderEnabled {
-		p.processClientInactivity(orgID, settings, now)
+	// Human-attendance inactivity sweep — decoupled from SLA. Runs for any org
+	// with CloseInactiveAttendances on (default false), regardless of sla_enabled.
+	// It rides its own gate rather than sharing ReminderEnabled: an org using
+	// chatbot reminders would otherwise get every human attendance idle past
+	// AutoCloseMinutes (default:60) mass-closed — customer message included — on
+	// the first tick after deploy.
+	if settings.ClientInactivity.CloseInactiveAttendances {
+		p.closeInactiveAttendances(orgID, settings, now)
 	}
 }
 
@@ -130,20 +149,36 @@ func (p *SLAProcessor) autoCloseExpiredTransfers(orgID uuid.UUID, settings model
 			continue
 		}
 
-		// Send auto-close message to customer if configured
+		// Send auto-close message to customer if configured. Kept ahead of the
+		// close, unchanged, per the SLA path's existing customer-message logic.
 		if settings.SLA.AutoCloseMessage != "" {
 			p.sendSLATextToCustomer(transfer, "SLA auto-close message", settings.SLA.AutoCloseMessage)
 		}
 
-		// Update transfer status
-		if err := p.app.DB.Model(&transfer).Updates(map[string]any{
+		// Close and release atomically through the shared path so this close
+		// gets the same side effects as every other — chatbot-tracking clear
+		// and the lifecycle webhook — instead of a bare status update. Same
+		// release rules as a manual close: an automatic close must not leave the
+		// contact pinned to the agent who never answered.
+		var toRelease *models.Contact
+		var contact models.Contact
+		if err := p.app.DB.First(&contact, "id = ?", transfer.ContactID).Error; err != nil {
+			p.app.Log.Error("Failed to load contact for SLA auto-close; closing the attendance without releasing",
+				"error", err, "contact_id", transfer.ContactID, "transfer_id", transfer.ID)
+		} else {
+			toRelease = &contact
+		}
+
+		if err := p.app.closeAttendance(&transfer, toRelease, map[string]any{
 			"status":     models.TransferStatusExpired,
 			"resumed_at": now,
 			"notes":      transfer.Notes + "\n[Auto-closed: No agent response within SLA]",
-		}).Error; err != nil {
-			p.app.Log.Error("Failed to expire transfer", "error", err, "transfer_id", transfer.ID)
+		}, nil, "SLA auto-close", closeAttendanceOptions{webhookEvent: models.WebhookEventTransferResumed}); err != nil {
+			p.app.Log.Error("Failed to auto-close expired transfer; left active for the next tick",
+				"error", err, "transfer_id", transfer.ID)
 			continue
 		}
+		transfer.Status = models.TransferStatusExpired
 
 		closedCount++
 		p.app.Log.Info("Transfer auto-closed due to expiry",
@@ -302,7 +337,7 @@ func (p *SLAProcessor) notifyEscalation(transfer models.AgentTransfer, settings 
 	if transfer.TeamID != nil {
 		payload["team_id"] = transfer.TeamID.String()
 	}
-	p.app.WSHub.BroadcastToOrg(transfer.OrganizationID, websocket.WSMessage{
+	p.app.WSHub.BroadcastToAuthorizedViewers(transfer.OrganizationID, transfer.ContactID, websocket.WSMessage{
 		Type:    websocket.TypeTransferEscalation,
 		Payload: payload,
 	})
@@ -352,7 +387,7 @@ func (p *SLAProcessor) broadcastTransferUpdate(transfer models.AgentTransfer, ws
 
 	contactName, phoneNumber := p.app.MaskContactFields(transfer.OrganizationID, contact.ProfileName, contact.PhoneNumber)
 
-	p.app.WSHub.BroadcastToOrg(transfer.OrganizationID, websocket.WSMessage{
+	p.app.WSHub.BroadcastToAuthorizedViewers(transfer.OrganizationID, transfer.ContactID, websocket.WSMessage{
 		Type: wsType,
 		Payload: map[string]any{
 			"id":               transfer.ID.String(),
@@ -499,6 +534,85 @@ func (p *SLAProcessor) processClientInactivity(orgID uuid.UUID, settings models.
 				p.sendChatbotReminder(contact, settings)
 			}
 		}
+	}
+}
+
+// closeInactiveAttendances closes human attendances with no message in either
+// direction for AutoCloseMinutes, then applies the same release rules as a
+// manual close.
+//
+// processClientInactivity cannot cover this: it selects on
+// chatbot_last_message_at, which ClearContactChatbotTracking zeroes the moment
+// a contact moves to a human — so attendances never entered that loop. Here the
+// anchor is Contact.LastMessageAt, which is what "no interaction" means in a
+// conversation between people.
+//
+// The attendance itself must also be older than the threshold. Opening one
+// writes no message — neither CreateAgentTransfer nor PickNextTransfer touches
+// last_message_at — so anchoring on the contact alone would close an
+// attendance an agent opened seconds ago on a conversation that happened to be
+// quiet, and tell the customer they had been inactive. This is the equivalent
+// of the agentRespondedSince guard autoCloseExpiredTransfers uses.
+//
+// transferred_at is not enough on its own: a transfer can sit in a queue for
+// an hour before an agent picks it up, and PickNextTransfer / AssignAgentTransfer
+// record the pickup in picked_up_at without touching transferred_at. Guarding
+// on transferred_at alone would close an attendance the moment an agent takes
+// it off a queue that filled up long ago — the agent-age must therefore be the
+// most recent of transferred_at and picked_up_at, so a just-picked-up
+// attendance is spared even when the transfer itself is old.
+func (p *SLAProcessor) closeInactiveAttendances(orgID uuid.UUID, settings models.ChatbotSettings, now time.Time) {
+	if settings.ClientInactivity.AutoCloseMinutes <= 0 {
+		return
+	}
+
+	threshold := now.Add(-time.Duration(settings.ClientInactivity.AutoCloseMinutes) * time.Minute)
+
+	var transfers []models.AgentTransfer
+	if err := p.app.DB.
+		Joins("JOIN contacts ON contacts.id = agent_transfers.contact_id AND contacts.deleted_at IS NULL").
+		Where("agent_transfers.organization_id = ? AND agent_transfers.status = ?",
+			orgID, models.TransferStatusActive).
+		Where("agent_transfers.transferred_at < ?", threshold).
+		Where("(agent_transfers.picked_up_at IS NULL OR agent_transfers.picked_up_at < ?)", threshold).
+		Where("contacts.last_message_at IS NOT NULL AND contacts.last_message_at < ?", threshold).
+		Find(&transfers).Error; err != nil {
+		p.app.Log.Error("Failed to find inactive attendances", "error", err, "org_id", orgID)
+		return
+	}
+
+	for i := range transfers {
+		transfer := transfers[i]
+
+		var toRelease *models.Contact
+		var contact models.Contact
+		if err := p.app.DB.First(&contact, "id = ?", transfer.ContactID).Error; err != nil {
+			p.app.Log.Error("Failed to load contact for inactivity close; closing the attendance without releasing",
+				"error", err, "org_id", orgID, "contact_id", transfer.ContactID, "transfer_id", transfer.ID)
+		} else {
+			toRelease = &contact
+		}
+
+		// Close and release atomically. A failure leaves the attendance active
+		// so the next tick retries it, and must not abort the rest of the batch.
+		if err := p.app.closeAttendance(&transfer, toRelease, map[string]any{
+			"status":     models.TransferStatusExpired,
+			"resumed_at": now,
+			"notes":      transfer.Notes + "\n[Auto-closed: no interaction within the inactivity window]",
+		}, nil, "inactivity auto-close", closeAttendanceOptions{webhookEvent: models.WebhookEventTransferResumed}); err != nil {
+			p.app.Log.Error("Failed to close inactive attendance; left active for the next tick",
+				"error", err, "org_id", orgID, "contact_id", transfer.ContactID, "transfer_id", transfer.ID)
+			continue
+		}
+		transfer.Status = models.TransferStatusExpired
+
+		// Sent only after the close committed, so a rolled-back attempt never
+		// tells the customer a conversation was closed that is still open.
+		if settings.ClientInactivity.AutoCloseMessage != "" {
+			p.sendSLATextToCustomer(transfer, "inactivity auto-close message", settings.ClientInactivity.AutoCloseMessage)
+		}
+
+		p.broadcastTransferUpdate(transfer, websocket.TypeTransferExpired)
 	}
 }
 

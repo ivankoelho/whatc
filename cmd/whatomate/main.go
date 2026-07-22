@@ -209,6 +209,11 @@ func runServer(args []string) {
 		HTTPClient: httpClient,
 	}
 
+	// Wire the conversation authorizer into the hub now that the App (which owns
+	// the single visibility rule) exists. This gates all WebSocket conversation
+	// delivery — without it the hub would fall back to legacy (insecure) behaviour.
+	wsHub.SetConversationAuthorizer(app.CanViewConversationByID)
+
 	// Initialize S3 client for call recordings (optional)
 	var s3Client *storage.S3Client
 	if cfg.Calling.RecordingEnabled && cfg.Storage.S3Bucket != "" {
@@ -740,6 +745,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/chatbot/transfers/pick", app.PickNextTransfer)
 	g.PUT("/api/chatbot/transfers/{id}/resume", app.ResumeFromTransfer)
 	g.PUT("/api/chatbot/transfers/{id}/assign", app.AssignAgentTransfer)
+	g.PUT("/api/chatbot/transfers/{id}/unassign", app.UnassignTransfer)
 
 	// Teams (admin/manager - access control in handler)
 	g.GET("/api/teams", app.ListTeams)

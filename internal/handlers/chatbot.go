@@ -26,6 +26,7 @@ type ChatbotSettingsResponse struct {
 	AllowAgentQueuePickup        bool              `json:"allow_agent_queue_pickup"`
 	AssignToSameAgent            bool              `json:"assign_to_same_agent"`
 	AgentCurrentConversationOnly bool              `json:"agent_current_conversation_only"`
+	StrictConversationVisibility bool              `json:"strict_conversation_visibility"`
 	AIEnabled                    bool              `json:"ai_enabled"`
 	AIProvider                   models.AIProvider `json:"ai_provider"`
 	AIModel                      string            `json:"ai_model"`
@@ -46,6 +47,9 @@ type ChatbotSettingsResponse struct {
 	ClientReminderMessage  string `json:"client_reminder_message"`
 	ClientAutoCloseMinutes int    `json:"client_auto_close_minutes"`
 	ClientAutoCloseMessage string `json:"client_auto_close_message"`
+	// CloseInactiveAttendances opts the org into auto-closing idle human
+	// attendances using the same inactivity window (default false).
+	CloseInactiveAttendances bool `json:"close_inactive_attendances"`
 }
 
 // ChatbotStatsResponse represents chatbot statistics
@@ -170,6 +174,7 @@ func (a *App) GetChatbotSettings(r *fastglue.Request) error {
 		AllowAgentQueuePickup:        settings.AgentAssignment.AllowQueuePickup,
 		AssignToSameAgent:            settings.AgentAssignment.AssignToSameAgent,
 		AgentCurrentConversationOnly: settings.AgentAssignment.CurrentConversationOnly,
+		StrictConversationVisibility: settings.AgentAssignment.StrictConversationVisibility,
 		// AI
 		AIEnabled:      settings.AI.Enabled,
 		AIProvider:     settings.AI.Provider,
@@ -186,11 +191,12 @@ func (a *App) GetChatbotSettings(r *fastglue.Request) error {
 		SLAWarningMessage:      settings.SLA.WarningMessage,
 		SLAEscalationNotifyIDs: settings.SLA.EscalationNotifyIDs,
 		// Client Inactivity Settings
-		ClientReminderEnabled:  settings.ClientInactivity.ReminderEnabled,
-		ClientReminderMinutes:  settings.ClientInactivity.ReminderMinutes,
-		ClientReminderMessage:  settings.ClientInactivity.ReminderMessage,
-		ClientAutoCloseMinutes: settings.ClientInactivity.AutoCloseMinutes,
-		ClientAutoCloseMessage: settings.ClientInactivity.AutoCloseMessage,
+		ClientReminderEnabled:    settings.ClientInactivity.ReminderEnabled,
+		ClientReminderMinutes:    settings.ClientInactivity.ReminderMinutes,
+		ClientReminderMessage:    settings.ClientInactivity.ReminderMessage,
+		ClientAutoCloseMinutes:   settings.ClientInactivity.AutoCloseMinutes,
+		ClientAutoCloseMessage:   settings.ClientInactivity.AutoCloseMessage,
+		CloseInactiveAttendances: settings.ClientInactivity.CloseInactiveAttendances,
 	}
 
 	return r.SendEnvelope(map[string]any{
@@ -218,6 +224,7 @@ func chatbotAgentsSnapshot(s *models.ChatbotSettings) map[string]any {
 		"allow_agent_queue_pickup":        s.AgentAssignment.AllowQueuePickup,
 		"assign_to_same_agent":            s.AgentAssignment.AssignToSameAgent,
 		"agent_current_conversation_only": s.AgentAssignment.CurrentConversationOnly,
+		"strict_conversation_visibility":  s.AgentAssignment.StrictConversationVisibility,
 	}
 }
 
@@ -235,19 +242,20 @@ func chatbotHoursSnapshot(s *models.ChatbotSettings) map[string]any {
 // (SLA + Client Inactivity live on the same tab in the UI).
 func chatbotSLASnapshot(s *models.ChatbotSettings) map[string]any {
 	return map[string]any{
-		"sla_enabled":               s.SLA.Enabled,
-		"sla_response_minutes":      s.SLA.ResponseMinutes,
-		"sla_resolution_minutes":    s.SLA.ResolutionMinutes,
-		"sla_escalation_minutes":    s.SLA.EscalationMinutes,
-		"sla_auto_close_hours":      s.SLA.AutoCloseHours,
-		"sla_auto_close_message":    s.SLA.AutoCloseMessage,
-		"sla_warning_message":       s.SLA.WarningMessage,
-		"sla_escalation_notify_ids": s.SLA.EscalationNotifyIDs,
-		"client_reminder_enabled":   s.ClientInactivity.ReminderEnabled,
-		"client_reminder_minutes":   s.ClientInactivity.ReminderMinutes,
-		"client_reminder_message":   s.ClientInactivity.ReminderMessage,
-		"client_auto_close_minutes": s.ClientInactivity.AutoCloseMinutes,
-		"client_auto_close_message": s.ClientInactivity.AutoCloseMessage,
+		"sla_enabled":                s.SLA.Enabled,
+		"sla_response_minutes":       s.SLA.ResponseMinutes,
+		"sla_resolution_minutes":     s.SLA.ResolutionMinutes,
+		"sla_escalation_minutes":     s.SLA.EscalationMinutes,
+		"sla_auto_close_hours":       s.SLA.AutoCloseHours,
+		"sla_auto_close_message":     s.SLA.AutoCloseMessage,
+		"sla_warning_message":        s.SLA.WarningMessage,
+		"sla_escalation_notify_ids":  s.SLA.EscalationNotifyIDs,
+		"client_reminder_enabled":    s.ClientInactivity.ReminderEnabled,
+		"client_reminder_minutes":    s.ClientInactivity.ReminderMinutes,
+		"client_reminder_message":    s.ClientInactivity.ReminderMessage,
+		"client_auto_close_minutes":  s.ClientInactivity.AutoCloseMinutes,
+		"client_auto_close_message":  s.ClientInactivity.AutoCloseMessage,
+		"close_inactive_attendances": s.ClientInactivity.CloseInactiveAttendances,
 	}
 }
 
@@ -284,6 +292,7 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		AllowAgentQueuePickup        *bool              `json:"allow_agent_queue_pickup"`
 		AssignToSameAgent            *bool              `json:"assign_to_same_agent"`
 		AgentCurrentConversationOnly *bool              `json:"agent_current_conversation_only"`
+		StrictConversationVisibility *bool              `json:"strict_conversation_visibility"`
 		AIEnabled                    *bool              `json:"ai_enabled"`
 		AIProvider                   *models.AIProvider `json:"ai_provider"`
 		AIAPIKey                     *string            `json:"ai_api_key"`
@@ -300,15 +309,27 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		SLAWarningMessage      *string   `json:"sla_warning_message"`
 		SLAEscalationNotifyIDs *[]string `json:"sla_escalation_notify_ids"`
 		// Client Inactivity Settings
-		ClientReminderEnabled  *bool   `json:"client_reminder_enabled"`
-		ClientReminderMinutes  *int    `json:"client_reminder_minutes"`
-		ClientReminderMessage  *string `json:"client_reminder_message"`
-		ClientAutoCloseMinutes *int    `json:"client_auto_close_minutes"`
-		ClientAutoCloseMessage *string `json:"client_auto_close_message"`
+		ClientReminderEnabled    *bool   `json:"client_reminder_enabled"`
+		ClientReminderMinutes    *int    `json:"client_reminder_minutes"`
+		ClientReminderMessage    *string `json:"client_reminder_message"`
+		ClientAutoCloseMinutes   *int    `json:"client_auto_close_minutes"`
+		ClientAutoCloseMessage   *string `json:"client_auto_close_message"`
+		CloseInactiveAttendances *bool   `json:"close_inactive_attendances"`
 	}
 
 	if err := json.Unmarshal(r.RequestCtx.PostBody(), &req); err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid request body", nil, "")
+	}
+
+	// A close time at or below the reminder means the reminder is never sent —
+	// the attendance is already closed by the time it would fire. The Vue form
+	// enforces this, but the API must too: these two minutes now gate a pass
+	// that closes conversations and messages customers.
+	if req.ClientReminderMinutes != nil && req.ClientAutoCloseMinutes != nil &&
+		*req.ClientReminderMinutes != 0 && *req.ClientAutoCloseMinutes != 0 &&
+		*req.ClientAutoCloseMinutes <= *req.ClientReminderMinutes {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest,
+			"client_auto_close_minutes must be greater than client_reminder_minutes", nil, "")
 	}
 
 	// Get or create settings
@@ -338,7 +359,7 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		req.GreetingButtons != nil || req.FallbackMessage != nil ||
 		req.FallbackButtons != nil || req.SessionTimeoutMinutes != nil
 	agentsTouched := req.AllowAgentQueuePickup != nil || req.AssignToSameAgent != nil ||
-		req.AgentCurrentConversationOnly != nil
+		req.AgentCurrentConversationOnly != nil || req.StrictConversationVisibility != nil
 	hoursTouched := req.BusinessHoursEnabled != nil || req.BusinessHours != nil ||
 		req.OutOfHoursMessage != nil || req.AllowAutomatedOutsideHours != nil
 	slaTouched := req.SLAEnabled != nil || req.SLAResponseMinutes != nil ||
@@ -347,7 +368,7 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		req.SLAWarningMessage != nil || req.SLAEscalationNotifyIDs != nil ||
 		req.ClientReminderEnabled != nil || req.ClientReminderMinutes != nil ||
 		req.ClientReminderMessage != nil || req.ClientAutoCloseMinutes != nil ||
-		req.ClientAutoCloseMessage != nil
+		req.ClientAutoCloseMessage != nil || req.CloseInactiveAttendances != nil
 	aiTouched := req.AIEnabled != nil || req.AIProvider != nil || req.AIAPIKey != nil ||
 		req.AIModel != nil || req.AIMaxTokens != nil || req.AISystemPrompt != nil
 
@@ -405,6 +426,9 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 	}
 	if req.AgentCurrentConversationOnly != nil {
 		settings.AgentAssignment.CurrentConversationOnly = *req.AgentCurrentConversationOnly
+	}
+	if req.StrictConversationVisibility != nil {
+		settings.AgentAssignment.StrictConversationVisibility = *req.StrictConversationVisibility
 	}
 
 	// AI Settings
@@ -468,6 +492,9 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 	}
 	if req.ClientAutoCloseMessage != nil {
 		settings.ClientInactivity.AutoCloseMessage = *req.ClientAutoCloseMessage
+	}
+	if req.CloseInactiveAttendances != nil {
+		settings.ClientInactivity.CloseInactiveAttendances = *req.CloseInactiveAttendances
 	}
 
 	if err := a.DB.Save(&settings).Error; err != nil {
@@ -1346,7 +1373,7 @@ func (a *App) DeleteAIContext(r *fastglue.Request) error {
 
 // ListChatbotSessions lists chatbot sessions
 func (a *App) ListChatbotSessions(r *fastglue.Request) error {
-	orgID, err := a.getOrgID(r)
+	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
 	}
@@ -1361,6 +1388,15 @@ func (a *App) ListChatbotSessions(r *fastglue.Request) error {
 		query = query.Where("status = ?", status)
 	}
 
+	// Visibility scoping: a session is listable only if the user may view its
+	// contact's conversation. Same rule as canViewConversation, via the single
+	// source of truth scopeVisibleConversations (view_all sees all; flag-off
+	// preserves prior behaviour). This mirrors ListAgentTransfers.
+	visibleContactIDs := a.scopeVisibleConversations(
+		a.DB.Model(&models.Contact{}).Where("organization_id = ?", orgID).Select("id"),
+		userID, orgID)
+	query = query.Where("contact_id IN (?)", visibleContactIDs)
+
 	var sessions []models.ChatbotSession
 	if err := query.Limit(100).Find(&sessions).Error; err != nil {
 		a.Log.Error("Failed to fetch sessions", "error", err)
@@ -1374,7 +1410,7 @@ func (a *App) ListChatbotSessions(r *fastglue.Request) error {
 
 // GetChatbotSession gets a single chatbot session with messages
 func (a *App) GetChatbotSession(r *fastglue.Request) error {
-	orgID, err := a.getOrgID(r)
+	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
 	}
@@ -1389,6 +1425,14 @@ func (a *App) GetChatbotSession(r *fastglue.Request) error {
 		Preload("Contact").
 		Preload("Messages").
 		First(&session).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Session not found", nil, "")
+	}
+
+	// Visibility gate: the session exposes the customer transcript, so only a
+	// user who may view the contact's conversation may read it. Return 404 (not
+	// 403) so we do not reveal the session exists to someone who cannot view it,
+	// matching how a cross-org session already returns 404.
+	if session.Contact == nil || !a.canViewConversation(userID, orgID, session.Contact) {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Session not found", nil, "")
 	}
 

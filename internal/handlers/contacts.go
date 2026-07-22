@@ -19,7 +19,6 @@ import (
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
-	"gorm.io/gorm"
 )
 
 // ContactResponse represents a contact with additional fields for the frontend
@@ -110,7 +109,7 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 
 	// Users without contacts:read permission can only see contacts assigned to them
 	// or contacts with an active chat transfer to them
-	query = a.scopeAssignedContact(query, userID, orgID)
+	query = a.scopeVisibleConversations(query, userID, orgID)
 
 	if search != "" {
 		// Limit search string length to prevent abuse
@@ -213,25 +212,6 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 	return r.SendEnvelope(listEnvelope("contacts", response, total, pg))
 }
 
-// scopeAssignedContact narrows a contact query for users who lack the
-// contacts:read permission: they may only access contacts assigned to them
-// (assigned_user_id) or contacts with an active agent transfer to them. With
-// the permission, the query is returned unchanged. Keeping this in one place
-// ensures every contact endpoint enforces the same visibility — assignment
-// via an active transfer counts even when assigned_user_id is unset (which it
-// is unless the AssignToSameAgent setting is on).
-func (a *App) scopeAssignedContact(query *gorm.DB, userID, orgID uuid.UUID) *gorm.DB {
-	if a.HasPermission(userID, models.ResourceContacts, models.ActionRead, orgID) {
-		return query
-	}
-	return query.Where("assigned_user_id = ? OR id IN (?)",
-		userID,
-		a.DB.Model(&models.AgentTransfer{}).
-			Select("contact_id").
-			Where("agent_id = ? AND organization_id = ? AND status = ?", userID, orgID, models.TransferStatusActive),
-	)
-}
-
 // GetContact returns a single contact
 // Users without contacts:read permission can only access contacts assigned to them
 func (a *App) GetContact(r *fastglue.Request) error {
@@ -249,7 +229,7 @@ func (a *App) GetContact(r *fastglue.Request) error {
 
 	// Users without contacts:read permission can only access their assigned contacts
 	// or contacts with an active chat transfer to them
-	query = a.scopeAssignedContact(query, userID, orgID)
+	query = a.scopeVisibleConversations(query, userID, orgID)
 
 	if err := query.First(&contact).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
@@ -278,7 +258,7 @@ func (a *App) GetMessages(r *fastglue.Request) error {
 	// Verify contact belongs to org (and to user if no contacts:read permission)
 	var contact models.Contact
 	query := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID)
-	query = a.scopeAssignedContact(query, userID, orgID)
+	query = a.scopeVisibleConversations(query, userID, orgID)
 	if err := query.First(&contact).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
 	}
@@ -470,7 +450,7 @@ func (a *App) MarkContactRead(r *fastglue.Request) error {
 
 	var contact models.Contact
 	query := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID)
-	query = a.scopeAssignedContact(query, userID, orgID)
+	query = a.scopeVisibleConversations(query, userID, orgID)
 	if err := query.First(&contact).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
 	}
@@ -579,10 +559,13 @@ func (a *App) SendMessage(r *fastglue.Request) error {
 
 	// Get contact (users without full read permission can only message their assigned contacts)
 	var contact models.Contact
-	query := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID)
-	query = a.scopeAssignedContact(query, userID, orgID)
-	if err := query.First(&contact).Error; err != nil {
+	if err := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID).
+		First(&contact).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
+	}
+	if !a.canInteractWithConversation(userID, orgID, &contact) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You do not have access to this conversation", nil, "")
 	}
 
 	// Get WhatsApp account - prefer request-specified account over contact default
@@ -832,10 +815,13 @@ func (a *App) SendMediaMessage(r *fastglue.Request) error {
 
 	// Get contact (users without full read permission can only message their assigned contacts)
 	var contact models.Contact
-	query := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID)
-	query = a.scopeAssignedContact(query, userID, orgID)
-	if err := query.First(&contact).Error; err != nil {
+	if err := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID).
+		First(&contact).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
+	}
+	if !a.canInteractWithConversation(userID, orgID, &contact) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You do not have access to this conversation", nil, "")
 	}
 
 	// Get WhatsApp account - prefer form-specified account over contact default
@@ -973,10 +959,13 @@ func (a *App) SendReaction(r *fastglue.Request) error {
 
 	// Get contact (users without full read permission can only react to messages in their assigned contacts)
 	var contact models.Contact
-	query := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID)
-	query = a.scopeAssignedContact(query, userID, orgID)
-	if err := query.First(&contact).Error; err != nil {
+	if err := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID).
+		First(&contact).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
+	}
+	if !a.canInteractWithConversation(userID, orgID, &contact) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You do not have access to this conversation", nil, "")
 	}
 
 	// Get message
@@ -1148,6 +1137,14 @@ func (a *App) AssignContact(r *fastglue.Request) error {
 		return nil
 	}
 
+	// Visibility gate: reassignment is an interaction. Without it a contacts:write
+	// holder with no view_all could reassign a carteira-only conversation to
+	// themselves and flip their own visibility on.
+	if !a.canInteractWithConversation(userID, orgID, contact) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You do not have access to this conversation", nil, "")
+	}
+
 	// If assigning to a user, verify they exist in the same org
 	if req.UserID != nil {
 		var user models.User
@@ -1192,7 +1189,7 @@ func (a *App) GetContactSessionData(r *fastglue.Request) error {
 	// Verify contact belongs to org (users without full read permission can only access assigned contacts)
 	var contact models.Contact
 	query := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID)
-	query = a.scopeAssignedContact(query, userID, orgID)
+	query = a.scopeVisibleConversations(query, userID, orgID)
 	if err := query.First(&contact).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
 	}
@@ -1299,6 +1296,13 @@ func (a *App) UpdateContactTags(r *fastglue.Request) error {
 	contact, err := findByIDAndOrg[models.Contact](a.DB, r, contactID, orgID, "Contact")
 	if err != nil {
 		return nil
+	}
+
+	// Visibility gate: tags are conversation data; gate mutating them the same
+	// way SendMessage and the other action surfaces are gated.
+	if !a.canInteractWithConversation(userID, orgID, contact) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You do not have access to this conversation", nil, "")
 	}
 
 	// Convert tags to JSONBArray
@@ -1476,6 +1480,16 @@ func (a *App) UpdateContact(r *fastglue.Request) error {
 	contact, err := findByIDAndOrg[models.Contact](a.DB, r, contactID, orgID, "Contact")
 	if err != nil {
 		return nil
+	}
+
+	// Visibility gate: editing a contact (including reassignment via
+	// assigned_user_id) is an interaction with its conversation, and the handler
+	// reads back full contact detail. Gate the whole handler so a contacts:write
+	// holder without view_all cannot mutate or read a conversation they can't see
+	// — nor reassign a carteira-only conversation to themselves to gain access.
+	if !a.canInteractWithConversation(userID, orgID, contact) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You do not have access to this conversation", nil, "")
 	}
 	oldContact := *contact
 

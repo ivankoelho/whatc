@@ -29,10 +29,13 @@ func (a *App) NotifyTyping(r *fastglue.Request) error {
 	// Same visibility rules as GetContact: users without contacts:read only
 	// reach contacts assigned to them.
 	var contact models.Contact
-	query := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID)
-	query = a.scopeAssignedContact(query, userID, orgID)
-	if err := query.First(&contact).Error; err != nil {
+	if err := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID).
+		First(&contact).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
+	}
+	if !a.canInteractWithConversation(userID, orgID, &contact) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You do not have access to this conversation", nil, "")
 	}
 
 	if a.WSHub != nil {

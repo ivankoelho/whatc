@@ -8,6 +8,12 @@ import (
 	"github.com/zerodha/logf"
 )
 
+// ConversationAuthorizer reports whether a user may view/receive events for a
+// conversation (identified by contactID) in an organization. It is injected by
+// the application layer so the hub never embeds any visibility rule of its own —
+// the single source of truth stays in authorizeConversation.
+type ConversationAuthorizer func(userID, orgID, contactID uuid.UUID) bool
+
 // Hub maintains the set of active clients and broadcasts messages to them
 type Hub struct {
 	// clients maps organization ID -> user ID -> set of clients (supports multiple tabs)
@@ -27,6 +33,18 @@ type Hub struct {
 
 	// logger
 	log logf.Logger
+
+	// authorize gates delivery of contact-targeted events. When nil (e.g. in
+	// unit tests or before wiring), no gate is applied and legacy behaviour is
+	// preserved; production always injects it via SetConversationAuthorizer.
+	authorize ConversationAuthorizer
+}
+
+// SetConversationAuthorizer injects the authorization function used to gate
+// contact-targeted delivery. It is set once at startup, after the application
+// layer that owns the visibility rule has been constructed.
+func (h *Hub) SetConversationAuthorizer(fn ConversationAuthorizer) {
+	h.authorize = fn
 }
 
 // NewHub creates a new Hub instance
@@ -151,15 +169,27 @@ func (h *Hub) broadcastMessage(msg BroadcastMessage) {
 	for _, userClients := range orgClients {
 		// Iterate through all clients (tabs) for each user
 		for client := range userClients {
-			// If ContactID is specified, only send to clients viewing that contact
+			// If ContactID is specified, authorize and (optionally) filter by interest.
 			if msg.ContactID != uuid.Nil {
-				if client.currentContact == nil {
-					// No contact selected: strict senders skip, legacy senders deliver
-					if msg.RequireContactMatch {
+				// Authorization gate: a client must be authorized to view this
+				// conversation before it can receive ANY contact-targeted event.
+				// Nil authorizer preserves legacy behaviour (tests / pre-wiring).
+				if h.authorize != nil && !h.authorize(client.userID, msg.OrgID, msg.ContactID) {
+					continue
+				}
+
+				// Interest filter: deliver only to clients currently viewing the
+				// contact. IgnoreContactFilter skips this (e.g. new_message must
+				// reach every authorized client for the sidebar).
+				if !msg.IgnoreContactFilter {
+					if client.currentContact == nil {
+						// No contact selected: strict senders skip, legacy senders deliver
+						if msg.RequireContactMatch {
+							continue
+						}
+					} else if *client.currentContact != msg.ContactID {
 						continue
 					}
-				} else if *client.currentContact != msg.ContactID {
-					continue
 				}
 			}
 
@@ -211,6 +241,30 @@ func (h *Hub) BroadcastToContactViewers(orgID, contactID uuid.UUID, msg WSMessag
 		RequireContactMatch: true,
 		Message:             msg,
 	})
+}
+
+// BroadcastNewMessageToAuthorized delivers a new_message event to every client
+// authorized to view the contact's conversation, regardless of which contact
+// each client currently has selected. The authorization gate still applies —
+// only the interest filter is skipped (IgnoreContactFilter) so the message
+// reaches authorized clients viewing a different conversation (sidebar update).
+func (h *Hub) BroadcastNewMessageToAuthorized(orgID, contactID uuid.UUID, msg WSMessage) {
+	h.Broadcast(BroadcastMessage{
+		OrgID:               orgID,
+		ContactID:           contactID,
+		IgnoreContactFilter: true,
+		Message:             msg,
+	})
+}
+
+// BroadcastToAuthorizedViewers delivers a background conversation event
+// (reaction updates, message status updates) to every client authorized to
+// view the contact's conversation, regardless of which contact each client
+// currently has selected. This is the same gated delivery as
+// BroadcastNewMessageToAuthorized — the alias just reads more naturally for
+// non-"new message" event types.
+func (h *Hub) BroadcastToAuthorizedViewers(orgID, contactID uuid.UUID, msg WSMessage) {
+	h.BroadcastNewMessageToAuthorized(orgID, contactID, msg)
 }
 
 // BroadcastToUser sends a message to a specific user

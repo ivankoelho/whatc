@@ -78,6 +78,7 @@ const (
 	ResourceWebhooks                = "webhooks"
 	ResourceAPIKeys                 = "api_keys"
 	ResourceCannedResponses         = "canned_responses"
+	ResourceConversations           = "conversations"
 	ResourceCustomActions           = "custom_actions"
 	ResourceOrganizations           = "organizations"
 	ResourceCallLogs                = "call_logs"
@@ -98,6 +99,7 @@ const (
 	ActionExport  = "export"
 	ActionPickup  = "pickup"
 	ActionAssign  = "assign"
+	ActionViewAll = "view_all"
 )
 
 // DefaultPermissions returns the list of all available permissions to seed
@@ -167,6 +169,9 @@ func DefaultPermissions() []Permission {
 		{Resource: ResourceChat, Action: ActionRead, Description: "View chat conversations"},
 		{Resource: ResourceChat, Action: ActionWrite, Description: "Send messages"},
 		{Resource: ResourceChatAssign, Action: ActionWrite, Description: "Assign conversations to agents"},
+
+		// Conversations
+		{Resource: ResourceConversations, Action: ActionViewAll, Description: "View and act on all conversations, including those assigned to other agents"},
 
 		// Contacts
 		{Resource: ResourceContacts, Action: ActionRead, Description: "View contacts"},
@@ -266,6 +271,8 @@ func SystemRolePermissions() map[string][]string {
 		"chatbot.ai:read", "chatbot.ai:write", "chatbot.ai:delete",
 		// Chat
 		"chat:read", "chat:write", "chat.assign:write",
+		// Conversations
+		"conversations:view_all",
 		// Contacts
 		"contacts:read", "contacts:write", "contacts:delete", "contacts:import", "contacts:export",
 		// Tags

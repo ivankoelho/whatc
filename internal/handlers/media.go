@@ -154,11 +154,11 @@ func (a *App) ServeMedia(r *fastglue.Request) error {
 
 	// Users without contacts:read permission can only access media from contacts
 	// assigned to them — the persistent owner or an active transfer assigned
-	// directly to them (via scopeAssignedContact) — or from contacts with an
+	// directly to them (via scopeVisibleConversations) — or from contacts with an
 	// active team transfer where the user is a team member.
 	if !a.HasPermission(userID, models.ResourceContacts, models.ActionRead, orgID) {
 		var contact models.Contact
-		q := a.scopeAssignedContact(a.DB.Where("id = ? AND organization_id = ?", message.ContactID, orgID), userID, orgID)
+		q := a.scopeVisibleConversations(a.DB.Where("id = ? AND organization_id = ?", message.ContactID, orgID), userID, orgID)
 		if err := q.First(&contact).Error; err != nil {
 			// Not owner / not directly assigned — check team membership via active transfer
 			var transfer models.AgentTransfer

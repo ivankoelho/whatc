@@ -165,7 +165,6 @@ func TestApp_ListAgentTransfers_AgentRoleFiltering(t *testing.T) {
 	_ = createTestTransfer(t, app, org.ID, contact.ID, account.Name, models.TransferStatusActive, &otherAgent.ID)
 	_ = createTestTransfer(t, app, org.ID, contact.ID, account.Name, models.TransferStatusActive, nil) // Unassigned (general queue)
 
-	// Agent should only see their assigned transfers + general queue
 	req := testutil.NewGETRequest(t)
 	testutil.SetAuthContext(req, org.ID, agent.ID)
 
@@ -182,8 +181,12 @@ func TestApp_ListAgentTransfers_AgentRoleFiltering(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &result))
 
-	// Agent sees their transfer + general queue (2), not the other agent's transfer
-	assert.Equal(t, int64(2), result.Data.TotalCount)
+	// Transfer visibility now mirrors conversation visibility (canView), rather
+	// than the old divergent transfers:write gate. Flag off, this fixture agent
+	// holds contacts:read, so it can view every contact's conversation — and
+	// therefore every transfer for those contacts. All three transfers reference
+	// the same contact the agent can view, so all three are listed.
+	assert.Equal(t, int64(3), result.Data.TotalCount)
 }
 
 func TestApp_ListAgentTransfers_Pagination(t *testing.T) {
@@ -1018,4 +1021,108 @@ func TestApp_ReturnAgentTransfersToQueue_ClearsAssignmentWhenItPointsAtAgent(t *
 
 	assert.Nil(t, readContactAssignedUser(t, app, contact.ID),
 		"assignment pointing at the offline agent must be cleared")
+}
+
+func TestApp_UnassignTransfer(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns the attendance to the team queue", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+		user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+		agent := testutil.CreateTestUser(t, app.DB, org.ID)
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		require.NoError(t, app.DB.Model(contact).Update("assigned_user_id", agent.ID).Error)
+
+		transfer := models.AgentTransfer{
+			BaseModel:      models.BaseModel{ID: uuid.New()},
+			OrganizationID: org.ID,
+			ContactID:      contact.ID,
+			PhoneNumber:    contact.PhoneNumber,
+			Status:         models.TransferStatusActive,
+			Source:         models.TransferSourceManual,
+			AgentID:        &agent.ID,
+			TransferredAt:  time.Now(),
+		}
+		require.NoError(t, app.DB.Create(&transfer).Error)
+
+		req := testutil.NewJSONRequest(t, nil)
+		testutil.SetAuthContext(req, org.ID, user.ID)
+		testutil.SetPathParam(req, "id", transfer.ID.String())
+
+		require.NoError(t, app.UnassignTransfer(req))
+		assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+		var stored models.AgentTransfer
+		require.NoError(t, app.DB.First(&stored, "id = ?", transfer.ID).Error)
+		assert.Nil(t, stored.AgentID)
+		assert.Equal(t, models.TransferStatusActive, stored.Status, "it stays open, just unassigned")
+
+		var storedContact models.Contact
+		require.NoError(t, app.DB.First(&storedContact, "id = ?", contact.ID).Error)
+		assert.Nil(t, storedContact.AssignedUserID)
+	})
+
+	t.Run("preserves a relationship manager pointing at someone else", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+		user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+		agent := testutil.CreateTestUser(t, app.DB, org.ID)
+		other := testutil.CreateTestUser(t, app.DB, org.ID)
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		require.NoError(t, app.DB.Model(contact).Update("assigned_user_id", other.ID).Error)
+
+		transfer := models.AgentTransfer{
+			BaseModel:      models.BaseModel{ID: uuid.New()},
+			OrganizationID: org.ID,
+			ContactID:      contact.ID,
+			PhoneNumber:    contact.PhoneNumber,
+			Status:         models.TransferStatusActive,
+			Source:         models.TransferSourceManual,
+			AgentID:        &agent.ID,
+			TransferredAt:  time.Now(),
+		}
+		require.NoError(t, app.DB.Create(&transfer).Error)
+
+		req := testutil.NewJSONRequest(t, nil)
+		testutil.SetAuthContext(req, org.ID, user.ID)
+		testutil.SetPathParam(req, "id", transfer.ID.String())
+
+		require.NoError(t, app.UnassignTransfer(req))
+
+		var storedContact models.Contact
+		require.NoError(t, app.DB.First(&storedContact, "id = ?", contact.ID).Error)
+		require.NotNil(t, storedContact.AssignedUserID)
+		assert.Equal(t, other.ID, *storedContact.AssignedUserID,
+			"unassigning one agent must not wipe another agent's relationship")
+	})
+
+	t.Run("denies a user without transfer write permission", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		user := testutil.CreateTestUser(t, app.DB, org.ID) // no role
+		agent := testutil.CreateTestUser(t, app.DB, org.ID)
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+
+		transfer := models.AgentTransfer{
+			BaseModel:      models.BaseModel{ID: uuid.New()},
+			OrganizationID: org.ID,
+			ContactID:      contact.ID,
+			PhoneNumber:    contact.PhoneNumber,
+			Status:         models.TransferStatusActive,
+			Source:         models.TransferSourceManual,
+			AgentID:        &agent.ID,
+			TransferredAt:  time.Now(),
+		}
+		require.NoError(t, app.DB.Create(&transfer).Error)
+
+		req := testutil.NewJSONRequest(t, nil)
+		testutil.SetAuthContext(req, org.ID, user.ID)
+		testutil.SetPathParam(req, "id", transfer.ID.String())
+
+		require.NoError(t, app.UnassignTransfer(req))
+		assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(req))
+	})
 }
