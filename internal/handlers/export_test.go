@@ -37,3 +37,12 @@ func (a *App) CreateAgentInitiatedTransferForTest(account *models.WhatsAppAccoun
 func (a *App) ReleaseContactForTest(contact *models.Contact, actorID *uuid.UUID, reason string) error {
 	return a.releaseContact(contact, actorID, reason)
 }
+
+// CanViewConversationForTest / CanInteractWithConversationForTest expose the
+// authorization functions to the external test package.
+func (a *App) CanViewConversationForTest(userID, orgID uuid.UUID, contact *models.Contact) bool {
+	return a.canViewConversation(userID, orgID, contact)
+}
+func (a *App) CanInteractWithConversationForTest(userID, orgID uuid.UUID, contact *models.Contact) bool {
+	return a.canInteractWithConversation(userID, orgID, contact)
+}

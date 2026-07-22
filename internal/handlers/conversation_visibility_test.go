@@ -1,0 +1,168 @@
+package handlers_test
+
+import (
+	"testing"
+
+	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/handlers"
+	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/test/testutil"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// enableStrictVisibility flips the org flag on and clears the settings cache.
+//
+// Test orgs have no ChatbotSettings row by default (unlike production, where
+// one is created on signup), so this ensures one exists before updating it —
+// otherwise the flag flip is a no-op UPDATE against zero rows.
+func enableStrictVisibility(t *testing.T, app *handlers.App, orgID uuid.UUID) {
+	t.Helper()
+	settings := &models.ChatbotSettings{OrganizationID: orgID}
+	require.NoError(t, app.DB.Where("organization_id = ? AND whats_app_account = ?", orgID, "").
+		FirstOrCreate(settings).Error)
+	require.NoError(t, app.DB.Model(&models.ChatbotSettings{}).
+		Where("id = ?", settings.ID).
+		Update("strict_conversation_visibility", true).Error)
+	app.InvalidateChatbotSettingsCache(orgID)
+}
+
+// activeTransfer creates an active transfer for a contact.
+func activeTransfer(t *testing.T, app *handlers.App, orgID, contactID uuid.UUID, agentID, teamID *uuid.UUID) {
+	t.Helper()
+	require.NoError(t, app.DB.Create(&models.AgentTransfer{
+		BaseModel:      models.BaseModel{ID: uuid.New()},
+		OrganizationID: orgID,
+		ContactID:      contactID,
+		PhoneNumber:    "+550000",
+		Status:         models.TransferStatusActive,
+		Source:         models.TransferSourceManual,
+		AgentID:        agentID,
+		TeamID:         teamID,
+	}).Error)
+}
+
+// createTeamWithMember creates a team and adds userID as an agent member.
+func createTeamWithMember(t *testing.T, app *handlers.App, orgID, userID uuid.UUID) *models.Team {
+	t.Helper()
+	team := &models.Team{
+		BaseModel:      models.BaseModel{ID: uuid.New()},
+		OrganizationID: orgID,
+		Name:           "Test Team",
+		IsActive:       true,
+	}
+	require.NoError(t, app.DB.Create(team).Error)
+	require.NoError(t, app.DB.Create(&models.TeamMember{
+		BaseModel: models.BaseModel{ID: uuid.New()},
+		TeamID:    team.ID,
+		UserID:    userID,
+		Role:      models.TeamRoleAgent,
+	}).Error)
+	return team
+}
+
+func TestAuthorizeConversation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("flag off preserves current behaviour", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+		agent := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+		other := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		activeTransfer(t, app, org.ID, contact.ID, &agent.ID, nil)
+
+		// Flag off: an "other" agent with contacts:read still sees it (today's behaviour).
+		assert.True(t, app.CanViewConversationForTest(other.ID, org.ID, contact))
+	})
+
+	t.Run("strict: assigned agent sees and interacts, other agent does not", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		agentRole := testutil.CreateAgentRole(t, app.DB, org.ID) // agent role: no view_all
+		agent := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+		other := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		activeTransfer(t, app, org.ID, contact.ID, &agent.ID, nil)
+		enableStrictVisibility(t, app, org.ID)
+
+		assert.True(t, app.CanViewConversationForTest(agent.ID, org.ID, contact))
+		assert.True(t, app.CanInteractWithConversationForTest(agent.ID, org.ID, contact))
+		assert.False(t, app.CanViewConversationForTest(other.ID, org.ID, contact))
+		assert.False(t, app.CanInteractWithConversationForTest(other.ID, org.ID, contact))
+	})
+
+	t.Run("strict: view_all sees any conversation", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+		managerRole := testutil.CreateAdminRole(t, app.DB, org.ID) // admin role has all perms incl view_all
+		agent := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+		manager := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&managerRole.ID))
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		activeTransfer(t, app, org.ID, contact.ID, &agent.ID, nil)
+		enableStrictVisibility(t, app, org.ID)
+
+		assert.True(t, app.CanViewConversationForTest(manager.ID, org.ID, contact))
+	})
+
+	t.Run("strict: team queue visible to team members only", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+		member := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+		outsider := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+		team := createTeamWithMember(t, app, org.ID, member.ID)
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		activeTransfer(t, app, org.ID, contact.ID, nil, &team.ID) // queued to team, no agent
+		enableStrictVisibility(t, app, org.ID)
+
+		assert.True(t, app.CanViewConversationForTest(member.ID, org.ID, contact))
+		assert.False(t, app.CanViewConversationForTest(outsider.ID, org.ID, contact))
+	})
+
+	t.Run("strict: general queue (no team) visible to authorized agents", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+		anyAgent := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		activeTransfer(t, app, org.ID, contact.ID, nil, nil) // general queue
+		enableStrictVisibility(t, app, org.ID)
+
+		assert.True(t, app.CanViewConversationForTest(anyAgent.ID, org.ID, contact))
+	})
+
+	t.Run("strict: carteira governs only without an active transfer", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+		owner := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+		other := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		require.NoError(t, app.DB.Model(contact).Update("assigned_user_id", owner.ID).Error)
+		contact.AssignedUserID = &owner.ID
+		enableStrictVisibility(t, app, org.ID)
+
+		assert.True(t, app.CanViewConversationForTest(owner.ID, org.ID, contact))
+		assert.False(t, app.CanViewConversationForTest(other.ID, org.ID, contact))
+	})
+
+	t.Run("strict: active transfer wins over carteira (precedence)", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+		serving := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+		carteira := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		require.NoError(t, app.DB.Model(contact).Update("assigned_user_id", carteira.ID).Error)
+		contact.AssignedUserID = &carteira.ID
+		activeTransfer(t, app, org.ID, contact.ID, &serving.ID, nil)
+		enableStrictVisibility(t, app, org.ID)
+
+		// The active transfer's agent governs; the carteira agent does not.
+		assert.True(t, app.CanViewConversationForTest(serving.ID, org.ID, contact))
+		assert.False(t, app.CanViewConversationForTest(carteira.ID, org.ID, contact))
+	})
+}
