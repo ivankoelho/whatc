@@ -822,6 +822,11 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 		contact = &c
 	}
 
+	if !a.canInteractWithConversation(userID, orgID, contact) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You do not have access to this conversation", nil, "")
+	}
+
 	// Determine which WhatsApp account to use (explicit > template > contact > default)
 	accountName := req.AccountName
 	if accountName == "" {
