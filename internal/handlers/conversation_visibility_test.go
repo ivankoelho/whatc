@@ -260,6 +260,66 @@ func TestListContacts_StrictVisibility(t *testing.T) {
 	assert.False(t, ids[theirs.ID.String()], "agent must not see another agent's conversation")
 }
 
+func TestAssignAgentTransfer_403OnAnotherAgentsConversation(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+	agentA := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	agentB := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+
+	// Contact X is served by agent A (active transfer).
+	activeTransfer(t, app, org.ID, contact.ID, &agentA.ID, nil)
+	enableStrictVisibility(t, app, org.ID)
+
+	var transfer models.AgentTransfer
+	require.NoError(t, app.DB.Where("contact_id = ?", contact.ID).First(&transfer).Error)
+
+	// Agent B self-assigns onto A's active conversation — must be 403.
+	req := testutil.NewJSONRequest(t, map[string]any{})
+	testutil.SetAuthContext(req, org.ID, agentB.ID)
+	testutil.SetPathParam(req, "id", transfer.ID.String())
+
+	require.NoError(t, app.AssignAgentTransfer(req))
+	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(req),
+		"agent B must not take over agent A's active conversation")
+
+	// The transfer's agent is unchanged.
+	var stored models.AgentTransfer
+	require.NoError(t, app.DB.First(&stored, "id = ?", transfer.ID).Error)
+	require.NotNil(t, stored.AgentID)
+	assert.Equal(t, agentA.ID, *stored.AgentID, "assignment must be untouched")
+}
+
+func TestUnassignTransfer_403OnAnotherAgentsConversation(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+	agentA := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	agentB := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+
+	activeTransfer(t, app, org.ID, contact.ID, &agentA.ID, nil)
+	enableStrictVisibility(t, app, org.ID)
+
+	var transfer models.AgentTransfer
+	require.NoError(t, app.DB.Where("contact_id = ?", contact.ID).First(&transfer).Error)
+
+	// Agent B tries to kick A's conversation back to the queue — must be 403.
+	req := testutil.NewJSONRequest(t, nil)
+	testutil.SetAuthContext(req, org.ID, agentB.ID)
+	testutil.SetPathParam(req, "id", transfer.ID.String())
+
+	require.NoError(t, app.UnassignTransfer(req))
+	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(req),
+		"agent B must not unassign agent A's active conversation")
+
+	var stored models.AgentTransfer
+	require.NoError(t, app.DB.First(&stored, "id = ?", transfer.ID).Error)
+	require.NotNil(t, stored.AgentID)
+	assert.Equal(t, agentA.ID, *stored.AgentID, "assignment must be untouched")
+}
+
 func TestSendMessage_403AfterTransfer(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)

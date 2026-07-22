@@ -860,6 +860,18 @@ func (a *App) AssignAgentTransfer(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Transfer is not active", nil, "")
 	}
 
+	// Visibility gate: the caller must already be able to interact with this
+	// conversation. Without it a default agent (transfers:write) could self-assign
+	// onto another agent's active conversation and thereby gain read access.
+	var gateContact models.Contact
+	if err := a.DB.Where("id = ? AND organization_id = ?", transfer.ContactID, orgID).First(&gateContact).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
+	}
+	if !a.canInteractWithConversation(userID, orgID, &gateContact) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You do not have access to this conversation", nil, "")
+	}
+
 	// Determine target agent
 	var targetAgentID *uuid.UUID
 
@@ -1014,6 +1026,17 @@ func (a *App) UnassignTransfer(r *fastglue.Request) error {
 
 	if transfer.Status != models.TransferStatusActive {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Transfer is not active", nil, "")
+	}
+
+	// Visibility gate: same as AssignAgentTransfer — a default agent must not be
+	// able to touch a conversation they cannot view.
+	var gateContact models.Contact
+	if err := a.DB.Where("id = ? AND organization_id = ?", transfer.ContactID, orgID).First(&gateContact).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
+	}
+	if !a.canInteractWithConversation(userID, orgID, &gateContact) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You do not have access to this conversation", nil, "")
 	}
 
 	previousAgentID := transfer.AgentID
