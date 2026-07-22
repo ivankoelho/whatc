@@ -79,21 +79,55 @@ O último caso é o cenário de carteira individual: um contato atribuído manua
 
 Como fila e encerramento **sempre** têm, respectivamente, transferência ativa ou `AssignedUserID` já limpo, a carteira **nunca** interfere no fluxo de filas, transferências ou novos atendimentos.
 
+### Comportamento após uma transferência
+
+Este comportamento é consequência direta da precedência acima, e fica documentado explicitamente porque é o ponto que o produto mais precisa garantir.
+
+Quando uma conversa atendida pelo **agente de origem A** é transferida para o **agente de destino B** (ou para a fila de uma equipe):
+
+- A transferência ativa passa a ter `AgentID = B` (ou `AgentID = NULL` com o `TeamID` da equipe de destino). Como a autorização é governada pela transferência ativa, **o agente A perde acesso imediatamente** — na próxima requisição, `canView`/`canInteract` retornam `false` e a listagem já não traz a conversa. Não há janela em que A ainda responda a uma conversa que não é mais dele.
+- **Exceção — permissões superiores:** um usuário com `conversations:view_all` (supervisor/manager/admin) continua vendo e interagindo, antes e depois da transferência, porque `view_all` é avaliado antes da árvore de atribuição. Se o próprio A tiver `view_all`, ele mantém acesso — mas então não é "o agente de origem" e sim um supervisor, e o acesso é por RBAC, não por ter atendido antes.
+- **Perda imediata, não no encerramento:** o acesso de A cai no instante da transferência, não quando a conversa é encerrada. A referência é sempre o estado atual da transferência ativa, nunca o histórico de quem atendeu.
+
+Uma tentativa de A enviar mensagem à conversa **após** a transferência retorna **403** — isto é testado (ver "Testes").
+
 ## Arquitetura
 
 ### A função central — um único ponto
 
-Arquivo novo `internal/handlers/conversation_visibility.go`. **Duas formas da mesma regra**, derivadas da mesma decisão para não divergirem:
+Arquivo novo `internal/handlers/conversation_visibility.go`.
+
+**Visualizar e interagir são conceitos separados desde já**, ainda que no Ciclo 2 as duas usem a mesma regra. A separação é estrutural (assinaturas distintas), não de implementação — hoje `canInteract` delega a `canView`; amanhã, se surgir um caso "vê mas não responde" (ex.: um papel de auditoria read-only), o ponto de divergência já existe e não exige retrofit dos call sites.
 
 ```go
-// canViewConversation decide se o usuário pode ver/interagir com a conversa de
-// um contato já carregado. Usada nos caminhos de AÇÃO (enviar, mídia, status,
-// digitação) — retorno false vira 403.
-func (a *App) canViewConversation(userID, orgID uuid.UUID, contact *models.Contact) bool
+// conversationAccess é a decisão de autorização central, calculada uma vez a
+// partir do estado do contato. Todas as formas abaixo derivam dela — não há
+// segunda fonte de verdade.
+type conversationAccess struct {
+    canView     bool
+    canInteract bool
+}
 
-// scopeVisibleConversations expressa a MESMA regra como filtro SQL, para a
-// listagem não puxar do banco o que canViewConversation negaria. Substitui
-// scopeAssignedContact nos 11 pontos de listagem/leitura.
+// authorizeConversation é o ÚNICO lugar onde a regra vive. Recebe o contato
+// carregado e devolve a decisão.
+func (a *App) authorizeConversation(userID, orgID uuid.UUID, contact *models.Contact) conversationAccess
+
+// canViewConversation e canInteractWithConversation são finas projeções da
+// decisão acima — usadas nos caminhos de AÇÃO (false → 403).
+func (a *App) canViewConversation(userID, orgID uuid.UUID, contact *models.Contact) bool
+func (a *App) canInteractWithConversation(userID, orgID uuid.UUID, contact *models.Contact) bool
+```
+
+**`scopeVisibleConversations` é *exclusivamente* a tradução SQL de `authorizeConversation.canView`** — não uma segunda regra. Ela existe só porque a listagem não pode chamar a função linha a linha sem puxar tudo do banco. Para blindar contra bifurcação futura:
+
+- As duas devem produzir o mesmo veredito de *visualização* para qualquer contato. Isso é **verificado por teste**: um teste-oráculo cria contatos em todos os ramos da árvore e afirma que `scopeVisibleConversations(...).Find(...)` retorna exatamente o conjunto para o qual `canViewConversation` é `true`. Se as duas divergirem, o teste quebra.
+- O comentário no código de ambas aponta uma para a outra e para este parágrafo do spec.
+
+```go
+// scopeVisibleConversations é a tradução SQL de authorizeConversation.canView
+// (ver spec §"A função central"). Deve retornar exatamente os contatos para os
+// quais canViewConversation é true — o teste TestVisibilityScopeMatchesFunction
+// garante isso. Substitui scopeAssignedContact nos 11 pontos de listagem.
 func (a *App) scopeVisibleConversations(query *gorm.DB, userID, orgID uuid.UUID) *gorm.DB
 ```
 
@@ -186,9 +220,21 @@ frontend/src/i18n/locales/{en,pt-BR}.json      strings
 - Fila geral (`TeamID` NULL): qualquer agente autorizado vê.
 - Carteira pura (sem transferência ativa, `AssignedUserID` definido): só o dono + `view_all`.
 - **Precedência:** contato com transferência ativa para o agente A e `AssignedUserID` = agente B → governa A (a transferência vence).
-- **Flag desligada:** comportamento idêntico ao atual — todos os autorizados veem tudo (teste de regressão).
+- **Flag desligada:** comportamento idêntico ao atual (teste de regressão).
 
-**Frontend (Playwright):** dois agentes; um atribuído vê e responde, o outro não vê a conversa na lista nem consegue abrir.
+**Comportamento após transferência (Ajuste 2):**
+- Conversa de A é transferida para B → na sequência, A recebe **403** ao tentar enviar mensagem, e a conversa some da listagem de A. B vê e envia.
+- Transferência para fila de equipe → A perde acesso; membros da equipe de destino ganham.
+- Supervisor com `view_all` mantém acesso antes e depois da transferência.
+
+**Isolamento multiconta (Ajuste 3):**
+- Agente da organização X **nunca** vê nem interage com conversa da organização Y, independentemente da flag, de `view_all`, de atribuição ou de pertencer a equipe de mesmo nome. `view_all` é escopado à organização do usuário — testar que um manager de X com `view_all` não alcança contato de Y (**403**/404, nunca 200).
+- A flag `strict_conversation_visibility` de uma organização não afeta a visibilidade em outra.
+
+**Coerência scope × função (Ajuste 4 — anti-bifurcação):**
+- `TestVisibilityScopeMatchesFunction`: cria contatos cobrindo todos os ramos da árvore e afirma que o conjunto retornado por `scopeVisibleConversations(...).Find(...)` é **exatamente** aquele para o qual `canViewConversation` é `true`. Guarda contra a listagem e a ação divergirem.
+
+**Frontend (Playwright):** dois agentes; um atribuído vê e responde, o outro não vê a conversa na lista nem consegue abrir. Após transferir do primeiro para um terceiro, o primeiro perde a conversa da lista.
 
 ## Fora de escopo (Ciclo 3)
 
