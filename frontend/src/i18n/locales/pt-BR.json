@@ -1875,6 +1875,8 @@
     "assignSameAgentDesc": "Transferências dentro de um atendimento aberto voltam para o mesmo agente. A atribuição não sobrevive ao encerramento: ao encerrar, o contato é liberado e uma nova mensagem inicia um novo atendimento.",
     "currentConversationOnly": "Agentes veem apenas a conversa atual",
     "currentConversationOnlyDesc": "Quando ativado, os agentes veem apenas as mensagens da sessão atual",
+    "strictConversationVisibility": "Restringir conversas ao agente atribuído",
+    "strictConversationVisibilityDesc": "Quando ligado, uma conversa atribuída é visível e respondível apenas pelo agente responsável. Supervisores e managers mantêm acesso conforme permissões.",
     "businessHours": "Horário comercial",
     "businessHoursDesc": "Defina quando o chatbot está ativo e configure o comportamento fora do horário",
     "enableBusinessHours": "Ativar horário comercial",

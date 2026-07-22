@@ -217,17 +217,15 @@ func (a *App) ListAgentTransfers(r *fastglue.Request) error {
 		}
 	}
 
-	// Filter based on permissions
-	if !hasFullAccess {
-		// Users without full access see their assigned transfers + unassigned in their team queues + general queue
-		if len(userTeamIDs) > 0 {
-			query = query.Where("agent_transfers.agent_id = ? OR (agent_transfers.agent_id IS NULL AND (agent_transfers.team_id IS NULL OR agent_transfers.team_id IN ?))", userID, userTeamIDs)
-		} else {
-			// User not in any team - see own transfers + general queue only
-			query = query.Where("agent_transfers.agent_id = ? OR (agent_transfers.agent_id IS NULL AND agent_transfers.team_id IS NULL)", userID)
-		}
-	}
-	// Users with full access see all transfers (no filter applied)
+	// Visibility scoping: a user may list only transfers whose contact they can
+	// view. This is the SAME rule as canViewConversation (via scopeVisibleConversations),
+	// so the transfer list can never enumerate conversations the user cannot open.
+	// view_all holders get the unrestricted set; flag-off preserves the prior
+	// contacts:read-sees-all / else-own behaviour.
+	query = query.Where("agent_transfers.contact_id IN (?)",
+		a.scopeVisibleConversations(
+			a.DB.Model(&models.Contact{}).Where("organization_id = ?", orgID).Select("id"),
+			userID, orgID))
 
 	// Get total count before pagination (for frontend to know if more exist)
 	var totalCount int64
@@ -242,13 +240,10 @@ func (a *App) ListAgentTransfers(r *fastglue.Request) error {
 			countQuery = countQuery.Where("agent_transfers.team_id = ?", teamID)
 		}
 	}
-	if !hasFullAccess {
-		if len(userTeamIDs) > 0 {
-			countQuery = countQuery.Where("agent_transfers.agent_id = ? OR (agent_transfers.agent_id IS NULL AND (agent_transfers.team_id IS NULL OR agent_transfers.team_id IN ?))", userID, userTeamIDs)
-		} else {
-			countQuery = countQuery.Where("agent_transfers.agent_id = ? OR (agent_transfers.agent_id IS NULL AND agent_transfers.team_id IS NULL)", userID)
-		}
-	}
+	countQuery = countQuery.Where("agent_transfers.contact_id IN (?)",
+		a.scopeVisibleConversations(
+			a.DB.Model(&models.Contact{}).Where("organization_id = ?", orgID).Select("id"),
+			userID, orgID))
 	countQuery.Count(&totalCount)
 
 	// Apply pagination
@@ -860,6 +855,18 @@ func (a *App) AssignAgentTransfer(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Transfer is not active", nil, "")
 	}
 
+	// Visibility gate: the caller must already be able to interact with this
+	// conversation. Without it a default agent (transfers:write) could self-assign
+	// onto another agent's active conversation and thereby gain read access.
+	var gateContact models.Contact
+	if err := a.DB.Where("id = ? AND organization_id = ?", transfer.ContactID, orgID).First(&gateContact).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
+	}
+	if !a.canInteractWithConversation(userID, orgID, &gateContact) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You do not have access to this conversation", nil, "")
+	}
+
 	// Determine target agent
 	var targetAgentID *uuid.UUID
 
@@ -1014,6 +1021,17 @@ func (a *App) UnassignTransfer(r *fastglue.Request) error {
 
 	if transfer.Status != models.TransferStatusActive {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Transfer is not active", nil, "")
+	}
+
+	// Visibility gate: same as AssignAgentTransfer — a default agent must not be
+	// able to touch a conversation they cannot view.
+	var gateContact models.Contact
+	if err := a.DB.Where("id = ? AND organization_id = ?", transfer.ContactID, orgID).First(&gateContact).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
+	}
+	if !a.canInteractWithConversation(userID, orgID, &gateContact) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You do not have access to this conversation", nil, "")
 	}
 
 	previousAgentID := transfer.AgentID
@@ -1318,7 +1336,7 @@ func (a *App) broadcastTransferCreated(transfer *models.AgentTransfer, contact *
 		payload["team_id"] = transfer.TeamID.String()
 	}
 
-	a.WSHub.BroadcastToOrg(transfer.OrganizationID, websocket.WSMessage{
+	a.WSHub.BroadcastToAuthorizedViewers(transfer.OrganizationID, transfer.ContactID, websocket.WSMessage{
 		Type:    websocket.TypeAgentTransfer,
 		Payload: payload,
 	})
@@ -1342,7 +1360,7 @@ func (a *App) broadcastTransferResumed(transfer *models.AgentTransfer) {
 		payload["resumed_by"] = transfer.ResumedBy.String()
 	}
 
-	a.WSHub.BroadcastToOrg(transfer.OrganizationID, websocket.WSMessage{
+	a.WSHub.BroadcastToAuthorizedViewers(transfer.OrganizationID, transfer.ContactID, websocket.WSMessage{
 		Type:    websocket.TypeAgentTransferResume,
 		Payload: payload,
 	})
@@ -1371,7 +1389,7 @@ func (a *App) broadcastTransferAssigned(transfer *models.AgentTransfer) {
 		payload["team_id"] = nil
 	}
 
-	a.WSHub.BroadcastToOrg(transfer.OrganizationID, websocket.WSMessage{
+	a.WSHub.BroadcastToAuthorizedViewers(transfer.OrganizationID, transfer.ContactID, websocket.WSMessage{
 		Type:    websocket.TypeAgentTransferAssign,
 		Payload: payload,
 	})

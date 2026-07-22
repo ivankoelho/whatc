@@ -266,6 +266,25 @@ func TestJSONBArray_Value(t *testing.T) {
 	}
 }
 
+func TestConversationsViewAllPermission(t *testing.T) {
+	// The permission must exist in the default set.
+	found := false
+	for _, p := range models.DefaultPermissions() {
+		if p.Resource == models.ResourceConversations && p.Action == models.ActionViewAll {
+			found = true
+		}
+	}
+	assert.True(t, found, "conversations:view_all must be a default permission")
+
+	roles := models.SystemRolePermissions()
+	// admin gets every default permission automatically.
+	assert.Contains(t, roles["admin"], "conversations:view_all")
+	// manager is a supervisor and must see all conversations.
+	assert.Contains(t, roles["manager"], "conversations:view_all")
+	// agent must NOT — that is the whole point.
+	assert.NotContains(t, roles["agent"], "conversations:view_all")
+}
+
 func TestJSONBArray_Scan(t *testing.T) {
 	t.Parallel()
 

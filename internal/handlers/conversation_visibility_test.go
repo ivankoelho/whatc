@@ -1,0 +1,583 @@
+package handlers_test
+
+import (
+	"encoding/json"
+	"testing"
+
+	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/handlers"
+	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/test/testutil"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/valyala/fasthttp"
+)
+
+// enableStrictVisibility flips the org flag on and clears the settings cache.
+//
+// Test orgs have no ChatbotSettings row by default (unlike production, where
+// one is created on signup), so this ensures one exists before updating it —
+// otherwise the flag flip is a no-op UPDATE against zero rows.
+func enableStrictVisibility(t *testing.T, app *handlers.App, orgID uuid.UUID) {
+	t.Helper()
+	settings := &models.ChatbotSettings{OrganizationID: orgID}
+	require.NoError(t, app.DB.Where("organization_id = ? AND whats_app_account = ?", orgID, "").
+		FirstOrCreate(settings).Error)
+	require.NoError(t, app.DB.Model(&models.ChatbotSettings{}).
+		Where("id = ?", settings.ID).
+		Update("strict_conversation_visibility", true).Error)
+	app.InvalidateChatbotSettingsCache(orgID)
+}
+
+// activeTransfer creates an active transfer for a contact.
+func activeTransfer(t *testing.T, app *handlers.App, orgID, contactID uuid.UUID, agentID, teamID *uuid.UUID) {
+	t.Helper()
+	require.NoError(t, app.DB.Create(&models.AgentTransfer{
+		BaseModel:      models.BaseModel{ID: uuid.New()},
+		OrganizationID: orgID,
+		ContactID:      contactID,
+		PhoneNumber:    "+550000",
+		Status:         models.TransferStatusActive,
+		Source:         models.TransferSourceManual,
+		AgentID:        agentID,
+		TeamID:         teamID,
+	}).Error)
+}
+
+// createTeamWithMember creates a team and adds userID as an agent member.
+func createTeamWithMember(t *testing.T, app *handlers.App, orgID, userID uuid.UUID) *models.Team {
+	t.Helper()
+	team := &models.Team{
+		BaseModel:      models.BaseModel{ID: uuid.New()},
+		OrganizationID: orgID,
+		Name:           "Test Team",
+		IsActive:       true,
+	}
+	require.NoError(t, app.DB.Create(team).Error)
+	require.NoError(t, app.DB.Create(&models.TeamMember{
+		BaseModel: models.BaseModel{ID: uuid.New()},
+		TeamID:    team.ID,
+		UserID:    userID,
+		Role:      models.TeamRoleAgent,
+	}).Error)
+	return team
+}
+
+func TestAuthorizeConversation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("flag off preserves current behaviour", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+		agent := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+		other := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		activeTransfer(t, app, org.ID, contact.ID, &agent.ID, nil)
+
+		// Flag off: an "other" agent with contacts:read still sees it (today's behaviour).
+		assert.True(t, app.CanViewConversationForTest(other.ID, org.ID, contact))
+	})
+
+	t.Run("strict: assigned agent sees and interacts, other agent does not", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		agentRole := testutil.CreateAgentRole(t, app.DB, org.ID) // agent role: no view_all
+		agent := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+		other := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		activeTransfer(t, app, org.ID, contact.ID, &agent.ID, nil)
+		enableStrictVisibility(t, app, org.ID)
+
+		assert.True(t, app.CanViewConversationForTest(agent.ID, org.ID, contact))
+		assert.True(t, app.CanInteractWithConversationForTest(agent.ID, org.ID, contact))
+		assert.False(t, app.CanViewConversationForTest(other.ID, org.ID, contact))
+		assert.False(t, app.CanInteractWithConversationForTest(other.ID, org.ID, contact))
+	})
+
+	t.Run("strict: view_all sees any conversation", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+		managerRole := testutil.CreateAdminRole(t, app.DB, org.ID) // admin role has all perms incl view_all
+		agent := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+		manager := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&managerRole.ID))
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		activeTransfer(t, app, org.ID, contact.ID, &agent.ID, nil)
+		enableStrictVisibility(t, app, org.ID)
+
+		assert.True(t, app.CanViewConversationForTest(manager.ID, org.ID, contact))
+	})
+
+	t.Run("strict: team queue visible to team members only", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+		member := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+		outsider := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+		team := createTeamWithMember(t, app, org.ID, member.ID)
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		activeTransfer(t, app, org.ID, contact.ID, nil, &team.ID) // queued to team, no agent
+		enableStrictVisibility(t, app, org.ID)
+
+		assert.True(t, app.CanViewConversationForTest(member.ID, org.ID, contact))
+		assert.False(t, app.CanViewConversationForTest(outsider.ID, org.ID, contact))
+	})
+
+	t.Run("strict: general queue (no team) visible to authorized agents", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+		anyAgent := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		activeTransfer(t, app, org.ID, contact.ID, nil, nil) // general queue
+		enableStrictVisibility(t, app, org.ID)
+
+		assert.True(t, app.CanViewConversationForTest(anyAgent.ID, org.ID, contact))
+	})
+
+	t.Run("strict: carteira governs only without an active transfer", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+		owner := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+		other := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		require.NoError(t, app.DB.Model(contact).Update("assigned_user_id", owner.ID).Error)
+		contact.AssignedUserID = &owner.ID
+		enableStrictVisibility(t, app, org.ID)
+
+		assert.True(t, app.CanViewConversationForTest(owner.ID, org.ID, contact))
+		assert.False(t, app.CanViewConversationForTest(other.ID, org.ID, contact))
+	})
+
+	t.Run("strict: active transfer wins over carteira (precedence)", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+		serving := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+		carteira := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		require.NoError(t, app.DB.Model(contact).Update("assigned_user_id", carteira.ID).Error)
+		contact.AssignedUserID = &carteira.ID
+		activeTransfer(t, app, org.ID, contact.ID, &serving.ID, nil)
+		enableStrictVisibility(t, app, org.ID)
+
+		// The active transfer's agent governs; the carteira agent does not.
+		assert.True(t, app.CanViewConversationForTest(serving.ID, org.ID, contact))
+		assert.False(t, app.CanViewConversationForTest(carteira.ID, org.ID, contact))
+	})
+}
+
+// TestVisibilityScopeMatchesFunction is the anti-divergence guard: the SQL scope
+// must return exactly the contacts for which canViewConversation is true.
+func TestVisibilityScopeMatchesFunction(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+	viewer := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	otherAgent := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	team := createTeamWithMember(t, app, org.ID, viewer.ID)
+
+	// One contact per branch of the tree.
+	assignedToViewer := testutil.CreateTestContact(t, app.DB, org.ID)
+	activeTransfer(t, app, org.ID, assignedToViewer.ID, &viewer.ID, nil)
+
+	assignedToOther := testutil.CreateTestContact(t, app.DB, org.ID)
+	activeTransfer(t, app, org.ID, assignedToOther.ID, &otherAgent.ID, nil)
+
+	teamQueue := testutil.CreateTestContact(t, app.DB, org.ID)
+	activeTransfer(t, app, org.ID, teamQueue.ID, nil, &team.ID)
+
+	generalQueue := testutil.CreateTestContact(t, app.DB, org.ID)
+	activeTransfer(t, app, org.ID, generalQueue.ID, nil, nil)
+
+	carteira := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(carteira).Update("assigned_user_id", otherAgent.ID).Error)
+
+	idle := testutil.CreateTestContact(t, app.DB, org.ID) // no transfer, no carteira
+
+	enableStrictVisibility(t, app, org.ID)
+
+	// All contacts in the org.
+	all := []*models.Contact{assignedToViewer, assignedToOther, teamQueue, generalQueue, carteira, idle}
+
+	// Expected set per the function.
+	expected := map[uuid.UUID]bool{}
+	for _, c := range all {
+		var fresh models.Contact
+		require.NoError(t, app.DB.First(&fresh, "id = ?", c.ID).Error)
+		if app.CanViewConversationForTest(viewer.ID, org.ID, &fresh) {
+			expected[c.ID] = true
+		}
+	}
+
+	// Actual set from the SQL scope.
+	var visible []models.Contact
+	q := app.ScopeVisibleConversationsForTest(
+		app.DB.Where("organization_id = ?", org.ID), viewer.ID, org.ID)
+	require.NoError(t, q.Find(&visible).Error)
+
+	got := map[uuid.UUID]bool{}
+	for i := range visible {
+		got[visible[i].ID] = true
+	}
+
+	assert.Equal(t, expected, got,
+		"scopeVisibleConversations must return exactly the contacts canViewConversation allows")
+}
+
+func TestListContacts_StrictVisibility(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+	agent := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	other := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+
+	mine := testutil.CreateTestContact(t, app.DB, org.ID)
+	activeTransfer(t, app, org.ID, mine.ID, &agent.ID, nil)
+	theirs := testutil.CreateTestContact(t, app.DB, org.ID)
+	activeTransfer(t, app, org.ID, theirs.ID, &other.ID, nil)
+
+	enableStrictVisibility(t, app, org.ID)
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, agent.ID)
+	require.NoError(t, app.ListContacts(req))
+
+	var resp struct {
+		Data struct {
+			Contacts []handlers.ContactResponse `json:"contacts"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &resp))
+
+	ids := map[string]bool{}
+	for _, c := range resp.Data.Contacts {
+		ids[c.ID.String()] = true
+	}
+	assert.True(t, ids[mine.ID.String()], "agent sees own conversation")
+	assert.False(t, ids[theirs.ID.String()], "agent must not see another agent's conversation")
+}
+
+func TestAssignAgentTransfer_403OnAnotherAgentsConversation(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+	agentA := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	agentB := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+
+	// Contact X is served by agent A (active transfer).
+	activeTransfer(t, app, org.ID, contact.ID, &agentA.ID, nil)
+	enableStrictVisibility(t, app, org.ID)
+
+	var transfer models.AgentTransfer
+	require.NoError(t, app.DB.Where("contact_id = ?", contact.ID).First(&transfer).Error)
+
+	// Agent B self-assigns onto A's active conversation — must be 403.
+	req := testutil.NewJSONRequest(t, map[string]any{})
+	testutil.SetAuthContext(req, org.ID, agentB.ID)
+	testutil.SetPathParam(req, "id", transfer.ID.String())
+
+	require.NoError(t, app.AssignAgentTransfer(req))
+	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(req),
+		"agent B must not take over agent A's active conversation")
+
+	// The transfer's agent is unchanged.
+	var stored models.AgentTransfer
+	require.NoError(t, app.DB.First(&stored, "id = ?", transfer.ID).Error)
+	require.NotNil(t, stored.AgentID)
+	assert.Equal(t, agentA.ID, *stored.AgentID, "assignment must be untouched")
+}
+
+func TestUnassignTransfer_403OnAnotherAgentsConversation(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+	agentA := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	agentB := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+
+	activeTransfer(t, app, org.ID, contact.ID, &agentA.ID, nil)
+	enableStrictVisibility(t, app, org.ID)
+
+	var transfer models.AgentTransfer
+	require.NoError(t, app.DB.Where("contact_id = ?", contact.ID).First(&transfer).Error)
+
+	// Agent B tries to kick A's conversation back to the queue — must be 403.
+	req := testutil.NewJSONRequest(t, nil)
+	testutil.SetAuthContext(req, org.ID, agentB.ID)
+	testutil.SetPathParam(req, "id", transfer.ID.String())
+
+	require.NoError(t, app.UnassignTransfer(req))
+	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(req),
+		"agent B must not unassign agent A's active conversation")
+
+	var stored models.AgentTransfer
+	require.NoError(t, app.DB.First(&stored, "id = ?", transfer.ID).Error)
+	require.NotNil(t, stored.AgentID)
+	assert.Equal(t, agentA.ID, *stored.AgentID, "assignment must be untouched")
+}
+
+func TestListAgentTransfers_StrictVisibility(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+	managerRole := testutil.CreateAdminRole(t, app.DB, org.ID) // view_all
+	agentA := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	agentB := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	manager := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&managerRole.ID))
+
+	contactA := testutil.CreateTestContact(t, app.DB, org.ID)
+	activeTransfer(t, app, org.ID, contactA.ID, &agentA.ID, nil)
+	contactB := testutil.CreateTestContact(t, app.DB, org.ID)
+	activeTransfer(t, app, org.ID, contactB.ID, &agentB.ID, nil)
+
+	enableStrictVisibility(t, app, org.ID)
+
+	listFor := func(uid uuid.UUID) map[string]bool {
+		req := testutil.NewGETRequest(t)
+		testutil.SetAuthContext(req, org.ID, uid)
+		require.NoError(t, app.ListAgentTransfers(req))
+		var resp struct {
+			Data struct {
+				Transfers []handlers.AgentTransferResponse `json:"transfers"`
+			} `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &resp))
+		ids := map[string]bool{}
+		for _, tr := range resp.Data.Transfers {
+			ids[tr.ContactID] = true
+		}
+		return ids
+	}
+
+	bSees := listFor(agentB.ID)
+	assert.True(t, bSees[contactB.ID.String()], "agent B sees B's transfer")
+	assert.False(t, bSees[contactA.ID.String()], "agent B must not see A's transfer")
+
+	mgrSees := listFor(manager.ID)
+	assert.True(t, mgrSees[contactA.ID.String()], "view_all manager sees A's transfer")
+	assert.True(t, mgrSees[contactB.ID.String()], "view_all manager sees B's transfer")
+}
+
+func TestAssignContact_403WithoutVisibility(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+	// A custom role with contacts:write but NO conversations:view_all.
+	writerRole := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "contact-writer",
+		[]string{"contacts:write"})
+	ownerA := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	userB := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&writerRole.ID))
+
+	// Carteira-only contact owned by A (no active transfer).
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(contact).Update("assigned_user_id", ownerA.ID).Error)
+	enableStrictVisibility(t, app, org.ID)
+
+	// B (contacts:write, no view_all) tries to reassign the contact to self.
+	req := testutil.NewJSONRequest(t, map[string]any{"user_id": userB.ID.String()})
+	testutil.SetAuthContext(req, org.ID, userB.ID)
+	testutil.SetPathParam(req, "id", contact.ID.String())
+
+	require.NoError(t, app.AssignContact(req))
+	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(req),
+		"a contacts:write user without view_all cannot reassign a conversation they can't view")
+
+	var stored models.Contact
+	require.NoError(t, app.DB.First(&stored, "id = ?", contact.ID).Error)
+	require.NotNil(t, stored.AssignedUserID)
+	assert.Equal(t, ownerA.ID, *stored.AssignedUserID, "assignment must be untouched")
+}
+
+func TestExportContacts_StrictVisibility(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	// contacts:export but NO view_all.
+	exporterRole := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "strict-exporter",
+		[]string{"contacts:export"})
+	exporter := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&exporterRole.ID))
+	other := testutil.CreateTestUser(t, app.DB, org.ID)
+
+	mine := testutil.CreateTestContactWith(t, app.DB, org.ID, testutil.WithPhoneNumber("+15551111"))
+	require.NoError(t, app.DB.Model(mine).Update("assigned_user_id", exporter.ID).Error)
+	theirs := testutil.CreateTestContactWith(t, app.DB, org.ID, testutil.WithPhoneNumber("+15552222"))
+	require.NoError(t, app.DB.Model(theirs).Update("assigned_user_id", other.ID).Error)
+
+	enableStrictVisibility(t, app, org.ID)
+
+	req := testutil.NewJSONRequest(t, map[string]any{
+		"table":   "contacts",
+		"columns": []string{"phone_number", "profile_name"},
+	})
+	req.RequestCtx.Request.Header.SetMethod("POST")
+	testutil.SetAuthContext(req, org.ID, exporter.ID)
+
+	require.NoError(t, app.ExportData(req))
+	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+	csv := string(testutil.GetResponseBody(req))
+
+	assert.Contains(t, csv, mine.PhoneNumber, "exporter sees own carteira contact")
+	assert.NotContains(t, csv, theirs.PhoneNumber,
+		"strict mode: a no-view_all exporter must not export another agent's conversation")
+}
+
+func TestSendMessage_403AfterTransfer(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+	source := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	dest := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+	contact := testutil.CreateTestContactWith(t, app.DB, org.ID, testutil.WithContactAccount(account.Name))
+
+	// Initially served by source.
+	activeTransfer(t, app, org.ID, contact.ID, &source.ID, nil)
+	enableStrictVisibility(t, app, org.ID)
+
+	// Transfer to dest: close source's transfer, open dest's (mirror the real
+	// reassignment: only one active transfer at a time).
+	require.NoError(t, app.DB.Model(&models.AgentTransfer{}).
+		Where("contact_id = ? AND status = ?", contact.ID, models.TransferStatusActive).
+		Update("status", models.TransferStatusResumed).Error)
+	activeTransfer(t, app, org.ID, contact.ID, &dest.ID, nil)
+
+	// Source now tries to send — must be 403.
+	req := testutil.NewJSONRequest(t, map[string]any{"content": map[string]string{"body": "hi"}})
+	testutil.SetAuthContext(req, org.ID, source.ID)
+	testutil.SetPathParam(req, "id", contact.ID.String())
+	require.NoError(t, app.SendMessage(req))
+	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(req),
+		"the source agent loses interaction access immediately at transfer")
+}
+
+// createChatbotSession creates a chatbot session for a contact.
+func createChatbotSession(t *testing.T, app *handlers.App, orgID, contactID uuid.UUID) *models.ChatbotSession {
+	t.Helper()
+	session := &models.ChatbotSession{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  orgID,
+		ContactID:       contactID,
+		WhatsAppAccount: "default",
+		PhoneNumber:     "+550000",
+		Status:          models.SessionStatusCompleted,
+	}
+	require.NoError(t, app.DB.Create(session).Error)
+	return session
+}
+
+func TestGetChatbotSession_404WhenNotVisible(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+	agentA := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	agentB := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+
+	// Contact X served by agent A (active transfer), so B cannot view it.
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	activeTransfer(t, app, org.ID, contact.ID, &agentA.ID, nil)
+	session := createChatbotSession(t, app, org.ID, contact.ID)
+	enableStrictVisibility(t, app, org.ID)
+
+	getFor := func(uid uuid.UUID) int {
+		req := testutil.NewGETRequest(t)
+		testutil.SetAuthContext(req, org.ID, uid)
+		testutil.SetPathParam(req, "id", session.ID.String())
+		require.NoError(t, app.GetChatbotSession(req))
+		return testutil.GetResponseStatusCode(req)
+	}
+
+	assert.Equal(t, fasthttp.StatusNotFound, getFor(agentB.ID),
+		"agent B must not read the transcript of A's conversation")
+	assert.Equal(t, fasthttp.StatusOK, getFor(agentA.ID),
+		"the assigned agent A can read the session")
+}
+
+func TestListChatbotSessions_StrictVisibility(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+	agentA := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	agentB := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+
+	contactX := testutil.CreateTestContact(t, app.DB, org.ID)
+	activeTransfer(t, app, org.ID, contactX.ID, &agentA.ID, nil)
+	sessionX := createChatbotSession(t, app, org.ID, contactX.ID)
+
+	contactY := testutil.CreateTestContact(t, app.DB, org.ID)
+	activeTransfer(t, app, org.ID, contactY.ID, &agentB.ID, nil)
+	sessionY := createChatbotSession(t, app, org.ID, contactY.ID)
+
+	enableStrictVisibility(t, app, org.ID)
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, agentB.ID)
+	require.NoError(t, app.ListChatbotSessions(req))
+
+	var resp struct {
+		Data struct {
+			Sessions []models.ChatbotSession `json:"sessions"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &resp))
+
+	ids := map[uuid.UUID]bool{}
+	for _, s := range resp.Data.Sessions {
+		ids[s.ID] = true
+	}
+	assert.True(t, ids[sessionY.ID], "agent B sees B's session")
+	assert.False(t, ids[sessionX.ID], "agent B must not see A's session")
+}
+
+func TestAssignAgentTransfer_TeamMemberCanPickUp(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+	member := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	team := createTeamWithMember(t, app, org.ID, member.ID)
+
+	// Transfer QUEUED to team T: active, no agent.
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	activeTransfer(t, app, org.ID, contact.ID, nil, &team.ID)
+	enableStrictVisibility(t, app, org.ID)
+
+	var transfer models.AgentTransfer
+	require.NoError(t, app.DB.Where("contact_id = ?", contact.ID).First(&transfer).Error)
+
+	// The team member self-assigns (empty body = "assign to me").
+	req := testutil.NewJSONRequest(t, map[string]any{})
+	testutil.SetAuthContext(req, org.ID, member.ID)
+	testutil.SetPathParam(req, "id", transfer.ID.String())
+
+	require.NoError(t, app.AssignAgentTransfer(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req),
+		"a member of the queued team may pick up the transfer")
+
+	var stored models.AgentTransfer
+	require.NoError(t, app.DB.First(&stored, "id = ?", transfer.ID).Error)
+	require.NotNil(t, stored.AgentID)
+	assert.Equal(t, member.ID, *stored.AgentID, "the transfer is now assigned to the picking-up member")
+}
+
+func TestSendMessage_MultiTenantIsolation(t *testing.T) {
+	app := newTestApp(t)
+	orgX := testutil.CreateTestOrganization(t, app.DB)
+	orgY := testutil.CreateTestOrganization(t, app.DB)
+	// Manager of X with view_all (admin role has it).
+	adminRole := testutil.CreateAdminRole(t, app.DB, orgX.ID)
+	managerX := testutil.CreateTestUser(t, app.DB, orgX.ID, testutil.WithRoleID(&adminRole.ID))
+	// A contact in Y.
+	contactY := testutil.CreateTestContact(t, app.DB, orgY.ID)
+	enableStrictVisibility(t, app, orgX.ID)
+	enableStrictVisibility(t, app, orgY.ID)
+
+	req := testutil.NewJSONRequest(t, map[string]any{"content": map[string]string{"body": "hi"}})
+	testutil.SetAuthContext(req, orgX.ID, managerX.ID) // acting as org X
+	testutil.SetPathParam(req, "id", contactY.ID.String())
+	require.NoError(t, app.SendMessage(req))
+	code := testutil.GetResponseStatusCode(req)
+	assert.True(t, code == fasthttp.StatusNotFound || code == fasthttp.StatusForbidden,
+		"view_all in org X must never reach a contact in org Y, got %d", code)
+}

@@ -26,6 +26,7 @@ type ChatbotSettingsResponse struct {
 	AllowAgentQueuePickup        bool              `json:"allow_agent_queue_pickup"`
 	AssignToSameAgent            bool              `json:"assign_to_same_agent"`
 	AgentCurrentConversationOnly bool              `json:"agent_current_conversation_only"`
+	StrictConversationVisibility bool              `json:"strict_conversation_visibility"`
 	AIEnabled                    bool              `json:"ai_enabled"`
 	AIProvider                   models.AIProvider `json:"ai_provider"`
 	AIModel                      string            `json:"ai_model"`
@@ -173,6 +174,7 @@ func (a *App) GetChatbotSettings(r *fastglue.Request) error {
 		AllowAgentQueuePickup:        settings.AgentAssignment.AllowQueuePickup,
 		AssignToSameAgent:            settings.AgentAssignment.AssignToSameAgent,
 		AgentCurrentConversationOnly: settings.AgentAssignment.CurrentConversationOnly,
+		StrictConversationVisibility: settings.AgentAssignment.StrictConversationVisibility,
 		// AI
 		AIEnabled:      settings.AI.Enabled,
 		AIProvider:     settings.AI.Provider,
@@ -222,6 +224,7 @@ func chatbotAgentsSnapshot(s *models.ChatbotSettings) map[string]any {
 		"allow_agent_queue_pickup":        s.AgentAssignment.AllowQueuePickup,
 		"assign_to_same_agent":            s.AgentAssignment.AssignToSameAgent,
 		"agent_current_conversation_only": s.AgentAssignment.CurrentConversationOnly,
+		"strict_conversation_visibility":  s.AgentAssignment.StrictConversationVisibility,
 	}
 }
 
@@ -289,6 +292,7 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		AllowAgentQueuePickup        *bool              `json:"allow_agent_queue_pickup"`
 		AssignToSameAgent            *bool              `json:"assign_to_same_agent"`
 		AgentCurrentConversationOnly *bool              `json:"agent_current_conversation_only"`
+		StrictConversationVisibility *bool              `json:"strict_conversation_visibility"`
 		AIEnabled                    *bool              `json:"ai_enabled"`
 		AIProvider                   *models.AIProvider `json:"ai_provider"`
 		AIAPIKey                     *string            `json:"ai_api_key"`
@@ -355,7 +359,7 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		req.GreetingButtons != nil || req.FallbackMessage != nil ||
 		req.FallbackButtons != nil || req.SessionTimeoutMinutes != nil
 	agentsTouched := req.AllowAgentQueuePickup != nil || req.AssignToSameAgent != nil ||
-		req.AgentCurrentConversationOnly != nil
+		req.AgentCurrentConversationOnly != nil || req.StrictConversationVisibility != nil
 	hoursTouched := req.BusinessHoursEnabled != nil || req.BusinessHours != nil ||
 		req.OutOfHoursMessage != nil || req.AllowAutomatedOutsideHours != nil
 	slaTouched := req.SLAEnabled != nil || req.SLAResponseMinutes != nil ||
@@ -422,6 +426,9 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 	}
 	if req.AgentCurrentConversationOnly != nil {
 		settings.AgentAssignment.CurrentConversationOnly = *req.AgentCurrentConversationOnly
+	}
+	if req.StrictConversationVisibility != nil {
+		settings.AgentAssignment.StrictConversationVisibility = *req.StrictConversationVisibility
 	}
 
 	// AI Settings
@@ -1366,7 +1373,7 @@ func (a *App) DeleteAIContext(r *fastglue.Request) error {
 
 // ListChatbotSessions lists chatbot sessions
 func (a *App) ListChatbotSessions(r *fastglue.Request) error {
-	orgID, err := a.getOrgID(r)
+	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
 	}
@@ -1381,6 +1388,15 @@ func (a *App) ListChatbotSessions(r *fastglue.Request) error {
 		query = query.Where("status = ?", status)
 	}
 
+	// Visibility scoping: a session is listable only if the user may view its
+	// contact's conversation. Same rule as canViewConversation, via the single
+	// source of truth scopeVisibleConversations (view_all sees all; flag-off
+	// preserves prior behaviour). This mirrors ListAgentTransfers.
+	visibleContactIDs := a.scopeVisibleConversations(
+		a.DB.Model(&models.Contact{}).Where("organization_id = ?", orgID).Select("id"),
+		userID, orgID)
+	query = query.Where("contact_id IN (?)", visibleContactIDs)
+
 	var sessions []models.ChatbotSession
 	if err := query.Limit(100).Find(&sessions).Error; err != nil {
 		a.Log.Error("Failed to fetch sessions", "error", err)
@@ -1394,7 +1410,7 @@ func (a *App) ListChatbotSessions(r *fastglue.Request) error {
 
 // GetChatbotSession gets a single chatbot session with messages
 func (a *App) GetChatbotSession(r *fastglue.Request) error {
-	orgID, err := a.getOrgID(r)
+	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
 	}
@@ -1409,6 +1425,14 @@ func (a *App) GetChatbotSession(r *fastglue.Request) error {
 		Preload("Contact").
 		Preload("Messages").
 		First(&session).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Session not found", nil, "")
+	}
+
+	// Visibility gate: the session exposes the customer transcript, so only a
+	// user who may view the contact's conversation may read it. Return 404 (not
+	// 403) so we do not reveal the session exists to someone who cannot view it,
+	// matching how a cross-org session already returns 404.
+	if session.Contact == nil || !a.canViewConversation(userID, orgID, session.Contact) {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Session not found", nil, "")
 	}
 

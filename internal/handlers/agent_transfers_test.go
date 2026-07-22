@@ -165,7 +165,6 @@ func TestApp_ListAgentTransfers_AgentRoleFiltering(t *testing.T) {
 	_ = createTestTransfer(t, app, org.ID, contact.ID, account.Name, models.TransferStatusActive, &otherAgent.ID)
 	_ = createTestTransfer(t, app, org.ID, contact.ID, account.Name, models.TransferStatusActive, nil) // Unassigned (general queue)
 
-	// Agent should only see their assigned transfers + general queue
 	req := testutil.NewGETRequest(t)
 	testutil.SetAuthContext(req, org.ID, agent.ID)
 
@@ -182,8 +181,12 @@ func TestApp_ListAgentTransfers_AgentRoleFiltering(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &result))
 
-	// Agent sees their transfer + general queue (2), not the other agent's transfer
-	assert.Equal(t, int64(2), result.Data.TotalCount)
+	// Transfer visibility now mirrors conversation visibility (canView), rather
+	// than the old divergent transfers:write gate. Flag off, this fixture agent
+	// holds contacts:read, so it can view every contact's conversation — and
+	// therefore every transfer for those contacts. All three transfers reference
+	// the same contact the agent can view, so all three are listed.
+	assert.Equal(t, int64(3), result.Data.TotalCount)
 }
 
 func TestApp_ListAgentTransfers_Pagination(t *testing.T) {

@@ -209,6 +209,11 @@ func runServer(args []string) {
 		HTTPClient: httpClient,
 	}
 
+	// Wire the conversation authorizer into the hub now that the App (which owns
+	// the single visibility rule) exists. This gates all WebSocket conversation
+	// delivery — without it the hub would fall back to legacy (insecure) behaviour.
+	wsHub.SetConversationAuthorizer(app.CanViewConversationByID)
+
 	// Initialize S3 client for call recordings (optional)
 	var s3Client *storage.S3Client
 	if cfg.Calling.RecordingEnabled && cfg.Storage.S3Bucket != "" {

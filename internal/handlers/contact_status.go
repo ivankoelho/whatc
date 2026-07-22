@@ -22,7 +22,7 @@ func (a *App) GetContactStatusCounts(r *fastglue.Request) error {
 	}
 
 	query := a.ScopeToOrg(a.DB, userID, orgID)
-	query = a.scopeAssignedContact(query, userID, orgID)
+	query = a.scopeVisibleConversations(query, userID, orgID)
 
 	var newCount int64
 	if err := query.Model(&models.Contact{}).
@@ -69,6 +69,10 @@ func (a *App) UpdateContactStatus(r *fastglue.Request) error {
 	contact, err := findByIDAndOrg[models.Contact](a.DB, r, contactID, orgID, "Contact")
 	if err != nil {
 		return nil
+	}
+	if !a.canInteractWithConversation(userID, orgID, contact) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You do not have access to this conversation", nil, "")
 	}
 
 	// Resolving is a close: it must close the attendance and free the contact,
@@ -174,7 +178,7 @@ func (a *App) notifyContactStatusChange(
 	}
 
 	if a.WSHub != nil {
-		a.WSHub.BroadcastToOrg(contact.OrganizationID, websocket.WSMessage{
+		a.WSHub.BroadcastToAuthorizedViewers(contact.OrganizationID, contact.ID, websocket.WSMessage{
 			Type: websocket.TypeContactStatusChanged,
 			Payload: websocket.ContactStatusChangedPayload{
 				ContactID:       contact.ID,

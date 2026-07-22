@@ -482,7 +482,9 @@ func (a *App) updateMessageStatus(whatsappMsgID, statusValue string, errors []We
 		}
 	}
 
-	// Broadcast status update via WebSocket
+	// Broadcast status update via WebSocket. Routed through the
+	// authorized-viewers gate (not BroadcastToOrg) since this reveals which
+	// conversation a message belongs to.
 	if a.WSHub != nil {
 		wsPayload := map[string]any{
 			"message_id": message.ID.String(),
@@ -491,7 +493,7 @@ func (a *App) updateMessageStatus(whatsappMsgID, statusValue string, errors []We
 		if errMsg, ok := updates["error_message"].(string); ok && errMsg != "" {
 			wsPayload["error_message"] = errMsg
 		}
-		a.WSHub.BroadcastToOrg(message.OrganizationID, websocket.WSMessage{
+		a.WSHub.BroadcastToAuthorizedViewers(message.OrganizationID, message.ContactID, websocket.WSMessage{
 			Type:    websocket.TypeStatusUpdate,
 			Payload: wsPayload,
 		})

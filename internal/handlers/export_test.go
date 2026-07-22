@@ -3,6 +3,7 @@ package handlers
 import (
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"gorm.io/gorm"
 )
 
 // TransitionContactStatusForTest exposes transitionContactStatus to the
@@ -36,4 +37,19 @@ func (a *App) CreateAgentInitiatedTransferForTest(account *models.WhatsAppAccoun
 // ReleaseContactForTest exposes releaseContact.
 func (a *App) ReleaseContactForTest(contact *models.Contact, actorID *uuid.UUID, reason string) error {
 	return a.releaseContact(contact, actorID, reason)
+}
+
+// CanViewConversationForTest / CanInteractWithConversationForTest expose the
+// authorization functions to the external test package.
+func (a *App) CanViewConversationForTest(userID, orgID uuid.UUID, contact *models.Contact) bool {
+	return a.canViewConversation(userID, orgID, contact)
+}
+func (a *App) CanInteractWithConversationForTest(userID, orgID uuid.UUID, contact *models.Contact) bool {
+	return a.canInteractWithConversation(userID, orgID, contact)
+}
+
+// ScopeVisibleConversationsForTest exposes scopeVisibleConversations to the
+// external handlers_test package.
+func (a *App) ScopeVisibleConversationsForTest(q *gorm.DB, userID, orgID uuid.UUID) *gorm.DB {
+	return a.scopeVisibleConversations(q, userID, orgID)
 }

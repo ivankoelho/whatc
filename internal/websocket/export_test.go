@@ -31,3 +31,13 @@ func ClientHandleAuthMessage(c *Client, data []byte) bool {
 func ClientSetCurrentContact(c *Client, id *uuid.UUID) {
 	c.currentContact = id
 }
+
+// ClientCurrentContact returns the client's selected contact for testing.
+func ClientCurrentContact(c *Client) *uuid.UUID {
+	return c.currentContact
+}
+
+// ClientHandleSetContactForTest exposes handleSetContact for testing.
+func ClientHandleSetContactForTest(c *Client, payload any) {
+	c.handleSetContact(payload)
+}
