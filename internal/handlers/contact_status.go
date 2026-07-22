@@ -178,7 +178,7 @@ func (a *App) notifyContactStatusChange(
 	}
 
 	if a.WSHub != nil {
-		a.WSHub.BroadcastToOrg(contact.OrganizationID, websocket.WSMessage{
+		a.WSHub.BroadcastToAuthorizedViewers(contact.OrganizationID, contact.ID, websocket.WSMessage{
 			Type: websocket.TypeContactStatusChanged,
 			Payload: websocket.ContactStatusChangedPayload{
 				ContactID:       contact.ID,

@@ -134,6 +134,15 @@ func TestClient_HandleSetContact_AllowedSetsCurrentContact(t *testing.T) {
 // BroadcastToAuthorizedViewers (an alias for BroadcastNewMessageToAuthorized)
 // instead of BroadcastToOrg, so they're gated by the same authorizer as
 // new_message. Confirms a denied user gets nothing for these event types.
+//
+// The conversation-lifecycle events also now use this same gated path:
+// TypeAgentTransfer / TypeAgentTransferResume / TypeAgentTransferAssign
+// (internal/handlers/agent_transfers.go), TypeTransferEscalation and the SLA
+// expiry update (internal/handlers/sla_processor.go), and
+// TypeContactStatusChanged (internal/handlers/contact_status.go). They were
+// previously BroadcastToOrg and are now BroadcastToAuthorizedViewers, so the
+// TypeAgentTransfer assertion below stands in for all of them — a denied user
+// receives none of these conversation-naming events.
 func TestHub_BroadcastToAuthorizedViewers_ReactionAndStatusGated(t *testing.T) {
 	hub := newTestHub(t)
 	orgID := uuid.New()
@@ -159,6 +168,15 @@ func TestHub_BroadcastToAuthorizedViewers_ReactionAndStatusGated(t *testing.T) {
 	hub.BroadcastToAuthorizedViewers(orgID, contactID, statusMsg)
 
 	assertReceivesMessage(t, cA, websocket.TypeStatusUpdate)
+	assertNoMessage(t, cB)
+
+	// Conversation-lifecycle events (agent transfer created/resumed/assigned,
+	// SLA escalation/expiry, contact-status change) route through the same
+	// gated method. A transfer event stands in for the whole family.
+	transferMsg := websocket.WSMessage{Type: websocket.TypeAgentTransfer, Payload: "transfer"}
+	hub.BroadcastToAuthorizedViewers(orgID, contactID, transferMsg)
+
+	assertReceivesMessage(t, cA, websocket.TypeAgentTransfer)
 	assertNoMessage(t, cB)
 }
 
