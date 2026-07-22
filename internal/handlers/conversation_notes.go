@@ -28,7 +28,7 @@ type ConversationNoteResponse struct {
 
 // ListConversationNotes returns paginated notes for a contact (latest at bottom).
 func (a *App) ListConversationNotes(r *fastglue.Request) error {
-	orgID, _, err := a.requireAuth(r, models.ResourceChat, models.ActionRead)
+	orgID, userID, err := a.requireAuth(r, models.ResourceChat, models.ActionRead)
 	if err != nil {
 		return nil
 	}
@@ -36,6 +36,15 @@ func (a *App) ListConversationNotes(r *fastglue.Request) error {
 	contactID, err := parsePathUUID(r, "id", "contact")
 	if err != nil {
 		return nil
+	}
+
+	contact, err := findByIDAndOrg[models.Contact](a.DB, r, contactID, orgID, "Contact")
+	if err != nil {
+		return nil
+	}
+	if !a.canViewConversation(userID, orgID, contact) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You do not have access to this conversation", nil, "")
 	}
 
 	pg := parsePaginationWithDefaults(r, 30, 100)
@@ -99,6 +108,15 @@ func (a *App) CreateConversationNote(r *fastglue.Request) error {
 		return nil
 	}
 
+	contact, err := findByIDAndOrg[models.Contact](a.DB, r, contactID, orgID, "Contact")
+	if err != nil {
+		return nil
+	}
+	if !a.canInteractWithConversation(userID, orgID, contact) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You do not have access to this conversation", nil, "")
+	}
+
 	var req ConversationNoteRequest
 	if err := a.decodeRequest(r, &req); err != nil {
 		return nil
@@ -146,7 +164,7 @@ func (a *App) UpdateConversationNote(r *fastglue.Request) error {
 		return nil
 	}
 
-	_, err = parsePathUUID(r, "id", "contact")
+	contactID, err := parsePathUUID(r, "id", "contact")
 	if err != nil {
 		return nil
 	}
@@ -159,6 +177,15 @@ func (a *App) UpdateConversationNote(r *fastglue.Request) error {
 	note, err := findByIDAndOrg[models.ConversationNote](a.DB, r, noteID, orgID, "Note")
 	if err != nil {
 		return nil
+	}
+
+	contact, err := findByIDAndOrg[models.Contact](a.DB, r, contactID, orgID, "Contact")
+	if err != nil {
+		return nil
+	}
+	if !a.canInteractWithConversation(userID, orgID, contact) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You do not have access to this conversation", nil, "")
 	}
 
 	// Only the creator can update their own notes
@@ -207,7 +234,7 @@ func (a *App) DeleteConversationNote(r *fastglue.Request) error {
 		return nil
 	}
 
-	_, err = parsePathUUID(r, "id", "contact")
+	contactID, err := parsePathUUID(r, "id", "contact")
 	if err != nil {
 		return nil
 	}
@@ -222,12 +249,21 @@ func (a *App) DeleteConversationNote(r *fastglue.Request) error {
 		return nil
 	}
 
+	contact, err := findByIDAndOrg[models.Contact](a.DB, r, contactID, orgID, "Contact")
+	if err != nil {
+		return nil
+	}
+	if !a.canInteractWithConversation(userID, orgID, contact) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You do not have access to this conversation", nil, "")
+	}
+
 	// Only the creator can delete their own notes
 	if note.CreatedByID != userID {
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You can only delete your own notes", nil, "")
 	}
 
-	contactID := note.ContactID
+	noteContactID := note.ContactID
 
 	if err := a.DB.Delete(note).Error; err != nil {
 		a.Log.Error("Failed to delete conversation note", "error", err)
@@ -237,11 +273,11 @@ func (a *App) DeleteConversationNote(r *fastglue.Request) error {
 
 	// Broadcast via WebSocket
 	if a.WSHub != nil {
-		a.WSHub.BroadcastToContact(orgID, contactID, websocket.WSMessage{
+		a.WSHub.BroadcastToContact(orgID, noteContactID, websocket.WSMessage{
 			Type: websocket.TypeConversationNoteDeleted,
 			Payload: map[string]any{
 				"id":         noteID,
-				"contact_id": contactID,
+				"contact_id": noteContactID,
 			},
 		})
 	}
