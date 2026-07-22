@@ -531,6 +531,36 @@ func TestListChatbotSessions_StrictVisibility(t *testing.T) {
 	assert.False(t, ids[sessionX.ID], "agent B must not see A's session")
 }
 
+func TestAssignAgentTransfer_TeamMemberCanPickUp(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+	member := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	team := createTeamWithMember(t, app, org.ID, member.ID)
+
+	// Transfer QUEUED to team T: active, no agent.
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	activeTransfer(t, app, org.ID, contact.ID, nil, &team.ID)
+	enableStrictVisibility(t, app, org.ID)
+
+	var transfer models.AgentTransfer
+	require.NoError(t, app.DB.Where("contact_id = ?", contact.ID).First(&transfer).Error)
+
+	// The team member self-assigns (empty body = "assign to me").
+	req := testutil.NewJSONRequest(t, map[string]any{})
+	testutil.SetAuthContext(req, org.ID, member.ID)
+	testutil.SetPathParam(req, "id", transfer.ID.String())
+
+	require.NoError(t, app.AssignAgentTransfer(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req),
+		"a member of the queued team may pick up the transfer")
+
+	var stored models.AgentTransfer
+	require.NoError(t, app.DB.First(&stored, "id = ?", transfer.ID).Error)
+	require.NotNil(t, stored.AgentID)
+	assert.Equal(t, member.ID, *stored.AgentID, "the transfer is now assigned to the picking-up member")
+}
+
 func TestSendMessage_MultiTenantIsolation(t *testing.T) {
 	app := newTestApp(t)
 	orgX := testutil.CreateTestOrganization(t, app.DB)
