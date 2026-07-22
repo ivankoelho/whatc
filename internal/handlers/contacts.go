@@ -110,7 +110,7 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 
 	// Users without contacts:read permission can only see contacts assigned to them
 	// or contacts with an active chat transfer to them
-	query = a.scopeAssignedContact(query, userID, orgID)
+	query = a.scopeVisibleConversations(query, userID, orgID)
 
 	if search != "" {
 		// Limit search string length to prevent abuse
@@ -249,7 +249,7 @@ func (a *App) GetContact(r *fastglue.Request) error {
 
 	// Users without contacts:read permission can only access their assigned contacts
 	// or contacts with an active chat transfer to them
-	query = a.scopeAssignedContact(query, userID, orgID)
+	query = a.scopeVisibleConversations(query, userID, orgID)
 
 	if err := query.First(&contact).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
@@ -278,7 +278,7 @@ func (a *App) GetMessages(r *fastglue.Request) error {
 	// Verify contact belongs to org (and to user if no contacts:read permission)
 	var contact models.Contact
 	query := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID)
-	query = a.scopeAssignedContact(query, userID, orgID)
+	query = a.scopeVisibleConversations(query, userID, orgID)
 	if err := query.First(&contact).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
 	}
@@ -470,7 +470,7 @@ func (a *App) MarkContactRead(r *fastglue.Request) error {
 
 	var contact models.Contact
 	query := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID)
-	query = a.scopeAssignedContact(query, userID, orgID)
+	query = a.scopeVisibleConversations(query, userID, orgID)
 	if err := query.First(&contact).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
 	}
@@ -1192,7 +1192,7 @@ func (a *App) GetContactSessionData(r *fastglue.Request) error {
 	// Verify contact belongs to org (users without full read permission can only access assigned contacts)
 	var contact models.Contact
 	query := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID)
-	query = a.scopeAssignedContact(query, userID, orgID)
+	query = a.scopeVisibleConversations(query, userID, orgID)
 	if err := query.First(&contact).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
 	}

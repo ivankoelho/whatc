@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/google/uuid"
@@ -223,4 +224,37 @@ func TestVisibilityScopeMatchesFunction(t *testing.T) {
 
 	assert.Equal(t, expected, got,
 		"scopeVisibleConversations must return exactly the contacts canViewConversation allows")
+}
+
+func TestListContacts_StrictVisibility(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+	agent := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	other := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+
+	mine := testutil.CreateTestContact(t, app.DB, org.ID)
+	activeTransfer(t, app, org.ID, mine.ID, &agent.ID, nil)
+	theirs := testutil.CreateTestContact(t, app.DB, org.ID)
+	activeTransfer(t, app, org.ID, theirs.ID, &other.ID, nil)
+
+	enableStrictVisibility(t, app, org.ID)
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, agent.ID)
+	require.NoError(t, app.ListContacts(req))
+
+	var resp struct {
+		Data struct {
+			Contacts []handlers.ContactResponse `json:"contacts"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &resp))
+
+	ids := map[string]bool{}
+	for _, c := range resp.Data.Contacts {
+		ids[c.ID.String()] = true
+	}
+	assert.True(t, ids[mine.ID.String()], "agent sees own conversation")
+	assert.False(t, ids[theirs.ID.String()], "agent must not see another agent's conversation")
 }

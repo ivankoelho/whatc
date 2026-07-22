@@ -22,7 +22,7 @@ func (a *App) GetContactStatusCounts(r *fastglue.Request) error {
 	}
 
 	query := a.ScopeToOrg(a.DB, userID, orgID)
-	query = a.scopeAssignedContact(query, userID, orgID)
+	query = a.scopeVisibleConversations(query, userID, orgID)
 
 	var newCount int64
 	if err := query.Model(&models.Contact{}).
