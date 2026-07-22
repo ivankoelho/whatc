@@ -70,6 +70,10 @@ func (a *App) UpdateContactStatus(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
+	if !a.canInteractWithConversation(userID, orgID, contact) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You do not have access to this conversation", nil, "")
+	}
 
 	// Resolving is a close: it must close the attendance and free the contact,
 	// not merely flip a label. Freeing the contact alone would leave the

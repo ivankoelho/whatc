@@ -10,6 +10,7 @@ import (
 	"github.com/shridarpatil/whatomate/test/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/valyala/fasthttp"
 )
 
 // enableStrictVisibility flips the org flag on and clears the settings cache.
@@ -257,4 +258,54 @@ func TestListContacts_StrictVisibility(t *testing.T) {
 	}
 	assert.True(t, ids[mine.ID.String()], "agent sees own conversation")
 	assert.False(t, ids[theirs.ID.String()], "agent must not see another agent's conversation")
+}
+
+func TestSendMessage_403AfterTransfer(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+	source := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	dest := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+	contact := testutil.CreateTestContactWith(t, app.DB, org.ID, testutil.WithContactAccount(account.Name))
+
+	// Initially served by source.
+	activeTransfer(t, app, org.ID, contact.ID, &source.ID, nil)
+	enableStrictVisibility(t, app, org.ID)
+
+	// Transfer to dest: close source's transfer, open dest's (mirror the real
+	// reassignment: only one active transfer at a time).
+	require.NoError(t, app.DB.Model(&models.AgentTransfer{}).
+		Where("contact_id = ? AND status = ?", contact.ID, models.TransferStatusActive).
+		Update("status", models.TransferStatusResumed).Error)
+	activeTransfer(t, app, org.ID, contact.ID, &dest.ID, nil)
+
+	// Source now tries to send — must be 403.
+	req := testutil.NewJSONRequest(t, map[string]any{"content": map[string]string{"body": "hi"}})
+	testutil.SetAuthContext(req, org.ID, source.ID)
+	testutil.SetPathParam(req, "id", contact.ID.String())
+	require.NoError(t, app.SendMessage(req))
+	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(req),
+		"the source agent loses interaction access immediately at transfer")
+}
+
+func TestSendMessage_MultiTenantIsolation(t *testing.T) {
+	app := newTestApp(t)
+	orgX := testutil.CreateTestOrganization(t, app.DB)
+	orgY := testutil.CreateTestOrganization(t, app.DB)
+	// Manager of X with view_all (admin role has it).
+	adminRole := testutil.CreateAdminRole(t, app.DB, orgX.ID)
+	managerX := testutil.CreateTestUser(t, app.DB, orgX.ID, testutil.WithRoleID(&adminRole.ID))
+	// A contact in Y.
+	contactY := testutil.CreateTestContact(t, app.DB, orgY.ID)
+	enableStrictVisibility(t, app, orgX.ID)
+	enableStrictVisibility(t, app, orgY.ID)
+
+	req := testutil.NewJSONRequest(t, map[string]any{"content": map[string]string{"body": "hi"}})
+	testutil.SetAuthContext(req, orgX.ID, managerX.ID) // acting as org X
+	testutil.SetPathParam(req, "id", contactY.ID.String())
+	require.NoError(t, app.SendMessage(req))
+	code := testutil.GetResponseStatusCode(req)
+	assert.True(t, code == fasthttp.StatusNotFound || code == fasthttp.StatusForbidden,
+		"view_all in org X must never reach a contact in org Y, got %d", code)
 }

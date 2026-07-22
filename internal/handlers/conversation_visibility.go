@@ -25,7 +25,7 @@ func (a *App) authorizeConversation(userID, orgID uuid.UUID, contact *models.Con
 	settings, _ := a.getChatbotSettingsCached(orgID, "")
 
 	// Flag off (default): preserve today's behaviour exactly — contacts:read
-	// sees all, otherwise only own/assigned. Mirror scopeAssignedContact.
+	// sees all, otherwise only own/assigned (the old assigned-contact scope).
 	if settings == nil || !settings.AgentAssignment.StrictConversationVisibility {
 		if a.HasPermission(userID, models.ResourceContacts, models.ActionRead, orgID) {
 			return conversationAccess{canView: true, canInteract: true}
@@ -98,11 +98,11 @@ func (a *App) userInTeam(userID, teamID uuid.UUID) bool {
 // scopeVisibleConversations is the SQL translation of authorizeConversation.canView
 // (see spec §"A função central"). It must return exactly the contacts for which
 // canViewConversation is true — TestVisibilityScopeMatchesFunction guards that.
-// It replaces scopeAssignedContact at every listing/read site.
+// It is the single scope now used at every listing/read/action site.
 func (a *App) scopeVisibleConversations(query *gorm.DB, userID, orgID uuid.UUID) *gorm.DB {
 	settings, _ := a.getChatbotSettingsCached(orgID, "")
 
-	// Flag off: preserve scopeAssignedContact exactly.
+	// Flag off: preserve the old assigned-contact scope exactly.
 	if settings == nil || !settings.AgentAssignment.StrictConversationVisibility {
 		if a.HasPermission(userID, models.ResourceContacts, models.ActionRead, orgID) {
 			return query
@@ -157,7 +157,7 @@ func (a *App) scopeVisibleConversations(query *gorm.DB, userID, orgID uuid.UUID)
 	)
 }
 
-// userOwnsContact mirrors the old scopeAssignedContact "mine" condition, for
+// userOwnsContact mirrors the old assigned-contact "mine" condition, for
 // the flag-off path: the contact is assigned to the user, or an active transfer
 // is assigned to them.
 func (a *App) userOwnsContact(userID, orgID uuid.UUID, contact *models.Contact) bool {
