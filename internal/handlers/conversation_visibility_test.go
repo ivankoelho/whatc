@@ -320,6 +320,48 @@ func TestUnassignTransfer_403OnAnotherAgentsConversation(t *testing.T) {
 	assert.Equal(t, agentA.ID, *stored.AgentID, "assignment must be untouched")
 }
 
+func TestListAgentTransfers_StrictVisibility(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+	managerRole := testutil.CreateAdminRole(t, app.DB, org.ID) // view_all
+	agentA := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	agentB := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	manager := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&managerRole.ID))
+
+	contactA := testutil.CreateTestContact(t, app.DB, org.ID)
+	activeTransfer(t, app, org.ID, contactA.ID, &agentA.ID, nil)
+	contactB := testutil.CreateTestContact(t, app.DB, org.ID)
+	activeTransfer(t, app, org.ID, contactB.ID, &agentB.ID, nil)
+
+	enableStrictVisibility(t, app, org.ID)
+
+	listFor := func(uid uuid.UUID) map[string]bool {
+		req := testutil.NewGETRequest(t)
+		testutil.SetAuthContext(req, org.ID, uid)
+		require.NoError(t, app.ListAgentTransfers(req))
+		var resp struct {
+			Data struct {
+				Transfers []handlers.AgentTransferResponse `json:"transfers"`
+			} `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &resp))
+		ids := map[string]bool{}
+		for _, tr := range resp.Data.Transfers {
+			ids[tr.ContactID] = true
+		}
+		return ids
+	}
+
+	bSees := listFor(agentB.ID)
+	assert.True(t, bSees[contactB.ID.String()], "agent B sees B's transfer")
+	assert.False(t, bSees[contactA.ID.String()], "agent B must not see A's transfer")
+
+	mgrSees := listFor(manager.ID)
+	assert.True(t, mgrSees[contactA.ID.String()], "view_all manager sees A's transfer")
+	assert.True(t, mgrSees[contactB.ID.String()], "view_all manager sees B's transfer")
+}
+
 func TestSendMessage_403AfterTransfer(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
