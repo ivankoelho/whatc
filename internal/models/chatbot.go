@@ -19,6 +19,11 @@ type AgentAssignmentConfig struct {
 	AllowQueuePickup        bool `gorm:"column:allow_agent_queue_pickup;default:true" json:"allow_agent_queue_pickup"`                // Allow agents to pick transfers from queue
 	AssignToSameAgent       bool `gorm:"column:assign_to_same_agent;default:true" json:"assign_to_same_agent"`                        // Auto-assign transfers to contact's existing agent
 	CurrentConversationOnly bool `gorm:"column:agent_current_conversation_only;default:false" json:"agent_current_conversation_only"` // Agents see only current session messages
+	// StrictConversationVisibility gates per-agent conversation visibility.
+	// Default false: behaviour is unchanged from before this feature. When true,
+	// an assigned conversation is visible/actionable only by the assigned agent
+	// plus users with conversations:view_all.
+	StrictConversationVisibility bool `gorm:"column:strict_conversation_visibility;default:false" json:"strict_conversation_visibility"`
 }
 
 // SLAConfig holds SLA tracking settings

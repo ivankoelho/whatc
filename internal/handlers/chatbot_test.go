@@ -2850,3 +2850,34 @@ func TestApp_GetKeywordRule_ResponseFields(t *testing.T) {
 		assert.NotEmpty(t, resp.Data.CreatedAt)
 	})
 }
+
+func TestChatbotSettings_StrictVisibilityRoundTrip(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+
+	// Default is false.
+	getReq := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(getReq, org.ID, user.ID)
+	require.NoError(t, app.GetChatbotSettings(getReq))
+	var getResp struct {
+		Data struct {
+			Settings struct {
+				StrictConversationVisibility bool `json:"strict_conversation_visibility"`
+			} `json:"settings"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(getReq), &getResp))
+	assert.False(t, getResp.Data.Settings.StrictConversationVisibility, "default must be false")
+
+	// Turn it on.
+	putReq := testutil.NewJSONRequest(t, map[string]any{"strict_conversation_visibility": true})
+	testutil.SetAuthContext(putReq, org.ID, user.ID)
+	require.NoError(t, app.UpdateChatbotSettings(putReq))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(putReq))
+
+	var stored models.ChatbotSettings
+	require.NoError(t, app.DB.Where("organization_id = ?", org.ID).First(&stored).Error)
+	assert.True(t, stored.AgentAssignment.StrictConversationVisibility)
+}
