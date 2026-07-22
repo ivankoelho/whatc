@@ -1875,6 +1875,8 @@
     "assignSameAgentDesc": "Transfers within an open attendance return to the same agent. The assignment does not survive closing: closing frees the contact, and a new message starts a new attendance.",
     "currentConversationOnly": "Agents See Current Conversation Only",
     "currentConversationOnlyDesc": "When enabled, agents only see messages from the current session",
+    "strictConversationVisibility": "Restrict conversations to the assigned agent",
+    "strictConversationVisibilityDesc": "When on, an assigned conversation is visible and answerable only by the responsible agent. Supervisors and managers keep access via permissions.",
     "businessHours": "Business Hours",
     "businessHoursDesc": "Set when the chatbot is active and configure out-of-hours behavior",
     "enableBusinessHours": "Enable Business Hours",
