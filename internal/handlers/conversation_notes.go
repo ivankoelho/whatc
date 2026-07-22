@@ -178,6 +178,9 @@ func (a *App) UpdateConversationNote(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
+	if note.ContactID != contactID {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Note not found", nil, "")
+	}
 
 	contact, err := findByIDAndOrg[models.Contact](a.DB, r, contactID, orgID, "Contact")
 	if err != nil {
@@ -247,6 +250,9 @@ func (a *App) DeleteConversationNote(r *fastglue.Request) error {
 	note, err := findByIDAndOrg[models.ConversationNote](a.DB, r, noteID, orgID, "Note")
 	if err != nil {
 		return nil
+	}
+	if note.ContactID != contactID {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Note not found", nil, "")
 	}
 
 	contact, err := findByIDAndOrg[models.Contact](a.DB, r, contactID, orgID, "Contact")

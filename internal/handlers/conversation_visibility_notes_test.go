@@ -3,6 +3,8 @@ package handlers_test
 import (
 	"testing"
 
+	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/test/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -74,4 +76,90 @@ func TestListConversationNotes_403WhenNotVisible(t *testing.T) {
 	require.NoError(t, app.ListConversationNotes(reqA))
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(reqA),
 		"the assigned agent must still be able to list notes")
+}
+
+// TestUpdateNote_404WhenNoteBelongsToAnotherContact covers the IDOR found in
+// review of the GAP 2 visibility fix: Update/DeleteConversationNote loaded
+// the note by note_id+org only, then ran canInteractWithConversation against
+// the PATH contact — never checking that the note actually belongs to that
+// contact. An agent who lost strict-mode access to contact X (after
+// reassignment) could still edit/delete a note created on X's conversation
+// by supplying a DIFFERENT contact they still have access to (Y) in the path,
+// since the visibility check passed against Y and they still pass the
+// creator check. The fix requires note.ContactID == path contact id, 404
+// otherwise.
+func TestUpdateNote_404WhenNoteBelongsToAnotherContact(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agentRole := testutil.CreateAgentRole(t, app.DB, org.ID) // agent role: no view_all
+	agentA := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	contactX := testutil.CreateTestContact(t, app.DB, org.ID)
+	contactY := testutil.CreateTestContact(t, app.DB, org.ID)
+
+	// Agent A is (or was) assigned to X, and is currently assigned to Y — so
+	// the path-contact visibility check against Y passes; only the missing
+	// ContactID-match assertion stands between A and X's note.
+	activeTransfer(t, app, org.ID, contactX.ID, &agentA.ID, nil)
+	activeTransfer(t, app, org.ID, contactY.ID, &agentA.ID, nil)
+	enableStrictVisibility(t, app, org.ID)
+
+	note := &models.ConversationNote{
+		BaseModel:      models.BaseModel{ID: uuid.New()},
+		OrganizationID: org.ID,
+		ContactID:      contactX.ID,
+		CreatedByID:    agentA.ID,
+		Content:        "note on X",
+	}
+	require.NoError(t, app.DB.Create(note).Error)
+
+	// Agent A calls Update with path id = Y (accessible) but note_id belongs to X.
+	req := testutil.NewJSONRequest(t, map[string]any{"content": "hacked"})
+	testutil.SetAuthContext(req, org.ID, agentA.ID)
+	testutil.SetPathParam(req, "id", contactY.ID.String())
+	testutil.SetPathParam(req, "note_id", note.ID.String())
+
+	require.NoError(t, app.UpdateConversationNote(req))
+	assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req),
+		"a note belonging to a different contact must 404, not be editable via an unrelated accessible contact")
+
+	var got models.ConversationNote
+	require.NoError(t, app.DB.Where("id = ?", note.ID).First(&got).Error)
+	assert.Equal(t, "note on X", got.Content, "note must remain unchanged")
+}
+
+// TestDeleteNote_404WhenNoteBelongsToAnotherContact is the Delete analogue of
+// TestUpdateNote_404WhenNoteBelongsToAnotherContact — same IDOR, same fix.
+func TestDeleteNote_404WhenNoteBelongsToAnotherContact(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agentRole := testutil.CreateAgentRole(t, app.DB, org.ID) // agent role: no view_all
+	agentA := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	contactX := testutil.CreateTestContact(t, app.DB, org.ID)
+	contactY := testutil.CreateTestContact(t, app.DB, org.ID)
+
+	activeTransfer(t, app, org.ID, contactX.ID, &agentA.ID, nil)
+	activeTransfer(t, app, org.ID, contactY.ID, &agentA.ID, nil)
+	enableStrictVisibility(t, app, org.ID)
+
+	note := &models.ConversationNote{
+		BaseModel:      models.BaseModel{ID: uuid.New()},
+		OrganizationID: org.ID,
+		ContactID:      contactX.ID,
+		CreatedByID:    agentA.ID,
+		Content:        "note on X",
+	}
+	require.NoError(t, app.DB.Create(note).Error)
+
+	req := testutil.NewRequest(t)
+	testutil.SetAuthContext(req, org.ID, agentA.ID)
+	testutil.SetPathParam(req, "id", contactY.ID.String())
+	testutil.SetPathParam(req, "note_id", note.ID.String())
+
+	require.NoError(t, app.DeleteConversationNote(req))
+	assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req),
+		"a note belonging to a different contact must 404, not be deletable via an unrelated accessible contact")
+
+	var stillExists int64
+	app.DB.Model(&models.ConversationNote{}).Where("id = ?", note.ID).Count(&stillExists)
+	assert.Equal(t, int64(1), stillExists, "note must not be deleted")
 }
