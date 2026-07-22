@@ -1137,6 +1137,14 @@ func (a *App) AssignContact(r *fastglue.Request) error {
 		return nil
 	}
 
+	// Visibility gate: reassignment is an interaction. Without it a contacts:write
+	// holder with no view_all could reassign a carteira-only conversation to
+	// themselves and flip their own visibility on.
+	if !a.canInteractWithConversation(userID, orgID, contact) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You do not have access to this conversation", nil, "")
+	}
+
 	// If assigning to a user, verify they exist in the same org
 	if req.UserID != nil {
 		var user models.User
@@ -1288,6 +1296,13 @@ func (a *App) UpdateContactTags(r *fastglue.Request) error {
 	contact, err := findByIDAndOrg[models.Contact](a.DB, r, contactID, orgID, "Contact")
 	if err != nil {
 		return nil
+	}
+
+	// Visibility gate: tags are conversation data; gate mutating them the same
+	// way SendMessage and the other action surfaces are gated.
+	if !a.canInteractWithConversation(userID, orgID, contact) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You do not have access to this conversation", nil, "")
 	}
 
 	// Convert tags to JSONBArray
@@ -1465,6 +1480,16 @@ func (a *App) UpdateContact(r *fastglue.Request) error {
 	contact, err := findByIDAndOrg[models.Contact](a.DB, r, contactID, orgID, "Contact")
 	if err != nil {
 		return nil
+	}
+
+	// Visibility gate: editing a contact (including reassignment via
+	// assigned_user_id) is an interaction with its conversation, and the handler
+	// reads back full contact detail. Gate the whole handler so a contacts:write
+	// holder without view_all cannot mutate or read a conversation they can't see
+	// — nor reassign a carteira-only conversation to themselves to gain access.
+	if !a.canInteractWithConversation(userID, orgID, contact) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You do not have access to this conversation", nil, "")
 	}
 	oldContact := *contact
 

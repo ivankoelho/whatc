@@ -362,6 +362,68 @@ func TestListAgentTransfers_StrictVisibility(t *testing.T) {
 	assert.True(t, mgrSees[contactB.ID.String()], "view_all manager sees B's transfer")
 }
 
+func TestAssignContact_403WithoutVisibility(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+	// A custom role with contacts:write but NO conversations:view_all.
+	writerRole := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "contact-writer",
+		[]string{"contacts:write"})
+	ownerA := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	userB := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&writerRole.ID))
+
+	// Carteira-only contact owned by A (no active transfer).
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(contact).Update("assigned_user_id", ownerA.ID).Error)
+	enableStrictVisibility(t, app, org.ID)
+
+	// B (contacts:write, no view_all) tries to reassign the contact to self.
+	req := testutil.NewJSONRequest(t, map[string]any{"user_id": userB.ID.String()})
+	testutil.SetAuthContext(req, org.ID, userB.ID)
+	testutil.SetPathParam(req, "id", contact.ID.String())
+
+	require.NoError(t, app.AssignContact(req))
+	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(req),
+		"a contacts:write user without view_all cannot reassign a conversation they can't view")
+
+	var stored models.Contact
+	require.NoError(t, app.DB.First(&stored, "id = ?", contact.ID).Error)
+	require.NotNil(t, stored.AssignedUserID)
+	assert.Equal(t, ownerA.ID, *stored.AssignedUserID, "assignment must be untouched")
+}
+
+func TestExportContacts_StrictVisibility(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	// contacts:export but NO view_all.
+	exporterRole := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "strict-exporter",
+		[]string{"contacts:export"})
+	exporter := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&exporterRole.ID))
+	other := testutil.CreateTestUser(t, app.DB, org.ID)
+
+	mine := testutil.CreateTestContactWith(t, app.DB, org.ID, testutil.WithPhoneNumber("+15551111"))
+	require.NoError(t, app.DB.Model(mine).Update("assigned_user_id", exporter.ID).Error)
+	theirs := testutil.CreateTestContactWith(t, app.DB, org.ID, testutil.WithPhoneNumber("+15552222"))
+	require.NoError(t, app.DB.Model(theirs).Update("assigned_user_id", other.ID).Error)
+
+	enableStrictVisibility(t, app, org.ID)
+
+	req := testutil.NewJSONRequest(t, map[string]any{
+		"table":   "contacts",
+		"columns": []string{"phone_number", "profile_name"},
+	})
+	req.RequestCtx.Request.Header.SetMethod("POST")
+	testutil.SetAuthContext(req, org.ID, exporter.ID)
+
+	require.NoError(t, app.ExportData(req))
+	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+	csv := string(testutil.GetResponseBody(req))
+
+	assert.Contains(t, csv, mine.PhoneNumber, "exporter sees own carteira contact")
+	assert.NotContains(t, csv, theirs.PhoneNumber,
+		"strict mode: a no-view_all exporter must not export another agent's conversation")
+}
+
 func TestSendMessage_403AfterTransfer(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
