@@ -84,6 +84,11 @@ type BroadcastMessage struct {
 	// selected ContactID. Without it, clients with no contact selected also
 	// receive the message — the historical behaviour BroadcastToContact relies on.
 	RequireContactMatch bool
+
+	// IgnoreContactFilter skips the currentContact interest-filter so an
+	// authorized client receives the event even while viewing a different
+	// conversation. The authorization gate still applies. Used for new_message.
+	IgnoreContactFilter bool
 }
 
 // ContactStatusChangedPayload is the payload for contact_status_changed events.
