@@ -165,13 +165,23 @@ const slaSettings = ref({
   client_reminder_minutes: 30,
   client_reminder_message: '',
   client_auto_close_minutes: 60,
-  client_auto_close_message: ''
+  client_auto_close_message: '',
+  close_inactive_attendances: false
 })
 
 const isClientReminderEnabled = ref(false)
 
 watch(isClientReminderEnabled, (newValue) => {
   slaSettings.value.client_reminder_enabled = newValue
+})
+
+// A close time at or below the reminder means the reminder is never sent,
+// since the attendance would already be closed by the time it would fire.
+const inactivityError = computed(() => {
+  const reminder = slaSettings.value.client_reminder_minutes
+  const close = slaSettings.value.client_auto_close_minutes
+  if (!close || !reminder) return ''
+  return close <= reminder ? t('chatbotSettings.inactivityOrderError') : ''
 })
 
 const isSLAEnabled = ref(false)
@@ -258,7 +268,8 @@ onMounted(async () => {
         client_reminder_minutes: chatbotData.settings.client_reminder_minutes || 30,
         client_reminder_message: chatbotData.settings.client_reminder_message || '',
         client_auto_close_minutes: chatbotData.settings.client_auto_close_minutes || 60,
-        client_auto_close_message: chatbotData.settings.client_auto_close_message || ''
+        client_auto_close_message: chatbotData.settings.client_auto_close_message || '',
+        close_inactive_attendances: chatbotData.settings.close_inactive_attendances === true
       }
     }
   } catch (error) {
@@ -358,6 +369,11 @@ async function saveAISettings() {
 }
 
 async function saveSLASettings() {
+  if (inactivityError.value) {
+    toast.error(inactivityError.value)
+    return
+  }
+
   isSubmitting.value = true
   try {
     await chatbotService.updateSettings({
@@ -373,7 +389,8 @@ async function saveSLASettings() {
       client_reminder_minutes: slaSettings.value.client_reminder_minutes,
       client_reminder_message: slaSettings.value.client_reminder_message,
       client_auto_close_minutes: slaSettings.value.client_auto_close_minutes,
-      client_auto_close_message: slaSettings.value.client_auto_close_message
+      client_auto_close_message: slaSettings.value.client_auto_close_message,
+      close_inactive_attendances: slaSettings.value.close_inactive_attendances
     })
     toast.success(t('chatbotSettings.slaSettingsSaved'))
     refreshActivityLog(slaLogKey)
@@ -844,6 +861,12 @@ function removeEscalationUser(userId: string) {
                         <Label>{{ $t('chatbotSettings.autoCloseAfter') }}</Label>
                         <Input v-model.number="slaSettings.client_auto_close_minutes" type="number" min="1" max="1440" />
                         <p class="text-xs text-muted-foreground">{{ $t('chatbotSettings.autoCloseAfterHint') }}</p>
+                        <p
+                          v-if="inactivityError"
+                          class="text-xs text-destructive rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2"
+                        >
+                          {{ inactivityError }}
+                        </p>
                       </div>
                     </div>
 
@@ -864,11 +887,22 @@ function removeEscalationUser(userId: string) {
                         :rows="2"
                       />
                     </div>
+
+                    <div class="flex items-center justify-between pt-2">
+                      <div>
+                        <p class="font-medium">{{ $t('chatbotSettings.closeInactiveAttendances') }}</p>
+                        <p class="text-sm text-muted-foreground">{{ $t('chatbotSettings.closeInactiveAttendancesDesc') }}</p>
+                      </div>
+                      <Switch
+                        :checked="slaSettings.close_inactive_attendances"
+                        @update:checked="(val: boolean) => slaSettings.close_inactive_attendances = val"
+                      />
+                    </div>
                   </div>
                 </div>
 
                 <div class="flex justify-end pt-2">
-                  <Button @click="saveSLASettings" :disabled="isSubmitting">
+                  <Button @click="saveSLASettings" :disabled="isSubmitting || !!inactivityError">
                     <Loader2 v-if="isSubmitting" class="mr-2 h-4 w-4 animate-spin" />
                     {{ $t('chatbotSettings.saveChanges') }}
                   </Button>

@@ -299,7 +299,15 @@ func (a *App) InvalidateWebhooksCache(orgID uuid.UUID) {
 	a.Redis.Del(ctx, cacheKey)
 }
 
-// getSLAEnabledSettingsCached retrieves all SLA-enabled chatbot settings from cache or database
+// getSLAEnabledSettingsCached retrieves the chatbot settings the SLA processor
+// must visit each tick from cache or database.
+//
+// This is intentionally broader than "SLA enabled": the human-attendance
+// inactivity sweep (close_inactive_attendances) is decoupled from SLA, so an org
+// can opt into it without turning SLA on. Such an org must still be loaded here
+// or its sweep would never run. processOrganizationSLA gates every genuine SLA
+// pass behind settings.SLA.Enabled, so an org loaded only for the sweep runs
+// nothing but the sweep.
 func (a *App) getSLAEnabledSettingsCached() ([]models.ChatbotSettings, error) {
 	ctx := context.Background()
 
@@ -314,7 +322,7 @@ func (a *App) getSLAEnabledSettingsCached() ([]models.ChatbotSettings, error) {
 
 	// Cache miss - fetch from database
 	var settings []models.ChatbotSettings
-	if err := a.DB.Where("sla_enabled = ?", true).Find(&settings).Error; err != nil {
+	if err := a.DB.Where("sla_enabled = ? OR close_inactive_attendances = ?", true, true).Find(&settings).Error; err != nil {
 		return nil, err
 	}
 

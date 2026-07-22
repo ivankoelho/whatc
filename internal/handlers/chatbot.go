@@ -46,6 +46,9 @@ type ChatbotSettingsResponse struct {
 	ClientReminderMessage  string `json:"client_reminder_message"`
 	ClientAutoCloseMinutes int    `json:"client_auto_close_minutes"`
 	ClientAutoCloseMessage string `json:"client_auto_close_message"`
+	// CloseInactiveAttendances opts the org into auto-closing idle human
+	// attendances using the same inactivity window (default false).
+	CloseInactiveAttendances bool `json:"close_inactive_attendances"`
 }
 
 // ChatbotStatsResponse represents chatbot statistics
@@ -186,11 +189,12 @@ func (a *App) GetChatbotSettings(r *fastglue.Request) error {
 		SLAWarningMessage:      settings.SLA.WarningMessage,
 		SLAEscalationNotifyIDs: settings.SLA.EscalationNotifyIDs,
 		// Client Inactivity Settings
-		ClientReminderEnabled:  settings.ClientInactivity.ReminderEnabled,
-		ClientReminderMinutes:  settings.ClientInactivity.ReminderMinutes,
-		ClientReminderMessage:  settings.ClientInactivity.ReminderMessage,
-		ClientAutoCloseMinutes: settings.ClientInactivity.AutoCloseMinutes,
-		ClientAutoCloseMessage: settings.ClientInactivity.AutoCloseMessage,
+		ClientReminderEnabled:    settings.ClientInactivity.ReminderEnabled,
+		ClientReminderMinutes:    settings.ClientInactivity.ReminderMinutes,
+		ClientReminderMessage:    settings.ClientInactivity.ReminderMessage,
+		ClientAutoCloseMinutes:   settings.ClientInactivity.AutoCloseMinutes,
+		ClientAutoCloseMessage:   settings.ClientInactivity.AutoCloseMessage,
+		CloseInactiveAttendances: settings.ClientInactivity.CloseInactiveAttendances,
 	}
 
 	return r.SendEnvelope(map[string]any{
@@ -235,19 +239,20 @@ func chatbotHoursSnapshot(s *models.ChatbotSettings) map[string]any {
 // (SLA + Client Inactivity live on the same tab in the UI).
 func chatbotSLASnapshot(s *models.ChatbotSettings) map[string]any {
 	return map[string]any{
-		"sla_enabled":               s.SLA.Enabled,
-		"sla_response_minutes":      s.SLA.ResponseMinutes,
-		"sla_resolution_minutes":    s.SLA.ResolutionMinutes,
-		"sla_escalation_minutes":    s.SLA.EscalationMinutes,
-		"sla_auto_close_hours":      s.SLA.AutoCloseHours,
-		"sla_auto_close_message":    s.SLA.AutoCloseMessage,
-		"sla_warning_message":       s.SLA.WarningMessage,
-		"sla_escalation_notify_ids": s.SLA.EscalationNotifyIDs,
-		"client_reminder_enabled":   s.ClientInactivity.ReminderEnabled,
-		"client_reminder_minutes":   s.ClientInactivity.ReminderMinutes,
-		"client_reminder_message":   s.ClientInactivity.ReminderMessage,
-		"client_auto_close_minutes": s.ClientInactivity.AutoCloseMinutes,
-		"client_auto_close_message": s.ClientInactivity.AutoCloseMessage,
+		"sla_enabled":                s.SLA.Enabled,
+		"sla_response_minutes":       s.SLA.ResponseMinutes,
+		"sla_resolution_minutes":     s.SLA.ResolutionMinutes,
+		"sla_escalation_minutes":     s.SLA.EscalationMinutes,
+		"sla_auto_close_hours":       s.SLA.AutoCloseHours,
+		"sla_auto_close_message":     s.SLA.AutoCloseMessage,
+		"sla_warning_message":        s.SLA.WarningMessage,
+		"sla_escalation_notify_ids":  s.SLA.EscalationNotifyIDs,
+		"client_reminder_enabled":    s.ClientInactivity.ReminderEnabled,
+		"client_reminder_minutes":    s.ClientInactivity.ReminderMinutes,
+		"client_reminder_message":    s.ClientInactivity.ReminderMessage,
+		"client_auto_close_minutes":  s.ClientInactivity.AutoCloseMinutes,
+		"client_auto_close_message":  s.ClientInactivity.AutoCloseMessage,
+		"close_inactive_attendances": s.ClientInactivity.CloseInactiveAttendances,
 	}
 }
 
@@ -300,15 +305,27 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		SLAWarningMessage      *string   `json:"sla_warning_message"`
 		SLAEscalationNotifyIDs *[]string `json:"sla_escalation_notify_ids"`
 		// Client Inactivity Settings
-		ClientReminderEnabled  *bool   `json:"client_reminder_enabled"`
-		ClientReminderMinutes  *int    `json:"client_reminder_minutes"`
-		ClientReminderMessage  *string `json:"client_reminder_message"`
-		ClientAutoCloseMinutes *int    `json:"client_auto_close_minutes"`
-		ClientAutoCloseMessage *string `json:"client_auto_close_message"`
+		ClientReminderEnabled    *bool   `json:"client_reminder_enabled"`
+		ClientReminderMinutes    *int    `json:"client_reminder_minutes"`
+		ClientReminderMessage    *string `json:"client_reminder_message"`
+		ClientAutoCloseMinutes   *int    `json:"client_auto_close_minutes"`
+		ClientAutoCloseMessage   *string `json:"client_auto_close_message"`
+		CloseInactiveAttendances *bool   `json:"close_inactive_attendances"`
 	}
 
 	if err := json.Unmarshal(r.RequestCtx.PostBody(), &req); err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid request body", nil, "")
+	}
+
+	// A close time at or below the reminder means the reminder is never sent —
+	// the attendance is already closed by the time it would fire. The Vue form
+	// enforces this, but the API must too: these two minutes now gate a pass
+	// that closes conversations and messages customers.
+	if req.ClientReminderMinutes != nil && req.ClientAutoCloseMinutes != nil &&
+		*req.ClientReminderMinutes != 0 && *req.ClientAutoCloseMinutes != 0 &&
+		*req.ClientAutoCloseMinutes <= *req.ClientReminderMinutes {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest,
+			"client_auto_close_minutes must be greater than client_reminder_minutes", nil, "")
 	}
 
 	// Get or create settings
@@ -347,7 +364,7 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		req.SLAWarningMessage != nil || req.SLAEscalationNotifyIDs != nil ||
 		req.ClientReminderEnabled != nil || req.ClientReminderMinutes != nil ||
 		req.ClientReminderMessage != nil || req.ClientAutoCloseMinutes != nil ||
-		req.ClientAutoCloseMessage != nil
+		req.ClientAutoCloseMessage != nil || req.CloseInactiveAttendances != nil
 	aiTouched := req.AIEnabled != nil || req.AIProvider != nil || req.AIAPIKey != nil ||
 		req.AIModel != nil || req.AIMaxTokens != nil || req.AISystemPrompt != nil
 
@@ -468,6 +485,9 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 	}
 	if req.ClientAutoCloseMessage != nil {
 		settings.ClientInactivity.AutoCloseMessage = *req.ClientAutoCloseMessage
+	}
+	if req.CloseInactiveAttendances != nil {
+		settings.ClientInactivity.CloseInactiveAttendances = *req.CloseInactiveAttendances
 	}
 
 	if err := a.DB.Save(&settings).Error; err != nil {

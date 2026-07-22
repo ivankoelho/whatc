@@ -122,6 +122,152 @@ func TestTransitionContactStatus(t *testing.T) {
 	})
 }
 
+func TestReleaseContact(t *testing.T) {
+	t.Parallel()
+
+	t.Run("clears the assigned agent and resolves the conversation", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		agent := testutil.CreateTestUser(t, app.DB, org.ID)
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		require.NoError(t, app.DB.Model(contact).Updates(map[string]any{
+			"assigned_user_id": agent.ID,
+			"contact_status":   models.ContactStatusInProgress,
+		}).Error)
+		contact.AssignedUserID = &agent.ID
+		contact.ContactStatus = models.ContactStatusInProgress
+
+		require.NoError(t, app.ReleaseContactForTest(contact, nil, "test"))
+
+		var stored models.Contact
+		require.NoError(t, app.DB.First(&stored, "id = ?", contact.ID).Error)
+		assert.Nil(t, stored.AssignedUserID, "closing must not leave the contact pinned")
+		assert.Equal(t, models.ContactStatusResolved, stored.ContactStatus)
+	})
+
+	t.Run("is idempotent on an already-resolved contact that is still assigned", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		agent := testutil.CreateTestUser(t, app.DB, org.ID)
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		require.NoError(t, app.DB.Model(contact).Updates(map[string]any{
+			"assigned_user_id": agent.ID,
+			"contact_status":   models.ContactStatusResolved,
+		}).Error)
+		contact.AssignedUserID = &agent.ID
+		contact.ContactStatus = models.ContactStatusResolved
+
+		require.NoError(t, app.ReleaseContactForTest(contact, nil, "test"))
+
+		var stored models.Contact
+		require.NoError(t, app.DB.First(&stored, "id = ?", contact.ID).Error)
+		assert.Nil(t, stored.AssignedUserID, "release must clear the assignment even though the status was already resolved")
+		assert.Equal(t, models.ContactStatusResolved, stored.ContactStatus)
+
+		// The status transition is a no-op (already resolved), so
+		// transitionContactStatus's short-circuit must mean no audit entry is
+		// written for it — only a real change produces one.
+		time.Sleep(300 * time.Millisecond) // give any stray goroutine a chance
+		var count int64
+		app.DB.Model(&models.AuditLog{}).
+			Where("resource_type = ? AND resource_id = ?", "contact", contact.ID).
+			Count(&count)
+		assert.Equal(t, int64(0), count,
+			"a no-op status transition must not write a duplicate audit entry")
+	})
+
+	t.Run("records the actor when a person closed it", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		user := testutil.CreateTestUser(t, app.DB, org.ID)
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+
+		require.NoError(t, app.ReleaseContactForTest(contact, &user.ID, "manual close"))
+
+		require.Eventually(t, func() bool {
+			var count int64
+			app.DB.Model(&models.AuditLog{}).
+				Where("resource_type = ? AND resource_id = ? AND user_id = ?", "contact", contact.ID, user.ID).
+				Count(&count)
+			return count == 1
+		}, 3*time.Second, 50*time.Millisecond)
+	})
+}
+
+func TestUpdateContactStatus_ResolveReleasesContact(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+	agent := testutil.CreateTestUser(t, app.DB, org.ID)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(contact).Update("assigned_user_id", agent.ID).Error)
+
+	req := testutil.NewJSONRequest(t, map[string]any{"contact_status": "resolved"})
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	testutil.SetPathParam(req, "id", contact.ID.String())
+
+	require.NoError(t, app.UpdateContactStatus(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var stored models.Contact
+	require.NoError(t, app.DB.First(&stored, "id = ?", contact.ID).Error)
+	assert.Nil(t, stored.AssignedUserID, "resolving must free the contact")
+}
+
+// TestUpdateContactStatus_ResolveClosesAttendance guards the other half of the
+// close: resolving used to free the contact while leaving its AgentTransfer
+// `active` and still carrying an AgentID. hasActiveAgentTransfer then kept the
+// chatbot out of the conversation while nobody owned it.
+func TestUpdateContactStatus_ResolveClosesAttendance(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+	agent := testutil.CreateTestUser(t, app.DB, org.ID)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(contact).Updates(map[string]any{
+		"assigned_user_id": agent.ID,
+		"contact_status":   models.ContactStatusInProgress,
+	}).Error)
+
+	transfer := models.AgentTransfer{
+		BaseModel:      models.BaseModel{ID: uuid.New()},
+		OrganizationID: org.ID,
+		ContactID:      contact.ID,
+		PhoneNumber:    contact.PhoneNumber,
+		Status:         models.TransferStatusActive,
+		Source:         models.TransferSourceManual,
+		AgentID:        &agent.ID,
+		TransferredAt:  time.Now(),
+	}
+	require.NoError(t, app.DB.Create(&transfer).Error)
+
+	req := testutil.NewJSONRequest(t, map[string]any{"contact_status": "resolved"})
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	testutil.SetPathParam(req, "id", contact.ID.String())
+
+	require.NoError(t, app.UpdateContactStatus(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var storedTransfer models.AgentTransfer
+	require.NoError(t, app.DB.First(&storedTransfer, "id = ?", transfer.ID).Error)
+	assert.Equal(t, models.TransferStatusResumed, storedTransfer.Status,
+		"resolving is a close: the attendance must not stay active")
+	require.NotNil(t, storedTransfer.ResumedAt)
+	require.NotNil(t, storedTransfer.ResumedBy)
+	assert.Equal(t, user.ID, *storedTransfer.ResumedBy)
+
+	var stored models.Contact
+	require.NoError(t, app.DB.First(&stored, "id = ?", contact.ID).Error)
+	assert.Nil(t, stored.AssignedUserID, "resolving must free the contact")
+	assert.Equal(t, models.ContactStatusResolved, stored.ContactStatus)
+}
+
 func TestApp_UpdateContactStatus(t *testing.T) {
 	t.Parallel()
 
@@ -395,4 +541,94 @@ func TestContactStatusAutoTransitions(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, changed)
 	})
+}
+
+func TestResumeFromTransferReleasesContact(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+	agent := testutil.CreateTestUser(t, app.DB, org.ID)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(contact).Update("assigned_user_id", agent.ID).Error)
+
+	transfer := models.AgentTransfer{
+		BaseModel:      models.BaseModel{ID: uuid.New()},
+		OrganizationID: org.ID,
+		ContactID:      contact.ID,
+		PhoneNumber:    contact.PhoneNumber,
+		Status:         models.TransferStatusActive,
+		Source:         models.TransferSourceManual,
+		AgentID:        &agent.ID,
+		TransferredAt:  time.Now(),
+	}
+	require.NoError(t, app.DB.Create(&transfer).Error)
+
+	req := testutil.NewJSONRequest(t, nil)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	testutil.SetPathParam(req, "id", transfer.ID.String())
+
+	require.NoError(t, app.ResumeFromTransfer(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var stored models.Contact
+	require.NoError(t, app.DB.First(&stored, "id = ?", contact.ID).Error)
+	assert.Nil(t, stored.AssignedUserID, "closing an attendance must free the contact")
+	assert.Equal(t, models.ContactStatusResolved, stored.ContactStatus)
+}
+
+// TestResumeFromTransferSkipsReleaseWhenContactLoadFails proves the fix for
+// the unchecked contact load in ResumeFromTransfer: when the contact record
+// can't be loaded (simulated here via soft-delete, which makes a plain
+// `.First` return ErrRecordNotFound without violating the contact_id FK),
+// the handler must not call releaseContact with a zero-value Contact. Doing
+// so would silently "succeed" (no assignment to clear, an UPDATE matching
+// zero rows, a "Contact released" log line) while leaving the real contact
+// permanently pinned to its agent — exactly the bug this test guards against.
+func TestResumeFromTransferSkipsReleaseWhenContactLoadFails(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+	agent := testutil.CreateTestUser(t, app.DB, org.ID)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(contact).Update("assigned_user_id", agent.ID).Error)
+
+	transfer := models.AgentTransfer{
+		BaseModel:      models.BaseModel{ID: uuid.New()},
+		OrganizationID: org.ID,
+		ContactID:      contact.ID,
+		PhoneNumber:    contact.PhoneNumber,
+		Status:         models.TransferStatusActive,
+		Source:         models.TransferSourceManual,
+		AgentID:        &agent.ID,
+		TransferredAt:  time.Now(),
+	}
+	require.NoError(t, app.DB.Create(&transfer).Error)
+
+	// Soft-delete the contact so the handler's `.Where("id = ?", ...).First(...)`
+	// fails with ErrRecordNotFound, the same as a genuinely missing/unreadable
+	// row — the contact_id FK constraint means the row can't simply not exist,
+	// but gorm's default scope excludes soft-deleted rows just the same.
+	require.NoError(t, app.DB.Delete(contact).Error)
+
+	req := testutil.NewJSONRequest(t, nil)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	testutil.SetPathParam(req, "id", transfer.ID.String())
+
+	require.NoError(t, app.ResumeFromTransfer(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	// The bug: releaseContact called on a zero-value Contact would not touch
+	// this row at all (it would UPDATE a nonexistent uuid.Nil row instead).
+	// Assert the real contact's assignment survives untouched, proving the
+	// handler skipped the release rather than silently no-op'ing on it.
+	var stored models.Contact
+	require.NoError(t, app.DB.Unscoped().First(&stored, "id = ?", contact.ID).Error)
+	require.NotNil(t, stored.AssignedUserID, "a failed contact load must not be treated as a successful release")
+	assert.Equal(t, agent.ID, *stored.AssignedUserID, "the agent assignment must be untouched when the contact couldn't be loaded")
 }

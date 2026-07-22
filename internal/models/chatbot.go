@@ -40,6 +40,10 @@ type ClientInactivityConfig struct {
 	ReminderMessage  string `gorm:"column:client_reminder_message;type:text" json:"client_reminder_message"`      // Reminder message to client
 	AutoCloseMinutes int    `gorm:"column:client_auto_close_minutes;default:60" json:"client_auto_close_minutes"` // Auto-close after Y minutes of client inactivity
 	AutoCloseMessage string `gorm:"column:client_auto_close_message;type:text" json:"client_auto_close_message"`  // Message when closing due to client inactivity
+	// CloseInactiveAttendances gates the human-attendance inactivity sweep. It is
+	// its own opt-in (default false) so enabling chatbot reminders never
+	// mass-closes human attendances on the first tick after deploy.
+	CloseInactiveAttendances bool `gorm:"column:close_inactive_attendances;default:false" json:"close_inactive_attendances"` // Also auto-close idle human attendances
 }
 
 // AIConfig holds AI provider settings

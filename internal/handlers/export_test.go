@@ -27,3 +27,13 @@ func (a *App) SenderNameForBroadcastForTest(msg *models.Message) string {
 func SenderNameForTest(m *models.Message) string {
 	return senderName(m)
 }
+
+// CreateAgentInitiatedTransferForTest exposes createAgentInitiatedTransfer.
+func (a *App) CreateAgentInitiatedTransferForTest(account *models.WhatsAppAccount, contact *models.Contact, agentID uuid.UUID) {
+	a.createAgentInitiatedTransfer(account, contact, agentID)
+}
+
+// ReleaseContactForTest exposes releaseContact.
+func (a *App) ReleaseContactForTest(contact *models.Contact, actorID *uuid.UUID, reason string) error {
+	return a.releaseContact(contact, actorID, reason)
+}
