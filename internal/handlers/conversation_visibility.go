@@ -3,6 +3,7 @@ package handlers
 import (
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"gorm.io/gorm"
 )
 
 // conversationAccess is the single authorization decision for a conversation,
@@ -92,6 +93,68 @@ func (a *App) userInTeam(userID, teamID uuid.UUID) bool {
 		Where("team_id = ? AND user_id = ?", teamID, userID).
 		Count(&count)
 	return count > 0
+}
+
+// scopeVisibleConversations is the SQL translation of authorizeConversation.canView
+// (see spec §"A função central"). It must return exactly the contacts for which
+// canViewConversation is true — TestVisibilityScopeMatchesFunction guards that.
+// It replaces scopeAssignedContact at every listing/read site.
+func (a *App) scopeVisibleConversations(query *gorm.DB, userID, orgID uuid.UUID) *gorm.DB {
+	settings, _ := a.getChatbotSettingsCached(orgID, "")
+
+	// Flag off: preserve scopeAssignedContact exactly.
+	if settings == nil || !settings.AgentAssignment.StrictConversationVisibility {
+		if a.HasPermission(userID, models.ResourceContacts, models.ActionRead, orgID) {
+			return query
+		}
+		return query.Where("assigned_user_id = ? OR id IN (?)",
+			userID,
+			a.DB.Model(&models.AgentTransfer{}).Select("contact_id").
+				Where("agent_id = ? AND organization_id = ? AND status = ?",
+					userID, orgID, models.TransferStatusActive),
+		)
+	}
+
+	// Strict: view_all sees everything.
+	if a.HasPermission(userID, models.ResourceConversations, models.ActionViewAll, orgID) {
+		return query
+	}
+
+	// A contact is visible when, considering only its LATEST active transfer:
+	//   - that transfer is assigned to the user, OR
+	//   - that transfer is a team queue whose team the user belongs to, OR
+	//   - that transfer is the general queue (no team), OR
+	//   - there is NO active transfer and (carteira == user OR no carteira).
+	//
+	// "latest active transfer" mirrors activeTransferFor's Order(transferred_at DESC).
+	// Expressed as: the contact has NO active transfer OTHER than ones the user
+	// may see, is a delicate SQL. Simpler and provably equivalent to the function:
+	// a contact is visible iff it has an active transfer the user may see, OR it
+	// has no active transfer and the carteira rule passes.
+
+	activeSub := a.DB.Model(&models.AgentTransfer{}).Select("contact_id").
+		Where("organization_id = ? AND status = ?", orgID, models.TransferStatusActive)
+
+	// contact_ids with an active transfer the user MAY see.
+	visibleTransferSub := a.DB.Model(&models.AgentTransfer{}).Select("contact_id").
+		Where("organization_id = ? AND status = ?", orgID, models.TransferStatusActive).
+		Where(`
+			agent_id = ?
+			OR (agent_id IS NULL AND team_id IS NULL)
+			OR (agent_id IS NULL AND team_id IN (?))
+		`,
+			userID,
+			a.DB.Model(&models.TeamMember{}).Select("team_id").Where("user_id = ?", userID),
+		)
+
+	return query.Where(`
+		id IN (?)
+		OR (id NOT IN (?) AND (assigned_user_id IS NULL OR assigned_user_id = ?))
+	`,
+		visibleTransferSub,
+		activeSub,
+		userID,
+	)
 }
 
 // userOwnsContact mirrors the old scopeAssignedContact "mine" condition, for

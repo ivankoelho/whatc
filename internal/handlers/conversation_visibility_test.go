@@ -166,3 +166,61 @@ func TestAuthorizeConversation(t *testing.T) {
 		assert.False(t, app.CanViewConversationForTest(carteira.ID, org.ID, contact))
 	})
 }
+
+// TestVisibilityScopeMatchesFunction is the anti-divergence guard: the SQL scope
+// must return exactly the contacts for which canViewConversation is true.
+func TestVisibilityScopeMatchesFunction(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+	viewer := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	otherAgent := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	team := createTeamWithMember(t, app, org.ID, viewer.ID)
+
+	// One contact per branch of the tree.
+	assignedToViewer := testutil.CreateTestContact(t, app.DB, org.ID)
+	activeTransfer(t, app, org.ID, assignedToViewer.ID, &viewer.ID, nil)
+
+	assignedToOther := testutil.CreateTestContact(t, app.DB, org.ID)
+	activeTransfer(t, app, org.ID, assignedToOther.ID, &otherAgent.ID, nil)
+
+	teamQueue := testutil.CreateTestContact(t, app.DB, org.ID)
+	activeTransfer(t, app, org.ID, teamQueue.ID, nil, &team.ID)
+
+	generalQueue := testutil.CreateTestContact(t, app.DB, org.ID)
+	activeTransfer(t, app, org.ID, generalQueue.ID, nil, nil)
+
+	carteira := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(carteira).Update("assigned_user_id", otherAgent.ID).Error)
+
+	idle := testutil.CreateTestContact(t, app.DB, org.ID) // no transfer, no carteira
+
+	enableStrictVisibility(t, app, org.ID)
+
+	// All contacts in the org.
+	all := []*models.Contact{assignedToViewer, assignedToOther, teamQueue, generalQueue, carteira, idle}
+
+	// Expected set per the function.
+	expected := map[uuid.UUID]bool{}
+	for _, c := range all {
+		var fresh models.Contact
+		require.NoError(t, app.DB.First(&fresh, "id = ?", c.ID).Error)
+		if app.CanViewConversationForTest(viewer.ID, org.ID, &fresh) {
+			expected[c.ID] = true
+		}
+	}
+
+	// Actual set from the SQL scope.
+	var visible []models.Contact
+	q := app.ScopeVisibleConversationsForTest(
+		app.DB.Where("organization_id = ?", org.ID), viewer.ID, org.ID)
+	require.NoError(t, q.Find(&visible).Error)
+
+	got := map[uuid.UUID]bool{}
+	for i := range visible {
+		got[visible[i].ID] = true
+	}
+
+	assert.Equal(t, expected, got,
+		"scopeVisibleConversations must return exactly the contacts canViewConversation allows")
+}
