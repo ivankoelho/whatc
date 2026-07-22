@@ -450,9 +450,11 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 		})
 		a.Log.Error("Failed to send message", "error", err, "message_id", msg.ID, "type", msg.MessageType)
 
-		// Broadcast failure status via WebSocket so frontend updates immediately
+		// Broadcast failure status via WebSocket so frontend updates immediately.
+		// Routed through the authorized-viewers gate (not BroadcastToOrg) since
+		// this reveals which conversation a message belongs to.
 		if opts.BroadcastWebSocket && a.WSHub != nil {
-			a.WSHub.BroadcastToOrg(req.Account.OrganizationID, websocket.WSMessage{
+			a.WSHub.BroadcastToAuthorizedViewers(req.Account.OrganizationID, req.Contact.ID, websocket.WSMessage{
 				Type: websocket.TypeStatusUpdate,
 				Payload: map[string]any{
 					"message_id":    msg.ID,
@@ -476,9 +478,11 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 		a.dispatchMessageSentWebhook(req.Account, req.Contact, msg)
 	}
 
-	// Broadcast status update via WebSocket
+	// Broadcast status update via WebSocket. Routed through the
+	// authorized-viewers gate (not BroadcastToOrg) since this reveals which
+	// conversation a message belongs to.
 	if opts.BroadcastWebSocket && a.WSHub != nil {
-		a.WSHub.BroadcastToOrg(req.Account.OrganizationID, websocket.WSMessage{
+		a.WSHub.BroadcastToAuthorizedViewers(req.Account.OrganizationID, req.Contact.ID, websocket.WSMessage{
 			Type: websocket.TypeStatusUpdate,
 			Payload: map[string]any{
 				"message_id": msg.ID,
@@ -569,13 +573,15 @@ func (a *App) broadcastNewMessage(orgID uuid.UUID, msg *models.Message, contact 
 	})
 }
 
-// broadcastReactionUpdate broadcasts a reaction update via WebSocket
+// broadcastReactionUpdate broadcasts a reaction update via WebSocket.
+// Routed through the authorized-viewers gate (not BroadcastToOrg) since
+// reaction activity reveals which conversation a message belongs to.
 func (a *App) broadcastReactionUpdate(orgID uuid.UUID, messageID, contactID uuid.UUID, reactions any) {
 	if a.WSHub == nil {
 		return
 	}
-	a.WSHub.BroadcastToOrg(orgID, websocket.WSMessage{
-		Type: "reaction_update",
+	a.WSHub.BroadcastToAuthorizedViewers(orgID, contactID, websocket.WSMessage{
+		Type: websocket.TypeReactionUpdate,
 		Payload: map[string]any{
 			"message_id": messageID.String(),
 			"contact_id": contactID.String(),

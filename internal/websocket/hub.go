@@ -257,6 +257,16 @@ func (h *Hub) BroadcastNewMessageToAuthorized(orgID, contactID uuid.UUID, msg WS
 	})
 }
 
+// BroadcastToAuthorizedViewers delivers a background conversation event
+// (reaction updates, message status updates) to every client authorized to
+// view the contact's conversation, regardless of which contact each client
+// currently has selected. This is the same gated delivery as
+// BroadcastNewMessageToAuthorized — the alias just reads more naturally for
+// non-"new message" event types.
+func (h *Hub) BroadcastToAuthorizedViewers(orgID, contactID uuid.UUID, msg WSMessage) {
+	h.BroadcastNewMessageToAuthorized(orgID, contactID, msg)
+}
+
 // BroadcastToUser sends a message to a specific user
 func (h *Hub) BroadcastToUser(orgID, userID uuid.UUID, msg WSMessage) {
 	h.Broadcast(BroadcastMessage{

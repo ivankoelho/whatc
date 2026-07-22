@@ -129,6 +129,39 @@ func TestClient_HandleSetContact_AllowedSetsCurrentContact(t *testing.T) {
 	}
 }
 
+// 6. reaction/status-style events: broadcastReactionUpdate and the
+// TypeStatusUpdate sites in handlers now route through
+// BroadcastToAuthorizedViewers (an alias for BroadcastNewMessageToAuthorized)
+// instead of BroadcastToOrg, so they're gated by the same authorizer as
+// new_message. Confirms a denied user gets nothing for these event types.
+func TestHub_BroadcastToAuthorizedViewers_ReactionAndStatusGated(t *testing.T) {
+	hub := newTestHub(t)
+	orgID := uuid.New()
+	contactID := uuid.New()
+	userA := uuid.New()
+	userB := uuid.New()
+
+	hub.SetConversationAuthorizer(allowOnly(userA))
+
+	cA := newTestClient(hub, userA, orgID)
+	cB := newTestClient(hub, userB, orgID)
+	hub.Register(cA)
+	hub.Register(cB)
+	waitForClientCount(t, hub, 2)
+
+	reactionMsg := websocket.WSMessage{Type: websocket.TypeReactionUpdate, Payload: "reaction"}
+	hub.BroadcastToAuthorizedViewers(orgID, contactID, reactionMsg)
+
+	assertReceivesMessage(t, cA, websocket.TypeReactionUpdate)
+	assertNoMessage(t, cB)
+
+	statusMsg := websocket.WSMessage{Type: websocket.TypeStatusUpdate, Payload: "status"}
+	hub.BroadcastToAuthorizedViewers(orgID, contactID, statusMsg)
+
+	assertReceivesMessage(t, cA, websocket.TypeStatusUpdate)
+	assertNoMessage(t, cB)
+}
+
 // 5. Nil-authorizer regression: with no authorizer, BroadcastToContact behaves
 // exactly as before — a client with no contact selected still receives it.
 func TestHub_NilAuthorizer_BroadcastToContactUnchanged(t *testing.T) {

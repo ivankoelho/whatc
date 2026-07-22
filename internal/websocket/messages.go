@@ -14,10 +14,11 @@ type WSMessage struct {
 
 // Message types
 const (
-	TypeAuth          = "auth"
-	TypeNewMessage    = "new_message"
-	TypeStatusUpdate  = "status_update"
-	TypeContactUpdate = "contact_update"
+	TypeAuth           = "auth"
+	TypeNewMessage     = "new_message"
+	TypeStatusUpdate   = "status_update"
+	TypeReactionUpdate = "reaction_update"
+	TypeContactUpdate  = "contact_update"
 	// TypeContactStatusChanged carries ContactStatusChangedPayload
 	TypeContactStatusChanged = "contact_status_changed"
 	// TypeAgentTyping carries AgentTypingPayload
