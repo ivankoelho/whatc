@@ -559,7 +559,11 @@ func (a *App) broadcastNewMessage(orgID uuid.UUID, msg *models.Message, contact 
 		}
 	}
 
-	a.WSHub.BroadcastToOrg(orgID, websocket.WSMessage{
+	// Deliver only to clients authorized to view this conversation. The hub's
+	// injected authorizer (CanViewConversationByID) is the single source of
+	// truth; IgnoreContactFilter lets authorized clients update their sidebar
+	// even while viewing a different conversation.
+	a.WSHub.BroadcastNewMessageToAuthorized(orgID, contact.ID, websocket.WSMessage{
 		Type:    websocket.TypeNewMessage,
 		Payload: payload,
 	})

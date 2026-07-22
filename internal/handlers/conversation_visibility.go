@@ -70,6 +70,16 @@ func (a *App) canViewConversation(userID, orgID uuid.UUID, contact *models.Conta
 	return a.authorizeConversation(userID, orgID, contact).canView
 }
 
+// CanViewConversationByID loads the contact org-scoped and reports whether the
+// user may view its conversation. Used to authorize WebSocket delivery.
+func (a *App) CanViewConversationByID(userID, orgID, contactID uuid.UUID) bool {
+	var contact models.Contact
+	if err := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID).First(&contact).Error; err != nil {
+		return false
+	}
+	return a.canViewConversation(userID, orgID, &contact)
+}
+
 func (a *App) canInteractWithConversation(userID, orgID uuid.UUID, contact *models.Contact) bool {
 	return a.authorizeConversation(userID, orgID, contact).canInteract
 }
