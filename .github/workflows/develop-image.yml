@@ -7,6 +7,11 @@ on:
 
 jobs:
   develop-image:
+    # Publishing the develop image pushes to the upstream author's Docker Hub
+    # namespace (shridh0r/*), so it only makes sense on the canonical repo.
+    # Forks lack the DOCKERHUB_* secrets and push rights; skip there so a fork's
+    # main CI stays green (a skipped job reports neutral, not failure).
+    if: ${{ github.event.repository.fork == false }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
