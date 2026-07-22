@@ -206,7 +206,7 @@ export class ChatbotSettingsPage extends BasePage {
   }
 
   async expectAgentsTabVisible() {
-    await expect(this.page.getByText('Allow Agents to Pick from Queue')).toBeVisible()
+    await expect(this.page.getByText('Allow Agents to Take Attendances from the Queue')).toBeVisible()
   }
 
   async expectHoursTabVisible() {
