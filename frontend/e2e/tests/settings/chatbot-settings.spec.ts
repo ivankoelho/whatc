@@ -100,11 +100,11 @@ test.describe('Agents Tab', () => {
   // recent-activity / audit-log panel which renders entries like
   // "Assign To Same Agent: false" (different casing + trailing colon).
   test('should have allow queue pickup toggle', async ({ page }) => {
-    await expect(page.getByText('Allow Agents to Pick from Queue', { exact: true })).toBeVisible()
+    await expect(page.getByText('Allow Agents to Take Attendances from the Queue', { exact: true })).toBeVisible()
   })
 
   test('should have assign to same agent toggle', async ({ page }) => {
-    await expect(page.getByText('Assign to Same Agent', { exact: true })).toBeVisible()
+    await expect(page.getByText('Keep the same agent during an attendance', { exact: true })).toBeVisible()
   })
 
   test('should have current conversation only toggle', async ({ page }) => {
