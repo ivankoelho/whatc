@@ -114,7 +114,22 @@ test.describe.serial('Strict conversation visibility', () => {
     )
     orgId = orgRows[0]!.org as string
 
-    const accounts = await api.getWhatsAppAccounts().catch(() => [] as { name: string }[])
+    // A real WhatsApp account must exist for an authorized send to return 200:
+    // resolveWhatsAppAccount rejects an unknown account name with 400 before
+    // the (async, fake-token) delivery. Create one if the environment has none,
+    // mirroring template-sending.spec.ts — otherwise the manager-can-message
+    // assertion is coupled to test-ordering.
+    let accounts = await api.getWhatsAppAccounts().catch(() => [] as { name: string }[])
+    if (accounts.length === 0) {
+      const uid = Date.now().toString().slice(-8)
+      await api.createWhatsAppAccount({
+        name: `e2e-visibility-${uid}`,
+        phone_id: `phone-${uid}`,
+        business_id: `biz-${uid}`,
+        access_token: `token-${uid}`,
+      }).catch(() => {})
+      accounts = await api.getWhatsAppAccounts().catch(() => [] as { name: string }[])
+    }
     accountName = accounts[0]?.name ?? 'test-account'
 
     await setStrictVisibility(true)
