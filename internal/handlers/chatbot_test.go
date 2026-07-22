@@ -2348,7 +2348,11 @@ func TestApp_ListChatbotSessions(t *testing.T) {
 	t.Run("success returns all sessions", func(t *testing.T) {
 		app := newTestApp(t)
 		org := testutil.CreateTestOrganization(t, app.DB)
-		user := testutil.CreateTestUser(t, app.DB, org.ID)
+		// Session listing now mirrors conversation visibility. Flag off, an admin
+		// role holds contacts:read, so the user can view every contact's
+		// conversation — and therefore every session.
+		adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+		user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
 		contact := testutil.CreateTestContact(t, app.DB, org.ID)
 
 		createSessionForChatbotTest(t, app, org.ID, contact.ID, "+1234567890", models.SessionStatusActive)
@@ -2396,7 +2400,8 @@ func TestApp_ListChatbotSessions(t *testing.T) {
 	t.Run("filter by status active", func(t *testing.T) {
 		app := newTestApp(t)
 		org := testutil.CreateTestOrganization(t, app.DB)
-		user := testutil.CreateTestUser(t, app.DB, org.ID)
+		adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+		user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
 		contact := testutil.CreateTestContact(t, app.DB, org.ID)
 
 		createSessionForChatbotTest(t, app, org.ID, contact.ID, "+1111111111", models.SessionStatusActive)
@@ -2427,7 +2432,8 @@ func TestApp_ListChatbotSessions(t *testing.T) {
 	t.Run("filter by status completed", func(t *testing.T) {
 		app := newTestApp(t)
 		org := testutil.CreateTestOrganization(t, app.DB)
-		user := testutil.CreateTestUser(t, app.DB, org.ID)
+		adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+		user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
 		contact := testutil.CreateTestContact(t, app.DB, org.ID)
 
 		createSessionForChatbotTest(t, app, org.ID, contact.ID, "+2222222222", models.SessionStatusActive)
@@ -2456,12 +2462,15 @@ func TestApp_ListChatbotSessions(t *testing.T) {
 		app := newTestApp(t)
 
 		org1 := testutil.CreateTestOrganization(t, app.DB)
-		user1 := testutil.CreateTestUser(t, app.DB, org1.ID)
+		adminRole1 := testutil.CreateAdminRole(t, app.DB, org1.ID)
+		user1 := testutil.CreateTestUser(t, app.DB, org1.ID, testutil.WithRoleID(&adminRole1.ID))
 		contact1 := testutil.CreateTestContact(t, app.DB, org1.ID)
 		createSessionForChatbotTest(t, app, org1.ID, contact1.ID, "+3333333333", models.SessionStatusActive)
 
 		org2 := testutil.CreateTestOrganization(t, app.DB)
+		adminRole2 := testutil.CreateAdminRole(t, app.DB, org2.ID)
 		user2 := testutil.CreateTestUser(t, app.DB, org2.ID,
+			testutil.WithRoleID(&adminRole2.ID),
 			testutil.WithEmail(testutil.UniqueEmail("org2-sess")),
 		)
 		contact2 := testutil.CreateTestContact(t, app.DB, org2.ID)
@@ -2509,7 +2518,8 @@ func TestApp_GetChatbotSession(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		app := newTestApp(t)
 		org := testutil.CreateTestOrganization(t, app.DB)
-		user := testutil.CreateTestUser(t, app.DB, org.ID)
+		adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+		user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
 		contact := testutil.CreateTestContact(t, app.DB, org.ID)
 		session := createSessionForChatbotTest(t, app, org.ID, contact.ID, "+5555555555", models.SessionStatusActive)
 
@@ -2548,7 +2558,8 @@ func TestApp_GetChatbotSession(t *testing.T) {
 	t.Run("session with messages", func(t *testing.T) {
 		app := newTestApp(t)
 		org := testutil.CreateTestOrganization(t, app.DB)
-		user := testutil.CreateTestUser(t, app.DB, org.ID)
+		adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+		user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
 		contact := testutil.CreateTestContact(t, app.DB, org.ID)
 		session := createSessionForChatbotTest(t, app, org.ID, contact.ID, "+6666666666", models.SessionStatusActive)
 

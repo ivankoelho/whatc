@@ -453,6 +453,84 @@ func TestSendMessage_403AfterTransfer(t *testing.T) {
 		"the source agent loses interaction access immediately at transfer")
 }
 
+// createChatbotSession creates a chatbot session for a contact.
+func createChatbotSession(t *testing.T, app *handlers.App, orgID, contactID uuid.UUID) *models.ChatbotSession {
+	t.Helper()
+	session := &models.ChatbotSession{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  orgID,
+		ContactID:       contactID,
+		WhatsAppAccount: "default",
+		PhoneNumber:     "+550000",
+		Status:          models.SessionStatusCompleted,
+	}
+	require.NoError(t, app.DB.Create(session).Error)
+	return session
+}
+
+func TestGetChatbotSession_404WhenNotVisible(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+	agentA := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	agentB := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+
+	// Contact X served by agent A (active transfer), so B cannot view it.
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	activeTransfer(t, app, org.ID, contact.ID, &agentA.ID, nil)
+	session := createChatbotSession(t, app, org.ID, contact.ID)
+	enableStrictVisibility(t, app, org.ID)
+
+	getFor := func(uid uuid.UUID) int {
+		req := testutil.NewGETRequest(t)
+		testutil.SetAuthContext(req, org.ID, uid)
+		testutil.SetPathParam(req, "id", session.ID.String())
+		require.NoError(t, app.GetChatbotSession(req))
+		return testutil.GetResponseStatusCode(req)
+	}
+
+	assert.Equal(t, fasthttp.StatusNotFound, getFor(agentB.ID),
+		"agent B must not read the transcript of A's conversation")
+	assert.Equal(t, fasthttp.StatusOK, getFor(agentA.ID),
+		"the assigned agent A can read the session")
+}
+
+func TestListChatbotSessions_StrictVisibility(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+	agentA := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	agentB := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+
+	contactX := testutil.CreateTestContact(t, app.DB, org.ID)
+	activeTransfer(t, app, org.ID, contactX.ID, &agentA.ID, nil)
+	sessionX := createChatbotSession(t, app, org.ID, contactX.ID)
+
+	contactY := testutil.CreateTestContact(t, app.DB, org.ID)
+	activeTransfer(t, app, org.ID, contactY.ID, &agentB.ID, nil)
+	sessionY := createChatbotSession(t, app, org.ID, contactY.ID)
+
+	enableStrictVisibility(t, app, org.ID)
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, agentB.ID)
+	require.NoError(t, app.ListChatbotSessions(req))
+
+	var resp struct {
+		Data struct {
+			Sessions []models.ChatbotSession `json:"sessions"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &resp))
+
+	ids := map[uuid.UUID]bool{}
+	for _, s := range resp.Data.Sessions {
+		ids[s.ID] = true
+	}
+	assert.True(t, ids[sessionY.ID], "agent B sees B's session")
+	assert.False(t, ids[sessionX.ID], "agent B must not see A's session")
+}
+
 func TestSendMessage_MultiTenantIsolation(t *testing.T) {
 	app := newTestApp(t)
 	orgX := testutil.CreateTestOrganization(t, app.DB)
