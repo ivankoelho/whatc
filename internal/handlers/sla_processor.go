@@ -141,30 +141,36 @@ func (p *SLAProcessor) autoCloseExpiredTransfers(orgID uuid.UUID, settings model
 			continue
 		}
 
-		// Send auto-close message to customer if configured
+		// Send auto-close message to customer if configured. Kept ahead of the
+		// close, unchanged, per the SLA path's existing customer-message logic.
 		if settings.SLA.AutoCloseMessage != "" {
 			p.sendSLATextToCustomer(transfer, "SLA auto-close message", settings.SLA.AutoCloseMessage)
 		}
 
-		// Update transfer status
-		if err := p.app.DB.Model(&transfer).Updates(map[string]any{
+		// Close and release atomically through the shared path so this close
+		// gets the same side effects as every other — chatbot-tracking clear
+		// and the lifecycle webhook — instead of a bare status update. Same
+		// release rules as a manual close: an automatic close must not leave the
+		// contact pinned to the agent who never answered.
+		var toRelease *models.Contact
+		var contact models.Contact
+		if err := p.app.DB.First(&contact, "id = ?", transfer.ContactID).Error; err != nil {
+			p.app.Log.Error("Failed to load contact for SLA auto-close; closing the attendance without releasing",
+				"error", err, "contact_id", transfer.ContactID, "transfer_id", transfer.ID)
+		} else {
+			toRelease = &contact
+		}
+
+		if err := p.app.closeAttendance(&transfer, toRelease, map[string]any{
 			"status":     models.TransferStatusExpired,
 			"resumed_at": now,
 			"notes":      transfer.Notes + "\n[Auto-closed: No agent response within SLA]",
-		}).Error; err != nil {
-			p.app.Log.Error("Failed to expire transfer", "error", err, "transfer_id", transfer.ID)
+		}, nil, "SLA auto-close", closeAttendanceOptions{webhookEvent: models.WebhookEventTransferResumed}); err != nil {
+			p.app.Log.Error("Failed to auto-close expired transfer; left active for the next tick",
+				"error", err, "transfer_id", transfer.ID)
 			continue
 		}
-
-		// Same release rules as a manual close — an automatic close must not
-		// leave the contact pinned to the agent who never answered.
-		var contact models.Contact
-		if err := p.app.DB.First(&contact, "id = ?", transfer.ContactID).Error; err == nil {
-			if err := p.app.releaseContact(&contact, nil, "SLA auto-close"); err != nil {
-				p.app.Log.Error("Failed to release contact on SLA auto-close",
-					"error", err, "contact_id", contact.ID)
-			}
-		}
+		transfer.Status = models.TransferStatusExpired
 
 		closedCount++
 		p.app.Log.Info("Transfer auto-closed due to expiry",
@@ -585,7 +591,7 @@ func (p *SLAProcessor) closeInactiveAttendances(orgID uuid.UUID, settings models
 			"status":     models.TransferStatusExpired,
 			"resumed_at": now,
 			"notes":      transfer.Notes + "\n[Auto-closed: no interaction within the inactivity window]",
-		}, nil, "inactivity auto-close"); err != nil {
+		}, nil, "inactivity auto-close", closeAttendanceOptions{webhookEvent: models.WebhookEventTransferResumed}); err != nil {
 			p.app.Log.Error("Failed to close inactive attendance; left active for the next tick",
 				"error", err, "org_id", orgID, "contact_id", transfer.ContactID, "transfer_id", transfer.ID)
 			continue

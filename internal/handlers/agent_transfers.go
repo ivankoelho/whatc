@@ -638,12 +638,20 @@ func (a *App) CreateAgentTransfer(r *fastglue.Request) error {
 // `contact` may be nil when the contact row could not be loaded: there is then
 // nothing to release, and the transfer is closed on its own. Callers load the
 // contact themselves so they can decide what a failed load means.
+//
+// The side effects every close path shares — clearing chatbot tracking so the
+// client-inactivity SLA can't fire on a closed attendance, and dispatching the
+// transfer lifecycle webhook so integrations see the close — happen here,
+// once, after the commit. Each path keeps only what legitimately differs: its
+// own broadcast (resumed vs expired) and, for the SLA paths, the customer
+// message. `opts.webhookEvent` carries the event to dispatch (empty = none).
 func (a *App) closeAttendance(
 	transfer *models.AgentTransfer,
 	contact *models.Contact,
 	updates map[string]any,
 	actorID *uuid.UUID,
 	reason string,
+	opts closeAttendanceOptions,
 ) error {
 	var previousStatus models.ContactStatus
 	if contact != nil {
@@ -674,7 +682,46 @@ func (a *App) closeAttendance(
 	if commit != nil {
 		commit()
 	}
+
+	// Post-commit side effects, common to every close path. Run only after the
+	// writes committed so a rolled-back attempt never clears tracking or tells
+	// an integration a conversation closed that is in fact still open.
+	if contact != nil {
+		a.ClearContactChatbotTracking(contact.ID)
+	}
+	if opts.webhookEvent != "" {
+		a.dispatchTransferLifecycleWebhook(transfer, contact, opts.webhookEvent)
+	}
 	return nil
+}
+
+// closeAttendanceOptions carries the parts of a close that legitimately differ
+// between paths. Kept as a struct so new per-path knobs don't churn every
+// closeAttendance call site.
+type closeAttendanceOptions struct {
+	// webhookEvent is dispatched once, after a successful commit. Empty skips
+	// the webhook. Every close path emits WebhookEventTransferResumed — the
+	// "attendance closed, chatbot active again" lifecycle event.
+	webhookEvent models.WebhookEvent
+}
+
+// dispatchTransferLifecycleWebhook fires a transfer lifecycle webhook for a
+// closed attendance. Contact fields come from the loaded contact when present,
+// falling back to the transfer's own phone number when the contact couldn't be
+// loaded, so the event is still well-formed.
+func (a *App) dispatchTransferLifecycleWebhook(transfer *models.AgentTransfer, contact *models.Contact, event models.WebhookEvent) {
+	data := TransferEventData{
+		TransferID:      transfer.ID.String(),
+		ContactID:       transfer.ContactID.String(),
+		ContactPhone:    transfer.PhoneNumber,
+		Source:          transfer.Source,
+		WhatsAppAccount: transfer.WhatsAppAccount,
+	}
+	if contact != nil {
+		data.ContactPhone = contact.PhoneNumber
+		data.ContactName = contact.ProfileName
+	}
+	a.DispatchWebhook(transfer.OrganizationID, event, data)
 }
 
 // closeActiveAttendanceForContact closes the contact's active attendance, if
@@ -697,22 +744,20 @@ func (a *App) closeActiveAttendanceForContact(contact *models.Contact, actorID *
 	}
 
 	// Same close as ResumeFromTransfer performs, so there is one notion of a
-	// closed attendance regardless of which button produced it.
+	// closed attendance regardless of which button produced it — including the
+	// lifecycle webhook, which the resolve button used to skip.
 	now := time.Now()
 	if err := a.closeAttendance(&transfer, contact, map[string]any{
 		"status":     models.TransferStatusResumed,
 		"resumed_at": now,
 		"resumed_by": actorID,
-	}, actorID, reason); err != nil {
+	}, actorID, reason, closeAttendanceOptions{webhookEvent: models.WebhookEventTransferResumed}); err != nil {
 		return err
 	}
 	transfer.Status = models.TransferStatusResumed
 	transfer.ResumedAt = &now
 	transfer.ResumedBy = actorID
 
-	// Clear chatbot tracking so client inactivity SLA doesn't trigger after the
-	// attendance is closed.
-	a.ClearContactChatbotTracking(contact.ID)
 	a.broadcastTransferResumed(&transfer)
 	return nil
 }
@@ -763,7 +808,7 @@ func (a *App) ResumeFromTransfer(r *fastglue.Request) error {
 		"status":     models.TransferStatusResumed,
 		"resumed_at": now,
 		"resumed_by": userID,
-	}, &userID, "attendance closed"); err != nil {
+	}, &userID, "attendance closed", closeAttendanceOptions{webhookEvent: models.WebhookEventTransferResumed}); err != nil {
 		a.Log.Error("Failed to close attendance; nothing was changed",
 			"error", err,
 			"org_id", orgID,
@@ -776,21 +821,9 @@ func (a *App) ResumeFromTransfer(r *fastglue.Request) error {
 	transfer.ResumedAt = &now
 	transfer.ResumedBy = &userID
 
-	// Clear chatbot tracking so client inactivity SLA doesn't trigger after transfer is closed
-	a.ClearContactChatbotTracking(transfer.ContactID)
-
-	// Broadcast WebSocket notification
+	// Broadcast WebSocket notification. Chatbot-tracking clear and the
+	// transfer.resumed webhook are handled inside closeAttendance.
 	a.broadcastTransferResumed(transfer)
-
-	// Dispatch webhook for transfer resumed
-	a.DispatchWebhook(orgID, models.WebhookEventTransferResumed, TransferEventData{
-		TransferID:      transfer.ID.String(),
-		ContactID:       contact.ID.String(),
-		ContactPhone:    contact.PhoneNumber,
-		ContactName:     contact.ProfileName,
-		Source:          transfer.Source,
-		WhatsAppAccount: transfer.WhatsAppAccount,
-	})
 
 	return r.SendEnvelope(map[string]any{
 		"message": "Transfer resumed, chatbot is now active for this contact",
