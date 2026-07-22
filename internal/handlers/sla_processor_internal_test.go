@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -643,4 +644,168 @@ func TestSLAEscalationFiresWhenNoAgentResponse(t *testing.T) {
 
 	assert.Equal(t, 1, updated.SLA.EscalationLevel, "escalation level should increase to 1")
 	require.NotNil(t, updated.SLA.EscalatedAt)
+}
+
+// --- processStaleTransfers: full tick (org selection + pass gating) ---
+//
+// These exercise the real path the fix touches: getSLAEnabledSettingsCached must
+// now load an org that opted into the inactivity sweep without SLA, and
+// processOrganizationSLA must still gate every SLA-only pass behind SLA.Enabled.
+
+// persistSLASettings wipes the (global, org-agnostic-keyed) chatbot_settings
+// table, invalidates the shared SLA settings cache, and stores exactly one
+// settings row, so a processStaleTransfers tick visits only this org. The cache
+// is invalidated again after the write so the tick re-reads from the DB.
+func persistSLASettings(t *testing.T, app *App, settings models.ChatbotSettings) {
+	t.Helper()
+	if app.Redis == nil {
+		t.Skip("TEST_REDIS_URL not set; a processor tick reads the SLA settings cache")
+	}
+	require.NoError(t, app.DB.Exec("DELETE FROM chatbot_settings").Error)
+	if settings.ID == uuid.Nil {
+		settings.ID = uuid.New()
+	}
+	require.NoError(t, app.DB.Create(&settings).Error)
+	app.InvalidateSLASettingsCache()
+}
+
+// TestProcessTick_SweepRunsForSLADisabledOrg is the core of the fix: an org with
+// SLA off but close_inactive_attendances on must have its idle attendances swept
+// by a tick. Before the fix, getSLAEnabledSettingsCached filtered WHERE
+// sla_enabled = true, so this org was never loaded and the sweep silently never
+// ran — the toggle that lied.
+func TestProcessTick_SweepRunsForSLADisabledOrg(t *testing.T) {
+	app := newSLATestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agent := testutil.CreateTestUser(t, app.DB, org.ID)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+
+	idle := time.Now().Add(-90 * time.Minute)
+	require.NoError(t, app.DB.Model(contact).Updates(map[string]any{
+		"assigned_user_id": agent.ID,
+		"last_message_at":  idle,
+	}).Error)
+
+	transfer := models.AgentTransfer{
+		BaseModel:      models.BaseModel{ID: uuid.New()},
+		OrganizationID: org.ID,
+		ContactID:      contact.ID,
+		PhoneNumber:    contact.PhoneNumber,
+		Status:         models.TransferStatusActive,
+		Source:         models.TransferSourceManual,
+		AgentID:        &agent.ID,
+		TransferredAt:  idle,
+	}
+	require.NoError(t, app.DB.Create(&transfer).Error)
+
+	settings := models.ChatbotSettings{OrganizationID: org.ID}
+	settings.SLA.Enabled = false
+	settings.ClientInactivity.CloseInactiveAttendances = true
+	settings.ClientInactivity.AutoCloseMinutes = 60
+	persistSLASettings(t, app, settings)
+
+	proc := NewSLAProcessor(app, time.Minute)
+	proc.processStaleTransfers()
+
+	var stored models.AgentTransfer
+	require.NoError(t, app.DB.First(&stored, "id = ?", transfer.ID).Error)
+	assert.Equal(t, models.TransferStatusExpired, stored.Status,
+		"an SLA-disabled org with the sweep flag on must have idle attendances closed by a tick")
+}
+
+// TestProcessTick_SLAPassSkippedForSLADisabledOrg guards the trap: widening the
+// org query must not switch the SLA-only passes on for orgs that never opted
+// into SLA. The org here IS loaded (its sweep flag is on) and the tick runs, but
+// its expired transfer — which autoCloseExpiredTransfers would close if SLA were
+// on — must be left untouched. The transfer is deliberately not sweep-eligible
+// (fresh transferred_at / last_message_at), so the only thing that could close
+// it is the SLA pass, and it must not.
+func TestProcessTick_SLAPassSkippedForSLADisabledOrg(t *testing.T) {
+	app := newSLATestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agent := testutil.CreateTestUser(t, app.DB, org.ID)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+
+	require.NoError(t, app.DB.Model(contact).Updates(map[string]any{
+		"assigned_user_id": agent.ID,
+		"last_message_at":  time.Now(), // fresh — not eligible for the inactivity sweep
+	}).Error)
+
+	// Expired an hour ago, no agent reply → autoCloseExpiredTransfers would close
+	// it were the SLA passes to run. createSLATestTransfer leaves transferred_at
+	// at "now", so the inactivity sweep cannot match it either.
+	expiresAt := time.Now().Add(-1 * time.Hour)
+	transfer := createSLATestTransfer(t, app, org.ID, contact.ID, agent.ID, account.Name, models.SLATracking{
+		ExpiresAt: &expiresAt,
+	})
+
+	settings := models.ChatbotSettings{OrganizationID: org.ID}
+	settings.SLA.Enabled = false   // SLA off
+	settings.SLA.AutoCloseHours = 2 // would auto-close the expired transfer if the pass ran
+	settings.ClientInactivity.CloseInactiveAttendances = true // org loaded only for the sweep
+	settings.ClientInactivity.AutoCloseMinutes = 60
+	persistSLASettings(t, app, settings)
+
+	proc := NewSLAProcessor(app, time.Minute)
+	proc.processStaleTransfers()
+
+	var stored models.AgentTransfer
+	require.NoError(t, app.DB.First(&stored, "id = ?", transfer.ID).Error)
+	assert.Equal(t, models.TransferStatusActive, stored.Status,
+		"autoCloseExpiredTransfers is an SLA-only pass: it must not run for an SLA-disabled org, even one loaded for the sweep")
+}
+
+// TestProcessTick_ClosesOnceWhenBothEnabled verifies that an org with both
+// sla_enabled and the sweep flag on closes an idle, SLA-expired attendance
+// exactly once. Both the SLA auto-close pass and the inactivity sweep are
+// candidates for this transfer; the sweep re-queries status = active, so the
+// already-committed close leaves nothing for it to redo. The close note carries
+// a per-pass marker, so exactly one "[Auto-closed:" marker proves a single close
+// (no double customer message / double broadcast).
+func TestProcessTick_ClosesOnceWhenBothEnabled(t *testing.T) {
+	app := newSLATestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agent := testutil.CreateTestUser(t, app.DB, org.ID)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+
+	idle := time.Now().Add(-90 * time.Minute)
+	require.NoError(t, app.DB.Model(contact).Updates(map[string]any{
+		"assigned_user_id": agent.ID,
+		"last_message_at":  idle,
+	}).Error)
+
+	expiresAt := time.Now().Add(-1 * time.Hour)
+	transfer := models.AgentTransfer{
+		BaseModel:      models.BaseModel{ID: uuid.New()},
+		OrganizationID: org.ID,
+		ContactID:      contact.ID,
+		PhoneNumber:    contact.PhoneNumber,
+		Status:         models.TransferStatusActive,
+		Source:         models.TransferSourceManual,
+		AgentID:        &agent.ID,
+		TransferredAt:  idle,
+		SLA:            models.SLATracking{ExpiresAt: &expiresAt},
+	}
+	require.NoError(t, app.DB.Create(&transfer).Error)
+
+	settings := models.ChatbotSettings{OrganizationID: org.ID}
+	settings.SLA.Enabled = true
+	settings.SLA.AutoCloseHours = 2
+	settings.ClientInactivity.CloseInactiveAttendances = true
+	settings.ClientInactivity.AutoCloseMinutes = 60
+	persistSLASettings(t, app, settings)
+
+	proc := NewSLAProcessor(app, time.Minute)
+	proc.processStaleTransfers()
+
+	var stored models.AgentTransfer
+	require.NoError(t, app.DB.First(&stored, "id = ?", transfer.ID).Error)
+	assert.Equal(t, models.TransferStatusExpired, stored.Status, "the attendance must be closed")
+	assert.Equal(t, 1, strings.Count(stored.Notes, "[Auto-closed:"),
+		"an attendance closed by one tick must carry exactly one auto-close marker — no double close")
+
+	var storedContact models.Contact
+	require.NoError(t, app.DB.First(&storedContact, "id = ?", contact.ID).Error)
+	assert.Nil(t, storedContact.AssignedUserID, "the contact must be released exactly once")
 }

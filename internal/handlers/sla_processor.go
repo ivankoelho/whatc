@@ -75,33 +75,41 @@ func (p *SLAProcessor) processStaleTransfers() {
 func (p *SLAProcessor) processOrganizationSLA(settings models.ChatbotSettings, now time.Time) {
 	orgID := settings.OrganizationID
 
-	// 1. Auto-close expired transfers
-	if settings.SLA.AutoCloseHours > 0 {
-		p.autoCloseExpiredTransfers(orgID, settings, now)
+	// SLA-only passes. getSLAEnabledSettingsCached also loads orgs that opted
+	// into the inactivity sweep without SLA, so every genuine SLA feature must
+	// stay behind this gate — otherwise an org that only wanted the sweep would
+	// silently get expired-transfer auto-close, escalation, breach marking, and
+	// chatbot inactivity reminders switched on with it.
+	if settings.SLA.Enabled {
+		// 1. Auto-close expired transfers
+		if settings.SLA.AutoCloseHours > 0 {
+			p.autoCloseExpiredTransfers(orgID, settings, now)
+		}
+
+		// 2. Escalate transfers past escalation deadline
+		if settings.SLA.EscalationMinutes > 0 {
+			p.escalateTransfers(orgID, settings, now)
+		}
+
+		// 3. Mark SLA breached for transfers past response deadline
+		if settings.SLA.ResponseMinutes > 0 {
+			p.markSLABreached(orgID, now)
+		}
+
+		// 4. Chatbot client-inactivity reminders/auto-close. Rides its own
+		//    ReminderEnabled switch (the "Client Inactivity Reminders" card), but
+		//    remains an SLA feature: it only runs for SLA-enabled orgs.
+		if settings.ClientInactivity.ReminderEnabled {
+			p.processClientInactivity(orgID, settings, now)
+		}
 	}
 
-	// 2. Escalate transfers past escalation deadline
-	if settings.SLA.EscalationMinutes > 0 {
-		p.escalateTransfers(orgID, settings, now)
-	}
-
-	// 3. Mark SLA breached for transfers past response deadline
-	if settings.SLA.ResponseMinutes > 0 {
-		p.markSLABreached(orgID, now)
-	}
-
-	// 4. Handle client inactivity. The two passes have separate opt-in gates:
-	//
-	//   - Chatbot reminders/auto-close ride ReminderEnabled (default false),
-	//     the switch on the "Client Inactivity Reminders" card.
-	//   - Closing idle human attendances rides its own CloseInactiveAttendances
-	//     (default false). It must NOT share the reminder gate: any org already
-	//     using chatbot reminders would otherwise get every human attendance
-	//     idle past AutoCloseMinutes (default:60) mass-closed — customer message
-	//     included — on the first tick after deploy.
-	if settings.ClientInactivity.ReminderEnabled {
-		p.processClientInactivity(orgID, settings, now)
-	}
+	// Human-attendance inactivity sweep — decoupled from SLA. Runs for any org
+	// with CloseInactiveAttendances on (default false), regardless of sla_enabled.
+	// It rides its own gate rather than sharing ReminderEnabled: an org using
+	// chatbot reminders would otherwise get every human attendance idle past
+	// AutoCloseMinutes (default:60) mass-closed — customer message included — on
+	// the first tick after deploy.
 	if settings.ClientInactivity.CloseInactiveAttendances {
 		p.closeInactiveAttendances(orgID, settings, now)
 	}
