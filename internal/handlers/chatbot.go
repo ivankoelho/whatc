@@ -317,6 +317,17 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid request body", nil, "")
 	}
 
+	// A close time at or below the reminder means the reminder is never sent —
+	// the attendance is already closed by the time it would fire. The Vue form
+	// enforces this, but the API must too: these two minutes now gate a pass
+	// that closes conversations and messages customers.
+	if req.ClientReminderMinutes != nil && req.ClientAutoCloseMinutes != nil &&
+		*req.ClientReminderMinutes != 0 && *req.ClientAutoCloseMinutes != 0 &&
+		*req.ClientAutoCloseMinutes <= *req.ClientReminderMinutes {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest,
+			"client_auto_close_minutes must be greater than client_reminder_minutes", nil, "")
+	}
+
 	// Get or create settings
 	var settings models.ChatbotSettings
 	isNew := false

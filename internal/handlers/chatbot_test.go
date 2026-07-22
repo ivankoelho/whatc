@@ -195,6 +195,41 @@ func TestApp_UpdateChatbotSettings(t *testing.T) {
 		assert.True(t, getResp.Data.Settings.SLAEnabled)
 		assert.Equal(t, 10, getResp.Data.Settings.SLAResponseMinutes)
 	})
+
+	t.Run("rejects a close time at or below the reminder", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		user := testutil.CreateTestUser(t, app.DB, org.ID)
+
+		req := testutil.NewJSONRequest(t, map[string]any{
+			"client_reminder_minutes":   30,
+			"client_auto_close_minutes": 30, // not greater than the reminder
+		})
+		testutil.SetAuthContext(req, org.ID, user.ID)
+
+		require.NoError(t, app.UpdateChatbotSettings(req))
+		assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req),
+			"the API must reject an inverted reminder/close pair, matching the Vue form")
+
+		var result map[string]any
+		require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &result))
+		assert.Contains(t, result["message"], "greater than")
+	})
+
+	t.Run("accepts a close time greater than the reminder", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		user := testutil.CreateTestUser(t, app.DB, org.ID)
+
+		req := testutil.NewJSONRequest(t, map[string]any{
+			"client_reminder_minutes":   30,
+			"client_auto_close_minutes": 60,
+		})
+		testutil.SetAuthContext(req, org.ID, user.ID)
+
+		require.NoError(t, app.UpdateChatbotSettings(req))
+		assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+	})
 }
 
 // =============================================================================
