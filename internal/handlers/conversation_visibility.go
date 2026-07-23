@@ -35,12 +35,11 @@ func (a *App) authorizeConversation(userID, orgID uuid.UUID, contact *models.Con
 	}
 
 	// Strict mode.
-	// Supervisors/managers/admins with view_all always pass.
 	if a.HasPermission(userID, models.ResourceConversations, models.ActionViewAll, orgID) {
 		return conversationAccess{canView: true, canInteract: true}
 	}
 
-	// Is there an active transfer? It is the primary authority.
+	// Active transfer is the primary authority.
 	transfer, hasActive := a.activeTransferFor(orgID, contact.ID)
 	if hasActive {
 		switch {
@@ -51,19 +50,34 @@ func (a *App) authorizeConversation(userID, orgID uuid.UUID, contact *models.Con
 			ok := a.userInTeam(userID, *transfer.TeamID)
 			return conversationAccess{canView: ok, canInteract: ok}
 		default:
-			// General queue (no team): any authorized agent.
-			return conversationAccess{canView: true, canInteract: true}
+			// Active general-queue transfer (no agent, no team): fall back to
+			// the account default team, else view_all only.
+			if team := a.accountDefaultTeamID(orgID, contact); team != nil {
+				ok := a.userInTeam(userID, *team)
+				return conversationAccess{canView: ok, canInteract: ok}
+			}
+			return conversationAccess{canView: false, canInteract: false}
 		}
 	}
 
-	// No active transfer: carteira governs, if set.
+	// No active transfer: carteira governs (more specific than any team).
 	if contact.AssignedUserID != nil {
 		ok := *contact.AssignedUserID == userID
 		return conversationAccess{canView: ok, canInteract: ok}
 	}
 
-	// No transfer, no carteira: general pool, authorized agents.
-	return conversationAccess{canView: true, canInteract: true}
+	// No carteira: effective team = flow-set team, else account default team.
+	effTeam := contact.TeamID
+	if effTeam == nil {
+		effTeam = a.accountDefaultTeamID(orgID, contact)
+	}
+	if effTeam != nil {
+		ok := a.userInTeam(userID, *effTeam)
+		return conversationAccess{canView: ok, canInteract: ok}
+	}
+
+	// No transfer, no carteira, no team: view_all only.
+	return conversationAccess{canView: false, canInteract: false}
 }
 
 func (a *App) canViewConversation(userID, orgID uuid.UUID, contact *models.Contact) bool {
@@ -105,6 +119,22 @@ func (a *App) userInTeam(userID, teamID uuid.UUID) bool {
 	return count > 0
 }
 
+// accountDefaultTeamID returns the default team configured on the contact's
+// WhatsApp account, or nil. Used only in strict mode as the last team signal
+// before falling back to view_all-only.
+func (a *App) accountDefaultTeamID(orgID uuid.UUID, contact *models.Contact) *uuid.UUID {
+	if contact == nil || contact.WhatsAppAccount == "" {
+		return nil
+	}
+	var acct models.WhatsAppAccount
+	if err := a.DB.Select("default_team_id").
+		Where("organization_id = ? AND name = ?", orgID, contact.WhatsAppAccount).
+		First(&acct).Error; err != nil {
+		return nil
+	}
+	return acct.DefaultTeamID
+}
+
 // scopeVisibleConversations is the SQL translation of authorizeConversation.canView
 // (see spec §"A função central"). It must return exactly the contacts for which
 // canViewConversation is true — TestVisibilityScopeMatchesFunction guards that.
@@ -130,40 +160,34 @@ func (a *App) scopeVisibleConversations(query *gorm.DB, userID, orgID uuid.UUID)
 		return query
 	}
 
-	// A contact is visible when, considering only its LATEST active transfer:
-	//   - that transfer is assigned to the user, OR
-	//   - that transfer is a team queue whose team the user belongs to, OR
-	//   - that transfer is the general queue (no team), OR
-	//   - there is NO active transfer and (carteira == user OR no carteira).
-	//
-	// "latest active transfer" mirrors activeTransferFor's Order(transferred_at DESC).
-	// Expressed as: the contact has NO active transfer OTHER than ones the user
-	// may see, is a delicate SQL. Simpler and provably equivalent to the function:
-	// a contact is visible iff it has an active transfer the user may see, OR it
-	// has no active transfer and the carteira rule passes.
-
+	myTeams := a.DB.Model(&models.TeamMember{}).Select("team_id").Where("user_id = ?", userID)
 	activeSub := a.DB.Model(&models.AgentTransfer{}).Select("contact_id").
 		Where("organization_id = ? AND status = ?", orgID, models.TransferStatusActive)
+	activeAgentMine := a.DB.Model(&models.AgentTransfer{}).Select("contact_id").
+		Where("organization_id = ? AND status = ? AND agent_id = ?", orgID, models.TransferStatusActive, userID)
+	activeTeamMine := a.DB.Model(&models.AgentTransfer{}).Select("contact_id").
+		Where("organization_id = ? AND status = ? AND agent_id IS NULL AND team_id IN (?)",
+			orgID, models.TransferStatusActive, myTeams)
+	activeGeneral := a.DB.Model(&models.AgentTransfer{}).Select("contact_id").
+		Where("organization_id = ? AND status = ? AND agent_id IS NULL AND team_id IS NULL",
+			orgID, models.TransferStatusActive)
 
-	// contact_ids with an active transfer the user MAY see.
-	visibleTransferSub := a.DB.Model(&models.AgentTransfer{}).Select("contact_id").
-		Where("organization_id = ? AND status = ?", orgID, models.TransferStatusActive).
-		Where(`
-			agent_id = ?
-			OR (agent_id IS NULL AND team_id IS NULL)
-			OR (agent_id IS NULL AND team_id IN (?))
-		`,
-			userID,
-			a.DB.Model(&models.TeamMember{}).Select("team_id").Where("user_id = ?", userID),
-		)
+	// The contact's WhatsApp account default team is one of my teams.
+	acctDefault := `EXISTS (SELECT 1 FROM whatsapp_accounts wa
+		WHERE wa.name = contacts.whats_app_account
+		  AND wa.organization_id = contacts.organization_id
+		  AND wa.default_team_id IN (?))`
 
-	return query.Where(`
-		id IN (?)
-		OR (id NOT IN (?) AND (assigned_user_id IS NULL OR assigned_user_id = ?))
-	`,
-		visibleTransferSub,
-		activeSub,
-		userID,
+	return query.Where(
+		a.DB.
+			Where("id IN (?)", activeAgentMine). // A: active transfer to me
+			Or("id IN (?)", activeTeamMine).      // B: active team queue, my team
+			Or(a.DB.Where("id IN (?)", activeGeneral).Where(acctDefault, myTeams)). // C: general queue + account default mine
+			Or(a.DB.Where("id NOT IN (?)", activeSub).Where("assigned_user_id = ?", userID)). // D: carteira mine
+			Or(a.DB.Where("id NOT IN (?)", activeSub).
+				Where("assigned_user_id IS NULL AND team_id IN (?)", myTeams)). // E: flow team mine
+			Or(a.DB.Where("id NOT IN (?)", activeSub).
+				Where("assigned_user_id IS NULL AND team_id IS NULL").Where(acctDefault, myTeams)), // F: account default mine
 	)
 }
 

@@ -381,6 +381,19 @@ const typeLabel = computed<Record<string, string>>(() => ({
             :placeholder="t('chatbot.properties.phoneNumberPlaceholder')"
             class="h-7 text-xs font-mono"
           />
+          <div class="space-y-1.5">
+            <Label class="text-xs">{{ t('chatbot.properties.buttonTeam') }}</Label>
+            <Select
+              :model-value="btn.team_id || '_none'"
+              @update:model-value="(v: any) => updateButton(Number(idx), 'team_id', v === '_none' ? undefined : v)"
+            >
+              <SelectTrigger class="h-8 text-sm"><SelectValue :placeholder="t('chatbot.properties.buttonTeamNone')" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="_none">{{ t('chatbot.properties.buttonTeamNone') }}</SelectItem>
+                <SelectItem v-for="team in teamsStore.teams" :key="team.id" :value="team.id">{{ team.name }}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
         <p class="text-[10px] text-muted-foreground">{{ t('chatbot.properties.replyButtonsHint') }}</p>
       </div>

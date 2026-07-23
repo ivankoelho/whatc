@@ -257,6 +257,15 @@ func (a *App) releaseContactTx(
 		}
 	}
 
+	hadTeam := contact.TeamID != nil
+	if hadTeam {
+		if err := tx.Model(&models.Contact{}).
+			Where("id = ?", contact.ID).
+			Update("team_id", nil).Error; err != nil {
+			return nil, err
+		}
+	}
+
 	statusChanged, oldStatus, err := a.transitionContactStatusDB(tx, contact, models.ContactStatusResolved, nil)
 	if err != nil {
 		return nil, err
@@ -265,6 +274,9 @@ func (a *App) releaseContactTx(
 	return func() {
 		if wasAssigned {
 			contact.AssignedUserID = nil
+		}
+		if hadTeam {
+			contact.TeamID = nil
 		}
 		if statusChanged {
 			a.notifyContactStatusChange(contact, oldStatus, models.ContactStatusResolved, actorID)

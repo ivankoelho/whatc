@@ -72,6 +72,31 @@ func GetOrCreateContact(db *gorm.DB, orgID uuid.UUID, phoneNumber, profileName s
 	return &contact, true, nil
 }
 
+// FindContactUnscoped finds a contact for the given phone number, trying both
+// normalized and +prefix forms, INCLUDING soft-deleted contacts. This is the
+// same identity resolution GetOrCreateContact uses, but read-only: it never
+// restores a soft-delete or updates the profile name.
+//
+// Use this (not a raw scoped query) anywhere an "does this contact already
+// exist?" check gates authorization — a raw exact-match, non-Unscoped query
+// can miss a contact stored in the other phone-number format, or one that is
+// soft-deleted, and wrongly treat it as brand-new.
+func FindContactUnscoped(db *gorm.DB, orgID uuid.UUID, phoneNumber string) (*models.Contact, error) {
+	normalizedPhone := phoneNumber
+	if len(normalizedPhone) > 0 && normalizedPhone[0] == '+' {
+		normalizedPhone = normalizedPhone[1:]
+	}
+
+	var contact models.Contact
+	if err := db.Unscoped().Where("organization_id = ? AND phone_number = ?", orgID, normalizedPhone).First(&contact).Error; err == nil {
+		return &contact, nil
+	}
+	if err := db.Unscoped().Where("organization_id = ? AND phone_number = ?", orgID, "+"+normalizedPhone).First(&contact).Error; err == nil {
+		return &contact, nil
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+
 // FindContact finds a contact for the given phone number with both forms (normalized and +prefix).
 func FindContact(db *gorm.DB, orgID uuid.UUID, phoneNumber string) (*models.Contact, error) {
 	normalizedPhone := phoneNumber
