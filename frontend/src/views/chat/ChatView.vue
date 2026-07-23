@@ -109,7 +109,7 @@ import { CreateContactDialog } from '@/components/shared'
 import HeaderMediaUpload from '@/components/shared/HeaderMediaUpload.vue'
 import { Info } from 'lucide-vue-next'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const contactsStore = useContactsStore()
@@ -141,6 +141,38 @@ const SCROLL_BOTTOM_THRESHOLD = 80
 const isInfoPanelOpen = ref(false)
 const isNotesPanelOpen = ref(false)
 const contactSessionData = ref<any>(null)
+
+// Resizable contacts column — drag the right edge; width persists across
+// reloads and is clamped so both panes stay usable.
+const CONTACTS_WIDTH_KEY = 'chat.contactsWidth'
+const CONTACTS_MIN_WIDTH = 240
+const CONTACTS_MAX_WIDTH = 560
+const contactsWidth = ref(320)
+const isResizingContacts = ref(false)
+
+function startContactsResize(e: MouseEvent) {
+  isResizingContacts.value = true
+  const startX = e.clientX
+  const startWidth = contactsWidth.value
+  const onMove = (ev: MouseEvent) => {
+    contactsWidth.value = Math.min(
+      CONTACTS_MAX_WIDTH,
+      Math.max(CONTACTS_MIN_WIDTH, startWidth + ev.clientX - startX),
+    )
+  }
+  const onUp = () => {
+    isResizingContacts.value = false
+    localStorage.setItem(CONTACTS_WIDTH_KEY, String(contactsWidth.value))
+    document.body.style.userSelect = ''
+    document.body.style.cursor = ''
+    window.removeEventListener('mousemove', onMove)
+    window.removeEventListener('mouseup', onUp)
+  }
+  document.body.style.userSelect = 'none'
+  document.body.style.cursor = 'col-resize'
+  window.addEventListener('mousemove', onMove)
+  window.addEventListener('mouseup', onUp)
+}
 
 // Multi-account state
 const selectedAccount = ref<string | null>(null)
@@ -468,6 +500,12 @@ const filteredAssignableUsers = computed(() => {
 
 // Fetch contacts on mount (WebSocket is connected in AppLayout)
 onMounted(async () => {
+  // Restore the persisted contacts-column width.
+  const savedContactsWidth = Number(localStorage.getItem(CONTACTS_WIDTH_KEY))
+  if (savedContactsWidth >= CONTACTS_MIN_WIDTH && savedContactsWidth <= CONTACTS_MAX_WIDTH) {
+    contactsWidth.value = savedContactsWidth
+  }
+
   // Ensure auth session is restored
   if (!authStore.isAuthenticated) {
     authStore.restoreSession()
@@ -1384,7 +1422,7 @@ function getMessageStatusClass(status: string) {
 
 function formatMessageTime(dateStr: string) {
   const date = new Date(dateStr)
-  return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+  return date.toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
 }
 
 function formatContactTime(dateStr?: string) {
@@ -1394,13 +1432,13 @@ function formatContactTime(dateStr?: string) {
   const diffDays = Math.floor((now.getTime() - date.getTime()) / 86400000)
 
   if (diffDays === 0) {
-    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+    return date.toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
   } else if (diffDays === 1) {
-    return 'Yesterday'
+    return t('chat.yesterday')
   } else if (diffDays < 7) {
-    return date.toLocaleDateString('en-US', { weekday: 'short' })
+    return date.toLocaleDateString(locale.value, { weekday: 'short' })
   }
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  return date.toLocaleDateString(locale.value, { month: 'short', day: 'numeric' })
 }
 
 function getDateLabel(dateStr: string): string {
@@ -1411,11 +1449,11 @@ function getDateLabel(dateStr: string): string {
   const diffDays = Math.floor((today.getTime() - messageDate.getTime()) / 86400000)
 
   if (diffDays === 0) {
-    return 'Today'
+    return t('chat.today')
   } else if (diffDays === 1) {
-    return 'Yesterday'
+    return t('chat.yesterday')
   }
-  return date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+  return date.toLocaleDateString(locale.value, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
 }
 
 function shouldShowDateSeparator(index: number): boolean {
@@ -1730,7 +1768,19 @@ async function sendMediaMessage() {
 <template>
   <div class="flex h-full bg-[#0a0a0b] light:bg-gray-50">
     <!-- Contacts List -->
-    <div class="w-80 border-r border-white/[0.08] light:border-gray-200 flex flex-col bg-[#0a0a0b] light:bg-white">
+    <div
+      class="relative shrink-0 border-r border-white/[0.08] light:border-gray-200 flex flex-col bg-[#0a0a0b] light:bg-white"
+      :style="{ width: contactsWidth + 'px' }"
+    >
+      <!-- Drag-to-resize handle (right edge) -->
+      <div
+        class="absolute top-0 right-0 z-20 h-full w-1 cursor-col-resize select-none transition-colors hover:bg-emerald-500/40"
+        :class="{ 'bg-emerald-500/50': isResizingContacts }"
+        role="separator"
+        aria-orientation="vertical"
+        :aria-label="$t('chat.resizeContacts')"
+        @mousedown.prevent="startContactsResize"
+      ></div>
       <!-- Search Header -->
       <div class="p-2 border-b border-white/[0.08] light:border-gray-200">
         <div class="flex items-center gap-2">
