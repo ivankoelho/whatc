@@ -109,7 +109,7 @@ import { CreateContactDialog } from '@/components/shared'
 import HeaderMediaUpload from '@/components/shared/HeaderMediaUpload.vue'
 import { Info } from 'lucide-vue-next'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const contactsStore = useContactsStore()
@@ -1384,7 +1384,7 @@ function getMessageStatusClass(status: string) {
 
 function formatMessageTime(dateStr: string) {
   const date = new Date(dateStr)
-  return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+  return date.toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
 }
 
 function formatContactTime(dateStr?: string) {
@@ -1394,13 +1394,13 @@ function formatContactTime(dateStr?: string) {
   const diffDays = Math.floor((now.getTime() - date.getTime()) / 86400000)
 
   if (diffDays === 0) {
-    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+    return date.toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
   } else if (diffDays === 1) {
-    return 'Yesterday'
+    return t('chat.yesterday')
   } else if (diffDays < 7) {
-    return date.toLocaleDateString('en-US', { weekday: 'short' })
+    return date.toLocaleDateString(locale.value, { weekday: 'short' })
   }
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  return date.toLocaleDateString(locale.value, { month: 'short', day: 'numeric' })
 }
 
 function getDateLabel(dateStr: string): string {
@@ -1411,11 +1411,11 @@ function getDateLabel(dateStr: string): string {
   const diffDays = Math.floor((today.getTime() - messageDate.getTime()) / 86400000)
 
   if (diffDays === 0) {
-    return 'Today'
+    return t('chat.today')
   } else if (diffDays === 1) {
-    return 'Yesterday'
+    return t('chat.yesterday')
   }
-  return date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+  return date.toLocaleDateString(locale.value, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
 }
 
 function shouldShowDateSeparator(index: number): boolean {
