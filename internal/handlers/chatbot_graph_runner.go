@@ -266,6 +266,27 @@ func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 			}
 			ctx.session.SessionData[storeAs] = value
 		}
+
+		// Optional per-button team: set the conversation's effective team for
+		// triage-phase visibility (a lightweight field write, NOT a transfer,
+		// so the bot keeps running). Matched by button id.
+		for _, b := range buttonsFromConfig(node.Config) {
+			if id, _ := b["id"].(string); id == ctx.buttonID {
+				if tid, _ := b["team_id"].(string); tid != "" {
+					if parsed, err := uuid.Parse(tid); err == nil {
+						if err := a.DB.Model(&models.Contact{}).Where("id = ?", ctx.contact.ID).
+							Update("team_id", parsed).Error; err != nil {
+							a.Log.Error("buttons node failed to set contact team",
+								"node", node.ID, "contact", ctx.contact.ID, "error", err)
+						} else {
+							ctx.contact.TeamID = &parsed
+						}
+					}
+				}
+				break
+			}
+		}
+
 		return nodeOutcome{outcome: "button:" + ctx.buttonID}, nil
 	}
 

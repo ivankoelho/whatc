@@ -1479,3 +1479,53 @@ func TestRunChatGraph_Prompt_NoRegexAcceptsAnything(t *testing.T) {
 	assert.Equal(t, models.SessionStatusCompleted, session.Status)
 	assert.Equal(t, "literally anything", session.SessionData["email"])
 }
+
+// TestExecChatButtons_SetsContactTeamFromButton verifies that picking a
+// button whose config carries a team_id sets Contact.TeamID as a lightweight
+// field write, without creating an AgentTransfer (the bot must keep running).
+//
+// createTeamWithMember (internal/handlers/conversation_visibility_test.go)
+// lives in package handlers_test, which this file (package handlers) cannot
+// import without an import cycle, so the team fixture is created inline here
+// instead of reusing that helper. Only a Team row is needed (no membership):
+// the button hook just resolves team_id to Contact.TeamID.
+func TestExecChatButtons_SetsContactTeamFromButton(t *testing.T) {
+	app, org, account, contact, session := newGraphTestFixtures(t)
+
+	team := &models.Team{
+		BaseModel:      models.BaseModel{ID: uuid.New()},
+		OrganizationID: org.ID,
+		Name:           "Vendas",
+		IsActive:       true,
+	}
+	require.NoError(t, app.DB.Create(team).Error)
+
+	flow := &models.ChatbotFlow{
+		BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: org.ID,
+		WhatsAppAccount: account.Name, Name: "menu-team", IsEnabled: true,
+		Graph: models.JSONB{
+			"version": 2, "entry_node": "b1",
+			"nodes": []any{
+				map[string]any{"id": "b1", "type": "buttons", "label": "menu",
+					"config": map[string]any{"body": "Escolha",
+						"buttons": []any{map[string]any{"id": "vendas", "title": "Vendas", "team_id": team.ID.String()}}}},
+				map[string]any{"id": "p1", "type": "prompt", "label": "ask",
+					"config": map[string]any{"body": "CEP?", "store_as": "cep"}},
+			},
+			"edges": []any{map[string]any{"from": "b1", "to": "p1", "condition": "button:vendas"}},
+		},
+	}
+	require.NoError(t, app.DB.Create(flow).Error)
+
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "start", "", nil))  // park at b1
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "", "vendas", nil)) // pick Vendas → p1
+
+	var fresh models.Contact
+	require.NoError(t, app.DB.First(&fresh, "id = ?", contact.ID).Error)
+	require.NotNil(t, fresh.TeamID, "button team_id must set Contact.TeamID")
+	assert.Equal(t, team.ID, *fresh.TeamID)
+
+	var transfers int64
+	app.DB.Model(&models.AgentTransfer{}).Where("contact_id = ?", contact.ID).Count(&transfers)
+	assert.Equal(t, int64(0), transfers, "setting team must NOT create a transfer")
+}
