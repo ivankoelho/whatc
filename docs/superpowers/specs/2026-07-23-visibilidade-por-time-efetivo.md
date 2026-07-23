@@ -62,6 +62,12 @@ Mapeamento para a lista de precedência acordada com o produto:
 
 **Mudanças vs. Ciclo 2:** as duas folhas que hoje devolvem "todos os agentes autorizados" (fila geral explícita, e sem-transferência-sem-carteira) passam a resolver por **time padrão da conta → senão `view_all` apenas**. Todo o resto do Ciclo 2 é preservado, incluindo a precedência transferência-ativa > carteira.
 
+### Exclusividade da carteira/atribuição (o porquê)
+
+Quando uma conversa possui um **agente responsável** — carteira (`Contact.AssignedUserID`) ou transferência ativa para um agente (`AgentTransfer.AgentID`) — ela **deixa de ser visível para os demais membros da equipe**, inclusive colegas do mesmo time. Isso é intencional: é uma **decisão de negócio para evitar atendimentos concorrentes** (dois agentes respondendo o mesmo contato ao mesmo tempo, gerando respostas conflitantes e retrabalho).
+
+Consequência operacional: se o agente responsável fica **indisponível** (férias, pausa, desligamento), a conversa **não** volta automaticamente para a equipe. Um **supervisor (`view_all`)** faz a **transferência** para outro agente — a transferência ativa passa a ter precedência imediatamente, sem depender de "liberar" a conversa ao time. Este comportamento é esperado e documentado aqui justamente para que, no futuro, "por que a equipe não vê a conversa do colega?" tenha resposta clara: por design, para não haver atendimento duplicado.
+
 ## Arquitetura
 
 ### Time efetivo — resolução
@@ -122,6 +128,7 @@ Aditiva apenas: colunas `contacts.team_id` e `whatsapp_accounts.default_team_id`
 | Risco | Mitigação |
 |---|---|
 | Conversa some para agentes durante a triagem e ninguém a "puxa" | Por design: supervisor vê; o fluxo/campo default direciona ao time assim que possível. Documentar que "assumir da fila" passa a ser por time |
+| Agente responsável fica indisponível (férias, pausa, desligamento) | Supervisor (`view_all`) transfere a conversa para outro agente. A transferência ativa passa a ter precedência imediatamente, sem necessidade de liberar a conversa ao time |
 | Número sem `default_team_id` e fluxo que nunca grava time | Conversa fica só com `view_all`. Mitigação: a UI destaca contas sem time padrão; o funil do Central grava o time cedo |
 | SQL do scope divergir da função (mais ramos agora) | `TestVisibilityScopeMatchesFunction` estendido é o guarda anti-bifurcação |
 | Carteira vs. time efetivo ambíguo | Precedência explícita: carteira (usuário específico) vence o time efetivo |
