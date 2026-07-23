@@ -606,6 +606,32 @@ func TestSaveIncomingMessage_WithMedia(t *testing.T) {
 	assert.Equal(t, "[image]", dbContact.LastMessagePreview)
 }
 
+func TestChatbotInput(t *testing.T) {
+	img := &MediaInfo{MediaURL: "/uploads/photo.jpg", MediaMimeType: "image/jpeg"}
+	tests := []struct {
+		name           string
+		messageText    string
+		buttonID       string
+		media          *MediaInfo
+		wantInput      string
+		wantActionable bool
+	}{
+		{"text only", "porcelanato cinza", "", nil, "porcelanato cinza", true},
+		{"button only", "", "realizar_pedido", nil, "", true},
+		{"media only feeds the url as input", "", "", img, "/uploads/photo.jpg", true},
+		{"media with caption keeps the caption", "essa aqui", "", img, "essa aqui", true},
+		{"nothing is not actionable", "", "", nil, "", false},
+		{"empty media url is not actionable", "", "", &MediaInfo{}, "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input, actionable := chatbotInput(tt.messageText, tt.buttonID, tt.media)
+			assert.Equal(t, tt.wantInput, input)
+			assert.Equal(t, tt.wantActionable, actionable)
+		})
+	}
+}
+
 func TestSaveIncomingMessage_WithReplyContext(t *testing.T) {
 	app := newProcessorTestApp(t)
 	org, account := createProcessorTestOrg(t, app)
