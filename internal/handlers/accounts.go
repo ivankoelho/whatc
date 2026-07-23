@@ -20,18 +20,19 @@ import (
 
 // AccountRequest represents the request body for creating/updating an account
 type AccountRequest struct {
-	Name                   string `json:"name" validate:"required"`
-	AppID                  string `json:"app_id"`
-	PhoneID                string `json:"phone_id" validate:"required"`
-	BusinessID             string `json:"business_id" validate:"required"`
-	AccessToken            string `json:"access_token" validate:"required"`
-	AppSecret              string `json:"app_secret"` // Meta App Secret for webhook signature verification
-	WebhookVerifyToken     string `json:"webhook_verify_token"`
-	APIVersion             string `json:"api_version"`
-	IsDefaultIncoming      bool   `json:"is_default_incoming"`
-	IsDefaultOutgoing      bool   `json:"is_default_outgoing"`
-	AutoReadReceipt        bool   `json:"auto_read_receipt"`
-	BusinessCallingEnabled bool   `json:"business_calling_enabled"`
+	Name                   string  `json:"name" validate:"required"`
+	AppID                  string  `json:"app_id"`
+	PhoneID                string  `json:"phone_id" validate:"required"`
+	BusinessID             string  `json:"business_id" validate:"required"`
+	AccessToken            string  `json:"access_token" validate:"required"`
+	AppSecret              string  `json:"app_secret"` // Meta App Secret for webhook signature verification
+	WebhookVerifyToken     string  `json:"webhook_verify_token"`
+	APIVersion             string  `json:"api_version"`
+	IsDefaultIncoming      bool    `json:"is_default_incoming"`
+	IsDefaultOutgoing      bool    `json:"is_default_outgoing"`
+	AutoReadReceipt        bool    `json:"auto_read_receipt"`
+	BusinessCallingEnabled bool    `json:"business_calling_enabled"`
+	DefaultTeamID          *string `json:"default_team_id"` // "" ou null limpa; uuid define
 }
 
 // AccountResponse represents the response for an account (without sensitive data)
@@ -261,6 +262,17 @@ func (a *App) UpdateAccount(r *fastglue.Request) error {
 	}
 	account.IsDefaultIncoming = req.IsDefaultIncoming
 	account.IsDefaultOutgoing = req.IsDefaultOutgoing
+
+	if req.DefaultTeamID != nil {
+		if *req.DefaultTeamID == "" {
+			account.DefaultTeamID = nil
+		} else if tid, err := uuid.Parse(*req.DefaultTeamID); err == nil {
+			account.DefaultTeamID = &tid
+		} else {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid default_team_id", nil, "")
+		}
+	}
+
 	account.UpdatedByID = &userID
 
 	if err := a.DB.Save(account).Error; err != nil {
