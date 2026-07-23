@@ -632,6 +632,27 @@ func TestChatbotInput(t *testing.T) {
 	}
 }
 
+func TestAddContactTags(t *testing.T) {
+	app := newProcessorTestApp(t)
+	org, _ := createProcessorTestOrg(t, app)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(contact).Update("tags", models.JSONBArray{"vip"}).Error)
+	contact.Tags = models.JSONBArray{"vip"}
+
+	// Adds new tags, de-dupes the already-present one, trims blank entries.
+	app.addContactTags(contact, []string{"orçamento", "vip", "  "})
+
+	var reloaded models.Contact
+	require.NoError(t, app.DB.First(&reloaded, contact.ID).Error)
+	got := []string{}
+	for _, tag := range reloaded.Tags {
+		if s, ok := tag.(string); ok {
+			got = append(got, s)
+		}
+	}
+	assert.Equal(t, []string{"vip", "orçamento"}, got)
+}
+
 func TestSaveIncomingMessage_WithReplyContext(t *testing.T) {
 	app := newProcessorTestApp(t)
 	org, account := createProcessorTestOrg(t, app)

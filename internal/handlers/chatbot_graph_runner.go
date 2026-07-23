@@ -722,6 +722,12 @@ func (a *App) execChatTransfer(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, e
 		notes = processTemplate(rawNotes, ctx.session.SessionData)
 	}
 
+	// Apply any tags configured on the node so the conversation reaches the
+	// agent already labelled by subject (e.g. "orçamento", "reclamação").
+	if tags := stringSliceFromConfig(node.Config, "tags"); len(tags) > 0 {
+		a.addContactTags(ctx.contact, tags)
+	}
+
 	teamIDStr := stringFromConfig(node.Config, "team_id")
 	if teamIDStr != "" && teamIDStr != "_general" {
 		if parsed, err := uuid.Parse(teamIDStr); err == nil {
@@ -737,6 +743,38 @@ func (a *App) execChatTransfer(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, e
 
 	ctx.session.Status = models.SessionStatusCompleted
 	return nodeOutcome{yield: true}, nil
+}
+
+// addContactTags merges tag names into the contact's tag set (de-duplicated,
+// order preserved) and persists them. Best-effort: a failure is logged and
+// never blocks the flow.
+func (a *App) addContactTags(contact *models.Contact, tags []string) {
+	seen := map[string]bool{}
+	merged := models.JSONBArray{}
+	for _, t := range contact.Tags {
+		if s, ok := t.(string); ok && !seen[s] {
+			seen[s] = true
+			merged = append(merged, s)
+		}
+	}
+	added := false
+	for _, t := range tags {
+		t = strings.TrimSpace(t)
+		if t == "" || seen[t] {
+			continue
+		}
+		seen[t] = true
+		merged = append(merged, t)
+		added = true
+	}
+	if !added {
+		return
+	}
+	if err := a.DB.Model(contact).Update("tags", merged).Error; err != nil {
+		a.Log.Error("transfer node failed to apply tags", "contact", contact.ID, "error", err)
+		return
+	}
+	contact.Tags = merged
 }
 
 // execChatWebhook fires a best-effort HTTP request. Unlike api_call, the
@@ -986,6 +1024,25 @@ func intFromConfig(cfg map[string]any, key string, def int) int {
 		return v
 	}
 	return def
+}
+
+// stringSliceFromConfig returns a []string from config at the given key. JSON
+// arrays decode as []any, so accept both []any and []string; non-string or
+// blank elements are dropped.
+func stringSliceFromConfig(cfg map[string]any, key string) []string {
+	switch v := cfg[key].(type) {
+	case []string:
+		return v
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, e := range v {
+			if s, ok := e.(string); ok && strings.TrimSpace(s) != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 // buttonsFromConfig normalizes node.Config["buttons"] into the shape the
