@@ -2318,6 +2318,8 @@
       "buttonIdPlaceholder": "button_id",
       "urlExamplePlaceholder": "https://exemplo.com",
       "phoneNumberPlaceholder": "+5511999999999",
+      "buttonTeam": "Time para esta opção",
+      "buttonTeamNone": "Sem time (não altera)",
       "replyButtonsHint": "Botões de resposta (máx. 10) devolvem a escolha do usuário. Botões de URL/Telefone (máx. 2 por nó, mutuamente exclusivos com Resposta) abrem um link ou ligam. Conecte os botões de resposta aos próximos nós arrastando a partir do conector do botão no canvas.",
       "selectionButtons": "Seleção (botões)",
       "storeResponseAsOptional": "Armazenar resposta como (opcional)",

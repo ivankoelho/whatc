@@ -2318,6 +2318,8 @@
       "buttonIdPlaceholder": "button_id",
       "urlExamplePlaceholder": "https://example.com",
       "phoneNumberPlaceholder": "+1234567890",
+      "buttonTeam": "Team for this option",
+      "buttonTeamNone": "No team (unchanged)",
       "replyButtonsHint": "Reply buttons (max 10) send the user's choice back. URL / Phone buttons (max 2 per node, mutually exclusive with Reply) open a link or call. Wire reply buttons to next nodes by dragging from the button handle on the canvas.",
       "selectionButtons": "Selection (buttons)",
       "storeResponseAsOptional": "Store response as (optional)",
