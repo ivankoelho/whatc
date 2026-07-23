@@ -124,7 +124,7 @@ func TestAuthorizeConversation(t *testing.T) {
 		assert.False(t, app.CanViewConversationForTest(outsider.ID, org.ID, contact))
 	})
 
-	t.Run("strict: general queue (no team) visible to authorized agents", func(t *testing.T) {
+	t.Run("strict: general queue (no team, no account default) is view_all only", func(t *testing.T) {
 		app := newTestApp(t)
 		org := testutil.CreateTestOrganization(t, app.DB)
 		agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
@@ -133,7 +133,96 @@ func TestAuthorizeConversation(t *testing.T) {
 		activeTransfer(t, app, org.ID, contact.ID, nil, nil) // general queue
 		enableStrictVisibility(t, app, org.ID)
 
-		assert.True(t, app.CanViewConversationForTest(anyAgent.ID, org.ID, contact))
+		assert.False(t, app.CanViewConversationForTest(anyAgent.ID, org.ID, contact))
+	})
+
+	t.Run("strict: general queue falls back to account default team", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+		member := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+		outsider := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+		team := createTeamWithMember(t, app, org.ID, member.ID)
+		acct := &models.WhatsAppAccount{
+			BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: org.ID,
+			Name: "gq-" + uuid.New().String()[:8], PhoneID: "p", BusinessID: "b",
+			AccessToken: "t", DefaultTeamID: &team.ID,
+		}
+		require.NoError(t, app.DB.Create(acct).Error)
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		require.NoError(t, app.DB.Model(contact).Update("whats_app_account", acct.Name).Error)
+		contact.WhatsAppAccount = acct.Name
+		activeTransfer(t, app, org.ID, contact.ID, nil, nil) // general queue, no team
+		enableStrictVisibility(t, app, org.ID)
+
+		assert.True(t, app.CanViewConversationForTest(member.ID, org.ID, contact))
+		assert.False(t, app.CanViewConversationForTest(outsider.ID, org.ID, contact))
+	})
+
+	t.Run("strict: flow team (Contact.TeamID) scopes to that team only", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+		member := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+		outsider := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+		team := createTeamWithMember(t, app, org.ID, member.ID)
+		contact := testutil.CreateTestContact(t, app.DB, org.ID) // no transfer, no carteira
+		require.NoError(t, app.DB.Model(contact).Update("team_id", team.ID).Error)
+		contact.TeamID = &team.ID
+		enableStrictVisibility(t, app, org.ID)
+
+		assert.True(t, app.CanViewConversationForTest(member.ID, org.ID, contact))
+		assert.False(t, app.CanViewConversationForTest(outsider.ID, org.ID, contact))
+	})
+
+	t.Run("strict: account default team scopes a teamless conversation", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+		member := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+		outsider := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+		team := createTeamWithMember(t, app, org.ID, member.ID)
+		acct := &models.WhatsAppAccount{
+			BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: org.ID,
+			Name: "fin-" + uuid.New().String()[:8], PhoneID: "p", BusinessID: "b",
+			AccessToken: "t", DefaultTeamID: &team.ID,
+		}
+		require.NoError(t, app.DB.Create(acct).Error)
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		require.NoError(t, app.DB.Model(contact).Update("whats_app_account", acct.Name).Error)
+		contact.WhatsAppAccount = acct.Name
+		enableStrictVisibility(t, app, org.ID)
+
+		assert.True(t, app.CanViewConversationForTest(member.ID, org.ID, contact))
+		assert.False(t, app.CanViewConversationForTest(outsider.ID, org.ID, contact))
+	})
+
+	t.Run("strict: teamless with no account default is view_all only", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+		anyAgent := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+		contact := testutil.CreateTestContact(t, app.DB, org.ID) // no transfer/carteira/team/account default
+		enableStrictVisibility(t, app, org.ID)
+
+		assert.False(t, app.CanViewConversationForTest(anyAgent.ID, org.ID, contact))
+	})
+
+	t.Run("strict: carteira wins over flow team", func(t *testing.T) {
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+		owner := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+		teamMember := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+		team := createTeamWithMember(t, app, org.ID, teamMember.ID)
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		require.NoError(t, app.DB.Model(contact).Updates(map[string]any{"assigned_user_id": owner.ID, "team_id": team.ID}).Error)
+		contact.AssignedUserID = &owner.ID
+		contact.TeamID = &team.ID
+		enableStrictVisibility(t, app, org.ID)
+
+		assert.True(t, app.CanViewConversationForTest(owner.ID, org.ID, contact))
+		assert.False(t, app.CanViewConversationForTest(teamMember.ID, org.ID, contact), "carteira is more specific than flow team")
 	})
 
 	t.Run("strict: carteira governs only without an active transfer", func(t *testing.T) {
@@ -197,10 +286,49 @@ func TestVisibilityScopeMatchesFunction(t *testing.T) {
 
 	idle := testutil.CreateTestContact(t, app.DB, org.ID) // no transfer, no carteira
 
+	flowTeamMine := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(flowTeamMine).Update("team_id", team.ID).Error) // team has viewer
+
+	flowTeamOther := testutil.CreateTestContact(t, app.DB, org.ID)
+	otherTeam := createTeamWithMember(t, app, org.ID, otherAgent.ID)
+	require.NoError(t, app.DB.Model(flowTeamOther).Update("team_id", otherTeam.ID).Error)
+
+	acctMine := &models.WhatsAppAccount{
+		BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: org.ID,
+		Name: "am-" + uuid.New().String()[:8], PhoneID: "p", BusinessID: "b",
+		AccessToken: "t", DefaultTeamID: &team.ID,
+	}
+	require.NoError(t, app.DB.Create(acctMine).Error)
+	acctDefaultMine := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(acctDefaultMine).Update("whats_app_account", acctMine.Name).Error)
+
+	// Branch C positive: an active general-queue transfer (agent_id NULL,
+	// team_id NULL) on a contact whose WhatsApp account's default_team_id IS
+	// the viewer's team.
+	generalQueueAcctMine := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(generalQueueAcctMine).Update("whats_app_account", acctMine.Name).Error)
+	activeTransfer(t, app, org.ID, generalQueueAcctMine.ID, nil, nil)
+
+	// Branch F negative: no transfer, no carteira, no flow team, and the
+	// contact's account default_team_id is a team the viewer is NOT in.
+	otherTeamForAcct := createTeamWithMember(t, app, org.ID, otherAgent.ID)
+	acctOther := &models.WhatsAppAccount{
+		BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: org.ID,
+		Name: "ao-" + uuid.New().String()[:8], PhoneID: "p2", BusinessID: "b2",
+		AccessToken: "t", DefaultTeamID: &otherTeamForAcct.ID,
+	}
+	require.NoError(t, app.DB.Create(acctOther).Error)
+	acctDefaultOther := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(acctDefaultOther).Update("whats_app_account", acctOther.Name).Error)
+
 	enableStrictVisibility(t, app, org.ID)
 
 	// All contacts in the org.
-	all := []*models.Contact{assignedToViewer, assignedToOther, teamQueue, generalQueue, carteira, idle}
+	all := []*models.Contact{
+		assignedToViewer, assignedToOther, teamQueue, generalQueue, carteira, idle,
+		flowTeamMine, flowTeamOther, acctDefaultMine,
+		generalQueueAcctMine, acctDefaultOther,
+	}
 
 	// Expected set per the function.
 	expected := map[uuid.UUID]bool{}
@@ -225,6 +353,15 @@ func TestVisibilityScopeMatchesFunction(t *testing.T) {
 
 	assert.Equal(t, expected, got,
 		"scopeVisibleConversations must return exactly the contacts canViewConversation allows")
+
+	// Pin the two branches added for general-queue-with-account-default (C)
+	// and its negative counterpart (F, teamless with a foreign account
+	// default): a future change that made both the function and the SQL deny
+	// (or both allow) branch C, or both allow (or both deny) the branch F
+	// negative, would still pass the set-equality assert above by construction
+	// — these explicit checks guard against losing that coverage silently.
+	assert.True(t, got[generalQueueAcctMine.ID], "branch C: general queue + account default mine must be visible")
+	assert.False(t, got[acctDefaultOther.ID], "branch F negative: foreign account default team must not be visible")
 }
 
 func TestListContacts_StrictVisibility(t *testing.T) {
@@ -580,4 +717,50 @@ func TestSendMessage_MultiTenantIsolation(t *testing.T) {
 	code := testutil.GetResponseStatusCode(req)
 	assert.True(t, code == fasthttp.StatusNotFound || code == fasthttp.StatusForbidden,
 		"view_all in org X must never reach a contact in org Y, got %d", code)
+}
+
+func TestContactAndAccountTeamColumns(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	user := testutil.CreateTestUser(t, app.DB, org.ID)
+	team := createTeamWithMember(t, app, org.ID, user.ID)
+
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(contact).Update("team_id", team.ID).Error)
+	var freshContact models.Contact
+	require.NoError(t, app.DB.First(&freshContact, "id = ?", contact.ID).Error)
+	require.NotNil(t, freshContact.TeamID)
+	assert.Equal(t, team.ID, *freshContact.TeamID)
+
+	acct := &models.WhatsAppAccount{
+		BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: org.ID,
+		Name: "acct-" + uuid.New().String()[:8], PhoneID: "p", BusinessID: "b",
+		AccessToken: "t", DefaultTeamID: &team.ID,
+	}
+	require.NoError(t, app.DB.Create(acct).Error)
+	var freshAcct models.WhatsAppAccount
+	require.NoError(t, app.DB.First(&freshAcct, "id = ?", acct.ID).Error)
+	require.NotNil(t, freshAcct.DefaultTeamID)
+	assert.Equal(t, team.ID, *freshAcct.DefaultTeamID)
+}
+
+func TestReleaseContact_ClearsTeamID(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	team := &models.Team{
+		BaseModel:      models.BaseModel{ID: uuid.New()},
+		OrganizationID: org.ID,
+		Name:           "Test Team",
+		IsActive:       true,
+	}
+	require.NoError(t, app.DB.Create(team).Error)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(contact).Update("team_id", team.ID).Error)
+	contact.TeamID = &team.ID
+
+	require.NoError(t, app.ReleaseContactForTest(contact, nil, "test"))
+
+	var fresh models.Contact
+	require.NoError(t, app.DB.First(&fresh, "id = ?", contact.ID).Error)
+	assert.Nil(t, fresh.TeamID, "release must clear the effective team")
 }

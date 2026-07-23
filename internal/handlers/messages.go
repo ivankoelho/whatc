@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/contactutil"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/templateutil"
 	"github.com/shridarpatil/whatomate/internal/utils"
@@ -798,8 +799,15 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, fmt.Sprintf("Template is not approved (status: %s)", template.Status), nil, "")
 	}
 
-	// Get contact or use phone number directly
+	// Get contact or use phone number directly. Look the contact up before
+	// deciding anything about access: an EXISTING contact (by contact_id, or
+	// an existing phone match) must pass the visibility gate before we do
+	// anything else. A phone number with no existing contact means the agent
+	// is initiating a brand-new conversation, which is theirs by definition —
+	// it is created further below (after the WhatsApp account is resolved, so
+	// its WhatsAppAccount can be set) and the gate is skipped for it.
 	var contact *models.Contact
+	isNewContact := false
 
 	if req.ContactID != "" {
 		cID, err := uuid.Parse(req.ContactID)
@@ -812,27 +820,20 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 		}
 		contact = c
 	} else {
-		// Find or create contact from phone number
-		phoneNumber := req.PhoneNumber
-		var c models.Contact
-		err := a.DB.Where("phone_number = ? AND organization_id = ?", phoneNumber, orgID).First(&c).Error
-		if err != nil {
-			// Contact not found, create new one
-			c = models.Contact{
-				BaseModel:      models.BaseModel{ID: uuid.New()},
-				OrganizationID: orgID,
-				PhoneNumber:    phoneNumber,
-			}
-			if err := a.DB.Create(&c).Error; err != nil {
-				a.Log.Error("Failed to create contact", "error", err, "phone", phoneNumber)
-				return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create contact", nil, "")
-			}
-			a.Log.Info("Contact created from API", "contact_id", c.ID, "phone", phoneNumber)
+		// Resolve existence with the SAME identity semantics used everywhere
+		// else a phone number is matched to a contact: normalized (with/without
+		// leading '+') and Unscoped (soft-deleted contacts still count). A raw
+		// exact-match query here would miss a contact stored in the other
+		// format, or a soft-deleted-but-team-scoped one, and wrongly treat it
+		// as a brand-new conversation — skipping the gate below entirely.
+		if c, err := contactutil.FindContactUnscoped(a.DB, orgID, req.PhoneNumber); err == nil {
+			contact = c
+		} else {
+			isNewContact = true
 		}
-		contact = &c
 	}
 
-	if !a.canInteractWithConversation(userID, orgID, contact) {
+	if contact != nil && !a.canInteractWithConversation(userID, orgID, contact) {
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
 			"You do not have access to this conversation", nil, "")
 	}
@@ -849,6 +850,21 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 	account, err := a.resolveWhatsAppAccount(orgID, accountName)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, err.Error(), nil, "")
+	}
+
+	if isNewContact {
+		c := models.Contact{
+			BaseModel:       models.BaseModel{ID: uuid.New()},
+			OrganizationID:  orgID,
+			PhoneNumber:     req.PhoneNumber,
+			WhatsAppAccount: account.Name,
+		}
+		if err := a.DB.Create(&c).Error; err != nil {
+			a.Log.Error("Failed to create contact", "error", err, "phone", req.PhoneNumber)
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create contact", nil, "")
+		}
+		a.Log.Info("Contact created from API", "contact_id", c.ID, "phone", req.PhoneNumber)
+		contact = &c
 	}
 
 	// Extract parameter names and resolve values

@@ -298,6 +298,162 @@ func TestApp_ServeMedia_AgentViaTeamTransfer(t *testing.T) {
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
 }
 
+// --- ServeMedia: strict visibility denies a contacts:read holder outside the team ---
+
+func TestApp_ServeMedia_StrictMode_DeniesContactsReadHolderNotOnTeam(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	enableStrictVisibility(t, app, org.ID)
+
+	// contacts:read alone must not bypass the strict scope check.
+	contactsReadPerms := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "media-reader-strict", []string{"contacts:read"})
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&contactsReadPerms.ID))
+	contact := testutil.CreateTestContact(t, app.DB, org.ID) // no carteira, no team, no transfer
+
+	rel := withStorageDir(t, app, "images/strict.jpg", []byte("strict-bytes"))
+	msg := makeMediaMessage(t, app, org.ID, contact.ID, rel)
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	testutil.SetPathParam(req, "message_id", msg.ID.String())
+
+	require.NoError(t, app.ServeMedia(req))
+	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(req),
+		"a contacts:read holder outside the conversation's team must be denied under strict visibility")
+}
+
+func TestApp_ServeMedia_StrictMode_AllowsTeamMember(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	enableStrictVisibility(t, app, org.ID)
+
+	contactsReadPerms := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "media-reader-strict-ok", []string{"contacts:read"})
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&contactsReadPerms.ID))
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(contact).Update("assigned_user_id", user.ID).Error)
+
+	rel := withStorageDir(t, app, "images/strict-ok.jpg", []byte("strict-ok-bytes"))
+	msg := makeMediaMessage(t, app, org.ID, contact.ID, rel)
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	testutil.SetPathParam(req, "message_id", msg.ID.String())
+
+	require.NoError(t, app.ServeMedia(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req),
+		"the assigned agent should still access the conversation's media under strict visibility")
+}
+
+// --- ServeMedia: FIX B regression — team-queue fallback must not grant access
+// to a conversation actively assigned to a specific agent ---
+
+func TestApp_ServeMedia_StrictMode_TeamFallbackDeniedWhenTransferHasAgent(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	enableStrictVisibility(t, app, org.ID)
+
+	role := testutil.CreateTestRoleExact(t, app.DB, org.ID, "team-agent-fallback", false, false, nil)
+	alice := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
+	bob := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
+	team := createTeamWithMember(t, app, org.ID, alice.ID)
+	require.NoError(t, app.DB.Create(&models.TeamMember{
+		BaseModel: models.BaseModel{ID: uuid.New()},
+		TeamID:    team.ID,
+		UserID:    bob.ID,
+		Role:      models.TeamRoleAgent,
+	}).Error)
+
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	// Active transfer with BOTH team_id AND agent_id: an agent-assigned
+	// conversation, not a team queue. Per authorizeConversation this is
+	// agent-only — Bob (a team member, not the assigned agent) must be denied.
+	require.NoError(t, app.DB.Create(&models.AgentTransfer{
+		BaseModel:      models.BaseModel{ID: uuid.New()},
+		OrganizationID: org.ID,
+		ContactID:      contact.ID,
+		TeamID:         &team.ID,
+		AgentID:        &alice.ID,
+		Status:         models.TransferStatusActive,
+	}).Error)
+
+	rel := withStorageDir(t, app, "images/agent-assigned.png", []byte("assigned data"))
+	msg := makeMediaMessage(t, app, org.ID, contact.ID, rel)
+
+	reqBob := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(reqBob, org.ID, bob.ID)
+	testutil.SetPathParam(reqBob, "message_id", msg.ID.String())
+	require.NoError(t, app.ServeMedia(reqBob))
+	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(reqBob),
+		"a team member who is not the assigned agent must be denied media access")
+
+	reqAlice := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(reqAlice, org.ID, alice.ID)
+	testutil.SetPathParam(reqAlice, "message_id", msg.ID.String())
+	require.NoError(t, app.ServeMedia(reqAlice))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(reqAlice),
+		"the assigned agent must still access the media")
+}
+
+// --- ServeMedia: FIX B — the team-queue fallback must still work for a
+// genuinely unassigned (agent_id NULL) team transfer ---
+
+func TestApp_ServeMedia_StrictMode_TeamFallbackAllowsUnassignedQueue(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	enableStrictVisibility(t, app, org.ID)
+
+	role := testutil.CreateTestRoleExact(t, app.DB, org.ID, "team-queue-fallback", false, false, nil)
+	bob := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
+	team := createTeamWithMember(t, app, org.ID, bob.ID)
+
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Create(&models.AgentTransfer{
+		BaseModel:      models.BaseModel{ID: uuid.New()},
+		OrganizationID: org.ID,
+		ContactID:      contact.ID,
+		TeamID:         &team.ID,
+		AgentID:        nil, // genuine unassigned team queue
+		Status:         models.TransferStatusActive,
+	}).Error)
+
+	rel := withStorageDir(t, app, "images/queue.png", []byte("queue data"))
+	msg := makeMediaMessage(t, app, org.ID, contact.ID, rel)
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, bob.ID)
+	testutil.SetPathParam(req, "message_id", msg.ID.String())
+	require.NoError(t, app.ServeMedia(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req),
+		"a team member should still access media for a genuinely unassigned team-queue transfer")
+}
+
+// --- ServeMedia: FIX C — flag-off parity for a message whose contact was
+// soft-deleted after the message was created ---
+
+func TestApp_ServeMedia_FlagOff_SoftDeletedContactStillResolves(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "media-reader-softdel", []string{"contacts:read"})
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+
+	rel := withStorageDir(t, app, "images/softdel.png", []byte("softdel data"))
+	msg := makeMediaMessage(t, app, org.ID, contact.ID, rel)
+
+	// Soft-delete the contact after the message was recorded — the message row
+	// survives (as it does in production), so the media endpoint must still
+	// resolve it for a contacts:read holder, matching flag-off behaviour.
+	require.NoError(t, app.DB.Delete(contact).Error)
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	testutil.SetPathParam(req, "message_id", msg.ID.String())
+
+	require.NoError(t, app.ServeMedia(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req),
+		"a contacts:read holder must still access media whose contact was later soft-deleted")
+}
+
 // --- ServeMedia: empty MediaURL ---
 
 func TestApp_ServeMedia_NoMediaInMessage(t *testing.T) {
