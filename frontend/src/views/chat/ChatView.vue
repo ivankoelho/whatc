@@ -6,6 +6,7 @@ import { useContactsStore, type Contact, type Message } from '@/stores/contacts'
 import { useAuthStore } from '@/stores/auth'
 import { useUsersStore } from '@/stores/users'
 import { useTransfersStore } from '@/stores/transfers'
+import { useTeamsStore } from '@/stores/teams'
 import { wsService } from '@/services/websocket'
 import { contactsService, chatbotService, messagesService, customActionsService, accountsService, cannedResponsesService, getRequestHeaders, type CustomAction, type ActionResult, type CannedResponse } from '@/services/api'
 import { useTagsStore } from '@/stores/tags'
@@ -71,6 +72,7 @@ import {
   UserPlus,
   UserMinus,
   UserX,
+  Users,
   Play,
   Reply,
   X,
@@ -117,6 +119,7 @@ const { notifyTyping } = useTypingNotifier()
 const authStore = useAuthStore()
 const usersStore = useUsersStore()
 const transfersStore = useTransfersStore()
+const teamsStore = useTeamsStore()
 const tagsStore = useTagsStore()
 const notesStore = useNotesStore()
 const { isDark } = useColorMode()
@@ -129,6 +132,7 @@ const messageInputRef = ref<HTMLTextAreaElement | null>(null)
 const isSending = ref(false)
 const isAssignDialogOpen = ref(false)
 const isTransferring = ref(false)
+const isTransferTeamDialogOpen = ref(false)
 const isResuming = ref(false)
 // Tracks incoming messages that arrived while the chat is open.
 // Surfaced as a "N unread messages" pill at the top of the chat panel
@@ -505,6 +509,9 @@ onMounted(async () => {
   if (savedContactsWidth >= CONTACTS_MIN_WIDTH && savedContactsWidth <= CONTACTS_MAX_WIDTH) {
     contactsWidth.value = savedContactsWidth
   }
+
+  // Teams populate the "Transfer to team" picker in the conversation menu.
+  if (teamsStore.teams.length === 0) teamsStore.fetchTeams()
 
   // Ensure auth session is restored
   if (!authStore.isAuthenticated) {
@@ -1349,6 +1356,30 @@ async function transferToAgent() {
   }
 }
 
+async function transferToTeam(teamId: string) {
+  if (!contactsStore.currentContact) return
+
+  isTransferring.value = true
+  isTransferTeamDialogOpen.value = false
+  try {
+    await chatbotService.createTransfer({
+      contact_id: contactsStore.currentContact.id,
+      whatsapp_account: (contactsStore.currentContact as any).whatsapp_account,
+      team_id: teamId,
+      source: 'manual'
+    })
+    toast.success(t('chat.transferSuccess'), {
+      description: t('chat.transferSuccessDesc')
+    })
+    await transfersStore.fetchTransfers({ status: 'active' })
+  } catch (error: any) {
+    const message = error.response?.data?.message || t('chat.transferFailed')
+    toast.error(message)
+  } finally {
+    isTransferring.value = false
+  }
+}
+
 async function resumeChatbot() {
   if (!activeTransferId.value) return
 
@@ -2061,6 +2092,10 @@ async function sendMediaMessage() {
                 <DropdownMenuItem v-if="!activeTransferId" @click="transferToAgent" :disabled="isTransferring">
                   <UserX class="mr-2 h-4 w-4" />
                   <span>{{ $t('chat.transferToAgent') }}</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem v-if="!activeTransferId" @click="isTransferTeamDialogOpen = true" :disabled="isTransferring">
+                  <Users class="mr-2 h-4 w-4" />
+                  <span>{{ $t('chat.transferToTeam') }}</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem v-if="activeTransferId" @click="resumeChatbot" :disabled="isResuming">
                   <Play class="mr-2 h-4 w-4" />
@@ -2811,6 +2846,36 @@ async function sendMediaMessage() {
               </Button>
               <p v-if="filteredAssignableUsers.length === 0" class="text-sm text-muted-foreground text-center py-4">
                 {{ $t('chat.noUsersFound') }}
+              </p>
+            </div>
+          </ScrollArea>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    <!-- Transfer to team -->
+    <Dialog v-model:open="isTransferTeamDialogOpen">
+      <DialogContent class="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>{{ $t('chat.transferToTeamTitle') }}</DialogTitle>
+          <DialogDescription>{{ $t('chat.transferToTeamDesc') }}</DialogDescription>
+        </DialogHeader>
+        <div class="py-4">
+          <ScrollArea class="max-h-[280px]">
+            <div class="space-y-1">
+              <Button
+                v-for="team in teamsStore.teams"
+                :key="team.id"
+                variant="ghost"
+                class="w-full justify-start"
+                :disabled="isTransferring"
+                @click="transferToTeam(team.id)"
+              >
+                <Users class="mr-2 h-4 w-4" />
+                <span>{{ team.name }}</span>
+              </Button>
+              <p v-if="teamsStore.teams.length === 0" class="text-sm text-muted-foreground text-center py-4">
+                {{ $t('chat.noTeamsFound') }}
               </p>
             </div>
           </ScrollArea>
