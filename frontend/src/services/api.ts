@@ -184,6 +184,22 @@ export const apiKeysService = {
   delete: (id: string) => api.delete(`/api-keys/${id}`)
 }
 
+export interface WhatsAppAccountUpdatePayload {
+  name?: string
+  app_id?: string
+  phone_id?: string
+  business_id?: string
+  access_token?: string
+  app_secret?: string
+  webhook_verify_token?: string
+  api_version?: string
+  is_default_incoming?: boolean
+  is_default_outgoing?: boolean
+  auto_read_receipt?: boolean
+  business_calling_enabled?: boolean
+  default_team_id?: string | null
+}
+
 export const accountsService = {
   list: () => api.get('/accounts')
 }

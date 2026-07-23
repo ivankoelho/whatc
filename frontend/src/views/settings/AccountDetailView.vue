@@ -3,7 +3,8 @@ import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
-import { api } from '@/services/api'
+import { useTeamsStore } from '@/stores/teams'
+import { api, type WhatsAppAccountUpdatePayload } from '@/services/api'
 import { toast } from 'vue-sonner'
 import { getErrorMessage } from '@/lib/api-utils'
 import { getQualityBadgeClass, getQualityRatingLabel, getVerificationBadgeClass, getVerificationStatusLabel, formatLimitTier } from '@/lib/utils'
@@ -19,6 +20,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { IconButton } from '@/components/shared'
 import {
@@ -58,6 +60,7 @@ interface WhatsAppAccount {
   is_default_incoming: boolean
   is_default_outgoing: boolean
   auto_read_receipt: boolean
+  default_team_id?: string | null
   status: string
   has_access_token: boolean
   has_app_secret: boolean
@@ -88,6 +91,7 @@ const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
 const authStore = useAuthStore()
+const teamsStore = useTeamsStore()
 
 const accountId = computed(() => route.params.id as string)
 const isNew = computed(() => accountId.value === 'new')
@@ -120,6 +124,7 @@ const form = ref({
   is_default_outgoing: false,
   auto_read_receipt: false,
   business_calling_enabled: false,
+  default_team_id: null as string | null,
 })
 
 const breadcrumbs = computed(() => [
@@ -165,6 +170,7 @@ function syncForm() {
     is_default_outgoing: account.value.is_default_outgoing,
     auto_read_receipt: account.value.auto_read_receipt,
     business_calling_enabled: account.value.business_calling_enabled ?? false,
+    default_team_id: account.value.default_team_id ?? null,
   }
 }
 
@@ -180,7 +186,7 @@ async function save() {
 
   isSaving.value = true
   try {
-    const payload: any = { ...form.value }
+    const payload: WhatsAppAccountUpdatePayload = { ...form.value }
     if (!isNew.value && !payload.access_token) delete payload.access_token
     if (!isNew.value && !payload.app_secret) delete payload.app_secret
 
@@ -261,6 +267,7 @@ async function copyToClipboard(text: string) {
 }
 
 onMounted(async () => {
+  if (teamsStore.teams.length === 0) teamsStore.fetchTeams()
   if (isNew.value) {
     isLoading.value = false
     hasChanges.value = false
@@ -450,6 +457,20 @@ onMounted(async () => {
               </p>
             </div>
             <Switch :checked="form.business_calling_enabled" @update:checked="form.business_calling_enabled = $event" :disabled="!canWrite" />
+          </div>
+          <div class="space-y-1.5">
+            <Label class="text-xs">{{ $t('accounts.defaultTeam') }}</Label>
+            <p class="text-[11px] text-muted-foreground">{{ $t('accounts.defaultTeamHint') }}</p>
+            <Select
+              :model-value="form.default_team_id || '_none'"
+              @update:model-value="(v: any) => form.default_team_id = v === '_none' ? null : v"
+            >
+              <SelectTrigger :disabled="!canWrite"><SelectValue :placeholder="$t('accounts.defaultTeamNone')" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="_none">{{ $t('accounts.defaultTeamNone') }}</SelectItem>
+                <SelectItem v-for="team in teamsStore.teams" :key="team.id" :value="team.id">{{ team.name }}</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
       </CardContent>
