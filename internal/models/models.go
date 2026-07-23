@@ -315,6 +315,10 @@ type WhatsAppAccount struct {
 	CreatedByID            *uuid.UUID `gorm:"type:uuid" json:"created_by_id,omitempty"`
 	UpdatedByID            *uuid.UUID `gorm:"type:uuid" json:"updated_by_id,omitempty"`
 
+	// DefaultTeamID scopes conversations on this number to a team from the
+	// first message, before any transfer (e.g. a dedicated Finance number).
+	DefaultTeamID *uuid.UUID `gorm:"type:uuid;index" json:"default_team_id,omitempty"`
+
 	// Relations
 	Organization *Organization `gorm:"foreignKey:OrganizationID" json:"organization,omitempty"`
 	CreatedBy    *User         `gorm:"foreignKey:CreatedByID" json:"created_by,omitempty"`
@@ -349,6 +353,13 @@ type Contact struct {
 	ProfileName        string     `gorm:"size:255" json:"profile_name"`
 	WhatsAppAccount    string     `gorm:"size:100;index" json:"whatsapp_account"` // References WhatsAppAccount.Name
 	AssignedUserID     *uuid.UUID `gorm:"type:uuid;index" json:"assigned_user_id,omitempty"`
+
+	// TeamID is the conversation's effective team during triage — set by the
+	// chatbot flow (per-button), NOT the active transfer (AgentTransfer.TeamID)
+	// nor the carteira (AssignedUserID, a user). Governs visibility only when
+	// there is no active transfer and no carteira. See conversation_visibility.go.
+	TeamID *uuid.UUID `gorm:"type:uuid;index" json:"team_id,omitempty"`
+
 	LastMessageAt      *time.Time `json:"last_message_at,omitempty"`
 	LastMessagePreview string     `gorm:"type:text" json:"last_message_preview"`
 	IsRead             bool       `gorm:"default:true" json:"is_read"`

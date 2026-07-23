@@ -581,3 +581,28 @@ func TestSendMessage_MultiTenantIsolation(t *testing.T) {
 	assert.True(t, code == fasthttp.StatusNotFound || code == fasthttp.StatusForbidden,
 		"view_all in org X must never reach a contact in org Y, got %d", code)
 }
+
+func TestContactAndAccountTeamColumns(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	user := testutil.CreateTestUser(t, app.DB, org.ID)
+	team := createTeamWithMember(t, app, org.ID, user.ID)
+
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(contact).Update("team_id", team.ID).Error)
+	var freshContact models.Contact
+	require.NoError(t, app.DB.First(&freshContact, "id = ?", contact.ID).Error)
+	require.NotNil(t, freshContact.TeamID)
+	assert.Equal(t, team.ID, *freshContact.TeamID)
+
+	acct := &models.WhatsAppAccount{
+		BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: org.ID,
+		Name: "acct-" + uuid.New().String()[:8], PhoneID: "p", BusinessID: "b",
+		AccessToken: "t", DefaultTeamID: &team.ID,
+	}
+	require.NoError(t, app.DB.Create(acct).Error)
+	var freshAcct models.WhatsAppAccount
+	require.NoError(t, app.DB.First(&freshAcct, "id = ?", acct.ID).Error)
+	require.NotNil(t, freshAcct.DefaultTeamID)
+	assert.Equal(t, team.ID, *freshAcct.DefaultTeamID)
+}
