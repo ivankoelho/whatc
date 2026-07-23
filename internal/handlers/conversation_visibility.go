@@ -160,40 +160,34 @@ func (a *App) scopeVisibleConversations(query *gorm.DB, userID, orgID uuid.UUID)
 		return query
 	}
 
-	// A contact is visible when, considering only its LATEST active transfer:
-	//   - that transfer is assigned to the user, OR
-	//   - that transfer is a team queue whose team the user belongs to, OR
-	//   - that transfer is the general queue (no team), OR
-	//   - there is NO active transfer and (carteira == user OR no carteira).
-	//
-	// "latest active transfer" mirrors activeTransferFor's Order(transferred_at DESC).
-	// Expressed as: the contact has NO active transfer OTHER than ones the user
-	// may see, is a delicate SQL. Simpler and provably equivalent to the function:
-	// a contact is visible iff it has an active transfer the user may see, OR it
-	// has no active transfer and the carteira rule passes.
-
+	myTeams := a.DB.Model(&models.TeamMember{}).Select("team_id").Where("user_id = ?", userID)
 	activeSub := a.DB.Model(&models.AgentTransfer{}).Select("contact_id").
 		Where("organization_id = ? AND status = ?", orgID, models.TransferStatusActive)
+	activeAgentMine := a.DB.Model(&models.AgentTransfer{}).Select("contact_id").
+		Where("organization_id = ? AND status = ? AND agent_id = ?", orgID, models.TransferStatusActive, userID)
+	activeTeamMine := a.DB.Model(&models.AgentTransfer{}).Select("contact_id").
+		Where("organization_id = ? AND status = ? AND agent_id IS NULL AND team_id IN (?)",
+			orgID, models.TransferStatusActive, myTeams)
+	activeGeneral := a.DB.Model(&models.AgentTransfer{}).Select("contact_id").
+		Where("organization_id = ? AND status = ? AND agent_id IS NULL AND team_id IS NULL",
+			orgID, models.TransferStatusActive)
 
-	// contact_ids with an active transfer the user MAY see.
-	visibleTransferSub := a.DB.Model(&models.AgentTransfer{}).Select("contact_id").
-		Where("organization_id = ? AND status = ?", orgID, models.TransferStatusActive).
-		Where(`
-			agent_id = ?
-			OR (agent_id IS NULL AND team_id IS NULL)
-			OR (agent_id IS NULL AND team_id IN (?))
-		`,
-			userID,
-			a.DB.Model(&models.TeamMember{}).Select("team_id").Where("user_id = ?", userID),
-		)
+	// The contact's WhatsApp account default team is one of my teams.
+	acctDefault := `EXISTS (SELECT 1 FROM whatsapp_accounts wa
+		WHERE wa.name = contacts.whats_app_account
+		  AND wa.organization_id = contacts.organization_id
+		  AND wa.default_team_id IN (?))`
 
-	return query.Where(`
-		id IN (?)
-		OR (id NOT IN (?) AND (assigned_user_id IS NULL OR assigned_user_id = ?))
-	`,
-		visibleTransferSub,
-		activeSub,
-		userID,
+	return query.Where(
+		a.DB.
+			Where("id IN (?)", activeAgentMine). // A: active transfer to me
+			Or("id IN (?)", activeTeamMine).      // B: active team queue, my team
+			Or(a.DB.Where("id IN (?)", activeGeneral).Where(acctDefault, myTeams)). // C: general queue + account default mine
+			Or(a.DB.Where("id NOT IN (?)", activeSub).Where("assigned_user_id = ?", userID)). // D: carteira mine
+			Or(a.DB.Where("id NOT IN (?)", activeSub).
+				Where("assigned_user_id IS NULL AND team_id IN (?)", myTeams)). // E: flow team mine
+			Or(a.DB.Where("id NOT IN (?)", activeSub).
+				Where("assigned_user_id IS NULL AND team_id IS NULL").Where(acctDefault, myTeams)), // F: account default mine
 	)
 }
 

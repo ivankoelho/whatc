@@ -286,10 +286,29 @@ func TestVisibilityScopeMatchesFunction(t *testing.T) {
 
 	idle := testutil.CreateTestContact(t, app.DB, org.ID) // no transfer, no carteira
 
+	flowTeamMine := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(flowTeamMine).Update("team_id", team.ID).Error) // team has viewer
+
+	flowTeamOther := testutil.CreateTestContact(t, app.DB, org.ID)
+	otherTeam := createTeamWithMember(t, app, org.ID, otherAgent.ID)
+	require.NoError(t, app.DB.Model(flowTeamOther).Update("team_id", otherTeam.ID).Error)
+
+	acctMine := &models.WhatsAppAccount{
+		BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: org.ID,
+		Name: "am-" + uuid.New().String()[:8], PhoneID: "p", BusinessID: "b",
+		AccessToken: "t", DefaultTeamID: &team.ID,
+	}
+	require.NoError(t, app.DB.Create(acctMine).Error)
+	acctDefaultMine := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(acctDefaultMine).Update("whats_app_account", acctMine.Name).Error)
+
 	enableStrictVisibility(t, app, org.ID)
 
 	// All contacts in the org.
-	all := []*models.Contact{assignedToViewer, assignedToOther, teamQueue, generalQueue, carteira, idle}
+	all := []*models.Contact{
+		assignedToViewer, assignedToOther, teamQueue, generalQueue, carteira, idle,
+		flowTeamMine, flowTeamOther, acctDefaultMine,
+	}
 
 	// Expected set per the function.
 	expected := map[uuid.UUID]bool{}
