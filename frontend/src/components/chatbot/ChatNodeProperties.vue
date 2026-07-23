@@ -566,6 +566,16 @@ const typeLabel = computed<Record<string, string>>(() => ({
           class="min-h-[50px] text-xs"
         />
       </div>
+      <div class="space-y-1.5">
+        <Label class="text-xs">{{ t('chatbot.properties.tags') }}</Label>
+        <Input
+          :model-value="(config.tags || []).join(', ')"
+          @update:model-value="(v: string) => updateConfig('tags', v.split(',').map((s) => s.trim()).filter(Boolean))"
+          :placeholder="t('chatbot.properties.tagsPlaceholder')"
+          class="h-8 text-sm"
+        />
+        <p class="text-[11px] text-muted-foreground">{{ t('chatbot.properties.tagsHint') }}</p>
+      </div>
     </template>
 
     <!-- end -->
