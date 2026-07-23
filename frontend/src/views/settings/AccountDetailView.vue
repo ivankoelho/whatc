@@ -463,7 +463,7 @@ onMounted(async () => {
             <p class="text-[11px] text-muted-foreground">{{ $t('accounts.defaultTeamHint') }}</p>
             <Select
               :model-value="form.default_team_id || '_none'"
-              @update:model-value="(v: any) => form.default_team_id = v === '_none' ? null : v"
+              @update:model-value="(v: any) => form.default_team_id = v === '_none' ? '' : v"
             >
               <SelectTrigger :disabled="!canWrite"><SelectValue :placeholder="$t('accounts.defaultTeamNone')" /></SelectTrigger>
               <SelectContent>
