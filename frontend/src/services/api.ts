@@ -422,6 +422,7 @@ export const chatbotService = {
     contact_id: string
     whatsapp_account: string
     agent_id?: string
+    team_id?: string
     notes?: string
     source?: string
   }) => api.post('/chatbot/transfers', data),
