@@ -267,6 +267,11 @@ func (a *App) UpdateAccount(r *fastglue.Request) error {
 		if *req.DefaultTeamID == "" {
 			account.DefaultTeamID = nil
 		} else if tid, err := uuid.Parse(*req.DefaultTeamID); err == nil {
+			var count int64
+			a.DB.Model(&models.Team{}).Where("id = ? AND organization_id = ?", tid, orgID).Count(&count)
+			if count == 0 {
+				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid default_team_id", nil, "")
+			}
 			account.DefaultTeamID = &tid
 		} else {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid default_team_id", nil, "")

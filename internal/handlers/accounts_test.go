@@ -530,6 +530,33 @@ func TestApp_UpdateAccount_DefaultTeam_ClearsWithEmptyString(t *testing.T) {
 	assert.Nil(t, fresh.DefaultTeamID)
 }
 
+func TestApp_UpdateAccount_DefaultTeam_RejectsForeignOrgTeam(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	admin := createAdminUser(t, app, org.ID)
+	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+
+	otherOrg := testutil.CreateTestOrganization(t, app.DB)
+	otherAdmin := createAdminUser(t, app, otherOrg.ID)
+	foreignTeam := createTeamWithMember(t, app, otherOrg.ID, otherAdmin.ID)
+
+	req := testutil.NewJSONRequest(t, map[string]any{
+		"default_team_id": foreignTeam.ID.String(),
+	})
+	testutil.SetAuthContext(req, org.ID, admin.ID)
+	testutil.SetPathParam(req, "id", account.ID.String())
+
+	err := app.UpdateAccount(req)
+	require.NoError(t, err)
+	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
+
+	var fresh models.WhatsAppAccount
+	require.NoError(t, app.DB.First(&fresh, "id = ?", account.ID).Error)
+	assert.Nil(t, fresh.DefaultTeamID)
+}
+
 func TestApp_UpdateAccount_NotFound(t *testing.T) {
 	t.Parallel()
 
