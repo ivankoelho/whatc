@@ -516,6 +516,71 @@ func TestRunChatGraph_Prompt_MaxRetriesRoutesToEdge(t *testing.T) {
 	assert.Equal(t, models.SessionStatusCompleted, session.Status)
 }
 
+// TestRunChatGraph_ButtonRoutesToPrompt_SendsPrompt guards against a frozen
+// flow: when a button click routes into a prompt node in the same run, the
+// prompt body must still be sent. Previously the prompt yielded without
+// sending because the button had already set ctx.consumed, so the follow-up
+// question never reached the user and the flow looked stuck until they sent an
+// extra message.
+func TestRunChatGraph_ButtonRoutesToPrompt_SendsPrompt(t *testing.T) {
+	app, org, account, contact, session := newGraphTestFixtures(t)
+
+	flow := &models.ChatbotFlow{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		WhatsAppAccount: account.Name,
+		Name:            "button-to-prompt",
+		IsEnabled:       true,
+		Graph: models.JSONB{
+			"version":    2,
+			"entry_node": "b1",
+			"nodes": []any{
+				map[string]any{
+					"id": "b1", "type": "buttons", "label": "menu",
+					"config": map[string]any{
+						"body":    "Pick one",
+						"buttons": []any{map[string]any{"id": "opt_a", "title": "A"}},
+					},
+				},
+				map[string]any{
+					"id": "p1", "type": "prompt", "label": "ask-cep",
+					"config": map[string]any{"body": "What is your CEP?", "store_as": "cep"},
+				},
+				map[string]any{
+					"id": "e1", "type": "end", "label": "done",
+					"config": map[string]any{},
+				},
+			},
+			"edges": []any{
+				map[string]any{"from": "b1", "to": "p1", "condition": "button:opt_a"},
+				map[string]any{"from": "p1", "to": "e1", "condition": "default"},
+			},
+		},
+	}
+	require.NoError(t, app.DB.Create(flow).Error)
+
+	// Run 1: trigger parks at the buttons node.
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "start", "", nil))
+	require.NoError(t, app.DB.First(session, session.ID).Error)
+	require.Equal(t, "b1", session.CurrentStep)
+
+	// Run 2: the button click routes to the prompt. It must park at the prompt
+	// AND send the question — one click should surface the next prompt.
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "", "opt_a", nil))
+	require.NoError(t, app.DB.First(session, session.ID).Error)
+	assert.Equal(t, "p1", session.CurrentStep, "should park at the prompt node")
+
+	var msgs []models.ChatbotSessionMessage
+	require.NoError(t, app.DB.Where("session_id = ? AND direction = ?", session.ID, models.DirectionOutgoing).Find(&msgs).Error)
+	sentPrompt := false
+	for _, m := range msgs {
+		if m.Message == "What is your CEP?" {
+			sentPrompt = true
+		}
+	}
+	assert.True(t, sentPrompt, "prompt body must be sent when a button routes into it")
+}
+
 // newAPICallFlow builds a three-node graph (api_call → message → end)
 // where the api_call's outgoing edges route to differently-labelled
 // message nodes for 2xx vs non-2xx, making it easy to assert which
