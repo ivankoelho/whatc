@@ -714,3 +714,24 @@ func TestContactAndAccountTeamColumns(t *testing.T) {
 	require.NotNil(t, freshAcct.DefaultTeamID)
 	assert.Equal(t, team.ID, *freshAcct.DefaultTeamID)
 }
+
+func TestReleaseContact_ClearsTeamID(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	team := &models.Team{
+		BaseModel:      models.BaseModel{ID: uuid.New()},
+		OrganizationID: org.ID,
+		Name:           "Test Team",
+		IsActive:       true,
+	}
+	require.NoError(t, app.DB.Create(team).Error)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(contact).Update("team_id", team.ID).Error)
+	contact.TeamID = &team.ID
+
+	require.NoError(t, app.ReleaseContactForTest(contact, nil, "test"))
+
+	var fresh models.Contact
+	require.NoError(t, app.DB.First(&fresh, "id = ?", contact.ID).Error)
+	assert.Nil(t, fresh.TeamID, "release must clear the effective team")
+}
