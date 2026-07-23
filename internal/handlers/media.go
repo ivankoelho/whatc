@@ -159,11 +159,19 @@ func (a *App) ServeMedia(r *fastglue.Request) error {
 	// contacts:read holder when the flag is off), scopeVisibleConversations
 	// already returns the query unchanged, so behavior there is unaffected.
 	var contact models.Contact
-	q := a.scopeVisibleConversations(a.DB.Where("id = ? AND organization_id = ?", message.ContactID, orgID), userID, orgID)
+	// Unscoped: messages survive contact soft-deletion, so a soft-deleted
+	// contact must still resolve here to match the flag-off behaviour (which
+	// never scoped this lookup by deleted_at at all).
+	q := a.scopeVisibleConversations(a.DB.Unscoped().Where("id = ? AND organization_id = ?", message.ContactID, orgID), userID, orgID)
 	if err := q.First(&contact).Error; err != nil {
-		// Not owner / not directly assigned — check team membership via active transfer
+		// Not owner / not directly assigned — check team membership via an
+		// active, UNASSIGNED (agent_id IS NULL) team-queue transfer. An active
+		// transfer with BOTH team_id and agent_id set is agent-assigned — per
+		// authorizeConversation/scopeVisibleConversations that conversation is
+		// governed by the agent alone, so other team members must not match
+		// here (that would grant media access the visibility rule denies).
 		var transfer models.AgentTransfer
-		if err := a.DB.Where("contact_id = ? AND organization_id = ? AND status = ? AND team_id IS NOT NULL",
+		if err := a.DB.Where("contact_id = ? AND organization_id = ? AND status = ? AND team_id IS NOT NULL AND agent_id IS NULL",
 			message.ContactID, orgID, models.TransferStatusActive).First(&transfer).Error; err != nil {
 			return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Access denied", nil, "")
 		}

@@ -353,6 +353,15 @@ func TestVisibilityScopeMatchesFunction(t *testing.T) {
 
 	assert.Equal(t, expected, got,
 		"scopeVisibleConversations must return exactly the contacts canViewConversation allows")
+
+	// Pin the two branches added for general-queue-with-account-default (C)
+	// and its negative counterpart (F, teamless with a foreign account
+	// default): a future change that made both the function and the SQL deny
+	// (or both allow) branch C, or both allow (or both deny) the branch F
+	// negative, would still pass the set-equality assert above by construction
+	// — these explicit checks guard against losing that coverage silently.
+	assert.True(t, got[generalQueueAcctMine.ID], "branch C: general queue + account default mine must be visible")
+	assert.False(t, got[acctDefaultOther.ID], "branch F negative: foreign account default team must not be visible")
 }
 
 func TestListContacts_StrictVisibility(t *testing.T) {

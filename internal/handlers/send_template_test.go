@@ -829,6 +829,56 @@ func TestApp_SendTemplateMessage(t *testing.T) {
 		assert.Equal(t, int64(1), count, "no duplicate contact row should be created for a denied existing contact")
 	})
 
+	// --- FIX A regression: phone-number normalization must not bypass the gate ---
+
+	t.Run("strict mode: normalized phone match on a team-scoped contact is denied and no duplicate is created", func(t *testing.T) {
+		t.Parallel()
+		mockServer := newMockWhatsAppServer()
+		defer mockServer.close()
+
+		app := newMsgTestApp(t, mockServer)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		enableStrictVisibility(t, app, org.ID)
+		role := testutil.CreateTestRoleExact(t, app.DB, org.ID, "plain-agent-3", false, false, nil)
+		user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
+		account := createTestAccount(t, app, org.ID)
+		tpl := createTestTemplate(t, app, org.ID, account.Name)
+
+		// Team the caller is NOT in owns this contact via the flow-team column.
+		otherAgent := testutil.CreateTestUser(t, app.DB, org.ID)
+		team := createTeamWithMember(t, app, org.ID, otherAgent.ID)
+
+		// Stored WITHOUT a leading '+', as inbound webhooks store it.
+		storedPhone := "5511999999999"
+		existing := testutil.CreateTestContactWith(t, app.DB, org.ID,
+			testutil.WithContactAccount(account.Name), testutil.WithPhoneNumber(storedPhone))
+		require.NoError(t, app.DB.Model(existing).Update("team_id", team.ID).Error)
+
+		// Caller requests using the '+'-prefixed form.
+		req := testutil.NewJSONRequest(t, map[string]any{
+			"phone_number":  "+" + storedPhone,
+			"template_name": tpl.Name,
+			"account_name":  account.Name,
+			"template_params": map[string]string{
+				"name":     "Mallory",
+				"order_id": "ORD-3",
+			},
+		})
+		testutil.SetAuthContext(req, org.ID, user.ID)
+
+		err := app.SendTemplateMessage(req)
+		require.NoError(t, err)
+		assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(req),
+			"a normalized-form match on a team-scoped contact must still hit the visibility gate")
+
+		var count int64
+		app.DB.Model(&models.Contact{}).Where("organization_id = ? AND phone_number = ?", org.ID, storedPhone).Count(&count)
+		assert.Equal(t, int64(1), count, "no duplicate contact row should be created via the '+' form")
+
+		app.WaitForBackgroundTasks()
+		assert.Empty(t, mockServer.sentMessages, "no template should be delivered to the team-scoped contact")
+	})
+
 	t.Run("template without buttons has no interactive_data", func(t *testing.T) {
 		t.Parallel()
 		mockServer := newMockWhatsAppServer()

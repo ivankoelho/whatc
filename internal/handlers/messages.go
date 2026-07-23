@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/contactutil"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/templateutil"
 	"github.com/shridarpatil/whatomate/internal/utils"
@@ -819,10 +820,14 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 		}
 		contact = c
 	} else {
-		phoneNumber := req.PhoneNumber
-		var c models.Contact
-		if err := a.DB.Where("phone_number = ? AND organization_id = ?", phoneNumber, orgID).First(&c).Error; err == nil {
-			contact = &c
+		// Resolve existence with the SAME identity semantics used everywhere
+		// else a phone number is matched to a contact: normalized (with/without
+		// leading '+') and Unscoped (soft-deleted contacts still count). A raw
+		// exact-match query here would miss a contact stored in the other
+		// format, or a soft-deleted-but-team-scoped one, and wrongly treat it
+		// as a brand-new conversation — skipping the gate below entirely.
+		if c, err := contactutil.FindContactUnscoped(a.DB, orgID, req.PhoneNumber); err == nil {
+			contact = c
 		} else {
 			isNewContact = true
 		}
