@@ -298,6 +298,52 @@ func TestApp_ServeMedia_AgentViaTeamTransfer(t *testing.T) {
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
 }
 
+// --- ServeMedia: strict visibility denies a contacts:read holder outside the team ---
+
+func TestApp_ServeMedia_StrictMode_DeniesContactsReadHolderNotOnTeam(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	enableStrictVisibility(t, app, org.ID)
+
+	// contacts:read alone must not bypass the strict scope check.
+	contactsReadPerms := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "media-reader-strict", []string{"contacts:read"})
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&contactsReadPerms.ID))
+	contact := testutil.CreateTestContact(t, app.DB, org.ID) // no carteira, no team, no transfer
+
+	rel := withStorageDir(t, app, "images/strict.jpg", []byte("strict-bytes"))
+	msg := makeMediaMessage(t, app, org.ID, contact.ID, rel)
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	testutil.SetPathParam(req, "message_id", msg.ID.String())
+
+	require.NoError(t, app.ServeMedia(req))
+	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(req),
+		"a contacts:read holder outside the conversation's team must be denied under strict visibility")
+}
+
+func TestApp_ServeMedia_StrictMode_AllowsTeamMember(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	enableStrictVisibility(t, app, org.ID)
+
+	contactsReadPerms := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "media-reader-strict-ok", []string{"contacts:read"})
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&contactsReadPerms.ID))
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(contact).Update("assigned_user_id", user.ID).Error)
+
+	rel := withStorageDir(t, app, "images/strict-ok.jpg", []byte("strict-ok-bytes"))
+	msg := makeMediaMessage(t, app, org.ID, contact.ID, rel)
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	testutil.SetPathParam(req, "message_id", msg.ID.String())
+
+	require.NoError(t, app.ServeMedia(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req),
+		"the assigned agent should still access the conversation's media under strict visibility")
+}
+
 // --- ServeMedia: empty MediaURL ---
 
 func TestApp_ServeMedia_NoMediaInMessage(t *testing.T) {

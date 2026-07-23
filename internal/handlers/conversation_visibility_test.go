@@ -302,12 +302,32 @@ func TestVisibilityScopeMatchesFunction(t *testing.T) {
 	acctDefaultMine := testutil.CreateTestContact(t, app.DB, org.ID)
 	require.NoError(t, app.DB.Model(acctDefaultMine).Update("whats_app_account", acctMine.Name).Error)
 
+	// Branch C positive: an active general-queue transfer (agent_id NULL,
+	// team_id NULL) on a contact whose WhatsApp account's default_team_id IS
+	// the viewer's team.
+	generalQueueAcctMine := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(generalQueueAcctMine).Update("whats_app_account", acctMine.Name).Error)
+	activeTransfer(t, app, org.ID, generalQueueAcctMine.ID, nil, nil)
+
+	// Branch F negative: no transfer, no carteira, no flow team, and the
+	// contact's account default_team_id is a team the viewer is NOT in.
+	otherTeamForAcct := createTeamWithMember(t, app, org.ID, otherAgent.ID)
+	acctOther := &models.WhatsAppAccount{
+		BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: org.ID,
+		Name: "ao-" + uuid.New().String()[:8], PhoneID: "p2", BusinessID: "b2",
+		AccessToken: "t", DefaultTeamID: &otherTeamForAcct.ID,
+	}
+	require.NoError(t, app.DB.Create(acctOther).Error)
+	acctDefaultOther := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(acctDefaultOther).Update("whats_app_account", acctOther.Name).Error)
+
 	enableStrictVisibility(t, app, org.ID)
 
 	// All contacts in the org.
 	all := []*models.Contact{
 		assignedToViewer, assignedToOther, teamQueue, generalQueue, carteira, idle,
 		flowTeamMine, flowTeamOther, acctDefaultMine,
+		generalQueueAcctMine, acctDefaultOther,
 	}
 
 	// Expected set per the function.

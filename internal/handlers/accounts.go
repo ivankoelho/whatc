@@ -59,6 +59,7 @@ type AccountResponse struct {
 	UpdatedByName          string     `json:"updated_by_name,omitempty"`
 	CreatedAt              string     `json:"created_at"`
 	UpdatedAt              string     `json:"updated_at"`
+	DefaultTeamID          *uuid.UUID `json:"default_team_id,omitempty"`
 }
 
 // ListAccounts returns all WhatsApp accounts for the organization
@@ -131,6 +132,19 @@ func (a *App) CreateAccount(r *fastglue.Request) error {
 		Status:                 "active",
 		CreatedByID:            &userID,
 		UpdatedByID:            &userID,
+	}
+
+	if req.DefaultTeamID != nil && *req.DefaultTeamID != "" {
+		tid, err := uuid.Parse(*req.DefaultTeamID)
+		if err != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid default_team_id", nil, "")
+		}
+		var count int64
+		a.DB.Model(&models.Team{}).Where("id = ? AND organization_id = ?", tid, orgID).Count(&count)
+		if count == 0 {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid default_team_id", nil, "")
+		}
+		account.DefaultTeamID = &tid
 	}
 
 	if err := a.encryptAccountSecrets(&account); err != nil {
@@ -489,6 +503,7 @@ func accountToResponse(acc models.WhatsAppAccount) AccountResponse {
 		UpdatedByID:            acc.UpdatedByID,
 		CreatedAt:              acc.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt:              acc.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		DefaultTeamID:          acc.DefaultTeamID,
 	}
 	if acc.CreatedBy != nil {
 		resp.CreatedByName = acc.CreatedBy.FullName

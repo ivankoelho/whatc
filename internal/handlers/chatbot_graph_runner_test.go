@@ -1529,3 +1529,50 @@ func TestExecChatButtons_SetsContactTeamFromButton(t *testing.T) {
 	app.DB.Model(&models.AgentTransfer{}).Where("contact_id = ?", contact.ID).Count(&transfers)
 	assert.Equal(t, int64(0), transfers, "setting team must NOT create a transfer")
 }
+
+// TestExecChatButtons_UnknownTeamIDLeavesContactTeamNil verifies that a
+// button's team_id which does not resolve to a Team in the contact's
+// organization (a foreign-org id, or a syntactically invalid uuid) is never
+// written to Contact.TeamID, and that the flow still advances normally
+// instead of failing the node.
+func TestExecChatButtons_UnknownTeamIDLeavesContactTeamNil(t *testing.T) {
+	app, org, account, contact, session := newGraphTestFixtures(t)
+
+	otherOrg := &models.Organization{
+		BaseModel: models.BaseModel{ID: uuid.New()},
+		Name:      "other-org",
+		Slug:      "other-org-" + uuid.New().String()[:8],
+	}
+	require.NoError(t, app.DB.Create(otherOrg).Error)
+	foreignTeam := &models.Team{
+		BaseModel:      models.BaseModel{ID: uuid.New()},
+		OrganizationID: otherOrg.ID,
+		Name:           "Foreign Team",
+		IsActive:       true,
+	}
+	require.NoError(t, app.DB.Create(foreignTeam).Error)
+
+	flow := &models.ChatbotFlow{
+		BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: org.ID,
+		WhatsAppAccount: account.Name, Name: "menu-team-unknown", IsEnabled: true,
+		Graph: models.JSONB{
+			"version": 2, "entry_node": "b1",
+			"nodes": []any{
+				map[string]any{"id": "b1", "type": "buttons", "label": "menu",
+					"config": map[string]any{"body": "Escolha",
+						"buttons": []any{map[string]any{"id": "vendas", "title": "Vendas", "team_id": foreignTeam.ID.String()}}}},
+				map[string]any{"id": "p1", "type": "prompt", "label": "ask",
+					"config": map[string]any{"body": "CEP?", "store_as": "cep"}},
+			},
+			"edges": []any{map[string]any{"from": "b1", "to": "p1", "condition": "button:vendas"}},
+		},
+	}
+	require.NoError(t, app.DB.Create(flow).Error)
+
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "start", "", nil))  // park at b1
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "", "vendas", nil)) // pick Vendas → p1, flow must still advance
+
+	var fresh models.Contact
+	require.NoError(t, app.DB.First(&fresh, "id = ?", contact.ID).Error)
+	assert.Nil(t, fresh.TeamID, "a team_id from another organization must not be written to Contact.TeamID")
+}

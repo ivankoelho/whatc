@@ -214,6 +214,70 @@ func TestApp_CreateAccount_WithOptionalFields(t *testing.T) {
 	assert.True(t, resp.Data.HasAppSecret)
 }
 
+func TestApp_CreateAccount_WithDefaultTeamID(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	user := createAdminUser(t, app, org.ID)
+	team := createTeamWithMember(t, app, org.ID, user.ID)
+
+	req := testutil.NewJSONRequest(t, map[string]any{
+		"name":            "Team Scoped Account",
+		"phone_id":        "team-phone-id",
+		"business_id":     "team-business-id",
+		"access_token":    "tok",
+		"default_team_id": team.ID.String(),
+	})
+	testutil.SetAuthContext(req, org.ID, user.ID)
+
+	err := app.CreateAccount(req)
+	require.NoError(t, err)
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var resp struct {
+		Data handlers.AccountResponse `json:"data"`
+	}
+	err = json.Unmarshal(testutil.GetResponseBody(req), &resp)
+	require.NoError(t, err)
+	require.NotNil(t, resp.Data.DefaultTeamID)
+	assert.Equal(t, team.ID, *resp.Data.DefaultTeamID)
+
+	var persisted models.WhatsAppAccount
+	require.NoError(t, app.DB.First(&persisted, "id = ?", resp.Data.ID).Error)
+	require.NotNil(t, persisted.DefaultTeamID)
+	assert.Equal(t, team.ID, *persisted.DefaultTeamID)
+}
+
+func TestApp_CreateAccount_RejectsForeignOrgDefaultTeamID(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	user := createAdminUser(t, app, org.ID)
+
+	otherOrg := testutil.CreateTestOrganization(t, app.DB)
+	otherAdmin := createAdminUser(t, app, otherOrg.ID)
+	foreignTeam := createTeamWithMember(t, app, otherOrg.ID, otherAdmin.ID)
+
+	req := testutil.NewJSONRequest(t, map[string]any{
+		"name":            "Bad Team Account",
+		"phone_id":        "bad-team-phone-id",
+		"business_id":     "bad-team-business-id",
+		"access_token":    "tok",
+		"default_team_id": foreignTeam.ID.String(),
+	})
+	testutil.SetAuthContext(req, org.ID, user.ID)
+
+	err := app.CreateAccount(req)
+	require.NoError(t, err)
+	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
+
+	var count int64
+	app.DB.Model(&models.WhatsAppAccount{}).Where("organization_id = ? AND phone_id = ?", org.ID, "bad-team-phone-id").Count(&count)
+	assert.Equal(t, int64(0), count)
+}
+
 func TestApp_CreateAccount_ValidationErrors(t *testing.T) {
 	t.Parallel()
 
@@ -323,6 +387,35 @@ func TestApp_GetAccount_Success(t *testing.T) {
 	assert.Equal(t, account.APIVersion, resp.Data.APIVersion)
 	assert.Equal(t, "active", resp.Data.Status)
 	assert.True(t, resp.Data.HasAccessToken)
+}
+
+func TestApp_GetAccount_IncludesDefaultTeamID(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	user := createAdminUser(t, app, org.ID)
+	team := createTeamWithMember(t, app, org.ID, user.ID)
+	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+	teamID := team.ID
+	account.DefaultTeamID = &teamID
+	require.NoError(t, app.DB.Save(account).Error)
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	testutil.SetPathParam(req, "id", account.ID.String())
+
+	err := app.GetAccount(req)
+	require.NoError(t, err)
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var resp struct {
+		Data handlers.AccountResponse `json:"data"`
+	}
+	err = json.Unmarshal(testutil.GetResponseBody(req), &resp)
+	require.NoError(t, err)
+	require.NotNil(t, resp.Data.DefaultTeamID)
+	assert.Equal(t, team.ID, *resp.Data.DefaultTeamID)
 }
 
 func TestApp_GetAccount_NotFound(t *testing.T) {

@@ -273,14 +273,27 @@ func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 		for _, b := range buttonsFromConfig(node.Config) {
 			if id, _ := b["id"].(string); id == ctx.buttonID {
 				if tid, _ := b["team_id"].(string); tid != "" {
-					if parsed, err := uuid.Parse(tid); err == nil {
-						if err := a.DB.Model(&models.Contact{}).Where("id = ?", ctx.contact.ID).
-							Update("team_id", parsed).Error; err != nil {
-							a.Log.Error("buttons node failed to set contact team",
-								"node", node.ID, "contact", ctx.contact.ID, "error", err)
-						} else {
-							ctx.contact.TeamID = &parsed
-						}
+					parsed, err := uuid.Parse(tid)
+					if err != nil {
+						a.Log.Warn("buttons node has invalid team_id, skipping",
+							"node", node.ID, "team_id", tid, "error", err)
+						break
+					}
+					var count int64
+					a.DB.Model(&models.Team{}).
+						Where("id = ? AND organization_id = ?", parsed, ctx.contact.OrganizationID).
+						Count(&count)
+					if count == 0 {
+						a.Log.Warn("buttons node team_id not found in contact's organization, skipping",
+							"node", node.ID, "team_id", tid, "organization_id", ctx.contact.OrganizationID)
+						break
+					}
+					if err := a.DB.Model(&models.Contact{}).Where("id = ?", ctx.contact.ID).
+						Update("team_id", parsed).Error; err != nil {
+						a.Log.Error("buttons node failed to set contact team",
+							"node", node.ID, "contact", ctx.contact.ID, "error", err)
+					} else {
+						ctx.contact.TeamID = &parsed
 					}
 				}
 				break
