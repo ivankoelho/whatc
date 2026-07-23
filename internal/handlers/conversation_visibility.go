@@ -35,12 +35,11 @@ func (a *App) authorizeConversation(userID, orgID uuid.UUID, contact *models.Con
 	}
 
 	// Strict mode.
-	// Supervisors/managers/admins with view_all always pass.
 	if a.HasPermission(userID, models.ResourceConversations, models.ActionViewAll, orgID) {
 		return conversationAccess{canView: true, canInteract: true}
 	}
 
-	// Is there an active transfer? It is the primary authority.
+	// Active transfer is the primary authority.
 	transfer, hasActive := a.activeTransferFor(orgID, contact.ID)
 	if hasActive {
 		switch {
@@ -51,19 +50,34 @@ func (a *App) authorizeConversation(userID, orgID uuid.UUID, contact *models.Con
 			ok := a.userInTeam(userID, *transfer.TeamID)
 			return conversationAccess{canView: ok, canInteract: ok}
 		default:
-			// General queue (no team): any authorized agent.
-			return conversationAccess{canView: true, canInteract: true}
+			// Active general-queue transfer (no agent, no team): fall back to
+			// the account default team, else view_all only.
+			if team := a.accountDefaultTeamID(orgID, contact); team != nil {
+				ok := a.userInTeam(userID, *team)
+				return conversationAccess{canView: ok, canInteract: ok}
+			}
+			return conversationAccess{canView: false, canInteract: false}
 		}
 	}
 
-	// No active transfer: carteira governs, if set.
+	// No active transfer: carteira governs (more specific than any team).
 	if contact.AssignedUserID != nil {
 		ok := *contact.AssignedUserID == userID
 		return conversationAccess{canView: ok, canInteract: ok}
 	}
 
-	// No transfer, no carteira: general pool, authorized agents.
-	return conversationAccess{canView: true, canInteract: true}
+	// No carteira: effective team = flow-set team, else account default team.
+	effTeam := contact.TeamID
+	if effTeam == nil {
+		effTeam = a.accountDefaultTeamID(orgID, contact)
+	}
+	if effTeam != nil {
+		ok := a.userInTeam(userID, *effTeam)
+		return conversationAccess{canView: ok, canInteract: ok}
+	}
+
+	// No transfer, no carteira, no team: view_all only.
+	return conversationAccess{canView: false, canInteract: false}
 }
 
 func (a *App) canViewConversation(userID, orgID uuid.UUID, contact *models.Contact) bool {
@@ -103,6 +117,22 @@ func (a *App) userInTeam(userID, teamID uuid.UUID) bool {
 		Where("team_id = ? AND user_id = ?", teamID, userID).
 		Count(&count)
 	return count > 0
+}
+
+// accountDefaultTeamID returns the default team configured on the contact's
+// WhatsApp account, or nil. Used only in strict mode as the last team signal
+// before falling back to view_all-only.
+func (a *App) accountDefaultTeamID(orgID uuid.UUID, contact *models.Contact) *uuid.UUID {
+	if contact == nil || contact.WhatsAppAccount == "" {
+		return nil
+	}
+	var acct models.WhatsAppAccount
+	if err := a.DB.Select("default_team_id").
+		Where("organization_id = ? AND name = ?", orgID, contact.WhatsAppAccount).
+		First(&acct).Error; err != nil {
+		return nil
+	}
+	return acct.DefaultTeamID
 }
 
 // scopeVisibleConversations is the SQL translation of authorizeConversation.canView
