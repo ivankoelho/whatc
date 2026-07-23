@@ -133,6 +133,24 @@ type IncomingTextMessage struct {
 	} `json:"contacts,omitempty"`
 }
 
+// chatbotInput resolves the effective flow input for an inbound message and
+// whether it is actionable for the chatbot. Text and button replies pass
+// through unchanged; a media-only message (no caption) yields the media URL as
+// the input so a prompt node can capture and store it. A message with neither
+// text, button, nor media is not actionable and should be ignored.
+func chatbotInput(messageText, buttonID string, media *MediaInfo) (input string, actionable bool) {
+	mediaURL := ""
+	if media != nil {
+		mediaURL = media.MediaURL
+	}
+	input = messageText
+	if input == "" && mediaURL != "" {
+		input = mediaURL
+	}
+	actionable = messageText != "" || buttonID != "" || mediaURL != ""
+	return input, actionable
+}
+
 // processIncomingMessageFull processes incoming WhatsApp messages with chatbot logic
 func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextMessage, profileName string) {
 	a.Log.Info("Processing incoming message",
@@ -236,9 +254,14 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 		}
 	}
 
-	// Only process text and interactive messages for chatbot
-	if messageText == "" {
-		a.Log.Debug("Skipping message with no text content for chatbot", "type", msg.Type)
+	// A media-only message (photo, audio or document sent without a caption)
+	// has no text, but when the contact is answering a prompt node we still
+	// need to advance the flow — chatbotInput feeds the media URL as the input
+	// so it lands in store_as (notes rendering "Foto: {{referencia_por_foto}}"
+	// then carry a clickable link). Text and interactive replies are unaffected.
+	effectiveInput, actionable := chatbotInput(messageText, buttonID, mediaInfo)
+	if !actionable {
+		a.Log.Debug("Skipping message with no actionable content for chatbot", "type", msg.Type)
 		return
 	}
 
@@ -291,7 +314,7 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 			a.exitFlow(session)
 			return
 		}
-		if err := a.runChatGraph(account, contact, session, flow, messageText, buttonID, flowResponseData); err != nil {
+		if err := a.runChatGraph(account, contact, session, flow, effectiveInput, buttonID, flowResponseData); err != nil {
 			a.Log.Error("Chat graph runner failed", "error", err, "session", session.ID, "flow", flow.ID)
 		}
 		return
@@ -313,6 +336,13 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 		if err := a.runChatGraph(account, contact, session, flow, messageText, buttonID, flowResponseData); err != nil {
 			a.Log.Error("Chat graph runner failed at flow start", "error", err, "session", session.ID, "flow", flow.ID)
 		}
+		return
+	}
+
+	// Beyond this point the flow is text-driven (greeting, keyword replies,
+	// AI, fallback). A media-only message with no active flow has nothing to
+	// match, so preserve the prior "ignore" behaviour and stop here.
+	if messageText == "" {
 		return
 	}
 
