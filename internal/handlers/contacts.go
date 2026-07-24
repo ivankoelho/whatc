@@ -39,6 +39,7 @@ type ContactResponse struct {
 	LastMessagePreview string               `json:"last_message_preview"`
 	UnreadCount        int                  `json:"unread_count"`
 	AssignedUserID     *uuid.UUID           `json:"assigned_user_id,omitempty"`
+	AssignedUserName   string               `json:"assigned_user_name,omitempty"`
 	WhatsAppAccount    string               `json:"whatsapp_account,omitempty"`
 	LastInboundAt      *time.Time           `json:"last_inbound_at,omitempty"`
 	ServiceWindowOpen  bool                 `json:"service_window_open"`
@@ -161,6 +162,10 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 	// Check if phone masking is enabled
 	shouldMask := a.ShouldMaskPhoneNumbers(orgID)
 
+	// Resolve assigned-agent names in a single query (avoid N+1) so the chat
+	// list can show "Atribuído a: X" per row.
+	assignedNames := a.assignedUserNames(orgID, contacts)
+
 	// Convert to response format
 	response := make([]ContactResponse, len(contacts))
 	for i, c := range contacts {
@@ -207,6 +212,9 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 			MarketingOptOut:    c.MarketingOptOut,
 			CreatedAt:          c.CreatedAt,
 			UpdatedAt:          c.UpdatedAt,
+		}
+		if c.AssignedUserID != nil {
+			response[i].AssignedUserName = assignedNames[*c.AssignedUserID]
 		}
 	}
 
@@ -1605,6 +1613,16 @@ func (a *App) buildContactResponse(contact *models.Contact, orgID uuid.UUID) Con
 	// 24-hour service window: open if customer messaged within the last 24 hours.
 	serviceWindowOpen := contact.LastInboundAt != nil && time.Since(*contact.LastInboundAt) < 24*time.Hour
 
+	var assignedUserName string
+	if contact.AssignedUserID != nil {
+		var u models.User
+		if err := a.DB.Select("full_name").
+			Where("id = ? AND organization_id = ?", *contact.AssignedUserID, orgID).
+			First(&u).Error; err == nil {
+			assignedUserName = u.FullName
+		}
+	}
+
 	return ContactResponse{
 		ID:                 contact.ID,
 		PhoneNumber:        phoneNumber,
@@ -1618,6 +1636,7 @@ func (a *App) buildContactResponse(contact *models.Contact, orgID uuid.UUID) Con
 		LastMessagePreview: contact.LastMessagePreview,
 		UnreadCount:        int(unreadCount),
 		AssignedUserID:     contact.AssignedUserID,
+		AssignedUserName:   assignedUserName,
 		WhatsAppAccount:    contact.WhatsAppAccount,
 		LastInboundAt:      contact.LastInboundAt,
 		ServiceWindowOpen:  serviceWindowOpen,
@@ -1625,6 +1644,38 @@ func (a *App) buildContactResponse(contact *models.Contact, orgID uuid.UUID) Con
 		CreatedAt:          contact.CreatedAt,
 		UpdatedAt:          contact.UpdatedAt,
 	}
+}
+
+// assignedUserNames resolves the full names of the agents assigned to the given
+// contacts in a single query, keyed by user ID. Contacts without an assignment
+// are ignored. Returns an empty (non-nil) map when there are no assignees.
+func (a *App) assignedUserNames(orgID uuid.UUID, contacts []models.Contact) map[uuid.UUID]string {
+	names := make(map[uuid.UUID]string)
+	idSet := make(map[uuid.UUID]struct{})
+	for _, c := range contacts {
+		if c.AssignedUserID != nil {
+			idSet[*c.AssignedUserID] = struct{}{}
+		}
+	}
+	if len(idSet) == 0 {
+		return names
+	}
+	ids := make([]uuid.UUID, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
+	}
+	var rows []struct {
+		ID       uuid.UUID
+		FullName string
+	}
+	a.DB.Model(&models.User{}).
+		Select("id, full_name").
+		Where("id IN ? AND organization_id = ?", ids, orgID).
+		Scan(&rows)
+	for _, row := range rows {
+		names[row.ID] = row.FullName
+	}
+	return names
 }
 
 // senderName returns the display name of the agent who sent an outgoing
