@@ -19,6 +19,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Spinner } from '@/components/ui/spinner'
 import { Separator } from '@/components/ui/separator'
 import {
@@ -491,16 +492,59 @@ async function executeCustomAction(action: CustomAction) {
 
 // Search state for assignment dialog
 const assignSearchQuery = ref('')
+// Filter the agent picker by role ("type") so a long list stays navigable.
+// Shared by the assign and transfer-to-agent dialogs (only one open at a time).
+const assignRoleFilter = ref('_all')
+// Team-transfer dialog: pick an agent to transfer to, and search teams.
+const isTransferAgentDialogOpen = ref(false)
+const teamSearchQuery = ref('')
 
-// Filtered users for assignment dialog
+// Distinct role names present among assignable users, for the role filter.
+const assignableRoles = computed(() => {
+  const names = new Set<string>()
+  for (const u of assignableUsers.value) {
+    const n = u.role?.name
+    if (n) names.add(n)
+  }
+  return Array.from(names).sort()
+})
+
+// Filtered users for the assign / transfer-to-agent dialogs (role + search).
 const filteredAssignableUsers = computed(() => {
   const query = assignSearchQuery.value.toLowerCase().trim()
-  if (!query) return assignableUsers.value
-  return assignableUsers.value.filter(u =>
-    u.full_name.toLowerCase().includes(query) ||
-    u.email.toLowerCase().includes(query)
-  )
+  const role = assignRoleFilter.value
+  return assignableUsers.value.filter(u => {
+    if (role !== '_all' && u.role?.name !== role) return false
+    if (!query) return true
+    return u.full_name.toLowerCase().includes(query) || u.email.toLowerCase().includes(query)
+  })
 })
+
+// Teams filtered client-side by the dialog's search box.
+const filteredTeams = computed(() => {
+  const q = teamSearchQuery.value.toLowerCase().trim()
+  if (!q) return teamsStore.teams
+  return teamsStore.teams.filter(tm => tm.name.toLowerCase().includes(q))
+})
+
+// Reset the shared agent-picker filters when either dialog closes.
+function resetAgentPickerFilters() {
+  assignSearchQuery.value = ''
+  assignRoleFilter.value = '_all'
+}
+
+// Openers: ensure the picker data is loaded even for users who can transfer
+// but were not covered by the on-mount fetch (which is gated on canAssign).
+function openTransferAgentDialog() {
+  if (usersStore.users.length === 0) usersStore.fetchUsers().catch(() => {})
+  isTransferAgentDialogOpen.value = true
+}
+function openTransferTeamDialog() {
+  // Fetch up to the backend's max page so all teams show, not just the first 50.
+  teamsStore.fetchTeams({ limit: 100 }).catch(() => {})
+  teamSearchQuery.value = ''
+  isTransferTeamDialogOpen.value = true
+}
 
 // Fetch contacts on mount (WebSocket is connected in AppLayout)
 onMounted(async () => {
@@ -511,7 +555,7 @@ onMounted(async () => {
   }
 
   // Teams populate the "Transfer to team" picker in the conversation menu.
-  if (teamsStore.teams.length === 0) teamsStore.fetchTeams()
+  if (teamsStore.teams.length === 0) teamsStore.fetchTeams({ limit: 100 })
 
   // Ensure auth session is restored
   if (!authStore.isAuthenticated) {
@@ -1333,14 +1377,16 @@ async function assignContactToUser(userId: string | null) {
   }
 }
 
-async function transferToAgent() {
+async function transferToAgent(agentId: string) {
   if (!contactsStore.currentContact) return
 
   isTransferring.value = true
+  isTransferAgentDialogOpen.value = false
   try {
     await chatbotService.createTransfer({
       contact_id: contactsStore.currentContact.id,
       whatsapp_account: (contactsStore.currentContact as any).whatsapp_account,
+      agent_id: agentId,
       source: 'manual'
     })
     toast.success(t('chat.transferSuccess'), {
@@ -2089,11 +2135,11 @@ async function sendMediaMessage() {
                   <UserPlus class="mr-2 h-4 w-4" />
                   <span>{{ $t('chat.assignToAgent') }}</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem v-if="!activeTransferId" @click="transferToAgent" :disabled="isTransferring">
+                <DropdownMenuItem v-if="!activeTransferId" @click="openTransferAgentDialog" :disabled="isTransferring">
                   <UserX class="mr-2 h-4 w-4" />
                   <span>{{ $t('chat.transferToAgent') }}</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem v-if="!activeTransferId" @click="isTransferTeamDialogOpen = true" :disabled="isTransferring">
+                <DropdownMenuItem v-if="!activeTransferId" @click="openTransferTeamDialog" :disabled="isTransferring">
                   <Users class="mr-2 h-4 w-4" />
                   <span>{{ $t('chat.transferToTeam') }}</span>
                 </DropdownMenuItem>
@@ -2797,7 +2843,7 @@ async function sendMediaMessage() {
     </Dialog>
 
     <!-- Assign Contact Dialog -->
-    <Dialog v-model:open="isAssignDialogOpen" @update:open="(open) => !open && (assignSearchQuery = '')">
+    <Dialog v-model:open="isAssignDialogOpen" @update:open="(open) => !open && resetAgentPickerFilters()">
       <DialogContent class="max-w-sm">
         <DialogHeader>
           <DialogTitle>{{ $t('chat.assignContact') }}</DialogTitle>
@@ -2806,6 +2852,14 @@ async function sendMediaMessage() {
           </DialogDescription>
         </DialogHeader>
         <div class="py-4 space-y-3">
+          <!-- Filter by role (type) — only when there is more than one to pick -->
+          <Select v-if="assignableRoles.length > 1" v-model="assignRoleFilter">
+            <SelectTrigger class="h-9"><SelectValue :placeholder="$t('chat.filterByRole')" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="_all">{{ $t('chat.allRoles') }}</SelectItem>
+              <SelectItem v-for="r in assignableRoles" :key="r" :value="r">{{ r }}</SelectItem>
+            </SelectContent>
+          </Select>
           <!-- Search input -->
           <div class="relative">
             <Search class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -2834,13 +2888,13 @@ async function sendMediaMessage() {
                 class="w-full justify-start"
                 @click="assignContactToUser(user.id); isAssignDialogOpen = false"
               >
-                <User class="mr-2 h-4 w-4" />
-                <span>{{ user.full_name }}</span>
+                <User class="mr-2 h-4 w-4 shrink-0" />
+                <span class="truncate">{{ user.full_name }}</span>
                 <Check
                   v-if="contactsStore.currentContact?.assigned_user_id === user.id"
-                  class="ml-auto h-4 w-4 text-primary"
+                  class="ml-auto h-4 w-4 text-primary shrink-0"
                 />
-                <Badge v-else variant="outline" class="ml-auto text-xs">
+                <Badge v-else variant="outline" class="ml-auto shrink-0 text-xs">
                   {{ user.role?.name }}
                 </Badge>
               </Button>
@@ -2853,28 +2907,74 @@ async function sendMediaMessage() {
       </DialogContent>
     </Dialog>
 
+    <!-- Transfer to agent (pick a specific agent) -->
+    <Dialog v-model:open="isTransferAgentDialogOpen" @update:open="(open) => !open && resetAgentPickerFilters()">
+      <DialogContent class="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>{{ $t('chat.transferToAgentTitle') }}</DialogTitle>
+          <DialogDescription>{{ $t('chat.transferToAgentDesc') }}</DialogDescription>
+        </DialogHeader>
+        <div class="py-4 space-y-3">
+          <Select v-if="assignableRoles.length > 1" v-model="assignRoleFilter">
+            <SelectTrigger class="h-9"><SelectValue :placeholder="$t('chat.filterByRole')" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="_all">{{ $t('chat.allRoles') }}</SelectItem>
+              <SelectItem v-for="r in assignableRoles" :key="r" :value="r">{{ r }}</SelectItem>
+            </SelectContent>
+          </Select>
+          <div class="relative">
+            <Search class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input v-model="assignSearchQuery" :placeholder="$t('chat.searchUsers') + '...'" class="pl-9 h-9" />
+          </div>
+          <ScrollArea class="max-h-[280px]">
+            <div class="space-y-1">
+              <Button
+                v-for="user in filteredAssignableUsers"
+                :key="user.id"
+                variant="ghost"
+                class="w-full justify-start"
+                :disabled="isTransferring"
+                @click="transferToAgent(user.id)"
+              >
+                <User class="mr-2 h-4 w-4 shrink-0" />
+                <span class="truncate">{{ user.full_name }}</span>
+                <Badge variant="outline" class="ml-auto shrink-0 text-xs">{{ user.role?.name }}</Badge>
+              </Button>
+              <p v-if="filteredAssignableUsers.length === 0" class="text-sm text-muted-foreground text-center py-4">
+                {{ $t('chat.noUsersFound') }}
+              </p>
+            </div>
+          </ScrollArea>
+        </div>
+      </DialogContent>
+    </Dialog>
+
     <!-- Transfer to team -->
-    <Dialog v-model:open="isTransferTeamDialogOpen">
+    <Dialog v-model:open="isTransferTeamDialogOpen" @update:open="(open) => !open && (teamSearchQuery = '')">
       <DialogContent class="max-w-sm">
         <DialogHeader>
           <DialogTitle>{{ $t('chat.transferToTeamTitle') }}</DialogTitle>
           <DialogDescription>{{ $t('chat.transferToTeamDesc') }}</DialogDescription>
         </DialogHeader>
-        <div class="py-4">
+        <div class="py-4 space-y-3">
+          <div class="relative">
+            <Search class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input v-model="teamSearchQuery" :placeholder="$t('chat.searchTeams') + '...'" class="pl-9 h-9" />
+          </div>
           <ScrollArea class="max-h-[280px]">
             <div class="space-y-1">
               <Button
-                v-for="team in teamsStore.teams"
+                v-for="team in filteredTeams"
                 :key="team.id"
                 variant="ghost"
                 class="w-full justify-start"
                 :disabled="isTransferring"
                 @click="transferToTeam(team.id)"
               >
-                <Users class="mr-2 h-4 w-4" />
-                <span>{{ team.name }}</span>
+                <Users class="mr-2 h-4 w-4 shrink-0" />
+                <span class="truncate">{{ team.name }}</span>
               </Button>
-              <p v-if="teamsStore.teams.length === 0" class="text-sm text-muted-foreground text-center py-4">
+              <p v-if="filteredTeams.length === 0" class="text-sm text-muted-foreground text-center py-4">
                 {{ $t('chat.noTeamsFound') }}
               </p>
             </div>
