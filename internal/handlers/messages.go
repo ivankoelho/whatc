@@ -145,6 +145,23 @@ func SLASendOptions() MessageSendOptions {
 	}
 }
 
+// agentNamePrefix builds the customer-facing signature for an agent's message:
+// the agent's first name in WhatsApp bold, followed by a newline (e.g. "*Milena:*\n").
+// Returns "" if the user has no name, so callers can prefix unconditionally.
+func (a *App) agentNamePrefix(userID uuid.UUID) string {
+	var fullName string
+	a.DB.Model(&models.User{}).Where("id = ?", userID).Pluck("full_name", &fullName)
+	fullName = strings.TrimSpace(fullName)
+	if fullName == "" {
+		return ""
+	}
+	first := fullName
+	if i := strings.IndexAny(fullName, " \t"); i > 0 {
+		first = fullName[:i]
+	}
+	return "*" + first + ":*\n"
+}
+
 // SendOutgoingMessage is the unified method for sending all types of WhatsApp messages.
 // It handles: text, media (image/video/audio/document), interactive (buttons/list/cta_url), and template messages.
 func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageRequest, opts MessageSendOptions) (*models.Message, error) {
@@ -155,6 +172,24 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 	if err := a.DB.Create(msg).Error; err != nil {
 		a.Log.Error("Failed to create message", "error", err)
 		return nil, fmt.Errorf("failed to create message: %w", err)
+	}
+
+	// Customer-facing agent signature (opt-in): prefix the agent's first name in
+	// bold to outgoing free text and media captions, so the client sees who is
+	// replying. The stored message keeps the raw text — only what goes to
+	// WhatsApp is prefixed. Templates and interactive messages are never signed.
+	signedContent, signedCaption := req.Content, req.Caption
+	if opts.SentByUserID != nil && req.Contact != nil && req.Account != nil {
+		if settings, _ := a.getChatbotSettingsCached(req.Contact.OrganizationID, req.Account.Name); settings != nil && settings.AgentAssignment.SignWithAgentName {
+			if prefix := a.agentNamePrefix(*opts.SentByUserID); prefix != "" {
+				if signedContent != "" {
+					signedContent = prefix + signedContent
+				}
+				if signedCaption != "" {
+					signedCaption = prefix + signedCaption
+				}
+			}
+		}
 	}
 
 	// 2. Define the send function based on message type
@@ -170,7 +205,7 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 
 		switch req.Type {
 		case models.MessageTypeText:
-			return a.WhatsApp.SendTextMessage(sendCtx, waAccount, rcpt, req.Content, replyToMsgID)
+			return a.WhatsApp.SendTextMessage(sendCtx, waAccount, rcpt, signedContent, replyToMsgID)
 
 		case models.MessageTypeImage, models.MessageTypeVideo, models.MessageTypeAudio, models.MessageTypeDocument:
 			// Upload media if MediaData is provided and MediaID is not set
@@ -185,13 +220,13 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 			// Send the appropriate media type
 			switch req.Type {
 			case models.MessageTypeImage:
-				return a.WhatsApp.SendImageMessage(sendCtx, waAccount, rcpt, mediaID, req.Caption)
+				return a.WhatsApp.SendImageMessage(sendCtx, waAccount, rcpt, mediaID, signedCaption)
 			case models.MessageTypeVideo:
-				return a.WhatsApp.SendVideoMessage(sendCtx, waAccount, rcpt, mediaID, req.Caption)
+				return a.WhatsApp.SendVideoMessage(sendCtx, waAccount, rcpt, mediaID, signedCaption)
 			case models.MessageTypeAudio:
 				return a.WhatsApp.SendAudioMessage(sendCtx, waAccount, rcpt, mediaID)
 			default: // document
-				return a.WhatsApp.SendDocumentMessage(sendCtx, waAccount, rcpt, mediaID, req.MediaFilename, req.Caption)
+				return a.WhatsApp.SendDocumentMessage(sendCtx, waAccount, rcpt, mediaID, req.MediaFilename, signedCaption)
 			}
 
 		case models.MessageTypeInteractive:

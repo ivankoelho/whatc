@@ -92,7 +92,8 @@ const chatbotSettings = ref({
   allow_agent_queue_pickup: true,
   assign_to_same_agent: true,
   agent_current_conversation_only: false,
-  strict_conversation_visibility: false
+  strict_conversation_visibility: false,
+  sign_with_agent_name: false
 })
 
 // AI Settings
@@ -213,7 +214,8 @@ onMounted(async () => {
         allow_agent_queue_pickup: chatbotData.settings.allow_agent_queue_pickup !== false,
         assign_to_same_agent: chatbotData.settings.assign_to_same_agent !== false,
         agent_current_conversation_only: chatbotData.settings.agent_current_conversation_only === true,
-        strict_conversation_visibility: chatbotData.settings.strict_conversation_visibility === true
+        strict_conversation_visibility: chatbotData.settings.strict_conversation_visibility === true,
+        sign_with_agent_name: chatbotData.settings.sign_with_agent_name === true
       }
 
       const aiEnabledValue = chatbotData.settings.ai_enabled === true
@@ -294,7 +296,8 @@ async function saveAgentSettings() {
       allow_agent_queue_pickup: chatbotSettings.value.allow_agent_queue_pickup,
       assign_to_same_agent: chatbotSettings.value.assign_to_same_agent,
       agent_current_conversation_only: chatbotSettings.value.agent_current_conversation_only,
-      strict_conversation_visibility: chatbotSettings.value.strict_conversation_visibility
+      strict_conversation_visibility: chatbotSettings.value.strict_conversation_visibility,
+      sign_with_agent_name: chatbotSettings.value.sign_with_agent_name
     })
     toast.success(t('chatbotSettings.agentSettingsSaved'))
     refreshActivityLog(agentsLogKey)
@@ -552,6 +555,19 @@ function removeEscalationUser(userId: string) {
                   <Switch
                     :checked="chatbotSettings.strict_conversation_visibility"
                     @update:checked="chatbotSettings.strict_conversation_visibility = $event"
+                  />
+                </div>
+
+                <Separator />
+
+                <div class="flex items-center justify-between py-2">
+                  <div>
+                    <p class="font-medium">{{ $t('chatbotSettings.signWithAgentName') }}</p>
+                    <p class="text-sm text-muted-foreground">{{ $t('chatbotSettings.signWithAgentNameDesc') }}</p>
+                  </div>
+                  <Switch
+                    :checked="chatbotSettings.sign_with_agent_name"
+                    @update:checked="chatbotSettings.sign_with_agent_name = $event"
                   />
                 </div>
 

@@ -27,6 +27,7 @@ type ChatbotSettingsResponse struct {
 	AssignToSameAgent            bool              `json:"assign_to_same_agent"`
 	AgentCurrentConversationOnly bool              `json:"agent_current_conversation_only"`
 	StrictConversationVisibility bool              `json:"strict_conversation_visibility"`
+	SignWithAgentName            bool              `json:"sign_with_agent_name"`
 	AIEnabled                    bool              `json:"ai_enabled"`
 	AIProvider                   models.AIProvider `json:"ai_provider"`
 	AIModel                      string            `json:"ai_model"`
@@ -181,6 +182,7 @@ func (a *App) GetChatbotSettings(r *fastglue.Request) error {
 		AssignToSameAgent:            settings.AgentAssignment.AssignToSameAgent,
 		AgentCurrentConversationOnly: settings.AgentAssignment.CurrentConversationOnly,
 		StrictConversationVisibility: settings.AgentAssignment.StrictConversationVisibility,
+		SignWithAgentName:            settings.AgentAssignment.SignWithAgentName,
 		// AI
 		AIEnabled:      settings.AI.Enabled,
 		AIProvider:     settings.AI.Provider,
@@ -233,6 +235,7 @@ func chatbotAgentsSnapshot(s *models.ChatbotSettings) map[string]any {
 		"assign_to_same_agent":            s.AgentAssignment.AssignToSameAgent,
 		"agent_current_conversation_only": s.AgentAssignment.CurrentConversationOnly,
 		"strict_conversation_visibility":  s.AgentAssignment.StrictConversationVisibility,
+		"sign_with_agent_name":            s.AgentAssignment.SignWithAgentName,
 	}
 }
 
@@ -303,6 +306,7 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		AssignToSameAgent            *bool              `json:"assign_to_same_agent"`
 		AgentCurrentConversationOnly *bool              `json:"agent_current_conversation_only"`
 		StrictConversationVisibility *bool              `json:"strict_conversation_visibility"`
+		SignWithAgentName            *bool              `json:"sign_with_agent_name"`
 		AIEnabled                    *bool              `json:"ai_enabled"`
 		AIProvider                   *models.AIProvider `json:"ai_provider"`
 		AIAPIKey                     *string            `json:"ai_api_key"`
@@ -389,7 +393,8 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		req.GreetingButtons != nil || req.FallbackMessage != nil ||
 		req.FallbackButtons != nil || req.SessionTimeoutMinutes != nil
 	agentsTouched := req.AllowAgentQueuePickup != nil || req.AssignToSameAgent != nil ||
-		req.AgentCurrentConversationOnly != nil || req.StrictConversationVisibility != nil
+		req.AgentCurrentConversationOnly != nil || req.StrictConversationVisibility != nil ||
+		req.SignWithAgentName != nil
 	hoursTouched := req.BusinessHoursEnabled != nil || req.BusinessHours != nil ||
 		req.OutOfHoursMessage != nil || req.AllowAutomatedOutsideHours != nil
 	slaTouched := req.SLAEnabled != nil || req.SLAResponseMinutes != nil ||
@@ -460,6 +465,9 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 	}
 	if req.StrictConversationVisibility != nil {
 		settings.AgentAssignment.StrictConversationVisibility = *req.StrictConversationVisibility
+	}
+	if req.SignWithAgentName != nil {
+		settings.AgentAssignment.SignWithAgentName = *req.SignWithAgentName
 	}
 
 	// AI Settings
