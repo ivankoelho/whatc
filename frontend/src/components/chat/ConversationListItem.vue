@@ -85,17 +85,20 @@ const hasMetaLine = computed(() => tags.value.length > 0 || assignedName.value !
           {{ props.contact.unread_count }}
         </Badge>
       </div>
-      <!-- Third line for supervisors/admins: applied tags + who is handling it.
-           Hidden entirely when there is nothing to show. -->
-      <div v-if="hasMetaLine" class="mt-0.5 flex items-center gap-1.5 min-w-0">
-        <span
-          v-for="tag in tags"
-          :key="tag"
-          class="flex-shrink-0 max-w-[7rem] truncate rounded px-1.5 py-0.5 text-[10px] leading-none bg-white/[0.06] text-white/60 light:bg-gray-100 light:text-gray-600"
-          :title="tag"
-        >
-          {{ tag }}
-        </span>
+      <!-- Extra context for supervisors/admins: applied tags, and on its own
+           line below them, who is handling the conversation. Each part is
+           hidden when empty; the whole block collapses when there is nothing. -->
+      <div v-if="hasMetaLine" class="mt-0.5 flex flex-col gap-0.5 min-w-0">
+        <div v-if="tags.length" class="flex flex-wrap items-center gap-1">
+          <span
+            v-for="tag in tags"
+            :key="tag"
+            class="max-w-[7rem] truncate rounded px-1.5 py-0.5 text-[10px] leading-none bg-white/[0.06] text-white/60 light:bg-gray-100 light:text-gray-600"
+            :title="tag"
+          >
+            {{ tag }}
+          </span>
+        </div>
         <span
           v-if="assignedName"
           class="flex items-center gap-1 min-w-0 text-[11px] text-white/45 light:text-gray-500"
