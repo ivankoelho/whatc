@@ -765,6 +765,7 @@ func TestApp_SendTemplateMessage(t *testing.T) {
 		tpl := createTestTemplate(t, app, org.ID, account.Name)
 
 		phone := "+15550001111"
+		normalized := "15550001111" // stored digits-only
 		req := testutil.NewJSONRequest(t, map[string]any{
 			"phone_number":  phone,
 			"template_name": tpl.Name,
@@ -781,11 +782,12 @@ func TestApp_SendTemplateMessage(t *testing.T) {
 		assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
 
 		var newContact models.Contact
-		require.NoError(t, app.DB.Where("organization_id = ? AND phone_number = ?", org.ID, phone).First(&newContact).Error)
+		require.NoError(t, app.DB.Where("organization_id = ? AND phone_number = ?", org.ID, normalized).First(&newContact).Error)
 		assert.Equal(t, account.Name, newContact.WhatsAppAccount)
+		assert.Equal(t, normalized, newContact.PhoneNumber, "a new contact is stored in the digits-only canonical form")
 
 		var count int64
-		app.DB.Model(&models.Contact{}).Where("organization_id = ? AND phone_number = ?", org.ID, phone).Count(&count)
+		app.DB.Model(&models.Contact{}).Where("organization_id = ? AND phone_number IN (?, ?)", org.ID, normalized, phone).Count(&count)
 		assert.Equal(t, int64(1), count, "exactly one contact row should be created")
 	})
 
@@ -877,6 +879,54 @@ func TestApp_SendTemplateMessage(t *testing.T) {
 
 		app.WaitForBackgroundTasks()
 		assert.Empty(t, mockServer.sentMessages, "no template should be delivered to the team-scoped contact")
+	})
+
+	t.Run("strict mode: a differently-FORMATTED phone matches the stored contact, is denied, no duplicate", func(t *testing.T) {
+		t.Parallel()
+		mockServer := newMockWhatsAppServer()
+		defer mockServer.close()
+
+		app := newMsgTestApp(t, mockServer)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		enableStrictVisibility(t, app, org.ID)
+		role := testutil.CreateTestRoleExact(t, app.DB, org.ID, "plain-agent-4", false, false, nil)
+		user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
+		account := createTestAccount(t, app, org.ID)
+		tpl := createTestTemplate(t, app, org.ID, account.Name)
+
+		otherAgent := testutil.CreateTestUser(t, app.DB, org.ID)
+		team := createTeamWithMember(t, app, org.ID, otherAgent.ID)
+
+		// Stored digits-only, as inbound webhooks store it.
+		storedPhone := "5511988887777"
+		existing := testutil.CreateTestContactWith(t, app.DB, org.ID,
+			testutil.WithContactAccount(account.Name), testutil.WithPhoneNumber(storedPhone))
+		require.NoError(t, app.DB.Model(existing).Update("team_id", team.ID).Error)
+
+		// SAME number, human-typed with spaces, parens and a dash. The old
+		// exact-match (only +/bare) would miss it, treat it as brand new, skip
+		// the gate, deliver, and split the conversation into a duplicate row.
+		req := testutil.NewJSONRequest(t, map[string]any{
+			"phone_number":    "+55 (11) 98888-7777",
+			"template_name":   tpl.Name,
+			"account_name":    account.Name,
+			"template_params": map[string]string{"name": "Mallory", "order_id": "ORD-4"},
+		})
+		testutil.SetAuthContext(req, org.ID, user.ID)
+
+		err := app.SendTemplateMessage(req)
+		require.NoError(t, err)
+		assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(req),
+			"a formatted form of a team-scoped number must resolve to the same contact and hit the gate")
+
+		var count int64
+		app.DB.Model(&models.Contact{}).
+			Where("organization_id = ? AND phone_number IN (?, ?)", org.ID, storedPhone, "+"+storedPhone).
+			Count(&count)
+		assert.Equal(t, int64(1), count, "no duplicate contact created from a formatted number")
+
+		app.WaitForBackgroundTasks()
+		assert.Empty(t, mockServer.sentMessages, "no template delivered to the team-scoped contact")
 	})
 
 	t.Run("template without buttons has no interactive_data", func(t *testing.T) {

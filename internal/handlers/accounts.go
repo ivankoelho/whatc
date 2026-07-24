@@ -301,6 +301,12 @@ func (a *App) UpdateAccount(r *fastglue.Request) error {
 
 	// Invalidate cache
 	a.InvalidateWhatsAppAccountCache(account.PhoneID)
+	a.InvalidateAccountDefaultTeamCache(account.OrganizationID, account.Name)
+	// On a rename the pre-update name's default-team entry would otherwise stay
+	// cached (a transient visibility over-grant) — drop it too.
+	if oldAccount.Name != account.Name {
+		a.InvalidateAccountDefaultTeamCache(account.OrganizationID, oldAccount.Name)
+	}
 
 	a.DB.Preload("CreatedBy").Preload("UpdatedBy").First(account, "id = ?", account.ID)
 
@@ -346,6 +352,7 @@ func (a *App) DeleteAccount(r *fastglue.Request) error {
 
 	// Invalidate cache
 	a.InvalidateWhatsAppAccountCache(account.PhoneID)
+	a.InvalidateAccountDefaultTeamCache(account.OrganizationID, account.Name)
 
 	a.logAudit(orgID, userID,
 		"account", id, models.AuditActionDeleted, account, nil)
@@ -680,6 +687,7 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 
 	// Invalidate cache
 	a.InvalidateWhatsAppAccountCache(account.PhoneID)
+	a.InvalidateAccountDefaultTeamCache(account.OrganizationID, account.Name)
 
 	a.Log.Info("WhatsApp account connected via embedded signup successfully",
 		"account_id", account.ID,
@@ -963,6 +971,7 @@ func (a *App) RegisterPhoneNumber(r *fastglue.Request) error {
 
 	// Invalidate cache
 	a.InvalidateWhatsAppAccountCache(account.PhoneID)
+	a.InvalidateAccountDefaultTeamCache(account.OrganizationID, account.Name)
 
 	// Log audit!
 	a.DB.Preload("CreatedBy").Preload("UpdatedBy").First(account, "id = ?", account.ID)
