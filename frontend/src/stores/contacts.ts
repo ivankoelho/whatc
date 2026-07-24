@@ -36,6 +36,7 @@ export interface Contact {
   service_window_open?: boolean
   unread_count: number
   assigned_user_id?: string
+  assigned_user_name?: string
   whatsapp_account?: string
   marketing_opt_out?: boolean
   created_at: string
