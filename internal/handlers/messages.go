@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -19,6 +20,7 @@ import (
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
+	"gorm.io/gorm"
 )
 
 // ============================================================================
@@ -828,8 +830,13 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 		// as a brand-new conversation — skipping the gate below entirely.
 		if c, err := contactutil.FindContactUnscoped(a.DB, orgID, req.PhoneNumber); err == nil {
 			contact = c
-		} else {
+		} else if errors.Is(err, gorm.ErrRecordNotFound) {
 			isNewContact = true
+		} else {
+			// A real DB error must NOT be treated as "brand new" — that would
+			// skip the authorization gate below. Fail the request instead.
+			a.Log.Error("failed to resolve contact for template send", "error", err, "phone", req.PhoneNumber)
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to resolve contact", nil, "")
 		}
 	}
 
@@ -856,7 +863,7 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 		c := models.Contact{
 			BaseModel:       models.BaseModel{ID: uuid.New()},
 			OrganizationID:  orgID,
-			PhoneNumber:     req.PhoneNumber,
+			PhoneNumber:     contactutil.NormalizePhone(req.PhoneNumber),
 			WhatsAppAccount: account.Name,
 		}
 		if err := a.DB.Create(&c).Error; err != nil {

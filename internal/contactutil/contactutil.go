@@ -1,10 +1,29 @@
 package contactutil
 
 import (
+	"strings"
+
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"gorm.io/gorm"
 )
+
+// NormalizePhone reduces a phone number to its canonical digits-only identity:
+// it strips "+", spaces, dashes, parentheses, and every other non-digit. So
+// "+55 11 99999-9999", "55 (11) 99999-9999" and "5511999999999" all resolve to
+// "5511999999999". Use it for BOTH storing and looking up a contact's phone so
+// the same subscriber is never split across formats — a raw string match would
+// treat a differently-formatted number as a new contact.
+func NormalizePhone(phone string) string {
+	var b strings.Builder
+	b.Grow(len(phone))
+	for i := 0; i < len(phone); i++ {
+		if c := phone[i]; c >= '0' && c <= '9' {
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
+}
 
 // GetOrCreateContact finds or creates a contact for the given phone number.
 // Merges behaviors from both handler and worker implementations:
@@ -16,11 +35,8 @@ import (
 //
 // Returns the contact, whether it was newly created, and any error.
 func GetOrCreateContact(db *gorm.DB, orgID uuid.UUID, phoneNumber, profileName string) (*models.Contact, bool, error) {
-	// Normalize phone number (remove + prefix if present)
-	normalizedPhone := phoneNumber
-	if len(normalizedPhone) > 0 && normalizedPhone[0] == '+' {
-		normalizedPhone = normalizedPhone[1:]
-	}
+	// Canonical digits-only identity (see NormalizePhone).
+	normalizedPhone := NormalizePhone(phoneNumber)
 
 	// Try to find existing contact with normalized phone (including soft-deleted)
 	var contact models.Contact
@@ -82,27 +98,24 @@ func GetOrCreateContact(db *gorm.DB, orgID uuid.UUID, phoneNumber, profileName s
 // can miss a contact stored in the other phone-number format, or one that is
 // soft-deleted, and wrongly treat it as brand-new.
 func FindContactUnscoped(db *gorm.DB, orgID uuid.UUID, phoneNumber string) (*models.Contact, error) {
-	normalizedPhone := phoneNumber
-	if len(normalizedPhone) > 0 && normalizedPhone[0] == '+' {
-		normalizedPhone = normalizedPhone[1:]
-	}
+	normalizedPhone := NormalizePhone(phoneNumber)
 
+	// Match the digits-only form and the legacy "+"-prefixed form in one query.
+	// A real DB error is returned as-is (NOT collapsed to ErrRecordNotFound):
+	// callers gate authorization on "does this contact already exist?", so a
+	// transient error must never read as "brand new" and skip the gate.
 	var contact models.Contact
-	if err := db.Unscoped().Where("organization_id = ? AND phone_number = ?", orgID, normalizedPhone).First(&contact).Error; err == nil {
-		return &contact, nil
+	if err := db.Unscoped().
+		Where("organization_id = ? AND phone_number IN (?, ?)", orgID, normalizedPhone, "+"+normalizedPhone).
+		First(&contact).Error; err != nil {
+		return nil, err
 	}
-	if err := db.Unscoped().Where("organization_id = ? AND phone_number = ?", orgID, "+"+normalizedPhone).First(&contact).Error; err == nil {
-		return &contact, nil
-	}
-	return nil, gorm.ErrRecordNotFound
+	return &contact, nil
 }
 
 // FindContact finds a contact for the given phone number with both forms (normalized and +prefix).
 func FindContact(db *gorm.DB, orgID uuid.UUID, phoneNumber string) (*models.Contact, error) {
-	normalizedPhone := phoneNumber
-	if len(normalizedPhone) > 0 && normalizedPhone[0] == '+' {
-		normalizedPhone = normalizedPhone[1:]
-	}
+	normalizedPhone := NormalizePhone(phoneNumber)
 
 	var contact models.Contact
 	if err := db.Where("organization_id = ? AND phone_number = ?", orgID, normalizedPhone).First(&contact).Error; err == nil {
