@@ -381,6 +381,7 @@
     "transferToAgentDesc": "Choose an agent to hand this conversation to.",
     "filterByRole": "Filter by role",
     "allRoles": "All roles",
+    "searchTeams": "Search teams",
     "transferToTeam": "Transfer to Team",
     "transferToTeamTitle": "Transfer to team",
     "transferToTeamDesc": "Choose a team to hand this conversation to.",

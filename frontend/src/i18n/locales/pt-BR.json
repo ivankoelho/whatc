@@ -381,6 +381,7 @@
     "transferToAgentDesc": "Escolha um agente para assumir esta conversa.",
     "filterByRole": "Filtrar por papel",
     "allRoles": "Todos os papéis",
+    "searchTeams": "Buscar equipes",
     "transferToTeam": "Transferir para equipe",
     "transferToTeamTitle": "Transferir para equipe",
     "transferToTeamDesc": "Escolha uma equipe para assumir esta conversa.",
