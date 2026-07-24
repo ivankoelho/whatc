@@ -764,3 +764,67 @@ func TestReleaseContact_ClearsTeamID(t *testing.T) {
 	require.NoError(t, app.DB.First(&fresh, "id = ?", contact.ID).Error)
 	assert.Nil(t, fresh.TeamID, "release must clear the effective team")
 }
+
+// TestAccountDefaultTeam_VisibilityReflectsHandlerUpdate proves the account
+// default-team cache is invalidated by the UpdateAccount handler: after an
+// admin changes a number's default team, visibility reflects it immediately.
+// With Redis present a missing invalidation would keep the stale (primed)
+// verdict and fail the final assertion; without Redis the DB is read each time.
+func TestAccountDefaultTeam_VisibilityReflectsHandlerUpdate(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+	viewer := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	admin := createAdminUser(t, app, org.ID)
+	teamMine := createTeamWithMember(t, app, org.ID, viewer.ID)
+	teamOther := createTeamWithMember(t, app, org.ID, admin.ID) // viewer is NOT a member
+
+	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(&models.WhatsAppAccount{}).
+		Where("id = ?", account.ID).Update("default_team_id", teamMine.ID).Error)
+
+	contact := testutil.CreateTestContact(t, app.DB, org.ID) // no transfer, no carteira, no flow team
+	require.NoError(t, app.DB.Model(contact).Update("whats_app_account", account.Name).Error)
+	contact.WhatsAppAccount = account.Name
+
+	enableStrictVisibility(t, app, org.ID)
+
+	// Account default team = viewer's team → visible (primes the cache).
+	require.True(t, app.CanViewConversationForTest(viewer.ID, org.ID, contact))
+
+	// Admin repoints the account's default team to one the viewer is not in.
+	req := testutil.NewJSONRequest(t, map[string]any{"default_team_id": teamOther.ID.String()})
+	testutil.SetAuthContext(req, org.ID, admin.ID)
+	testutil.SetPathParam(req, "id", account.ID.String())
+	require.NoError(t, app.UpdateAccount(req))
+	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	// The handler must have invalidated the cache: the viewer loses access.
+	assert.False(t, app.CanViewConversationForTest(viewer.ID, org.ID, contact),
+		"after the account's default team changes, visibility must follow (cache invalidated)")
+}
+
+// TestCreateContact_FormattedPhoneMatchesExisting guards the manual-create path:
+// a differently-formatted form of an existing number must resolve to the same
+// contact (409 conflict), not create a duplicate.
+func TestCreateContact_FormattedPhoneMatchesExisting(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	admin := createAdminUser(t, app, org.ID)
+
+	// Existing contact stored digits-only, as inbound webhooks store it.
+	testutil.CreateTestContactWith(t, app.DB, org.ID, testutil.WithPhoneNumber("5511955554444"))
+
+	req := testutil.NewJSONRequest(t, map[string]any{
+		"phone_number": "+55 (11) 95555-4444",
+		"profile_name": "Dup",
+	})
+	testutil.SetAuthContext(req, org.ID, admin.ID)
+	require.NoError(t, app.CreateContact(req))
+	assert.Equal(t, fasthttp.StatusConflict, testutil.GetResponseStatusCode(req),
+		"a formatted form of an existing number must conflict, not create a duplicate")
+
+	var count int64
+	app.DB.Model(&models.Contact{}).Where("organization_id = ?", org.ID).Count(&count)
+	assert.Equal(t, int64(1), count, "no duplicate contact created from a formatted number")
+}

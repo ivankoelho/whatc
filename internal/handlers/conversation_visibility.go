@@ -123,16 +123,10 @@ func (a *App) userInTeam(userID, teamID uuid.UUID) bool {
 // WhatsApp account, or nil. Used only in strict mode as the last team signal
 // before falling back to view_all-only.
 func (a *App) accountDefaultTeamID(orgID uuid.UUID, contact *models.Contact) *uuid.UUID {
-	if contact == nil || contact.WhatsAppAccount == "" {
+	if contact == nil {
 		return nil
 	}
-	var acct models.WhatsAppAccount
-	if err := a.DB.Select("default_team_id").
-		Where("organization_id = ? AND name = ?", orgID, contact.WhatsAppAccount).
-		First(&acct).Error; err != nil {
-		return nil
-	}
-	return acct.DefaultTeamID
+	return a.getAccountDefaultTeamCached(orgID, contact.WhatsAppAccount)
 }
 
 // scopeVisibleConversations is the SQL translation of authorizeConversation.canView
