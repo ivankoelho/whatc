@@ -302,6 +302,11 @@ func (a *App) UpdateAccount(r *fastglue.Request) error {
 	// Invalidate cache
 	a.InvalidateWhatsAppAccountCache(account.PhoneID)
 	a.InvalidateAccountDefaultTeamCache(account.OrganizationID, account.Name)
+	// On a rename the pre-update name's default-team entry would otherwise stay
+	// cached (a transient visibility over-grant) — drop it too.
+	if oldAccount.Name != account.Name {
+		a.InvalidateAccountDefaultTeamCache(account.OrganizationID, oldAccount.Name)
+	}
 
 	a.DB.Preload("CreatedBy").Preload("UpdatedBy").First(account, "id = ?", account.ID)
 

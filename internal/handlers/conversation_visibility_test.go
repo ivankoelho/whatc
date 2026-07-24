@@ -803,3 +803,28 @@ func TestAccountDefaultTeam_VisibilityReflectsHandlerUpdate(t *testing.T) {
 	assert.False(t, app.CanViewConversationForTest(viewer.ID, org.ID, contact),
 		"after the account's default team changes, visibility must follow (cache invalidated)")
 }
+
+// TestCreateContact_FormattedPhoneMatchesExisting guards the manual-create path:
+// a differently-formatted form of an existing number must resolve to the same
+// contact (409 conflict), not create a duplicate.
+func TestCreateContact_FormattedPhoneMatchesExisting(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	admin := createAdminUser(t, app, org.ID)
+
+	// Existing contact stored digits-only, as inbound webhooks store it.
+	testutil.CreateTestContactWith(t, app.DB, org.ID, testutil.WithPhoneNumber("5511955554444"))
+
+	req := testutil.NewJSONRequest(t, map[string]any{
+		"phone_number": "+55 (11) 95555-4444",
+		"profile_name": "Dup",
+	})
+	testutil.SetAuthContext(req, org.ID, admin.ID)
+	require.NoError(t, app.CreateContact(req))
+	assert.Equal(t, fasthttp.StatusConflict, testutil.GetResponseStatusCode(req),
+		"a formatted form of an existing number must conflict, not create a duplicate")
+
+	var count int64
+	app.DB.Model(&models.Contact{}).Where("organization_id = ?", org.ID).Count(&count)
+	assert.Equal(t, int64(1), count, "no duplicate contact created from a formatted number")
+}

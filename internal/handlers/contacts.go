@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/contactutil"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/utils"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
@@ -1368,15 +1369,14 @@ func (a *App) CreateContact(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "phone_number is required", nil, "")
 	}
 
-	// Normalize phone number
-	normalizedPhone := req.PhoneNumber
-	if len(normalizedPhone) > 0 && normalizedPhone[0] == '+' {
-		normalizedPhone = normalizedPhone[1:]
-	}
+	// Canonical digits-only identity (see contactutil.NormalizePhone), matched
+	// against the legacy "+"-prefixed form too so a formatted input cannot create
+	// a duplicate of an existing contact.
+	normalizedPhone := contactutil.NormalizePhone(req.PhoneNumber)
 
 	// Check if contact exists (including soft-deleted)
 	var existingContact models.Contact
-	if err := a.DB.Unscoped().Where("organization_id = ? AND phone_number = ?", orgID, normalizedPhone).First(&existingContact).Error; err == nil {
+	if err := a.DB.Unscoped().Where("organization_id = ? AND phone_number IN (?, ?)", orgID, normalizedPhone, "+"+normalizedPhone).First(&existingContact).Error; err == nil {
 		// Contact exists
 		if existingContact.DeletedAt.Valid {
 			// Restore soft-deleted contact
