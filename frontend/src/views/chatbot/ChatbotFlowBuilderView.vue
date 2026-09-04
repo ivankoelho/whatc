@@ -32,6 +32,7 @@ import {
   ExternalLink,
   StopCircle,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Plus,
   Trash2,
@@ -46,6 +47,7 @@ import ErrorState from '@/components/shared/ErrorState.vue'
 import ChatNodeProperties from '@/components/chatbot/ChatNodeProperties.vue'
 import PanelConfigEditor from '@/components/chatbot/PanelConfigEditor.vue'
 import type { PanelConfig, AvailableVariable } from '@/components/chatbot/PanelConfigEditor.vue'
+import { useResizablePanel } from '@/composables/useResizablePanel'
 
 import ChatbotTextNode from '@/components/chatbot/nodes/ChatbotTextNode.vue'
 import ChatbotButtonsNode from '@/components/chatbot/nodes/ChatbotButtonsNode.vue'
@@ -95,6 +97,26 @@ const auditRefreshKey = ref(0)
 const completionConfigOpen = ref(false)
 const panelConfigOpen = ref(false)
 const activityOpen = ref(false)
+
+// Panel resize bounds
+const PANEL_MIN_WIDTH = 320
+const PANEL_MAX_WIDTH = 720
+
+// Right panel geometry (collapse + drag-resize), persisted across sessions.
+const {
+  width: panelWidth,
+  collapsed: panelCollapsed,
+  isDragging: panelDragging,
+  toggle: togglePanel,
+  expand: expandPanel,
+  onHandlePointerDown: onPanelHandlePointerDown,
+  onHandleKeydown: onPanelHandleKeydown,
+} = useResizablePanel({
+  storageKey: 'flow-builder-panel',
+  defaultWidth: 420,
+  minWidth: PANEL_MIN_WIDTH,
+  maxWidth: PANEL_MAX_WIDTH,
+})
 
 const createdAt = ref('')
 const updatedAt = ref('')
@@ -175,8 +197,16 @@ const selectedChatNode = computed<ChatNode | null>(() => {
   }
 })
 
+// Selecting a node must never leave the author staring at a hidden panel.
+watch(selectedNodeId, (id) => {
+  if (id) expandPanel()
+})
+
 function onNodeClick(event: NodeMouseEvent) {
   selectedNodeId.value = event.node.id
+  // Also expand here, not just in the watcher: re-clicking the already
+  // selected node doesn't change selectedNodeId, so the watcher wouldn't fire.
+  expandPanel()
 }
 
 function onPaneClick() {
@@ -747,7 +777,7 @@ onMounted(async () => {
     </div>
 
     <!-- Main: canvas + right panel -->
-    <div class="flex-1 flex overflow-hidden">
+    <div class="flex-1 flex overflow-hidden" :class="panelDragging && 'select-none'">
       <!-- Canvas -->
       <div class="flex-1 relative">
         <div v-if="isLoading" class="absolute inset-0 flex items-center justify-center bg-background/80 z-10">
@@ -781,8 +811,58 @@ onMounted(async () => {
         />
       </div>
 
+      <!-- Collapsed rail: the only way back once the panel is hidden -->
+      <div
+        v-if="panelCollapsed"
+        class="w-7 shrink-0 border-l bg-background flex justify-center pt-2"
+      >
+        <Button
+          variant="ghost"
+          size="icon"
+          class="h-7 w-7"
+          :title="$t('flowBuilder.expandPanel')"
+          :aria-label="$t('flowBuilder.expandPanel')"
+          @click="expandPanel()"
+        >
+          <ChevronLeft class="h-4 w-4" />
+        </Button>
+      </div>
+
       <!-- Right panel -->
-      <Card class="w-[420px] min-w-0 border-y-0 border-r-0 rounded-none shrink-0 flex flex-col">
+      <Card
+        v-else
+        data-testid="flow-builder-panel"
+        class="min-w-0 border-y-0 border-r-0 rounded-none shrink-0 flex flex-col relative"
+        :style="{ width: panelWidth + 'px' }"
+      >
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          tabindex="0"
+          :aria-label="$t('flowBuilder.resizePanel')"
+          :aria-valuenow="panelWidth"
+          :aria-valuemin="PANEL_MIN_WIDTH"
+          :aria-valuemax="PANEL_MAX_WIDTH"
+          :class="[
+            'absolute left-0 top-0 z-10 h-full w-1.5 -ml-0.5 cursor-col-resize transition-colors',
+            'hover:bg-primary/40 focus-visible:bg-primary/40 focus-visible:outline-none',
+            panelDragging && 'bg-primary/60',
+          ]"
+          @pointerdown="onPanelHandlePointerDown"
+          @keydown="onPanelHandleKeydown"
+        />
+        <div class="flex justify-end px-2 pt-2 shrink-0">
+          <Button
+            variant="ghost"
+            size="icon"
+            class="h-7 w-7"
+            :title="$t('flowBuilder.collapsePanel')"
+            :aria-label="$t('flowBuilder.collapsePanel')"
+            @click="togglePanel()"
+          >
+            <ChevronRight class="h-4 w-4" />
+          </Button>
+        </div>
         <!-- Node properties when a node is selected -->
         <div v-if="selectedChatNode && selectedChatNode.type !== 'start'" class="flex-1 overflow-y-auto">
           <ChatNodeProperties
@@ -858,8 +938,8 @@ onMounted(async () => {
                         </Select>
                       </div>
                       <div class="flex-1">
-                        <Label class="text-[10px]">URL</Label>
-                        <Input v-model="completionConfig.url" placeholder="https://example.com/hook" class="h-7 text-xs font-mono" />
+                        <Label class="text-[10px]">{{ $t('flowBuilder.url') }}</Label>
+                        <Input v-model="completionConfig.url" :placeholder="$t('chatbot.properties.webhookUrlPlaceholder')" class="h-7 text-xs font-mono" />
                       </div>
                     </div>
                     <div class="space-y-2">
@@ -873,13 +953,13 @@ onMounted(async () => {
                         <Input
                           :model-value="String(key)"
                           @update:model-value="(v: string) => updateCompletionHeaderKey(String(key), v)"
-                          placeholder="Key"
+                          :placeholder="$t('flowBuilder.keyPlaceholder')"
                           class="h-6 text-[10px] flex-1"
                         />
                         <Input
                           :model-value="String(val)"
                           @update:model-value="(v: string) => updateCompletionHeaderValue(String(key), v)"
-                          placeholder="Value"
+                          :placeholder="$t('flowBuilder.valuePlaceholder')"
                           class="h-6 text-[10px] flex-1"
                         />
                         <Button variant="ghost" size="icon" class="h-5 w-5" @click="removeCompletionHeader(String(key))">
@@ -888,7 +968,7 @@ onMounted(async () => {
                       </div>
                     </div>
                     <div class="space-y-1">
-                      <Label class="text-[10px]">Body</Label>
+                      <Label class="text-[10px]">{{ $t('flowBuilder.bodyOptional') }}</Label>
                       <Textarea v-model="completionConfig.body" :rows="2" class="text-[10px] font-mono" />
                     </div>
                   </div>
@@ -901,7 +981,7 @@ onMounted(async () => {
             <!-- Contact panel display config -->
             <Collapsible v-model:open="panelConfigOpen">
               <CollapsibleTrigger class="flex items-center justify-between w-full py-1 text-sm font-medium">
-                Contact panel display
+                {{ $t('flowBuilder.contactPanelDisplay') }}
                 <component :is="panelConfigOpen ? ChevronDown : ChevronRight" class="h-4 w-4" />
               </CollapsibleTrigger>
               <CollapsibleContent class="pt-3">
@@ -917,7 +997,7 @@ onMounted(async () => {
               <Separator />
               <Collapsible v-model:open="activityOpen">
                 <CollapsibleTrigger class="flex items-center justify-between w-full py-1 text-sm font-medium">
-                  Activity
+                  {{ $t('flowBuilder.activity') }}
                   <component :is="activityOpen ? ChevronDown : ChevronRight" class="h-4 w-4" />
                 </CollapsibleTrigger>
                 <CollapsibleContent class="pt-3 space-y-3">
@@ -939,7 +1019,7 @@ onMounted(async () => {
     <!-- Preview overlay -->
     <Dialog v-model:open="showPreview">
       <DialogContent class="max-w-[1100px] w-[95vw] h-[92vh] p-0 flex flex-col">
-        <DialogTitle class="sr-only">Flow preview</DialogTitle>
+        <DialogTitle class="sr-only">{{ $t('chatbot.preview.flowPreview') }}</DialogTitle>
         <InteractivePreview
           :graph="previewGraph"
           :flow-data="{ name, description, trigger_keywords: triggerKeywords, initial_message: initialMessage, completion_message: completionMessage, enabled, steps: [] } as any"
@@ -956,6 +1036,10 @@ onMounted(async () => {
       variant="destructive"
       @confirm="confirmDeleteSelectedNode"
     />
-    <UnsavedChangesDialog :open="cancelDialogOpen" @stay="cancelDialogOpen = false" @leave="confirmCancel" />
+    <UnsavedChangesDialog
+      :open="cancelDialogOpen"
+      @stay="cancelDialogOpen = false"
+      @leave="confirmCancel"
+    />
   </div>
 </template>

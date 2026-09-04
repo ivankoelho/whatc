@@ -115,8 +115,12 @@ test.describe('All Active Tab', () => {
   test('should show table headers', async ({ page }) => {
     const tableRows = await page.locator('tbody tr').count()
     if (tableRows > 0) {
-      await expect(page.getByText('Contact')).toBeVisible()
-      await expect(page.getByText('Phone')).toBeVisible()
+      // Anchor on the column headers by role, not getByText: other specs
+      // seed transfer rows whose contact names contain "contact" and whose
+      // cells contain phone digits, so a substring text match resolves to
+      // many elements and trips Playwright strict mode.
+      await expect(page.getByRole('columnheader', { name: 'Contact', exact: true })).toBeVisible()
+      await expect(page.getByRole('columnheader', { name: 'Phone', exact: true })).toBeVisible()
     }
   })
 })

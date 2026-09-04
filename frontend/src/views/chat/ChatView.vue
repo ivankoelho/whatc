@@ -6,6 +6,7 @@ import { useContactsStore, type Contact, type Message } from '@/stores/contacts'
 import { useAuthStore } from '@/stores/auth'
 import { useUsersStore } from '@/stores/users'
 import { useTransfersStore } from '@/stores/transfers'
+import { useTeamsStore } from '@/stores/teams'
 import { wsService } from '@/services/websocket'
 import { contactsService, chatbotService, messagesService, customActionsService, accountsService, cannedResponsesService, getRequestHeaders, type CustomAction, type ActionResult, type CannedResponse } from '@/services/api'
 import { useTagsStore } from '@/stores/tags'
@@ -19,6 +20,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Spinner } from '@/components/ui/spinner'
 import { Separator } from '@/components/ui/separator'
 import {
@@ -72,6 +74,7 @@ import {
   UserPlus,
   UserMinus,
   UserX,
+  Users,
   Play,
   Reply,
   X,
@@ -87,6 +90,8 @@ import {
   Globe,
   Code,
   RotateCw,
+  RotateCcw,
+  CheckCircle2,
   Filter,
   StickyNote
 } from 'lucide-vue-next'
@@ -94,30 +99,41 @@ import { getInitials, getAvatarGradient } from '@/lib/utils'
 import { useColorMode } from '@/composables/useColorMode'
 import { useInfiniteScroll } from '@/composables/useInfiniteScroll'
 import CannedResponsePicker from '@/components/chat/CannedResponsePicker.vue'
+import ConversationStatusFilter from '@/components/chat/ConversationStatusFilter.vue'
+import ConversationListItem from '@/components/chat/ConversationListItem.vue'
 import PreviewButtonGroup from '@/components/chatbot/flow-preview/PreviewButtonGroup.vue'
 import TemplatePicker from '@/components/chat/TemplatePicker.vue'
 import MediaViewerDialog from '@/components/chat/MediaViewerDialog.vue'
 import ContactInfoPanel from '@/components/chat/ContactInfoPanel.vue'
 import ConversationNotes from '@/components/chat/ConversationNotes.vue'
+import ContactOccurrencesPanel from '@/components/chat/ContactOccurrencesPanel.vue'
 import CallButton from '@/components/calling/CallButton.vue'
 import { useNotesStore } from '@/stores/notes'
 import { useHeaderMedia } from '@/composables/useHeaderMedia'
+import { useTypingNotifier } from '@/composables/useTypingNotifier'
 import { CreateContactDialog } from '@/components/shared'
 import HeaderMediaUpload from '@/components/shared/HeaderMediaUpload.vue'
 import { Info } from 'lucide-vue-next'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const contactsStore = useContactsStore()
+const { notifyTyping } = useTypingNotifier()
 const authStore = useAuthStore()
 const usersStore = useUsersStore()
 const transfersStore = useTransfersStore()
+const teamsStore = useTeamsStore()
 const tagsStore = useTagsStore()
 const notesStore = useNotesStore()
 const { isDark } = useColorMode()
 
 const canWriteContacts = authStore.hasPermission('contacts', 'write')
+
+// Mirror the server's gate on GET /api/contacts/{id}/occurrences, which requires
+// occurrences:read. The CRM route used to be gated on 'chat' so the ticket icon
+// was implicitly consistent with it; now the module has its own permission.
+const canReadOccurrences = computed(() => authStore.hasPermission('occurrences', 'read'))
 
 const messageInput = ref('')
 const messagesEndRef = ref<HTMLElement | null>(null)
@@ -125,6 +141,7 @@ const messageInputRef = ref<HTMLTextAreaElement | null>(null)
 const isSending = ref(false)
 const isAssignDialogOpen = ref(false)
 const isTransferring = ref(false)
+const isTransferTeamDialogOpen = ref(false)
 const isResuming = ref(false)
 // Tracks incoming messages that arrived while the chat is open.
 // Surfaced as a "N unread messages" pill at the top of the chat panel
@@ -134,9 +151,42 @@ const newMessagesCount = ref(0)
 const firstUnreadId = ref<string | null>(null)
 const isAtBottom = ref(true)
 const SCROLL_BOTTOM_THRESHOLD = 80
-const isInfoPanelOpen = ref(false)
+const isInfoPanelOpen = ref(true)
 const isNotesPanelOpen = ref(false)
+const isOccurrencesPanelOpen = ref(false)
 const contactSessionData = ref<any>(null)
+
+// Resizable contacts column — drag the right edge; width persists across
+// reloads and is clamped so both panes stay usable.
+const CONTACTS_WIDTH_KEY = 'chat.contactsWidth'
+const CONTACTS_MIN_WIDTH = 240
+const CONTACTS_MAX_WIDTH = 560
+const contactsWidth = ref(320)
+const isResizingContacts = ref(false)
+
+function startContactsResize(e: MouseEvent) {
+  isResizingContacts.value = true
+  const startX = e.clientX
+  const startWidth = contactsWidth.value
+  const onMove = (ev: MouseEvent) => {
+    contactsWidth.value = Math.min(
+      CONTACTS_MAX_WIDTH,
+      Math.max(CONTACTS_MIN_WIDTH, startWidth + ev.clientX - startX),
+    )
+  }
+  const onUp = () => {
+    isResizingContacts.value = false
+    localStorage.setItem(CONTACTS_WIDTH_KEY, String(contactsWidth.value))
+    document.body.style.userSelect = ''
+    document.body.style.cursor = ''
+    window.removeEventListener('mousemove', onMove)
+    window.removeEventListener('mouseup', onUp)
+  }
+  document.body.style.userSelect = 'none'
+  document.body.style.cursor = 'col-resize'
+  window.addEventListener('mousemove', onMove)
+  window.addEventListener('mouseup', onUp)
+}
 
 // Multi-account state
 const selectedAccount = ref<string | null>(null)
@@ -212,6 +262,30 @@ const executingActionId = ref<string | null>(null)
 // Tags filter state
 const isTagFilterOpen = ref(false)
 
+// Conversation status state
+const isChangingStatus = ref(false)
+const isConversationResolved = computed(
+  () => contactsStore.currentContact?.contact_status === 'resolved'
+)
+
+async function toggleConversationStatus() {
+  const contact = contactsStore.currentContact
+  if (!contact || isChangingStatus.value) return
+
+  const next = isConversationResolved.value ? 'in_progress' : 'resolved'
+  isChangingStatus.value = true
+  try {
+    await contactsStore.updateContactStatus(contact.id, next)
+    toast.success(next === 'resolved'
+      ? t('chat.conversationResolved')
+      : t('chat.conversationReopened'))
+  } catch {
+    toast.error(t('chat.statusChangeFailed'))
+  } finally {
+    isChangingStatus.value = false
+  }
+}
+
 // Service window state
 const isServiceWindowExpired = computed(() => {
   const contact = contactsStore.currentContact
@@ -278,6 +352,22 @@ function updateAtBottom(el: HTMLElement) {
 
 const contactId = computed(() => route.params.contactId as string | undefined)
 
+// Agent currently typing a reply in the active conversation, if any
+const typingAgent = computed(() => {
+  const contactId = contactsStore.currentContact?.id
+  if (!contactId) return null
+  return contactsStore.typingByContact[contactId] || null
+})
+
+// Show the agent name only when the sender changes from the previous message.
+// Repeating the same name on consecutive bubbles is noise.
+function shouldShowSenderName(message: Message, index: number): boolean {
+  if (message.direction !== 'outgoing' || !message.sent_by_user_name) return false
+  if (index === 0) return true
+  const previous = contactsStore.messages[index - 1]
+  return previous.direction !== 'outgoing' || previous.sent_by_user_name !== message.sent_by_user_name
+}
+
 // Get active transfer for current contact from the store (reactive)
 const activeTransfer = computed(() => {
   if (!contactsStore.currentContact) return null
@@ -286,23 +376,11 @@ const activeTransfer = computed(() => {
 
 const activeTransferId = computed(() => activeTransfer.value?.id || null)
 
-// Check if current user can assign contacts (admin or manager only)
-const canAssignContacts = computed(() => {
-  // Try store first, then fallback to localStorage
-  let role = authStore.userRole
-  if (!role || role === 'agent') {
-    try {
-      const storedUser = localStorage.getItem('user')
-      if (storedUser) {
-        const user = JSON.parse(storedUser)
-        role = user.role?.name || user.role // Support both old and new format
-      }
-    } catch {
-      // ignore
-    }
-  }
-  return role === 'admin' || role === 'manager'
-})
+// Mirror the server's gate on PUT /api/contacts/{id}/assign, which requires
+// contacts:write (plus a visibility check it makes itself). This used to compare
+// the role *name* against 'admin'/'manager', so a custom role could hold
+// contacts:write and still never be offered the button.
+const canAssignContacts = computed(() => authStore.hasPermission('contacts', 'write'))
 
 // Get list of users for assignment
 const assignableUsers = computed(() => {
@@ -415,19 +493,71 @@ async function executeCustomAction(action: CustomAction) {
 
 // Search state for assignment dialog
 const assignSearchQuery = ref('')
+// Filter the agent picker by role ("type") so a long list stays navigable.
+// Shared by the assign and transfer-to-agent dialogs (only one open at a time).
+const assignRoleFilter = ref('_all')
+// Team-transfer dialog: pick an agent to transfer to, and search teams.
+const isTransferAgentDialogOpen = ref(false)
+const teamSearchQuery = ref('')
 
-// Filtered users for assignment dialog
+// Distinct role names present among assignable users, for the role filter.
+const assignableRoles = computed(() => {
+  const names = new Set<string>()
+  for (const u of assignableUsers.value) {
+    const n = u.role?.name
+    if (n) names.add(n)
+  }
+  return Array.from(names).sort()
+})
+
+// Filtered users for the assign / transfer-to-agent dialogs (role + search).
 const filteredAssignableUsers = computed(() => {
   const query = assignSearchQuery.value.toLowerCase().trim()
-  if (!query) return assignableUsers.value
-  return assignableUsers.value.filter(u =>
-    u.full_name.toLowerCase().includes(query) ||
-    u.email.toLowerCase().includes(query)
-  )
+  const role = assignRoleFilter.value
+  return assignableUsers.value.filter(u => {
+    if (role !== '_all' && u.role?.name !== role) return false
+    if (!query) return true
+    return u.full_name.toLowerCase().includes(query) || u.email.toLowerCase().includes(query)
+  })
 })
+
+// Teams filtered client-side by the dialog's search box.
+const filteredTeams = computed(() => {
+  const q = teamSearchQuery.value.toLowerCase().trim()
+  if (!q) return teamsStore.teams
+  return teamsStore.teams.filter(tm => tm.name.toLowerCase().includes(q))
+})
+
+// Reset the shared agent-picker filters when either dialog closes.
+function resetAgentPickerFilters() {
+  assignSearchQuery.value = ''
+  assignRoleFilter.value = '_all'
+}
+
+// Openers: ensure the picker data is loaded even for users who can transfer
+// but were not covered by the on-mount fetch (which is gated on canAssign).
+function openTransferAgentDialog() {
+  if (usersStore.users.length === 0) usersStore.fetchUsers().catch(() => {})
+  isTransferAgentDialogOpen.value = true
+}
+function openTransferTeamDialog() {
+  // Fetch up to the backend's max page so all teams show, not just the first 50.
+  teamsStore.fetchTeams({ limit: 100 }).catch(() => {})
+  teamSearchQuery.value = ''
+  isTransferTeamDialogOpen.value = true
+}
 
 // Fetch contacts on mount (WebSocket is connected in AppLayout)
 onMounted(async () => {
+  // Restore the persisted contacts-column width.
+  const savedContactsWidth = Number(localStorage.getItem(CONTACTS_WIDTH_KEY))
+  if (savedContactsWidth >= CONTACTS_MIN_WIDTH && savedContactsWidth <= CONTACTS_MAX_WIDTH) {
+    contactsWidth.value = savedContactsWidth
+  }
+
+  // Teams populate the "Transfer to team" picker in the conversation menu.
+  if (teamsStore.teams.length === 0) teamsStore.fetchTeams({ limit: 100 })
+
   // Ensure auth session is restored
   if (!authStore.isAuthenticated) {
     authStore.restoreSession()
@@ -467,6 +597,9 @@ onMounted(async () => {
     tagsStore.fetchTags().catch(() => {})
   }
 
+  // Seed the "New" pill counter; WebSocket events keep it current from here
+  contactsStore.fetchStatusCounts()
+
   if (contactId.value) {
     await selectContact(contactId.value)
   }
@@ -496,6 +629,14 @@ function onUserActive() {
 }
 
 onUnmounted(() => {
+  // Leaving the chat view entirely: the route-param watcher only clears the
+  // *outgoing* contact when switching between conversations, so the one still
+  // open here would keep a live typing entry. The 3s TTL covers it in
+  // practice; clear it so store state cannot outlive the view.
+  const openContactId = contactsStore.currentContact?.id
+  if (openContactId) {
+    contactsStore.clearTyping(openContactId)
+  }
   wsService.setCurrentContact(null)
   // Clear current contact when leaving chat view so notifications work on other pages
   contactsStore.setCurrentContact(null)
@@ -541,7 +682,16 @@ function updateStickyDate(scrollContainer: HTMLElement) {
 }
 
 // Watch for route changes
-watch(contactId, async (newId) => {
+watch(contactId, async (newId, oldId) => {
+  // The open contact is changing (covers every way a conversation gets
+  // opened — sidebar click, the WS toast's "View" action, agent-transfer
+  // navigation, deep links — since they all route through this param).
+  // Clear the outgoing contact's typing entry so a not-yet-expired
+  // indicator can't flash back in if the same contact is reopened shortly
+  // after (the store's TTL alone doesn't guarantee that).
+  if (oldId && oldId !== newId) {
+    contactsStore.clearTyping(oldId)
+  }
   if (newId) {
     notesStore.notes = []
     notesStore.hasMore = false
@@ -697,6 +847,9 @@ async function switchAccount(accountName: string) {
 }
 
 function handleContactClick(contact: Contact) {
+  // Typing cleanup for the outgoing contact now happens in the contactId
+  // watcher above, which fires for every route into this view (this click,
+  // the WS toast's "View" action, agent-transfer navigation, deep links).
   router.push(`/chat/${contact.id}`)
 }
 
@@ -764,6 +917,12 @@ function autoResizeTextarea() {
   if (!textarea) return
   textarea.style.height = 'auto'
   textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px'
+}
+
+function handleComposerInput() {
+  autoResizeTextarea()
+  const contactId = contactsStore.currentContact?.id
+  if (contactId) notifyTyping(contactId)
 }
 
 function resetTextareaHeight() {
@@ -1219,20 +1378,46 @@ async function assignContactToUser(userId: string | null) {
   }
 }
 
-async function transferToAgent() {
+async function transferToAgent(agentId: string) {
   if (!contactsStore.currentContact) return
 
   isTransferring.value = true
+  isTransferAgentDialogOpen.value = false
   try {
     await chatbotService.createTransfer({
       contact_id: contactsStore.currentContact.id,
       whatsapp_account: (contactsStore.currentContact as any).whatsapp_account,
+      agent_id: agentId,
       source: 'manual'
     })
     toast.success(t('chat.transferSuccess'), {
       description: t('chat.transferSuccessDesc')
     })
     // Refresh transfers store (WebSocket will also update, but this ensures immediate sync)
+    await transfersStore.fetchTransfers({ status: 'active' })
+  } catch (error: any) {
+    const message = error.response?.data?.message || t('chat.transferFailed')
+    toast.error(message)
+  } finally {
+    isTransferring.value = false
+  }
+}
+
+async function transferToTeam(teamId: string) {
+  if (!contactsStore.currentContact) return
+
+  isTransferring.value = true
+  isTransferTeamDialogOpen.value = false
+  try {
+    await chatbotService.createTransfer({
+      contact_id: contactsStore.currentContact.id,
+      whatsapp_account: (contactsStore.currentContact as any).whatsapp_account,
+      team_id: teamId,
+      source: 'manual'
+    })
+    toast.success(t('chat.transferSuccess'), {
+      description: t('chat.transferSuccessDesc')
+    })
     await transfersStore.fetchTransfers({ status: 'active' })
   } catch (error: any) {
     const message = error.response?.data?.message || t('chat.transferFailed')
@@ -1315,7 +1500,7 @@ function getMessageStatusClass(status: string) {
 
 function formatMessageTime(dateStr: string) {
   const date = new Date(dateStr)
-  return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+  return date.toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
 }
 
 function formatContactTime(dateStr?: string) {
@@ -1325,13 +1510,13 @@ function formatContactTime(dateStr?: string) {
   const diffDays = Math.floor((now.getTime() - date.getTime()) / 86400000)
 
   if (diffDays === 0) {
-    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+    return date.toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
   } else if (diffDays === 1) {
-    return 'Yesterday'
+    return t('chat.yesterday')
   } else if (diffDays < 7) {
-    return date.toLocaleDateString('en-US', { weekday: 'short' })
+    return date.toLocaleDateString(locale.value, { weekday: 'short' })
   }
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  return date.toLocaleDateString(locale.value, { month: 'short', day: 'numeric' })
 }
 
 function getDateLabel(dateStr: string): string {
@@ -1342,11 +1527,11 @@ function getDateLabel(dateStr: string): string {
   const diffDays = Math.floor((today.getTime() - messageDate.getTime()) / 86400000)
 
   if (diffDays === 0) {
-    return 'Today'
+    return t('chat.today')
   } else if (diffDays === 1) {
-    return 'Yesterday'
+    return t('chat.yesterday')
   }
-  return date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+  return date.toLocaleDateString(locale.value, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
 }
 
 function shouldShowDateSeparator(index: number): boolean {
@@ -1695,7 +1880,19 @@ async function sendMediaMessage() {
 <template>
   <div class="flex h-full bg-[#0a0a0b] light:bg-gray-50">
     <!-- Contacts List -->
-    <div class="w-80 border-r border-white/[0.08] light:border-gray-200 flex flex-col bg-[#0a0a0b] light:bg-white">
+    <div
+      class="relative shrink-0 border-r border-white/[0.08] light:border-gray-200 flex flex-col bg-[#0a0a0b] light:bg-white"
+      :style="{ width: contactsWidth + 'px' }"
+    >
+      <!-- Drag-to-resize handle (right edge) -->
+      <div
+        class="absolute top-0 right-0 z-20 h-full w-1 cursor-col-resize select-none transition-colors hover:bg-emerald-500/40"
+        :class="{ 'bg-emerald-500/50': isResizingContacts }"
+        role="separator"
+        aria-orientation="vertical"
+        :aria-label="$t('chat.resizeContacts')"
+        @mousedown.prevent="startContactsResize"
+      ></div>
       <!-- Search Header -->
       <div class="p-2 border-b border-white/[0.08] light:border-gray-200">
         <div class="flex items-center gap-2">
@@ -1748,7 +1945,7 @@ async function sendMediaMessage() {
                     class="h-6 px-2 text-xs"
                     @click="clearTagFilter"
                   >
-                    Clear
+                    {{ $t('common.clear') }}
                   </Button>
                 </div>
                 <Separator />
@@ -1790,46 +1987,26 @@ async function sendMediaMessage() {
         </div>
       </div>
 
+      <!-- Status filter -->
+      <ConversationStatusFilter
+        :model-value="contactsStore.statusFilter"
+        :new-count="contactsStore.newCount"
+        @update:model-value="contactsStore.setStatusFilter"
+      />
+
       <!-- Contacts -->
       <ScrollArea :ref="(el: any) => contactsScroll.scrollAreaRef.value = el" orientation="vertical" class="flex-1">
         <div class="py-1 w-full">
-          <div
+          <ConversationListItem
             v-for="contact in contactsStore.sortedContacts"
             :key="contact.id"
-            :class="[
-              'flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-white/[0.04] light:hover:bg-gray-50 transition-colors',
-              contactsStore.currentContact?.id === contact.id && 'bg-white/[0.08] light:bg-gray-100'
-            ]"
+            :contact="contact"
+            :active="contactsStore.currentContact?.id === contact.id"
+            :format-time="formatContactTime"
+            :get-initials="getInitials"
+            :get-avatar-gradient="getAvatarGradient"
             @click="handleContactClick(contact)"
-          >
-            <Avatar class="h-9 w-9 ring-2 ring-white/[0.1] light:ring-gray-200">
-              <AvatarImage :src="contact.avatar_url" />
-              <AvatarFallback :class="'text-xs bg-gradient-to-br text-white ' + getAvatarGradient(contact.name || contact.phone_number)">
-                {{ getInitials(contact.name || contact.phone_number) }}
-              </AvatarFallback>
-            </Avatar>
-            <div class="flex-1 min-w-0">
-              <div class="flex items-center justify-between gap-2">
-                <p
-                  class="flex-1 min-w-0 text-sm font-medium truncate text-white light:text-gray-900"
-                  :title="contact.name || contact.phone_number"
-                >
-                  {{ contact.name || contact.phone_number }}
-                </p>
-                <span class="flex-shrink-0 text-[11px] text-white/40 light:text-gray-500">
-                  {{ formatContactTime(contact.last_message_at) }}
-                </span>
-              </div>
-              <div class="flex items-center justify-between gap-2">
-                <p class="flex-1 min-w-0 text-xs text-white/50 light:text-gray-500 truncate">
-                  {{ contact.phone_number }}
-                </p>
-                <Badge v-if="contact.unread_count > 0" class="flex-shrink-0 h-5 text-[10px] bg-emerald-500/20 text-emerald-400 light:bg-emerald-100 light:text-emerald-700">
-                  {{ contact.unread_count }}
-                </Badge>
-              </div>
-            </div>
-          </div>
+          />
 
           <!-- Loading indicator for infinite scroll -->
           <div v-if="contactsStore.isLoadingMoreContacts" class="p-3 text-center">
@@ -1877,7 +2054,7 @@ async function sendMediaMessage() {
                   {{ contactsStore.currentContact.name || contactsStore.currentContact.phone_number }}
                 </p>
                 <Badge v-if="activeTransferId" class="text-[10px] h-5 bg-orange-500/20 text-orange-400 light:bg-orange-100 light:text-orange-700">
-                  Paused
+                  {{ $t('chat.paused') }}
                 </Badge>
                 <Badge v-if="contactsStore.currentContact?.marketing_opt_out" class="text-[10px] h-5 bg-red-500/20 text-red-400 light:bg-red-100 light:text-red-700" :title="$t('chat.marketingOptOut')">
                   {{ $t('chat.marketingOptOut', 'Marketing Opt-out') }}
@@ -1928,6 +2105,21 @@ async function sendMediaMessage() {
               </TooltipTrigger>
               <TooltipContent>{{ action.name }}</TooltipContent>
             </Tooltip>
+            <!-- Labelled, not icon-only: resolving a conversation is a
+                 consequential action and deserves a visible name. -->
+            <Button
+              variant="ghost"
+              size="sm"
+              class="h-8 gap-1.5 px-2 text-xs font-medium"
+              :class="isConversationResolved
+                ? 'text-white/60 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100'
+                : 'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 light:text-emerald-600 light:hover:bg-emerald-50'"
+              :disabled="isChangingStatus"
+              @click="toggleConversationStatus"
+            >
+              <component :is="isConversationResolved ? RotateCcw : CheckCircle2" class="h-4 w-4" />
+              <span>{{ isConversationResolved ? $t('chat.reopenConversation') : $t('chat.resolveConversation') }}</span>
+            </Button>
             <Tooltip>
               <TooltipTrigger as-child>
                 <Button
@@ -1949,6 +2141,21 @@ async function sendMediaMessage() {
                 </Button>
               </TooltipTrigger>
               <TooltipContent>{{ $t('chat.internalNotes') }}</TooltipContent>
+            </Tooltip>
+            <Tooltip v-if="canReadOccurrences">
+              <TooltipTrigger as-child>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  id="occurrences-button"
+                  class="h-8 w-8 text-white/50 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100"
+                  :class="isOccurrencesPanelOpen && 'bg-blue-500/10 text-blue-400 light:bg-blue-50 light:text-blue-600'"
+                  @click="isOccurrencesPanelOpen = !isOccurrencesPanelOpen"
+                >
+                  <Ticket class="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{{ $t('chat.occurrences') }}</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger as-child>
@@ -1978,9 +2185,13 @@ async function sendMediaMessage() {
                   <UserPlus class="mr-2 h-4 w-4" />
                   <span>{{ $t('chat.assignToAgent') }}</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem v-if="!activeTransferId" @click="transferToAgent" :disabled="isTransferring">
+                <DropdownMenuItem v-if="!activeTransferId" @click="openTransferAgentDialog" :disabled="isTransferring">
                   <UserX class="mr-2 h-4 w-4" />
                   <span>{{ $t('chat.transferToAgent') }}</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem v-if="!activeTransferId" @click="openTransferTeamDialog" :disabled="isTransferring">
+                  <Users class="mr-2 h-4 w-4" />
+                  <span>{{ $t('chat.transferToTeam') }}</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem v-if="activeTransferId" @click="resumeChatbot" :disabled="isResuming">
                   <Play class="mr-2 h-4 w-4" />
@@ -2081,6 +2292,13 @@ async function sendMediaMessage() {
                   message.direction === 'outgoing' ? 'chat-bubble-outgoing' : 'chat-bubble-incoming'
                 ]"
               >
+                <!-- Which agent sent this, shown once per run of messages -->
+                <div
+                  v-if="shouldShowSenderName(message, index)"
+                  class="text-[11px] font-medium text-white/50 light:text-gray-500 mb-0.5"
+                >
+                  {{ message.sent_by_user_name }}
+                </div>
                 <!-- Reply preview (if this message is replying to another) -->
                 <div
                   v-if="message.is_reply && message.reply_to_message"
@@ -2207,7 +2425,7 @@ async function sendMediaMessage() {
                       <p v-if="getLocationData(message)?.name" class="text-sm font-medium truncate">
                         {{ getLocationData(message)?.name }}
                       </p>
-                      <p v-else class="text-sm font-medium">Location</p>
+                      <p v-else class="text-sm font-medium">{{ $t('chat.location') }}</p>
                       <p v-if="getLocationData(message)?.address" class="text-xs text-muted-foreground truncate">
                         {{ getLocationData(message)?.address }}
                       </p>
@@ -2415,7 +2633,7 @@ async function sendMediaMessage() {
                   class="h-6 w-6 text-destructive hover:text-destructive"
                   :disabled="retryingMessageId === message.id"
                   @click="retryMessage(message)"
-                  title="Retry sending"
+                  :title="$t('chat.retrySending')"
                 >
                   <Loader2 v-if="retryingMessageId === message.id" class="h-3 w-3 animate-spin" />
                   <RotateCw v-else class="h-3 w-3" />
@@ -2423,6 +2641,19 @@ async function sendMediaMessage() {
               </div>
             </div>
             </template>
+            <!-- Another agent is composing a reply in this conversation -->
+            <div
+              v-if="typingAgent"
+              class="flex items-center gap-1.5 px-3 py-1.5 text-xs text-white/50 light:text-gray-500"
+              aria-live="polite"
+            >
+              <span class="flex gap-0.5">
+                <span class="w-1 h-1 rounded-full bg-white/40 light:bg-gray-400 animate-bounce [animation-delay:0ms]" />
+                <span class="w-1 h-1 rounded-full bg-white/40 light:bg-gray-400 animate-bounce [animation-delay:150ms]" />
+                <span class="w-1 h-1 rounded-full bg-white/40 light:bg-gray-400 animate-bounce [animation-delay:300ms]" />
+              </span>
+              {{ $t('chat.agentTyping', { name: typingAgent.user_name }) }}
+            </div>
             <div ref="messagesEndRef" />
           </div>
         </ScrollArea>
@@ -2529,7 +2760,7 @@ async function sendMediaMessage() {
               rows="1"
               class="flex-1 bg-transparent text-[14px] text-white light:text-gray-900 placeholder:text-white/30 light:placeholder:text-gray-400 focus:outline-none resize-none min-h-[36px] max-h-[120px] py-2 overflow-y-auto"
               @keydown.enter.exact.prevent="sendMessage"
-              @input="autoResizeTextarea"
+              @input="handleComposerInput"
             />
             <button type="submit" class="w-9 h-9 rounded-lg bg-emerald-600 hover:bg-emerald-500 light:bg-emerald-500 light:hover:bg-emerald-600 flex items-center justify-center transition-colors disabled:opacity-50" :disabled="!messageInput.trim() || isSending">
               <Send class="w-4 h-4 text-white" />
@@ -2546,6 +2777,13 @@ async function sendMediaMessage() {
       @close="isNotesPanelOpen = false"
     />
 
+    <!-- Occurrences Side Panel -->
+    <ContactOccurrencesPanel
+      v-if="contactsStore.currentContact && isOccurrencesPanelOpen && canReadOccurrences"
+      :contact-id="contactsStore.currentContact.id"
+      :source-transfer-id="activeTransferId ?? undefined"
+    />
+
     <!-- Contact Info Panel -->
     <ContactInfoPanel
       v-if="contactsStore.currentContact && isInfoPanelOpen"
@@ -2553,6 +2791,7 @@ async function sendMediaMessage() {
       :session-data="contactSessionData"
       @close="isInfoPanelOpen = false"
       @tags-updated="(tags) => contactsStore.updateContactTags(contactsStore.currentContact!.id, tags)"
+      @name-updated="(name) => contactsStore.updateContactName(contactsStore.currentContact!.id, name)"
     />
 
     <!-- Template Params Dialog -->
@@ -2683,15 +2922,23 @@ async function sendMediaMessage() {
     </Dialog>
 
     <!-- Assign Contact Dialog -->
-    <Dialog v-model:open="isAssignDialogOpen" @update:open="(open) => !open && (assignSearchQuery = '')">
-      <DialogContent class="max-w-sm">
-        <DialogHeader>
+    <Dialog v-model:open="isAssignDialogOpen" @update:open="(open) => !open && resetAgentPickerFilters()">
+      <DialogContent class="max-w-md max-h-[85vh] flex flex-col">
+        <DialogHeader class="shrink-0">
           <DialogTitle>{{ $t('chat.assignContact') }}</DialogTitle>
           <DialogDescription>
             {{ $t('chat.assignContactDesc') }}
           </DialogDescription>
         </DialogHeader>
-        <div class="py-4 space-y-3">
+        <div class="py-4 space-y-3 flex-1 min-h-0 flex flex-col">
+          <!-- Filter by role (type) — only when there is more than one to pick -->
+          <Select v-if="assignableRoles.length > 1" v-model="assignRoleFilter">
+            <SelectTrigger class="h-9"><SelectValue :placeholder="$t('chat.filterByRole')" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="_all">{{ $t('chat.allRoles') }}</SelectItem>
+              <SelectItem v-for="r in assignableRoles" :key="r" :value="r">{{ r }}</SelectItem>
+            </SelectContent>
+          </Select>
           <!-- Search input -->
           <div class="relative">
             <Search class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -2711,7 +2958,7 @@ async function sendMediaMessage() {
             {{ $t('chat.unassignContact') }}
           </Button>
           <Separator />
-          <ScrollArea class="max-h-[280px]">
+          <ScrollArea orientation="vertical" class="flex-1 min-h-0">
             <div class="space-y-1">
               <Button
                 v-for="user in filteredAssignableUsers"
@@ -2720,18 +2967,94 @@ async function sendMediaMessage() {
                 class="w-full justify-start"
                 @click="assignContactToUser(user.id); isAssignDialogOpen = false"
               >
-                <User class="mr-2 h-4 w-4" />
-                <span>{{ user.full_name }}</span>
+                <User class="mr-2 h-4 w-4 shrink-0" />
+                <span class="truncate min-w-0 flex-1 text-left">{{ user.full_name }}</span>
                 <Check
                   v-if="contactsStore.currentContact?.assigned_user_id === user.id"
-                  class="ml-auto h-4 w-4 text-primary"
+                  class="ml-auto h-4 w-4 text-primary shrink-0"
                 />
-                <Badge v-else variant="outline" class="ml-auto text-xs">
+                <Badge v-else variant="outline" class="ml-auto shrink-0 text-xs">
                   {{ user.role?.name }}
                 </Badge>
               </Button>
               <p v-if="filteredAssignableUsers.length === 0" class="text-sm text-muted-foreground text-center py-4">
                 {{ $t('chat.noUsersFound') }}
+              </p>
+            </div>
+          </ScrollArea>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    <!-- Transfer to agent (pick a specific agent) -->
+    <Dialog v-model:open="isTransferAgentDialogOpen" @update:open="(open) => !open && resetAgentPickerFilters()">
+      <DialogContent class="max-w-md max-h-[85vh] flex flex-col">
+        <DialogHeader class="shrink-0">
+          <DialogTitle>{{ $t('chat.transferToAgentTitle') }}</DialogTitle>
+          <DialogDescription>{{ $t('chat.transferToAgentDesc') }}</DialogDescription>
+        </DialogHeader>
+        <div class="py-4 space-y-3 flex-1 min-h-0 flex flex-col">
+          <Select v-if="assignableRoles.length > 1" v-model="assignRoleFilter">
+            <SelectTrigger class="h-9"><SelectValue :placeholder="$t('chat.filterByRole')" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="_all">{{ $t('chat.allRoles') }}</SelectItem>
+              <SelectItem v-for="r in assignableRoles" :key="r" :value="r">{{ r }}</SelectItem>
+            </SelectContent>
+          </Select>
+          <div class="relative">
+            <Search class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input v-model="assignSearchQuery" :placeholder="$t('chat.searchUsers') + '...'" class="pl-9 h-9" />
+          </div>
+          <ScrollArea orientation="vertical" class="flex-1 min-h-0">
+            <div class="space-y-1">
+              <Button
+                v-for="user in filteredAssignableUsers"
+                :key="user.id"
+                variant="ghost"
+                class="w-full justify-start"
+                :disabled="isTransferring"
+                @click="transferToAgent(user.id)"
+              >
+                <User class="mr-2 h-4 w-4 shrink-0" />
+                <span class="truncate min-w-0 flex-1 text-left">{{ user.full_name }}</span>
+                <Badge variant="outline" class="ml-auto shrink-0 text-xs">{{ user.role?.name }}</Badge>
+              </Button>
+              <p v-if="filteredAssignableUsers.length === 0" class="text-sm text-muted-foreground text-center py-4">
+                {{ $t('chat.noUsersFound') }}
+              </p>
+            </div>
+          </ScrollArea>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    <!-- Transfer to team -->
+    <Dialog v-model:open="isTransferTeamDialogOpen" @update:open="(open) => !open && (teamSearchQuery = '')">
+      <DialogContent class="max-w-md max-h-[85vh] flex flex-col">
+        <DialogHeader class="shrink-0">
+          <DialogTitle>{{ $t('chat.transferToTeamTitle') }}</DialogTitle>
+          <DialogDescription>{{ $t('chat.transferToTeamDesc') }}</DialogDescription>
+        </DialogHeader>
+        <div class="py-4 space-y-3 flex-1 min-h-0 flex flex-col">
+          <div class="relative">
+            <Search class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input v-model="teamSearchQuery" :placeholder="$t('chat.searchTeams') + '...'" class="pl-9 h-9" />
+          </div>
+          <ScrollArea orientation="vertical" class="flex-1 min-h-0">
+            <div class="space-y-1">
+              <Button
+                v-for="team in filteredTeams"
+                :key="team.id"
+                variant="ghost"
+                class="w-full justify-start"
+                :disabled="isTransferring"
+                @click="transferToTeam(team.id)"
+              >
+                <Users class="mr-2 h-4 w-4 shrink-0" />
+                <span class="truncate min-w-0 flex-1 text-left">{{ team.name }}</span>
+              </Button>
+              <p v-if="filteredTeams.length === 0" class="text-sm text-muted-foreground text-center py-4">
+                {{ $t('chat.noTeamsFound') }}
               </p>
             </div>
           </ScrollArea>

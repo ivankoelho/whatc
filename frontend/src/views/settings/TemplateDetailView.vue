@@ -817,9 +817,9 @@ onMounted(async () => {
             </p>
           </div>
           <p class="text-xs text-muted-foreground">
-            <span v-if="form.header_type === 'IMAGE'">JPEG or PNG, max 5MB</span>
-            <span v-else-if="form.header_type === 'VIDEO'">MP4, max 16MB</span>
-            <span v-else-if="form.header_type === 'DOCUMENT'">PDF, max 100MB</span>
+            <span v-if="form.header_type === 'IMAGE'">{{ $t('templates.mediaJpegPng') }}</span>
+            <span v-else-if="form.header_type === 'VIDEO'">{{ $t('templates.mediaMp4') }}</span>
+            <span v-else-if="form.header_type === 'DOCUMENT'">{{ $t('templates.mediaPdf') }}</span>
           </p>
         </div>
 
@@ -830,18 +830,18 @@ onMounted(async () => {
             <Label class="text-xs">{{ $t('templates.codeDelivery', 'Code Delivery Method') }}</Label>
             <Select :model-value="authOtpType" @update:model-value="setAuthOtpType" :disabled="!canWrite || !isEditable">
               <SelectTrigger class="h-8 text-xs">
-                <SelectValue placeholder="Select delivery method" />
+                <SelectValue :placeholder="$t('templates.selectDeliveryMethod')" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="COPY_CODE">Copy Code</SelectItem>
-                <SelectItem value="ONE_TAP">One-Tap Autofill (Android only)</SelectItem>
-                <SelectItem value="ZERO_TAP">Zero-Tap (Android only)</SelectItem>
+                <SelectItem value="COPY_CODE">{{ $t('templates.copyCode') }}</SelectItem>
+                <SelectItem value="ONE_TAP">{{ $t('templates.oneTapAutofill') }}</SelectItem>
+                <SelectItem value="ZERO_TAP">{{ $t('templates.zeroTap') }}</SelectItem>
               </SelectContent>
             </Select>
             <p class="text-xs text-muted-foreground">
-              <span v-if="authOtpType === 'COPY_CODE'">User taps a button to copy the code to clipboard.</span>
-              <span v-else-if="authOtpType === 'ONE_TAP'">User taps a button to autofill the code in your app. Requires app configuration.</span>
-              <span v-else-if="authOtpType === 'ZERO_TAP'">Code is delivered to your app automatically. Requires app configuration.</span>
+              <span v-if="authOtpType === 'COPY_CODE'">{{ $t('templates.copyCodeDesc') }}</span>
+              <span v-else-if="authOtpType === 'ONE_TAP'">{{ $t('templates.oneTapDesc') }}</span>
+              <span v-else-if="authOtpType === 'ZERO_TAP'">{{ $t('templates.zeroTapDesc') }}</span>
             </p>
           </div>
 
@@ -851,7 +851,7 @@ onMounted(async () => {
               <span class="font-mono">{'{{1}}'}</span> is your verification code.
               <span v-if="form.add_security_recommendation" class="block mt-1">For your security, do not share this code.</span>
             </div>
-            <p class="text-xs text-muted-foreground">Authentication templates use fixed preset text defined by Meta.</p>
+            <p class="text-xs text-muted-foreground">{{ $t('templates.authPresetInfo') }}</p>
           </div>
           <div class="flex items-center gap-2">
             <input
@@ -885,7 +885,7 @@ onMounted(async () => {
                 class="h-8 text-xs w-24"
                 :disabled="!canWrite || !isEditable"
               />
-              <span class="text-xs text-muted-foreground">minutes (1-90)</span>
+              <span class="text-xs text-muted-foreground">{{ $t('templates.minutesRange') }}</span>
             </div>
             <p v-if="form.code_expiration_minutes > 0" class="text-xs text-muted-foreground ml-6">
               Footer: "This code expires in {{ form.code_expiration_minutes }} minutes."
@@ -902,8 +902,8 @@ onMounted(async () => {
                 class="h-4 w-4 mt-0.5 rounded border-gray-300"
               />
               <Label for="zero-tap-tos" class="text-xs cursor-pointer leading-relaxed">
-                By selecting zero-tap, I understand that my business's use of zero-tap authentication is subject to the
-                <a href="https://www.whatsapp.com/legal/business-terms/" target="_blank" class="underline text-primary">WhatsApp Business Terms of Service</a>.
+                {{ $t('templates.zeroTapConsent') }}
+                <a href="https://www.whatsapp.com/legal/business-terms/" target="_blank" class="underline text-primary">{{ $t('templates.whatsappBusinessTerms') }}</a>.
                 It is my business's responsibility to ensure its customers expect that the code will be automatically filled in on their behalf when they choose to receive the zero-tap code through WhatsApp.
               </Label>
             </div>
@@ -923,7 +923,7 @@ onMounted(async () => {
                   type="button" variant="outline" size="xs" class="h-6 text-xs"
                   @click="addSupportedApp"
                 >
-                  <Plus class="h-3 w-3 mr-1" /> Add App
+                  <Plus class="h-3 w-3 mr-1" /> {{ $t('templates.addApp') }}
                 </Button>
               </div>
               <div v-for="(app, i) in form.buttons[0]?.supported_apps || []" :key="i" class="flex items-end gap-2">
@@ -956,7 +956,7 @@ onMounted(async () => {
                   type="button" variant="outline" size="xs" class="h-6 text-xs"
                   @click="addSupportedApp"
                 >
-                  <Plus class="h-3 w-3 mr-1" /> Add App
+                  <Plus class="h-3 w-3 mr-1" /> {{ $t('templates.addApp') }}
                 </Button>
               </div>
               <div v-for="(app, i) in form.buttons[0]?.supported_apps || []" :key="i" class="flex items-end gap-2">
@@ -1090,8 +1090,8 @@ onMounted(async () => {
                     <SelectValue placeholder="navigate" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="navigate">Navigate</SelectItem>
-                    <SelectItem value="data_exchange">Data Exchange</SelectItem>
+                    <SelectItem value="navigate">{{ $t('templates.navigateAction') }}</SelectItem>
+                    <SelectItem value="data_exchange">{{ $t('templates.dataExchange') }}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -1121,9 +1121,9 @@ onMounted(async () => {
                     <SelectValue placeholder="Copy Code" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="COPY_CODE">Copy Code</SelectItem>
-                    <SelectItem value="ONE_TAP">One Tap</SelectItem>
-                    <SelectItem value="ZERO_TAP">Zero Tap</SelectItem>
+                    <SelectItem value="COPY_CODE">{{ $t('templates.copyCode') }}</SelectItem>
+                    <SelectItem value="ONE_TAP">{{ $t('templates.oneTap') }}</SelectItem>
+                    <SelectItem value="ZERO_TAP">{{ $t('templates.zeroTapShort') }}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

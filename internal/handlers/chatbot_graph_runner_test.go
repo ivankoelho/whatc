@@ -516,6 +516,71 @@ func TestRunChatGraph_Prompt_MaxRetriesRoutesToEdge(t *testing.T) {
 	assert.Equal(t, models.SessionStatusCompleted, session.Status)
 }
 
+// TestRunChatGraph_ButtonRoutesToPrompt_SendsPrompt guards against a frozen
+// flow: when a button click routes into a prompt node in the same run, the
+// prompt body must still be sent. Previously the prompt yielded without
+// sending because the button had already set ctx.consumed, so the follow-up
+// question never reached the user and the flow looked stuck until they sent an
+// extra message.
+func TestRunChatGraph_ButtonRoutesToPrompt_SendsPrompt(t *testing.T) {
+	app, org, account, contact, session := newGraphTestFixtures(t)
+
+	flow := &models.ChatbotFlow{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		WhatsAppAccount: account.Name,
+		Name:            "button-to-prompt",
+		IsEnabled:       true,
+		Graph: models.JSONB{
+			"version":    2,
+			"entry_node": "b1",
+			"nodes": []any{
+				map[string]any{
+					"id": "b1", "type": "buttons", "label": "menu",
+					"config": map[string]any{
+						"body":    "Pick one",
+						"buttons": []any{map[string]any{"id": "opt_a", "title": "A"}},
+					},
+				},
+				map[string]any{
+					"id": "p1", "type": "prompt", "label": "ask-cep",
+					"config": map[string]any{"body": "What is your CEP?", "store_as": "cep"},
+				},
+				map[string]any{
+					"id": "e1", "type": "end", "label": "done",
+					"config": map[string]any{},
+				},
+			},
+			"edges": []any{
+				map[string]any{"from": "b1", "to": "p1", "condition": "button:opt_a"},
+				map[string]any{"from": "p1", "to": "e1", "condition": "default"},
+			},
+		},
+	}
+	require.NoError(t, app.DB.Create(flow).Error)
+
+	// Run 1: trigger parks at the buttons node.
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "start", "", nil))
+	require.NoError(t, app.DB.First(session, session.ID).Error)
+	require.Equal(t, "b1", session.CurrentStep)
+
+	// Run 2: the button click routes to the prompt. It must park at the prompt
+	// AND send the question — one click should surface the next prompt.
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "", "opt_a", nil))
+	require.NoError(t, app.DB.First(session, session.ID).Error)
+	assert.Equal(t, "p1", session.CurrentStep, "should park at the prompt node")
+
+	var msgs []models.ChatbotSessionMessage
+	require.NoError(t, app.DB.Where("session_id = ? AND direction = ?", session.ID, models.DirectionOutgoing).Find(&msgs).Error)
+	sentPrompt := false
+	for _, m := range msgs {
+		if m.Message == "What is your CEP?" {
+			sentPrompt = true
+		}
+	}
+	assert.True(t, sentPrompt, "prompt body must be sent when a button routes into it")
+}
+
 // newAPICallFlow builds a three-node graph (api_call → message → end)
 // where the api_call's outgoing edges route to differently-labelled
 // message nodes for 2xx vs non-2xx, making it easy to assert which
@@ -1413,4 +1478,101 @@ func TestRunChatGraph_Prompt_NoRegexAcceptsAnything(t *testing.T) {
 	require.NoError(t, app.DB.First(session, session.ID).Error)
 	assert.Equal(t, models.SessionStatusCompleted, session.Status)
 	assert.Equal(t, "literally anything", session.SessionData["email"])
+}
+
+// TestExecChatButtons_SetsContactTeamFromButton verifies that picking a
+// button whose config carries a team_id sets Contact.TeamID as a lightweight
+// field write, without creating an AgentTransfer (the bot must keep running).
+//
+// createTeamWithMember (internal/handlers/conversation_visibility_test.go)
+// lives in package handlers_test, which this file (package handlers) cannot
+// import without an import cycle, so the team fixture is created inline here
+// instead of reusing that helper. Only a Team row is needed (no membership):
+// the button hook just resolves team_id to Contact.TeamID.
+func TestExecChatButtons_SetsContactTeamFromButton(t *testing.T) {
+	app, org, account, contact, session := newGraphTestFixtures(t)
+
+	team := &models.Team{
+		BaseModel:      models.BaseModel{ID: uuid.New()},
+		OrganizationID: org.ID,
+		Name:           "Vendas",
+		IsActive:       true,
+	}
+	require.NoError(t, app.DB.Create(team).Error)
+
+	flow := &models.ChatbotFlow{
+		BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: org.ID,
+		WhatsAppAccount: account.Name, Name: "menu-team", IsEnabled: true,
+		Graph: models.JSONB{
+			"version": 2, "entry_node": "b1",
+			"nodes": []any{
+				map[string]any{"id": "b1", "type": "buttons", "label": "menu",
+					"config": map[string]any{"body": "Escolha",
+						"buttons": []any{map[string]any{"id": "vendas", "title": "Vendas", "team_id": team.ID.String()}}}},
+				map[string]any{"id": "p1", "type": "prompt", "label": "ask",
+					"config": map[string]any{"body": "CEP?", "store_as": "cep"}},
+			},
+			"edges": []any{map[string]any{"from": "b1", "to": "p1", "condition": "button:vendas"}},
+		},
+	}
+	require.NoError(t, app.DB.Create(flow).Error)
+
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "start", "", nil))  // park at b1
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "", "vendas", nil)) // pick Vendas → p1
+
+	var fresh models.Contact
+	require.NoError(t, app.DB.First(&fresh, "id = ?", contact.ID).Error)
+	require.NotNil(t, fresh.TeamID, "button team_id must set Contact.TeamID")
+	assert.Equal(t, team.ID, *fresh.TeamID)
+
+	var transfers int64
+	app.DB.Model(&models.AgentTransfer{}).Where("contact_id = ?", contact.ID).Count(&transfers)
+	assert.Equal(t, int64(0), transfers, "setting team must NOT create a transfer")
+}
+
+// TestExecChatButtons_UnknownTeamIDLeavesContactTeamNil verifies that a
+// button's team_id which does not resolve to a Team in the contact's
+// organization (a foreign-org id, or a syntactically invalid uuid) is never
+// written to Contact.TeamID, and that the flow still advances normally
+// instead of failing the node.
+func TestExecChatButtons_UnknownTeamIDLeavesContactTeamNil(t *testing.T) {
+	app, org, account, contact, session := newGraphTestFixtures(t)
+
+	otherOrg := &models.Organization{
+		BaseModel: models.BaseModel{ID: uuid.New()},
+		Name:      "other-org",
+		Slug:      "other-org-" + uuid.New().String()[:8],
+	}
+	require.NoError(t, app.DB.Create(otherOrg).Error)
+	foreignTeam := &models.Team{
+		BaseModel:      models.BaseModel{ID: uuid.New()},
+		OrganizationID: otherOrg.ID,
+		Name:           "Foreign Team",
+		IsActive:       true,
+	}
+	require.NoError(t, app.DB.Create(foreignTeam).Error)
+
+	flow := &models.ChatbotFlow{
+		BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: org.ID,
+		WhatsAppAccount: account.Name, Name: "menu-team-unknown", IsEnabled: true,
+		Graph: models.JSONB{
+			"version": 2, "entry_node": "b1",
+			"nodes": []any{
+				map[string]any{"id": "b1", "type": "buttons", "label": "menu",
+					"config": map[string]any{"body": "Escolha",
+						"buttons": []any{map[string]any{"id": "vendas", "title": "Vendas", "team_id": foreignTeam.ID.String()}}}},
+				map[string]any{"id": "p1", "type": "prompt", "label": "ask",
+					"config": map[string]any{"body": "CEP?", "store_as": "cep"}},
+			},
+			"edges": []any{map[string]any{"from": "b1", "to": "p1", "condition": "button:vendas"}},
+		},
+	}
+	require.NoError(t, app.DB.Create(flow).Error)
+
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "start", "", nil))  // park at b1
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "", "vendas", nil)) // pick Vendas → p1, flow must still advance
+
+	var fresh models.Contact
+	require.NoError(t, app.DB.First(&fresh, "id = ?", contact.ID).Error)
+	assert.Nil(t, fresh.TeamID, "a team_id from another organization must not be written to Contact.TeamID")
 }

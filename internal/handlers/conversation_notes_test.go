@@ -16,7 +16,12 @@ import (
 
 func chatRWRole(t *testing.T, db *gorm.DB, orgID uuid.UUID) *models.CustomRole {
 	t.Helper()
-	return testutil.CreateTestRoleWithKeys(t, db, orgID, "chat-rw", []string{"chat:read", "chat:write"})
+	// Includes contacts:read so canView/canInteractWithConversation's flag-off
+	// path (see conversation_visibility.go) grants access the way every other
+	// endpoint's test roles already do (adminRole/agentRole both carry it) —
+	// otherwise this narrower role would newly fail the visibility gate added
+	// for GAP 2 even with strict_conversation_visibility off.
+	return testutil.CreateTestRoleWithKeys(t, db, orgID, "chat-rw", []string{"chat:read", "chat:write", "contacts:read"})
 }
 
 // --- ListConversationNotes ---

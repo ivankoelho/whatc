@@ -147,6 +147,18 @@ const router = createRouter({
           meta: { permission: 'transfers' }
         },
         {
+          path: 'crm/occurrences',
+          name: 'occurrences',
+          component: () => import('@/views/crm/OccurrencesView.vue'),
+          meta: { permission: 'occurrences' }
+        },
+        {
+          path: 'crm/occurrences/:id',
+          name: 'occurrence-detail',
+          component: () => import('@/views/crm/OccurrenceDetailView.vue'),
+          meta: { permission: 'occurrences' }
+        },
+        {
           path: 'analytics/agents',
           name: 'agent-analytics',
           component: () => import('@/views/analytics/AgentAnalyticsView.vue'),
@@ -288,6 +300,12 @@ const router = createRouter({
           meta: { permission: 'custom_actions' }
         },
         {
+          path: 'settings/occurrence-stages',
+          name: 'occurrence-stages',
+          component: () => import('@/views/settings/OccurrenceStagesView.vue'),
+          meta: { permission: 'occurrences.stages' }
+        },
+        {
           path: 'settings/audit-logs',
           name: 'audit-logs',
           component: () => import('@/views/settings/AuditLogsView.vue'),
@@ -342,6 +360,7 @@ const router = createRouter({
 const navigationOrder = [
   { path: '/', permission: 'analytics' },
   { path: '/chat', permission: 'chat' },
+  { path: '/crm/occurrences', permission: 'occurrences' },
   { path: '/chatbot', permission: 'settings.chatbot', childPaths: [
     { path: '/chatbot', permission: 'settings.chatbot' },
     { path: '/chatbot/keywords', permission: 'chatbot.keywords' },
@@ -372,6 +391,7 @@ const navigationOrder = [
     { path: '/settings/api-keys', permission: 'api_keys' },
     { path: '/settings/webhooks', permission: 'webhooks' },
     { path: '/settings/custom-actions', permission: 'custom_actions' },
+    { path: '/settings/occurrence-stages', permission: 'occurrences.stages' },
     { path: '/settings/sso', permission: 'settings.sso' }
   ]}
 ]

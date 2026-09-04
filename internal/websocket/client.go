@@ -266,6 +266,16 @@ func (c *Client) handleSetContact(payload any) {
 		if err != nil {
 			return
 		}
+		// Authorize the subscription: a client may only select a contact whose
+		// conversation it is allowed to view. Without this gate, knowing a
+		// ContactID would be enough to subscribe to its events. Nil authorizer
+		// (tests / pre-wiring) leaves legacy behaviour untouched.
+		if c.hub.authorize != nil && !c.hub.authorize(c.userID, c.organizationID, contactID) {
+			c.hub.log.Debug("Client denied set_contact (not authorized)",
+				"user_id", c.userID,
+				"contact_id", contactID)
+			return
+		}
 		c.currentContact = &contactID
 		c.hub.log.Debug("Client set current contact",
 			"user_id", c.userID,

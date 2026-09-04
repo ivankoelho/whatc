@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { ChatFlowGraph } from '@/services/api'
 import type { FlowData, ButtonConfig } from '@/types/flow-preview'
 import { useFlowGraphSimulation } from '@/composables/useFlowGraphSimulation'
@@ -16,6 +17,8 @@ const props = defineProps<{
   graph: ChatFlowGraph | null
   flowData: Partial<FlowData>
 }>()
+
+const { t } = useI18n()
 
 const graphRef = computed(() => props.graph)
 const flowDataRef = computed(() => props.flowData)
@@ -166,9 +169,9 @@ function handleGoToStep(stepName: string) {
                 <MessageSquare class="h-4 w-4" />
               </div>
               <div class="flex-1 min-w-0">
-                <p class="font-medium text-sm truncate">{{ flowData.name || 'Flow Preview' }}</p>
+                <p class="font-medium text-sm truncate">{{ flowData.name || t('chatbot.preview.flowPreview') }}</p>
                 <p class="text-[11px] text-white/80 truncate">
-                  <template v-if="state.status === 'idle'">tap Start to begin</template>
+                  <template v-if="state.status === 'idle'">{{ t('chatbot.preview.tapStartToBegin') }}</template>
                   <template v-else-if="state.currentStepName">{{ state.currentStepName }}</template>
                   <template v-else>{{ state.status }}</template>
                 </p>
@@ -182,7 +185,7 @@ function handleGoToStep(stepName: string) {
               <div v-if="state.status === 'idle' && state.messages.length === 0" class="text-center py-12">
                 <MessageSquare class="h-12 w-12 mx-auto text-gray-300 dark:text-gray-600 mb-4" />
                 <p class="text-sm text-gray-500 dark:text-gray-400">
-                  Start the preview to simulate the flow
+                  {{ t('chatbot.preview.startToSimulate') }}
                 </p>
               </div>
 
@@ -203,9 +206,9 @@ function handleGoToStep(stepName: string) {
                     class="px-4 py-2 bg-[#075e54] text-white text-sm rounded-lg hover:bg-[#064e46] transition-colors"
                     @click="handleWhatsAppFlowComplete"
                   >
-                    {{ currentStep.input_config?.flow_cta || 'Open Form' }}
+                    {{ currentStep.input_config?.flow_cta || t('chatbot.preview.openForm') }}
                   </button>
-                  <p class="text-[10px] text-gray-500 mt-1 italic">Simulated: clicks complete the flow</p>
+                  <p class="text-[10px] text-gray-500 mt-1 italic">{{ t('chatbot.preview.simulatedClicks') }}</p>
                 </div>
               </div>
 

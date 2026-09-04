@@ -9,39 +9,44 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/contactutil"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/utils"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
-	"gorm.io/gorm"
 )
 
 // ContactResponse represents a contact with additional fields for the frontend
 type ContactResponse struct {
-	ID                 uuid.UUID  `json:"id"`
-	PhoneNumber        string     `json:"phone_number"`
-	Name               string     `json:"name"`
-	ProfileName        string     `json:"profile_name"`
-	AvatarURL          string     `json:"avatar_url"`
-	Status             string     `json:"status"`
-	Tags               []string   `json:"tags"`
-	Metadata           any        `json:"metadata"`
-	LastMessageAt      *time.Time `json:"last_message_at"`
-	LastMessagePreview string     `json:"last_message_preview"`
-	UnreadCount        int        `json:"unread_count"`
-	AssignedUserID     *uuid.UUID `json:"assigned_user_id,omitempty"`
-	WhatsAppAccount    string     `json:"whatsapp_account,omitempty"`
-	LastInboundAt      *time.Time `json:"last_inbound_at,omitempty"`
-	ServiceWindowOpen  bool       `json:"service_window_open"`
-	MarketingOptOut    bool       `json:"marketing_opt_out"`
-	CreatedAt          time.Time  `json:"created_at"`
-	UpdatedAt          time.Time  `json:"updated_at"`
+	ID          uuid.UUID `json:"id"`
+	PhoneNumber string    `json:"phone_number"`
+	Name        string    `json:"name"`
+	ProfileName string    `json:"profile_name"`
+	AvatarURL   string    `json:"avatar_url"`
+	// Status is a legacy field, always "active". Kept untouched so existing
+	// integrations do not break; ContactStatus is the real service state.
+	Status             string               `json:"status"`
+	ContactStatus      models.ContactStatus `json:"contact_status"`
+	Tags               []string             `json:"tags"`
+	Metadata           any                  `json:"metadata"`
+	LastMessageAt      *time.Time           `json:"last_message_at"`
+	LastMessagePreview string               `json:"last_message_preview"`
+	UnreadCount        int                  `json:"unread_count"`
+	AssignedUserID     *uuid.UUID           `json:"assigned_user_id,omitempty"`
+	AssignedUserName   string               `json:"assigned_user_name,omitempty"`
+	WhatsAppAccount    string               `json:"whatsapp_account,omitempty"`
+	LastInboundAt      *time.Time           `json:"last_inbound_at,omitempty"`
+	ServiceWindowOpen  bool                 `json:"service_window_open"`
+	MarketingOptOut    bool                 `json:"marketing_opt_out"`
+	CreatedAt          time.Time            `json:"created_at"`
+	UpdatedAt          time.Time            `json:"updated_at"`
 }
 
 // MessageResponse represents a message for the frontend
@@ -63,6 +68,8 @@ type MessageResponse struct {
 	ReplyToMessage   *ReplyPreview        `json:"reply_to_message,omitempty"`
 	Reactions        []ReactionInfo       `json:"reactions,omitempty"`
 	WhatsAppAccount  string               `json:"whatsapp_account,omitempty"`
+	SentByUserID     *uuid.UUID           `json:"sent_by_user_id,omitempty"`
+	SentByUserName   string               `json:"sent_by_user_name,omitempty"`
 	CreatedAt        time.Time            `json:"created_at"`
 	UpdatedAt        time.Time            `json:"updated_at"`
 }
@@ -94,13 +101,18 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 	pg := parsePagination(r)
 	search := string(r.RequestCtx.QueryArgs().Peek("search"))
 	tagsParam := string(r.RequestCtx.QueryArgs().Peek("tags"))
+	statusParam := string(r.RequestCtx.QueryArgs().Peek("status"))
+	if statusParam != "" && !models.ContactStatus(statusParam).IsValid() {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest,
+			"status must be one of: new, in_progress, resolved", nil, "")
+	}
 
 	var contacts []models.Contact
 	query := a.ScopeToOrg(a.DB, userID, orgID)
 
 	// Users without contacts:read permission can only see contacts assigned to them
 	// or contacts with an active chat transfer to them
-	query = a.scopeAssignedContact(query, userID, orgID)
+	query = a.scopeVisibleConversations(query, userID, orgID)
 
 	if search != "" {
 		// Limit search string length to prevent abuse
@@ -133,6 +145,10 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 		}
 	}
 
+	if statusParam != "" {
+		query = query.Where("contact_status = ?", statusParam)
+	}
+
 	// Order by last message time (most recent first)
 	query = query.Order("last_message_at DESC NULLS LAST, created_at DESC")
 
@@ -146,6 +162,10 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 
 	// Check if phone masking is enabled
 	shouldMask := a.ShouldMaskPhoneNumbers(orgID)
+
+	// Resolve assigned-agent names in a single query (avoid N+1) so the chat
+	// list can show "Atribuído a: X" per row.
+	assignedNames := a.assignedUserNames(orgID, contacts)
 
 	// Convert to response format
 	response := make([]ContactResponse, len(contacts))
@@ -180,6 +200,7 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 			Name:               profileName,
 			ProfileName:        profileName,
 			Status:             "active",
+			ContactStatus:      c.ContactStatus,
 			Tags:               tags,
 			Metadata:           c.Metadata,
 			LastMessageAt:      c.LastMessageAt,
@@ -193,28 +214,12 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 			CreatedAt:          c.CreatedAt,
 			UpdatedAt:          c.UpdatedAt,
 		}
+		if c.AssignedUserID != nil {
+			response[i].AssignedUserName = assignedNames[*c.AssignedUserID]
+		}
 	}
 
 	return r.SendEnvelope(listEnvelope("contacts", response, total, pg))
-}
-
-// scopeAssignedContact narrows a contact query for users who lack the
-// contacts:read permission: they may only access contacts assigned to them
-// (assigned_user_id) or contacts with an active agent transfer to them. With
-// the permission, the query is returned unchanged. Keeping this in one place
-// ensures every contact endpoint enforces the same visibility — assignment
-// via an active transfer counts even when assigned_user_id is unset (which it
-// is unless the AssignToSameAgent setting is on).
-func (a *App) scopeAssignedContact(query *gorm.DB, userID, orgID uuid.UUID) *gorm.DB {
-	if a.HasPermission(userID, models.ResourceContacts, models.ActionRead, orgID) {
-		return query
-	}
-	return query.Where("assigned_user_id = ? OR id IN (?)",
-		userID,
-		a.DB.Model(&models.AgentTransfer{}).
-			Select("contact_id").
-			Where("agent_id = ? AND organization_id = ? AND status = ?", userID, orgID, models.TransferStatusActive),
-	)
 }
 
 // GetContact returns a single contact
@@ -234,7 +239,7 @@ func (a *App) GetContact(r *fastglue.Request) error {
 
 	// Users without contacts:read permission can only access their assigned contacts
 	// or contacts with an active chat transfer to them
-	query = a.scopeAssignedContact(query, userID, orgID)
+	query = a.scopeVisibleConversations(query, userID, orgID)
 
 	if err := query.First(&contact).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
@@ -263,7 +268,7 @@ func (a *App) GetMessages(r *fastglue.Request) error {
 	// Verify contact belongs to org (and to user if no contacts:read permission)
 	var contact models.Contact
 	query := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID)
-	query = a.scopeAssignedContact(query, userID, orgID)
+	query = a.scopeVisibleConversations(query, userID, orgID)
 	if err := query.First(&contact).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
 	}
@@ -317,7 +322,7 @@ func (a *App) GetMessages(r *fastglue.Request) error {
 		}
 		// For loading older messages, order DESC and limit, then reverse
 		var messages []models.Message
-		if err := msgQuery.Preload("ReplyToMessage").Order("created_at DESC").Limit(limit).Find(&messages).Error; err != nil {
+		if err := msgQuery.Preload("ReplyToMessage").Preload("SentByUser").Order("created_at DESC").Limit(limit).Find(&messages).Error; err != nil {
 			a.Log.Error("Failed to list messages", "error", err)
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list messages", nil, "")
 		}
@@ -353,7 +358,7 @@ func (a *App) GetMessages(r *fastglue.Request) error {
 	}
 
 	var messages []models.Message
-	if err := msgQuery.Preload("ReplyToMessage").Order("created_at ASC").Offset(offset).Limit(queryLimit).Find(&messages).Error; err != nil {
+	if err := msgQuery.Preload("ReplyToMessage").Preload("SentByUser").Order("created_at ASC").Offset(offset).Limit(queryLimit).Find(&messages).Error; err != nil {
 		a.Log.Error("Failed to list messages", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list messages", nil, "")
 	}
@@ -397,6 +402,8 @@ func (a *App) buildMessagesResponse(messages []models.Message) []MessageResponse
 			Error:           m.ErrorMessage,
 			IsReply:         m.IsReply,
 			WhatsAppAccount: m.WhatsAppAccount,
+			SentByUserID:    m.SentByUserID,
+			SentByUserName:  senderName(&m),
 			CreatedAt:       m.CreatedAt,
 			UpdatedAt:       m.UpdatedAt,
 		}
@@ -453,7 +460,7 @@ func (a *App) MarkContactRead(r *fastglue.Request) error {
 
 	var contact models.Contact
 	query := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID)
-	query = a.scopeAssignedContact(query, userID, orgID)
+	query = a.scopeVisibleConversations(query, userID, orgID)
 	if err := query.First(&contact).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
 	}
@@ -562,10 +569,13 @@ func (a *App) SendMessage(r *fastglue.Request) error {
 
 	// Get contact (users without full read permission can only message their assigned contacts)
 	var contact models.Contact
-	query := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID)
-	query = a.scopeAssignedContact(query, userID, orgID)
-	if err := query.First(&contact).Error; err != nil {
+	if err := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID).
+		First(&contact).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
+	}
+	if !a.canInteractWithConversation(userID, orgID, &contact) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You do not have access to this conversation", nil, "")
 	}
 
 	// Get WhatsApp account - prefer request-specified account over contact default
@@ -815,10 +825,13 @@ func (a *App) SendMediaMessage(r *fastglue.Request) error {
 
 	// Get contact (users without full read permission can only message their assigned contacts)
 	var contact models.Contact
-	query := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID)
-	query = a.scopeAssignedContact(query, userID, orgID)
-	if err := query.First(&contact).Error; err != nil {
+	if err := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID).
+		First(&contact).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
+	}
+	if !a.canInteractWithConversation(userID, orgID, &contact) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You do not have access to this conversation", nil, "")
 	}
 
 	// Get WhatsApp account - prefer form-specified account over contact default
@@ -956,10 +969,13 @@ func (a *App) SendReaction(r *fastglue.Request) error {
 
 	// Get contact (users without full read permission can only react to messages in their assigned contacts)
 	var contact models.Contact
-	query := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID)
-	query = a.scopeAssignedContact(query, userID, orgID)
-	if err := query.First(&contact).Error; err != nil {
+	if err := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID).
+		First(&contact).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
+	}
+	if !a.canInteractWithConversation(userID, orgID, &contact) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You do not have access to this conversation", nil, "")
 	}
 
 	// Get message
@@ -1131,6 +1147,14 @@ func (a *App) AssignContact(r *fastglue.Request) error {
 		return nil
 	}
 
+	// Visibility gate: reassignment is an interaction. Without it a contacts:write
+	// holder with no view_all could reassign a carteira-only conversation to
+	// themselves and flip their own visibility on.
+	if !a.canInteractWithConversation(userID, orgID, contact) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You do not have access to this conversation", nil, "")
+	}
+
 	// If assigning to a user, verify they exist in the same org
 	if req.UserID != nil {
 		var user models.User
@@ -1175,7 +1199,7 @@ func (a *App) GetContactSessionData(r *fastglue.Request) error {
 	// Verify contact belongs to org (users without full read permission can only access assigned contacts)
 	var contact models.Contact
 	query := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID)
-	query = a.scopeAssignedContact(query, userID, orgID)
+	query = a.scopeVisibleConversations(query, userID, orgID)
 	if err := query.First(&contact).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
 	}
@@ -1251,6 +1275,93 @@ func (a *App) GetContactSessionData(r *fastglue.Request) error {
 	return r.SendEnvelope(response)
 }
 
+// UpdateContactNameRequest carrega o único campo que este endpoint aceita.
+type UpdateContactNameRequest struct {
+	Name string `json:"name"`
+}
+
+// maskedValuePattern reconhece o formato de uma máscara de telefone
+// parcialmente editada: asteriscos seguidos (opcionalmente) de dígitos, e
+// nada mais. Não casa nomes reais com asterisco, como "M*A*S*H" ou "Hotel 4*".
+var maskedValuePattern = regexp.MustCompile(`^\*+\d*$`)
+
+// UpdateContactName renomeia o contato e nada mais.
+//
+// Endpoint próprio em vez de um caminho dentro de UpdateContact: um endpoint,
+// um portão. Um condicional dentro do update largo teria de acertar quais
+// campos ignorar, e erraria em silêncio no dia em que alguém acrescentasse um.
+func (a *App) UpdateContactName(r *fastglue.Request) error {
+	orgID, userID, err := a.requireAuth(r, models.ResourceContactName, models.ActionWrite)
+	if err != nil {
+		return nil
+	}
+
+	contactID, err := parsePathUUID(r, "id", "contact")
+	if err != nil {
+		return nil
+	}
+
+	contact, err := findByIDAndOrg[models.Contact](a.DB, r, contactID, orgID, "Contact")
+	if err != nil {
+		return nil
+	}
+
+	// A permissão não pode furar a visibilidade: renomear contato que o
+	// usuário não enxerga seria acesso lateral ao escopo de conversa.
+	if !a.canInteractWithConversation(userID, orgID, contact) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You do not have access to this conversation", nil, "")
+	}
+
+	var req UpdateContactNameRequest
+	if err := a.decodeRequest(r, &req); err != nil {
+		return nil
+	}
+
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "name is required", nil, "")
+	}
+
+	// profile_name is varchar(255); catch an over-long name here so the
+	// client gets a 400 instead of a 500 from the DB, and the error log
+	// stays clean of ordinary client mistakes.
+	if len(name) > 255 {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest,
+			"name is too long (max 255 characters)", nil, "")
+	}
+
+	// Com mask_phone_numbers ligado, um nome que parece telefone é exibido
+	// como ****1234. Salvar esse valor de volta gravaria a máscara por cima
+	// do número real, sem volta. Duas formas de isso acontecer:
+	//   1) a tela pré-preencheu o campo com o valor mascarado e o usuário
+	//      salvou sem editar (bate exatamente com o que a tela mostraria);
+	//   2) o usuário editou só uma parte, sobrando um resto no formato de
+	//      máscara (asteriscos seguidos de dígitos, e nada mais).
+	// Nome de gente com asterisco de verdade ("M*A*S*H", "Hotel 4*") não cai
+	// em nenhum dos dois casos e passa.
+	//
+	// O que isto NÃO cobre, de propósito: um usuário que digita "1234" por
+	// cima do valor mascarado. É um rename comum, e nada nessa entrada
+	// distingue essa intenção de uma troca de nome legítima.
+	if name == utils.MaskIfPhoneNumber(contact.ProfileName) || maskedValuePattern.MatchString(name) {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest,
+			"name looks like a masked phone number", nil, "")
+	}
+
+	if err := a.DB.Model(contact).Update("profile_name", name).Error; err != nil {
+		a.Log.Error("Failed to rename contact", "error", err, "contact_id", contactID)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError,
+			"Failed to rename contact", nil, "")
+	}
+
+	return r.SendEnvelope(map[string]any{
+		"id":           contactID,
+		"name":         name,
+		"profile_name": name,
+	})
+}
+
 // UpdateContactTagsRequest represents the request body for updating contact tags
 type UpdateContactTagsRequest struct {
 	Tags []string `json:"tags"`
@@ -1282,6 +1393,13 @@ func (a *App) UpdateContactTags(r *fastglue.Request) error {
 	contact, err := findByIDAndOrg[models.Contact](a.DB, r, contactID, orgID, "Contact")
 	if err != nil {
 		return nil
+	}
+
+	// Visibility gate: tags are conversation data; gate mutating them the same
+	// way SendMessage and the other action surfaces are gated.
+	if !a.canInteractWithConversation(userID, orgID, contact) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You do not have access to this conversation", nil, "")
 	}
 
 	// Convert tags to JSONBArray
@@ -1347,15 +1465,16 @@ func (a *App) CreateContact(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "phone_number is required", nil, "")
 	}
 
-	// Normalize phone number
-	normalizedPhone := req.PhoneNumber
-	if len(normalizedPhone) > 0 && normalizedPhone[0] == '+' {
-		normalizedPhone = normalizedPhone[1:]
-	}
+	// Canonical digits-only identity (see contactutil.NormalizePhone).
+	normalizedPhone := contactutil.NormalizePhone(req.PhoneNumber)
 
-	// Check if contact exists (including soft-deleted)
-	var existingContact models.Contact
-	if err := a.DB.Unscoped().Where("organization_id = ? AND phone_number = ?", orgID, normalizedPhone).First(&existingContact).Error; err == nil {
+	// Check if contact exists (including soft-deleted). Goes through the shared
+	// resolver so every spelling of the same subscriber counts as a duplicate --
+	// notably Brazil's legacy 8-digit mobile form, which an inbound message may
+	// already have created before an agent types the number in with the 9.
+	found, findErr := contactutil.FindContactUnscoped(a.DB, orgID, req.PhoneNumber)
+	if findErr == nil {
+		existingContact := *found
 		// Contact exists
 		if existingContact.DeletedAt.Valid {
 			// Restore soft-deleted contact
@@ -1379,6 +1498,12 @@ func (a *App) CreateContact(r *fastglue.Request) error {
 			if req.Metadata != nil {
 				updates["metadata"] = models.JSONB(req.Metadata)
 			}
+			// Same visibility reasoning as a fresh create: an unowned restored
+			// contact goes to whoever restored it, so they can see it under
+			// strict conversation visibility.
+			if existingContact.AssignedUserID == nil {
+				updates["assigned_user_id"] = userID
+			}
 			if len(updates) > 0 {
 				a.DB.Model(&existingContact).Updates(updates)
 			}
@@ -1389,13 +1514,18 @@ func (a *App) CreateContact(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusConflict, "Contact with this phone number already exists", nil, "")
 	}
 
-	// Create new contact
+	// Create new contact, owned by whoever created it. Without this the contact
+	// has no assignee, no team and (unless the account has a default team) falls
+	// into the "view_all only" bucket under strict conversation visibility — so
+	// the agent who just created it could not see it. Assigning to the creator
+	// makes it visible to them via the carteira rule.
 	contact := models.Contact{
 		BaseModel:       models.BaseModel{ID: uuid.New()},
 		OrganizationID:  orgID,
 		PhoneNumber:     normalizedPhone,
 		ProfileName:     req.ProfileName,
 		WhatsAppAccount: req.WhatsAppAccount,
+		AssignedUserID:  &userID,
 	}
 
 	if req.Tags != nil {
@@ -1459,6 +1589,16 @@ func (a *App) UpdateContact(r *fastglue.Request) error {
 	contact, err := findByIDAndOrg[models.Contact](a.DB, r, contactID, orgID, "Contact")
 	if err != nil {
 		return nil
+	}
+
+	// Visibility gate: editing a contact (including reassignment via
+	// assigned_user_id) is an interaction with its conversation, and the handler
+	// reads back full contact detail. Gate the whole handler so a contacts:write
+	// holder without view_all cannot mutate or read a conversation they can't see
+	// — nor reassign a carteira-only conversation to themselves to gain access.
+	if !a.canInteractWithConversation(userID, orgID, contact) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You do not have access to this conversation", nil, "")
 	}
 	oldContact := *contact
 
@@ -1574,18 +1714,30 @@ func (a *App) buildContactResponse(contact *models.Contact, orgID uuid.UUID) Con
 	// 24-hour service window: open if customer messaged within the last 24 hours.
 	serviceWindowOpen := contact.LastInboundAt != nil && time.Since(*contact.LastInboundAt) < 24*time.Hour
 
+	var assignedUserName string
+	if contact.AssignedUserID != nil {
+		var u models.User
+		if err := a.DB.Select("full_name").
+			Where("id = ? AND organization_id = ?", *contact.AssignedUserID, orgID).
+			First(&u).Error; err == nil {
+			assignedUserName = u.FullName
+		}
+	}
+
 	return ContactResponse{
 		ID:                 contact.ID,
 		PhoneNumber:        phoneNumber,
 		Name:               profileName,
 		ProfileName:        profileName,
 		Status:             "active",
+		ContactStatus:      contact.ContactStatus,
 		Tags:               tags,
 		Metadata:           contact.Metadata,
 		LastMessageAt:      contact.LastMessageAt,
 		LastMessagePreview: contact.LastMessagePreview,
 		UnreadCount:        int(unreadCount),
 		AssignedUserID:     contact.AssignedUserID,
+		AssignedUserName:   assignedUserName,
 		WhatsAppAccount:    contact.WhatsAppAccount,
 		LastInboundAt:      contact.LastInboundAt,
 		ServiceWindowOpen:  serviceWindowOpen,
@@ -1593,4 +1745,45 @@ func (a *App) buildContactResponse(contact *models.Contact, orgID uuid.UUID) Con
 		CreatedAt:          contact.CreatedAt,
 		UpdatedAt:          contact.UpdatedAt,
 	}
+}
+
+// assignedUserNames resolves the full names of the agents assigned to the given
+// contacts in a single query, keyed by user ID. Contacts without an assignment
+// are ignored. Returns an empty (non-nil) map when there are no assignees.
+func (a *App) assignedUserNames(orgID uuid.UUID, contacts []models.Contact) map[uuid.UUID]string {
+	names := make(map[uuid.UUID]string)
+	idSet := make(map[uuid.UUID]struct{})
+	for _, c := range contacts {
+		if c.AssignedUserID != nil {
+			idSet[*c.AssignedUserID] = struct{}{}
+		}
+	}
+	if len(idSet) == 0 {
+		return names
+	}
+	ids := make([]uuid.UUID, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
+	}
+	var rows []struct {
+		ID       uuid.UUID
+		FullName string
+	}
+	a.DB.Model(&models.User{}).
+		Select("id, full_name").
+		Where("id IN ? AND organization_id = ?", ids, orgID).
+		Scan(&rows)
+	for _, row := range rows {
+		names[row.ID] = row.FullName
+	}
+	return names
+}
+
+// senderName returns the display name of the agent who sent an outgoing
+// message, or "" for messages with no agent (chatbot, campaign, API).
+func senderName(m *models.Message) string {
+	if m.SentByUser == nil {
+		return ""
+	}
+	return m.SentByUser.FullName
 }

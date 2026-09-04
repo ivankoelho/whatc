@@ -402,18 +402,18 @@ onMounted(() => {
       <Button variant="ghost" size="icon" class="h-8 w-8" :aria-label="t('calling.backToFlows')" @click="router.push({ name: 'ivr-flows' })">
         <ArrowLeft class="h-4 w-4" />
       </Button>
-      <Input v-model="flowName" placeholder="Flow Name" class="h-8 text-sm max-w-[250px]" />
+      <Input v-model="flowName" :placeholder="$t('flows.flowName')" class="h-8 text-sm max-w-[250px]" />
       <div class="flex items-center gap-2 ml-4">
         <Switch v-model:checked="isActive" />
-        <Label class="text-xs whitespace-nowrap">Active</Label>
+        <Label class="text-xs whitespace-nowrap">{{ $t('common.active') }}</Label>
       </div>
       <div class="flex items-center gap-2 ml-2">
         <Switch v-model:checked="isCallStart" :disabled="!isActive" />
-        <Label class="text-xs whitespace-nowrap">Incoming Call Start</Label>
+        <Label class="text-xs whitespace-nowrap">{{ $t('calling.incomingCallStart') }}</Label>
       </div>
       <div class="flex items-center gap-2 ml-2">
         <Switch v-model:checked="isOutgoingEnd" :disabled="!isActive" />
-        <Label class="text-xs whitespace-nowrap">Outgoing Post-Call</Label>
+        <Label class="text-xs whitespace-nowrap">{{ $t('calling.outgoingEnd') }}</Label>
       </div>
       <div class="flex-1" />
       <Button :disabled="saving" size="sm" @click="saveFlow">

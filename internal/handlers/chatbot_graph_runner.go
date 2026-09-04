@@ -266,6 +266,40 @@ func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 			}
 			ctx.session.SessionData[storeAs] = value
 		}
+
+		// Optional per-button team: set the conversation's effective team for
+		// triage-phase visibility (a lightweight field write, NOT a transfer,
+		// so the bot keeps running). Matched by button id.
+		for _, b := range buttonsFromConfig(node.Config) {
+			if id, _ := b["id"].(string); id == ctx.buttonID {
+				if tid, _ := b["team_id"].(string); tid != "" {
+					parsed, err := uuid.Parse(tid)
+					if err != nil {
+						a.Log.Warn("buttons node has invalid team_id, skipping",
+							"node", node.ID, "team_id", tid, "error", err)
+						break
+					}
+					var count int64
+					a.DB.Model(&models.Team{}).
+						Where("id = ? AND organization_id = ?", parsed, ctx.contact.OrganizationID).
+						Count(&count)
+					if count == 0 {
+						a.Log.Warn("buttons node team_id not found in contact's organization, skipping",
+							"node", node.ID, "team_id", tid, "organization_id", ctx.contact.OrganizationID)
+						break
+					}
+					if err := a.DB.Model(&models.Contact{}).Where("id = ?", ctx.contact.ID).
+						Update("team_id", parsed).Error; err != nil {
+						a.Log.Error("buttons node failed to set contact team",
+							"node", node.ID, "contact", ctx.contact.ID, "error", err)
+					} else {
+						ctx.contact.TeamID = &parsed
+					}
+				}
+				break
+			}
+		}
+
 		return nodeOutcome{outcome: "button:" + ctx.buttonID}, nil
 	}
 
@@ -316,8 +350,13 @@ func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 func (a *App) execChatPrompt(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, error) {
 	body := stringFromConfig(node.Config, "body", "message", "text")
 
-	// No input yet → send prompt and wait.
-	if !ctx.consumed && ctx.userInput == "" {
+	// Send the prompt and wait when this node has no fresh input to process:
+	// either nothing arrived yet (first entry) or an earlier blocking node in
+	// the same run already consumed the inbound (e.g. a button click that
+	// routed here). In both cases the user is reaching this prompt for the
+	// first time and must actually see the question — otherwise the flow looks
+	// frozen after a button tap until they send an extra message.
+	if ctx.userInput == "" || ctx.consumed {
 		if body == "" {
 			return nodeOutcome{}, fmt.Errorf("prompt node %q has no body configured", node.ID)
 		}
@@ -326,12 +365,6 @@ func (a *App) execChatPrompt(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, err
 			return nodeOutcome{}, fmt.Errorf("send prompt: %w", err)
 		}
 		a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, rendered, node.ID)
-		return nodeOutcome{yield: true}, nil
-	}
-
-	if ctx.consumed {
-		// Input was already consumed by an earlier blocking node in this
-		// run — defensive guard. Treat as fresh entry.
 		return nodeOutcome{yield: true}, nil
 	}
 
@@ -722,6 +755,12 @@ func (a *App) execChatTransfer(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, e
 		notes = processTemplate(rawNotes, ctx.session.SessionData)
 	}
 
+	// Apply any tags configured on the node so the conversation reaches the
+	// agent already labelled by subject (e.g. "orçamento", "reclamação").
+	if tags := stringSliceFromConfig(node.Config, "tags"); len(tags) > 0 {
+		a.addContactTags(ctx.contact, tags)
+	}
+
 	teamIDStr := stringFromConfig(node.Config, "team_id")
 	if teamIDStr != "" && teamIDStr != "_general" {
 		if parsed, err := uuid.Parse(teamIDStr); err == nil {
@@ -737,6 +776,38 @@ func (a *App) execChatTransfer(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, e
 
 	ctx.session.Status = models.SessionStatusCompleted
 	return nodeOutcome{yield: true}, nil
+}
+
+// addContactTags merges tag names into the contact's tag set (de-duplicated,
+// order preserved) and persists them. Best-effort: a failure is logged and
+// never blocks the flow.
+func (a *App) addContactTags(contact *models.Contact, tags []string) {
+	seen := map[string]bool{}
+	merged := models.JSONBArray{}
+	for _, t := range contact.Tags {
+		if s, ok := t.(string); ok && !seen[s] {
+			seen[s] = true
+			merged = append(merged, s)
+		}
+	}
+	added := false
+	for _, t := range tags {
+		t = strings.TrimSpace(t)
+		if t == "" || seen[t] {
+			continue
+		}
+		seen[t] = true
+		merged = append(merged, t)
+		added = true
+	}
+	if !added {
+		return
+	}
+	if err := a.DB.Model(contact).Update("tags", merged).Error; err != nil {
+		a.Log.Error("transfer node failed to apply tags", "contact", contact.ID, "error", err)
+		return
+	}
+	contact.Tags = merged
 }
 
 // execChatWebhook fires a best-effort HTTP request. Unlike api_call, the
@@ -986,6 +1057,25 @@ func intFromConfig(cfg map[string]any, key string, def int) int {
 		return v
 	}
 	return def
+}
+
+// stringSliceFromConfig returns a []string from config at the given key. JSON
+// arrays decode as []any, so accept both []any and []string; non-string or
+// blank elements are dropped.
+func stringSliceFromConfig(cfg map[string]any, key string) []string {
+	switch v := cfg[key].(type) {
+	case []string:
+		return v
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, e := range v {
+			if s, ok := e.(string); ok && strings.TrimSpace(s) != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 // buttonsFromConfig normalizes node.Config["buttons"] into the shape the

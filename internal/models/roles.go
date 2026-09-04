@@ -71,6 +71,7 @@ const (
 	ResourceChat                    = "chat"
 	ResourceChatAssign              = "chat.assign"
 	ResourceContacts                = "contacts"
+	ResourceContactName             = "contacts.name"
 	ResourceTags                    = "tags"
 	ResourceAnalytics               = "analytics"
 	ResourceAnalyticsAgents         = "analytics.agents"
@@ -78,6 +79,7 @@ const (
 	ResourceWebhooks                = "webhooks"
 	ResourceAPIKeys                 = "api_keys"
 	ResourceCannedResponses         = "canned_responses"
+	ResourceConversations           = "conversations"
 	ResourceCustomActions           = "custom_actions"
 	ResourceOrganizations           = "organizations"
 	ResourceCallLogs                = "call_logs"
@@ -85,6 +87,8 @@ const (
 	ResourceCallTransfers           = "call_transfers"
 	ResourceOutgoingCalls           = "outgoing_calls"
 	ResourceAuditLogs               = "audit_logs"
+	ResourceOccurrences             = "occurrences"
+	ResourceOccurrenceStages        = "occurrences.stages"
 )
 
 // PermissionAction constants for available actions
@@ -98,6 +102,8 @@ const (
 	ActionExport  = "export"
 	ActionPickup  = "pickup"
 	ActionAssign  = "assign"
+	ActionViewAll = "view_all"
+	ActionViewTeam = "view_team"
 )
 
 // DefaultPermissions returns the list of all available permissions to seed
@@ -168,12 +174,19 @@ func DefaultPermissions() []Permission {
 		{Resource: ResourceChat, Action: ActionWrite, Description: "Send messages"},
 		{Resource: ResourceChatAssign, Action: ActionWrite, Description: "Assign conversations to agents"},
 
+		// Conversations
+		{Resource: ResourceConversations, Action: ActionViewAll, Description: "View and act on all conversations, including those assigned to other agents"},
+		{Resource: ResourceConversations, Action: ActionViewTeam, Description: "View and act on all conversations of the teams the user belongs to"},
+
 		// Contacts
 		{Resource: ResourceContacts, Action: ActionRead, Description: "View contacts"},
 		{Resource: ResourceContacts, Action: ActionWrite, Description: "Create and edit contacts"},
 		{Resource: ResourceContacts, Action: ActionDelete, Description: "Delete contacts"},
 		{Resource: ResourceContacts, Action: ActionImport, Description: "Import contacts"},
 		{Resource: ResourceContacts, Action: ActionExport, Description: "Export contacts"},
+		// Renomear o contato, separado de contacts:write para que o atendente
+		// possa corrigir o nome sem ganhar o contato inteiro.
+		{Resource: ResourceContactName, Action: ActionWrite, Description: "Rename contacts"},
 
 		// Tags
 		{Resource: ResourceTags, Action: ActionRead, Description: "View tags"},
@@ -235,6 +248,25 @@ func DefaultPermissions() []Permission {
 
 		// Audit Logs
 		{Resource: ResourceAuditLogs, Action: ActionRead, Description: "View audit logs"},
+
+		// CRM — ocorrências. Não há permissão de exclusão porque não existe
+		// endpoint de exclusão de ocorrência. `occurrences:read` também cobre
+		// a LEITURA das etapas: o quadro não renderiza sem elas, então isso é
+		// usar o CRM, não administrá-lo.
+		{Resource: ResourceOccurrences, Action: ActionRead, Description: "View occurrences and pipeline stages"},
+		{Resource: ResourceOccurrences, Action: ActionWrite, Description: "Create and edit occurrences"},
+
+		// CRM — administração do funil, separada de settings.general para que
+		// configurar etapas não exija as configurações gerais da organização.
+		//
+		// `read` aqui governa VER A TELA de configuração, não ler as etapas:
+		// a leitura das etapas pela API fica sob occurrences:read, porque o
+		// quadro não renderiza sem elas. A chave existe porque a guarda de
+		// rota do frontend chama hasPermission(recurso, 'read') com a ação
+		// fixa — sem ela a tela fica inalcançável até para o admin.
+		{Resource: ResourceOccurrenceStages, Action: ActionRead, Description: "View the occurrence pipeline configuration"},
+		{Resource: ResourceOccurrenceStages, Action: ActionWrite, Description: "Create and edit occurrence stages"},
+		{Resource: ResourceOccurrenceStages, Action: ActionDelete, Description: "Delete occurrence stages"},
 	}
 }
 
@@ -266,6 +298,11 @@ func SystemRolePermissions() map[string][]string {
 		"chatbot.ai:read", "chatbot.ai:write", "chatbot.ai:delete",
 		// Chat
 		"chat:read", "chat:write", "chat.assign:write",
+		// CRM: o gestor usa e administra o funil, coerente com ter settings.general:write
+		"occurrences:read", "occurrences:write",
+		"occurrences.stages:read", "occurrences.stages:write", "occurrences.stages:delete",
+		// Conversations
+		"conversations:view_all",
 		// Contacts
 		"contacts:read", "contacts:write", "contacts:delete", "contacts:import", "contacts:export",
 		// Tags
@@ -294,8 +331,12 @@ func SystemRolePermissions() map[string][]string {
 		"accounts:read",
 		// Chat
 		"chat:read", "chat:write",
+		// CRM: o atendente usa; administrar o funil não é papel dele
+		"occurrences:read", "occurrences:write",
 		// Contacts (read only)
 		"contacts:read",
+		// Renomear: agilidade no atendimento, sem abrir o resto do contato
+		"contacts.name:write",
 		// Tags (read only - agents can see tags on contacts)
 		"tags:read",
 		// Analytics (own)

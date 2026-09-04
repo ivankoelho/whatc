@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { Upload, FileText, X } from 'lucide-vue-next'
 
@@ -9,6 +10,8 @@ defineProps<{
   mediaLabel?: string
   label?: string
 }>()
+
+const { t } = useI18n()
 
 defineEmits<{
   (e: 'change', event: Event): void
@@ -21,7 +24,7 @@ defineEmits<{
     <label v-if="label" class="text-sm font-medium">{{ label }}</label>
     <div v-if="!file" class="border-2 border-dashed rounded-lg p-4 text-center cursor-pointer hover:border-primary/50 transition-colors" @click="($refs.fileInput as HTMLInputElement)?.click()">
       <Upload class="h-6 w-6 mx-auto text-muted-foreground mb-1" />
-      <p class="text-xs text-muted-foreground">Click to upload file</p>
+      <p class="text-xs text-muted-foreground">{{ t('common.clickToUploadFile') }}</p>
       <p v-if="mediaLabel" class="text-xs text-muted-foreground mt-0.5">{{ mediaLabel }}</p>
     </div>
     <div v-else class="flex items-center gap-2 p-2 bg-muted rounded-lg">

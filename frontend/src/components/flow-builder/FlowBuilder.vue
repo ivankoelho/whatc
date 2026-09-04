@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Card, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -31,19 +32,23 @@ import {
   Layers
 } from 'lucide-vue-next'
 
-// Component types available in WhatsApp Flows
+const { t } = useI18n()
+
+// Component types available in WhatsApp Flows. `labelKey` resolves to a
+// localized label via t(); labels are not stored so the palette and
+// property panel stay in sync with the active locale.
 const componentTypes = [
-  { type: 'TextHeading', label: 'Heading', icon: Type },
-  { type: 'TextSubheading', label: 'Subheading', icon: Type },
-  { type: 'TextBody', label: 'Text', icon: Type },
-  { type: 'TextInput', label: 'Text Input', icon: TextCursorInput },
-  { type: 'TextArea', label: 'Text Area', icon: TextCursorInput },
-  { type: 'Dropdown', label: 'Dropdown', icon: ChevronDown },
-  { type: 'RadioButtonsGroup', label: 'Radio Buttons', icon: CircleDot },
-  { type: 'CheckboxGroup', label: 'Checkboxes', icon: CheckSquare },
-  { type: 'DatePicker', label: 'Date Picker', icon: Calendar },
-  { type: 'Image', label: 'Image', icon: Image },
-  { type: 'Footer', label: 'Footer Button', icon: ArrowRight },
+  { type: 'TextHeading', labelKey: 'flows.builder.components.heading', icon: Type },
+  { type: 'TextSubheading', labelKey: 'flows.builder.components.subheading', icon: Type },
+  { type: 'TextBody', labelKey: 'flows.builder.components.textBody', icon: Type },
+  { type: 'TextInput', labelKey: 'flows.builder.components.textInput', icon: TextCursorInput },
+  { type: 'TextArea', labelKey: 'flows.builder.components.textArea', icon: TextCursorInput },
+  { type: 'Dropdown', labelKey: 'flows.builder.components.dropdown', icon: ChevronDown },
+  { type: 'RadioButtonsGroup', labelKey: 'flows.builder.components.radioButtons', icon: CircleDot },
+  { type: 'CheckboxGroup', labelKey: 'flows.builder.components.checkboxes', icon: CheckSquare },
+  { type: 'DatePicker', labelKey: 'flows.builder.components.datePicker', icon: Calendar },
+  { type: 'Image', labelKey: 'flows.builder.components.image', icon: Image },
+  { type: 'Footer', labelKey: 'flows.builder.components.footerButton', icon: ArrowRight },
 ]
 
 interface FlowComponent {
@@ -149,7 +154,7 @@ function addScreen() {
   const screenNum = screens.value.length + 1
   screens.value.push({
     id: `SCREEN_${numberToLetters(screenNum)}`,
-    title: `Screen ${screenNum}`,
+    title: t('flows.builder.screenName', { num: screenNum }),
     data: {},
     layout: {
       type: 'SingleColumnLayout',
@@ -186,49 +191,49 @@ function addComponent(type: string) {
     case 'TextHeading':
     case 'TextSubheading':
     case 'TextBody':
-      component.text = 'Enter text here'
+      component.text = t('flows.builder.defaults.enterTextHere')
       break
     case 'TextInput':
       component.name = generateFieldName(type)
-      component.label = 'Label'
+      component.label = t('flows.builder.defaults.label')
       component.required = false
       component['input-type'] = 'text'
       break
     case 'TextArea':
       component.name = generateFieldName(type)
-      component.label = 'Label'
+      component.label = t('flows.builder.defaults.label')
       component.required = false
       break
     case 'Dropdown':
       component.name = generateFieldName(type)
-      component.label = 'Select an option'
+      component.label = t('flows.builder.defaults.selectAnOption')
       component.required = false
       component['data-source'] = [
-        { id: 'option_a', title: 'Option 1' },
-        { id: 'option_b', title: 'Option 2' }
+        { id: 'option_a', title: t('flows.builder.defaults.option1') },
+        { id: 'option_b', title: t('flows.builder.defaults.option2') }
       ]
       break
     case 'RadioButtonsGroup':
       component.name = generateFieldName(type)
-      component.label = 'Choose one'
+      component.label = t('flows.builder.defaults.chooseOne')
       component.required = false
       component['data-source'] = [
-        { id: 'option_a', title: 'Option 1' },
-        { id: 'option_b', title: 'Option 2' }
+        { id: 'option_a', title: t('flows.builder.defaults.option1') },
+        { id: 'option_b', title: t('flows.builder.defaults.option2') }
       ]
       break
     case 'CheckboxGroup':
       component.name = generateFieldName(type)
-      component.label = 'Select options'
+      component.label = t('flows.builder.defaults.selectOptions')
       component.required = false
       component['data-source'] = [
-        { id: 'option_a', title: 'Option 1' },
-        { id: 'option_b', title: 'Option 2' }
+        { id: 'option_a', title: t('flows.builder.defaults.option1') },
+        { id: 'option_b', title: t('flows.builder.defaults.option2') }
       ]
       break
     case 'DatePicker':
       component.name = generateFieldName(type)
-      component.label = 'Select date'
+      component.label = t('flows.builder.defaults.selectDate')
       component.required = false
       break
     case 'Image':
@@ -236,7 +241,7 @@ function addComponent(type: string) {
       component['aspect-ratio'] = 1
       break
     case 'Footer':
-      component.label = 'Continue'
+      component.label = t('flows.builder.defaults.continue')
       component['on-click-action'] = {
         name: 'complete',
         payload: {}
@@ -281,7 +286,7 @@ function addOption() {
   if (!selectedComponent.value || !selectedComponent.value['data-source']) return
   selectedComponent.value['data-source'].push({
     id: generateId(),
-    title: 'New Option'
+    title: t('flows.builder.defaults.newOption')
   })
 }
 
@@ -296,12 +301,12 @@ function updateOption(index: number, key: string, value: string) {
 }
 
 function getComponentLabel(comp: FlowComponent): string {
-  const typeInfo = componentTypes.find(t => t.type === comp.type)
-  return typeInfo?.label || comp.type
+  const typeInfo = componentTypes.find(ct => ct.type === comp.type)
+  return typeInfo ? t(typeInfo.labelKey) : comp.type
 }
 
 function getComponentIcon(type: string) {
-  return componentTypes.find(t => t.type === type)?.icon || Type
+  return componentTypes.find(ct => ct.type === type)?.icon || Type
 }
 
 // Components that should NOT have an 'id' property when sent to Meta API
@@ -355,7 +360,7 @@ defineExpose({
         <div class="flex items-center justify-between">
           <CardTitle class="text-sm font-medium flex items-center gap-2">
             <Layers class="h-4 w-4" />
-            Screens
+            {{ t('flows.builder.screens') }}
           </CardTitle>
           <Button variant="ghost" size="icon" class="h-7 w-7" @click="addScreen">
             <Plus class="h-4 w-4" />
@@ -390,7 +395,7 @@ defineExpose({
             v-if="screens.length === 0"
             class="p-4 text-center text-sm text-muted-foreground"
           >
-            No screens yet
+            {{ t('flows.builder.noScreensYet') }}
           </div>
         </div>
       </ScrollArea>
@@ -404,11 +409,11 @@ defineExpose({
             <Input
               v-model="selectedScreen.title"
               class="h-8 w-48 text-sm font-medium"
-              placeholder="Screen Title"
+              :placeholder="t('flows.builder.screenTitlePlaceholder')"
             />
             <Badge variant="outline">{{ selectedScreen.id }}</Badge>
           </div>
-          <CardTitle v-else class="text-sm font-medium">Select a screen</CardTitle>
+          <CardTitle v-else class="text-sm font-medium">{{ t('flows.builder.selectAScreen') }}</CardTitle>
         </div>
       </CardHeader>
       <Separator />
@@ -417,7 +422,7 @@ defineExpose({
         <!-- Component Palette -->
         <ScrollArea class="w-48 border-r flex-shrink-0">
           <div class="p-3">
-            <p class="text-xs font-medium text-muted-foreground mb-2">Add Components</p>
+            <p class="text-xs font-medium text-muted-foreground mb-2">{{ t('flows.builder.addComponents') }}</p>
             <div class="grid grid-cols-2 gap-1">
               <Button
                 v-for="comp in componentTypes"
@@ -428,7 +433,7 @@ defineExpose({
                 @click="addComponent(comp.type)"
               >
                 <component :is="comp.icon" class="h-4 w-4" />
-                <span class="text-[10px]">{{ comp.label }}</span>
+                <span class="text-[10px]">{{ t(comp.labelKey) }}</span>
               </Button>
             </div>
           </div>
@@ -490,7 +495,7 @@ defineExpose({
                     <span v-if="comp.required" class="text-destructive">*</span>
                   </Label>
                   <div class="mt-1 p-2 rounded-md border bg-background text-sm flex items-center justify-between">
-                    <span class="text-muted-foreground">Select...</span>
+                    <span class="text-muted-foreground">{{ t('flows.builder.selectEllipsis') }}</span>
                     <ChevronDown class="h-4 w-4" />
                   </div>
                 </template>
@@ -538,7 +543,7 @@ defineExpose({
                     <span v-if="comp.required" class="text-destructive">*</span>
                   </Label>
                   <div class="mt-1 p-2 rounded-md border bg-background text-sm flex items-center justify-between">
-                    <span class="text-muted-foreground">Select date...</span>
+                    <span class="text-muted-foreground">{{ t('flows.builder.selectDateEllipsis') }}</span>
                     <Calendar class="h-4 w-4" />
                   </div>
                 </template>
@@ -568,7 +573,7 @@ defineExpose({
                 v-if="selectedScreen.layout.children.length === 0"
                 class="p-8 text-center text-sm text-muted-foreground border-2 border-dashed rounded-lg"
               >
-                Add components from the palette
+                {{ t('flows.builder.addComponentsFromPalette') }}
               </div>
             </div>
             </div>
@@ -579,10 +584,10 @@ defineExpose({
       <div v-else class="flex-1 flex items-center justify-center text-muted-foreground">
         <div class="text-center">
           <Layers class="h-12 w-12 mx-auto mb-4 opacity-50" />
-          <p>Add a screen to get started</p>
+          <p>{{ t('flows.builder.addScreenToStart') }}</p>
           <Button class="mt-4" @click="addScreen">
             <Plus class="h-4 w-4 mr-2" />
-            Add Screen
+            {{ t('flows.builder.addScreen') }}
           </Button>
         </div>
       </div>
@@ -593,7 +598,7 @@ defineExpose({
       <CardHeader class="py-3 px-4 flex-shrink-0">
         <CardTitle class="text-sm font-medium flex items-center gap-2">
           <Settings2 class="h-4 w-4" />
-          Properties
+          {{ t('flows.builder.properties') }}
         </CardTitle>
       </CardHeader>
       <Separator />
@@ -633,7 +638,7 @@ defineExpose({
 
           <!-- Text property -->
           <div v-if="'text' in selectedComponent" class="space-y-2">
-            <Label class="text-xs">Text</Label>
+            <Label class="text-xs">{{ t('flows.builder.text') }}</Label>
             <Input
               :model-value="selectedComponent.text"
               @update:model-value="updateComponentProperty('text', $event)"
@@ -642,7 +647,7 @@ defineExpose({
 
           <!-- Label property -->
           <div v-if="'label' in selectedComponent && selectedComponent.type !== 'Footer'" class="space-y-2">
-            <Label class="text-xs">Label</Label>
+            <Label class="text-xs">{{ t('flows.builder.label') }}</Label>
             <Input
               :model-value="selectedComponent.label"
               @update:model-value="updateComponentProperty('label', $event)"
@@ -651,21 +656,21 @@ defineExpose({
 
           <!-- Name property -->
           <div v-if="'name' in selectedComponent" class="space-y-2">
-            <Label class="text-xs">Field Name (Key)</Label>
+            <Label class="text-xs">{{ t('flows.builder.fieldNameKey') }}</Label>
             <Input
               :model-value="selectedComponent.name"
               @update:model-value="updateComponentProperty('name', $event)"
               class="font-mono text-sm"
-              placeholder="e.g. email, phone, message"
+              :placeholder="t('flows.builder.fieldNamePlaceholder')"
             />
             <p class="text-xs text-muted-foreground">
-              This key is used in the response data. Use lowercase with underscores (e.g. customer_name).
+              {{ t('flows.builder.fieldNameHint') }}
             </p>
           </div>
 
           <!-- Required property -->
           <div v-if="'required' in selectedComponent" class="flex items-center justify-between">
-            <Label class="text-xs">Required</Label>
+            <Label class="text-xs">{{ t('flows.builder.required') }}</Label>
             <Switch
               :checked="selectedComponent.required"
               @update:checked="updateComponentProperty('required', $event)"
@@ -675,10 +680,10 @@ defineExpose({
           <!-- Options for Dropdown, Radio, Checkbox -->
           <div v-if="selectedComponent['data-source']" class="space-y-2">
             <div class="flex items-center justify-between">
-              <Label class="text-xs">Options</Label>
+              <Label class="text-xs">{{ t('flows.builder.options') }}</Label>
               <Button variant="ghost" size="sm" class="h-6 text-xs" @click="addOption">
                 <Plus class="h-3 w-3 mr-1" />
-                Add
+                {{ t('flows.builder.add') }}
               </Button>
             </div>
             <div class="space-y-2">
@@ -691,7 +696,7 @@ defineExpose({
                   :model-value="opt.title"
                   @update:model-value="updateOption(index, 'title', $event)"
                   class="text-sm"
-                  placeholder="Option text"
+                  :placeholder="t('flows.builder.optionTextPlaceholder')"
                 />
                 <Button
                   variant="ghost"
@@ -708,14 +713,14 @@ defineExpose({
           <!-- Footer specific -->
           <div v-if="selectedComponent.type === 'Footer'" class="space-y-4">
             <div class="space-y-2">
-              <Label class="text-xs">Button Text</Label>
+              <Label class="text-xs">{{ t('flows.builder.buttonText') }}</Label>
               <Input
                 :model-value="selectedComponent.label"
                 @update:model-value="updateComponentProperty('label', $event)"
               />
             </div>
             <div class="space-y-2">
-              <Label class="text-xs">Action</Label>
+              <Label class="text-xs">{{ t('flows.builder.action') }}</Label>
               <Select
                 :model-value="selectedComponent['on-click-action']?.name || 'complete'"
                 @update:model-value="updateComponentProperty('on-click-action', { name: $event, payload: {} })"
@@ -724,8 +729,8 @@ defineExpose({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="complete">Complete Flow</SelectItem>
-                  <SelectItem value="navigate">Navigate to Screen</SelectItem>
+                  <SelectItem value="complete">{{ t('flows.builder.completeFlow') }}</SelectItem>
+                  <SelectItem value="navigate">{{ t('flows.builder.navigateToScreen') }}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -733,7 +738,7 @@ defineExpose({
               v-if="selectedComponent['on-click-action']?.name === 'navigate'"
               class="space-y-2"
             >
-              <Label class="text-xs">Target Screen</Label>
+              <Label class="text-xs">{{ t('flows.builder.targetScreen') }}</Label>
               <Select
                 :model-value="selectedComponent['on-click-action']?.next?.name || ''"
                 @update:model-value="updateComponentProperty('on-click-action', {
@@ -742,7 +747,7 @@ defineExpose({
                 })"
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Select screen" />
+                  <SelectValue :placeholder="t('flows.builder.selectScreenPlaceholder')" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem
@@ -758,7 +763,7 @@ defineExpose({
           </div>
         </div>
         <div v-else class="p-4 text-center text-sm text-muted-foreground">
-          Select a component to edit its properties
+          {{ t('flows.builder.selectComponentToEdit') }}
         </div>
       </ScrollArea>
     </Card>

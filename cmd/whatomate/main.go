@@ -162,6 +162,19 @@ func runServer(args []string) {
 		if err := handlers.BackfillChatbotFlowGraph(db, lo); err != nil {
 			lo.Fatal("Chatbot flow graph backfill failed", "error", err)
 		}
+		// Concede as permissões do CRM a quem já tem a capacidade equivalente.
+		// Precisa rodar aqui, no bloco de migração: o ListenAndServe só
+		// acontece depois, então nenhuma requisição chega antes de os papéis
+		// estarem corrigidos e não existe janela de 403.
+		if err := database.BackfillOccurrencePermissions(db, lo); err != nil {
+			lo.Fatal("Occurrence permissions backfill failed", "error", err)
+		}
+
+		// Mesma janela: roda antes do ListenAndServe, então nenhuma requisição
+		// chega antes de os papéis estarem corrigidos.
+		if err := database.BackfillContactNamePermission(db, lo); err != nil {
+			lo.Fatal("Contact name permission backfill failed", "error", err)
+		}
 	}
 
 	// Connect to Redis
@@ -208,6 +221,11 @@ func runServer(args []string) {
 		Queue:      jobQueue,
 		HTTPClient: httpClient,
 	}
+
+	// Wire the conversation authorizer into the hub now that the App (which owns
+	// the single visibility rule) exists. This gates all WebSocket conversation
+	// delivery — without it the hub would fall back to legacy (insecure) behaviour.
+	wsHub.SetConversationAuthorizer(app.CanViewConversationByID)
 
 	// Initialize S3 client for call recordings (optional)
 	var s3Client *storage.S3Client
@@ -623,12 +641,17 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 
 	// Contacts
 	g.GET("/api/contacts", app.ListContacts)
+	// Registered before /api/contacts/{id} so "counts" is not captured as an id
+	g.GET("/api/contacts/counts", app.GetContactStatusCounts)
 	g.POST("/api/contacts", app.CreateContact)
 	g.GET("/api/contacts/{id}", app.GetContact)
 	g.PUT("/api/contacts/{id}", app.UpdateContact)
 	g.DELETE("/api/contacts/{id}", app.DeleteContact)
 	g.PUT("/api/contacts/{id}/assign", app.AssignContact)
 	g.PUT("/api/contacts/{id}/tags", app.UpdateContactTags)
+	g.PUT("/api/contacts/{id}/name", app.UpdateContactName)
+	g.PUT("/api/contacts/{id}/status", app.UpdateContactStatus)
+	g.POST("/api/contacts/{id}/typing", app.NotifyTyping)
 	g.GET("/api/contacts/{id}/session-data", app.GetContactSessionData)
 
 	// Generic Import/Export
@@ -658,6 +681,23 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/contacts/{id}/notes", app.CreateConversationNote)
 	g.PUT("/api/contacts/{id}/notes/{note_id}", app.UpdateConversationNote)
 	g.DELETE("/api/contacts/{id}/notes/{note_id}", app.DeleteConversationNote)
+
+	// CRM — etapas de ocorrência
+	g.GET("/api/occurrence-stages", app.ListOccurrenceStages)
+	g.POST("/api/occurrence-stages", app.CreateOccurrenceStage)
+	g.PUT("/api/occurrence-stages/{id}", app.UpdateOccurrenceStage)
+	g.DELETE("/api/occurrence-stages/{id}", app.DeleteOccurrenceStage)
+
+	// CRM — ocorrências
+	g.GET("/api/occurrences", app.ListOccurrences)
+	g.POST("/api/occurrences", app.CreateOccurrence)
+	g.GET("/api/contacts/{id}/occurrences", app.ListContactOccurrences)
+	g.GET("/api/occurrences/{id}", app.GetOccurrence)
+	g.PUT("/api/occurrences/{id}", app.UpdateOccurrence)
+	g.PUT("/api/occurrences/{id}/stage", app.ChangeOccurrenceStage)
+	g.GET("/api/occurrences/{id}/events", app.ListOccurrenceEvents)
+	g.POST("/api/occurrences/{id}/events", app.CreateOccurrenceEvent)
+	g.POST("/api/occurrences/{id}/send-protocol", app.SendOccurrenceProtocol)
 
 	// Media (serves media files for messages, auth-protected)
 	g.GET("/api/media/{message_id}", app.ServeMedia)
@@ -719,6 +759,10 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.PUT("/api/chatbot/flows/{id}", app.UpdateChatbotFlow)
 	g.DELETE("/api/chatbot/flows/{id}", app.DeleteChatbotFlow)
 
+	// Chatbot Flow export/import (portable JSON between installations)
+	g.POST("/api/chatbot/export", app.ChatbotExport)
+	g.POST("/api/chatbot/import", app.ChatbotImport)
+
 	// AI Contexts
 	g.GET("/api/chatbot/ai-contexts", app.ListAIContexts)
 	g.POST("/api/chatbot/ai-contexts", app.CreateAIContext)
@@ -732,6 +776,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/chatbot/transfers/pick", app.PickNextTransfer)
 	g.PUT("/api/chatbot/transfers/{id}/resume", app.ResumeFromTransfer)
 	g.PUT("/api/chatbot/transfers/{id}/assign", app.AssignAgentTransfer)
+	g.PUT("/api/chatbot/transfers/{id}/unassign", app.UnassignTransfer)
 
 	// Teams (admin/manager - access control in handler)
 	g.GET("/api/teams", app.ListTeams)

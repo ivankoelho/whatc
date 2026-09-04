@@ -1,6 +1,10 @@
 package websocket
 
-import "github.com/google/uuid"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 // WSMessage represents a WebSocket message
 type WSMessage struct {
@@ -10,13 +14,18 @@ type WSMessage struct {
 
 // Message types
 const (
-	TypeAuth          = "auth"
-	TypeNewMessage    = "new_message"
-	TypeStatusUpdate  = "status_update"
-	TypeContactUpdate = "contact_update"
-	TypeSetContact    = "set_contact"
-	TypePing          = "ping"
-	TypePong          = "pong"
+	TypeAuth           = "auth"
+	TypeNewMessage     = "new_message"
+	TypeStatusUpdate   = "status_update"
+	TypeReactionUpdate = "reaction_update"
+	TypeContactUpdate  = "contact_update"
+	// TypeContactStatusChanged carries ContactStatusChangedPayload
+	TypeContactStatusChanged = "contact_status_changed"
+	// TypeAgentTyping carries AgentTypingPayload
+	TypeAgentTyping = "agent_typing"
+	TypeSetContact  = "set_contact"
+	TypePing        = "ping"
+	TypePong        = "pong"
 
 	// Agent transfer types
 	TypeAgentTransfer       = "agent_transfer"
@@ -31,6 +40,10 @@ const (
 
 	// Permission types
 	TypePermissionsUpdated = "permissions_updated"
+
+	// Occurrence types
+	TypeOccurrenceChanged      = "occurrence_changed"
+	TypeOccurrenceEventCreated = "occurrence_event_created"
 
 	// Conversation note types
 	TypeConversationNoteCreated = "conversation_note_created"
@@ -71,6 +84,43 @@ type BroadcastMessage struct {
 	UserID    uuid.UUID // Optional: only send to specific user
 	ContactID uuid.UUID // Optional: only send to users viewing this contact
 	Message   WSMessage
+
+	// RequireContactMatch restricts delivery to clients that have explicitly
+	// selected ContactID. Without it, clients with no contact selected also
+	// receive the message — the historical behaviour BroadcastToContact relies on.
+	RequireContactMatch bool
+
+	// IgnoreContactFilter skips the currentContact interest-filter so an
+	// authorized client receives the event even while viewing a different
+	// conversation. The authorization gate still applies. Used for new_message.
+	IgnoreContactFilter bool
+
+	// AlsoUserID bypasses the ContactID authorization gate for exactly this
+	// user, without a second delivery pass — used when a specific user (e.g.
+	// an occurrence's assignee) must receive a ContactID-gated broadcast even
+	// when their general conversation authorization wouldn't otherwise cover
+	// it. Zero value (uuid.Nil) is inert: no client ever has a Nil userID, so
+	// existing callers that don't set this field are unaffected.
+	AlsoUserID uuid.UUID
+}
+
+// ContactStatusChangedPayload is the payload for contact_status_changed events.
+// Typed struct on purpose — a bare map would compile against Payload's `any`
+// and only fail at runtime in the UI.
+type ContactStatusChangedPayload struct {
+	ContactID       uuid.UUID  `json:"contact_id"`
+	OldStatus       string     `json:"old_status"`
+	NewStatus       string     `json:"new_status"`
+	ChangedByUserID *uuid.UUID `json:"changed_by_user_id,omitempty"`
+	ChangedAt       time.Time  `json:"changed_at"`
+}
+
+// AgentTypingPayload is the payload for agent_typing events.
+type AgentTypingPayload struct {
+	ContactID uuid.UUID `json:"contact_id"`
+	UserID    uuid.UUID `json:"user_id"`
+	UserName  string    `json:"user_name"`
+	At        time.Time `json:"at"`
 }
 
 // AuthPayload is the payload for auth messages from client

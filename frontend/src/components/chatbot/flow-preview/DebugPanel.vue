@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { SimulationState, FlowStep } from '@/types/flow-preview'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
@@ -39,6 +40,8 @@ const emit = defineEmits<{
   goToStep: [stepName: string]
 }>()
 
+const { t } = useI18n()
+
 const variablesExpanded = ref(true)
 const timelineExpanded = ref(true)
 const stepsExpanded = ref(false)
@@ -46,17 +49,17 @@ const stepsExpanded = ref(false)
 const statusLabel = computed(() => {
   switch (props.state.status) {
     case 'idle':
-      return 'Ready'
+      return t('chatbot.preview.statusReady')
     case 'running':
-      return 'Running'
+      return t('chatbot.preview.statusRunning')
     case 'paused':
-      return 'Paused'
+      return t('chatbot.preview.statusPaused')
     case 'waiting_input':
-      return 'Waiting for input'
+      return t('chatbot.preview.statusWaiting')
     case 'completed':
-      return 'Completed'
+      return t('chatbot.preview.statusCompleted')
     case 'error':
-      return 'Error'
+      return t('chatbot.preview.statusError')
     default:
       return props.state.status
   }
@@ -119,7 +122,7 @@ function handlePlayPause() {
             size="icon"
             class="h-7 w-7"
             :disabled="state.status === 'error'"
-            :title="state.status === 'completed' ? 'Restart' : (state.status === 'running' || state.status === 'waiting_input' ? 'Pause' : 'Start')"
+            :title="state.status === 'completed' ? t('chatbot.preview.restart') : (state.status === 'running' || state.status === 'waiting_input' ? t('chatbot.preview.pause') : t('chatbot.preview.start'))"
             @click="handlePlayPause"
           >
             <Pause v-if="state.status === 'running' || state.status === 'waiting_input'" class="h-4 w-4" />
@@ -140,7 +143,7 @@ function handlePlayPause() {
             variant="ghost"
             size="icon"
             class="h-7 w-7"
-            title="Step back"
+            :title="t('chatbot.preview.stepBack')"
             :disabled="!canUndo"
             @click="emit('undo')"
           >
@@ -151,7 +154,7 @@ function handlePlayPause() {
             variant="ghost"
             size="icon"
             class="h-7 w-7"
-            title="Restart"
+            :title="t('chatbot.preview.restart')"
             @click="emit('reset')"
           >
             <RotateCcw class="h-4 w-4" />
@@ -161,7 +164,7 @@ function handlePlayPause() {
 
       <!-- Current Step -->
       <div v-if="state.currentStepName" class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-        Step {{ (state.currentStepIndex ?? 0) + 1 }}: <span class="font-mono">{{ state.currentStepName }}</span>
+        {{ t('chatbot.preview.stepNumber', { index: (state.currentStepIndex ?? 0) + 1 }) }} <span class="font-mono">{{ state.currentStepName }}</span>
       </div>
     </div>
 
@@ -173,13 +176,13 @@ function handlePlayPause() {
             <ChevronDown v-if="variablesExpanded" class="h-4 w-4" />
             <ChevronRight v-else class="h-4 w-4" />
             <Braces class="h-4 w-4" />
-            Variables
+            {{ t('chatbot.preview.variables') }}
             <span class="ml-auto text-xs text-gray-400">{{ variableEntries.length }}</span>
           </CollapsibleTrigger>
           <CollapsibleContent>
             <div class="mt-1 px-2 py-1 bg-white dark:bg-[#202c33] rounded border border-gray-200 dark:border-gray-700">
               <div v-if="variableEntries.length === 0" class="text-xs text-gray-400 py-2 text-center">
-                No variables set
+                {{ t('chatbot.preview.noVariablesSet') }}
               </div>
               <div v-else class="space-y-1">
                 <div
@@ -203,7 +206,7 @@ function handlePlayPause() {
             <ChevronDown v-if="stepsExpanded" class="h-4 w-4" />
             <ChevronRight v-else class="h-4 w-4" />
             <ListTree class="h-4 w-4" />
-            Steps
+            {{ t('chatbot.preview.steps') }}
             <span class="ml-auto text-xs text-gray-400">{{ steps.length }}</span>
           </CollapsibleTrigger>
           <CollapsibleContent>
@@ -237,7 +240,7 @@ function handlePlayPause() {
           <CollapsibleTrigger class="flex items-center gap-2 w-full px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded text-sm font-medium text-gray-700 dark:text-gray-300">
             <ChevronDown v-if="timelineExpanded" class="h-4 w-4" />
             <ChevronRight v-else class="h-4 w-4" />
-            Timeline
+            {{ t('chatbot.preview.timeline') }}
             <span class="ml-auto text-xs text-gray-400">{{ state.executionLog.length }}</span>
           </CollapsibleTrigger>
           <CollapsibleContent>

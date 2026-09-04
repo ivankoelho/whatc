@@ -2,6 +2,7 @@ package database_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/config"
@@ -248,4 +249,71 @@ func TestCreateDefaultAdmin_UsesExistingOrg(t *testing.T) {
 	var orgCount int64
 	db.Model(&models.Organization{}).Count(&orgCount)
 	assert.Equal(t, int64(1), orgCount, "should reuse existing organization")
+}
+
+// --- BackfillContactStatus ---
+
+func TestBackfillContactStatus(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	cleanAll(t, db)
+	org := testutil.CreateTestOrganization(t, db)
+
+	// No messages at all -> stays 'new'
+	silent := testutil.CreateTestContact(t, db, org.ID)
+
+	// Recent inbound -> 'in_progress'
+	recent := testutil.CreateTestContact(t, db, org.ID)
+	now := time.Now()
+	require.NoError(t, db.Model(recent).Update("last_inbound_at", now).Error)
+
+	// Unread -> 'in_progress'
+	unread := testutil.CreateTestContact(t, db, org.ID)
+	require.NoError(t, db.Model(unread).Update("is_read", false).Error)
+
+	// Old history, read -> 'resolved'
+	old := testutil.CreateTestContact(t, db, org.ID)
+	longAgo := now.Add(-72 * time.Hour)
+	require.NoError(t, db.Model(old).Updates(map[string]any{
+		"last_inbound_at": longAgo,
+		"is_read":         true,
+	}).Error)
+	require.NoError(t, db.Create(&models.Message{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		WhatsAppAccount: "test-account",
+		ContactID:       old.ID,
+		Direction:       models.DirectionIncoming,
+		MessageType:     models.MessageTypeText,
+		Content:         "older conversation",
+	}).Error)
+
+	require.NoError(t, database.BackfillContactStatus(db))
+
+	statusOf := func(id uuid.UUID) string {
+		var s string
+		require.NoError(t, db.Model(&models.Contact{}).Where("id = ?", id).Pluck("contact_status", &s).Error)
+		return s
+	}
+
+	assert.Equal(t, "new", statusOf(silent.ID), "a contact with no messages stays in the queue")
+	assert.Equal(t, "in_progress", statusOf(recent.ID))
+	assert.Equal(t, "in_progress", statusOf(unread.ID))
+	assert.Equal(t, "resolved", statusOf(old.ID))
+}
+
+func TestBackfillContactStatus_Idempotent(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	cleanAll(t, db)
+	org := testutil.CreateTestOrganization(t, db)
+	c := testutil.CreateTestContact(t, db, org.ID)
+
+	require.NoError(t, database.BackfillContactStatus(db))
+	// An agent resolves it manually
+	require.NoError(t, db.Model(c).Update("contact_status", "resolved").Error)
+	// A second run must not overwrite real state
+	require.NoError(t, database.BackfillContactStatus(db))
+
+	var s string
+	require.NoError(t, db.Model(&models.Contact{}).Where("id = ?", c.ID).Pluck("contact_status", &s).Error)
+	assert.Equal(t, "resolved", s)
 }

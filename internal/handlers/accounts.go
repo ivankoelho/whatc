@@ -20,18 +20,19 @@ import (
 
 // AccountRequest represents the request body for creating/updating an account
 type AccountRequest struct {
-	Name                   string `json:"name" validate:"required"`
-	AppID                  string `json:"app_id"`
-	PhoneID                string `json:"phone_id" validate:"required"`
-	BusinessID             string `json:"business_id" validate:"required"`
-	AccessToken            string `json:"access_token" validate:"required"`
-	AppSecret              string `json:"app_secret"` // Meta App Secret for webhook signature verification
-	WebhookVerifyToken     string `json:"webhook_verify_token"`
-	APIVersion             string `json:"api_version"`
-	IsDefaultIncoming      bool   `json:"is_default_incoming"`
-	IsDefaultOutgoing      bool   `json:"is_default_outgoing"`
-	AutoReadReceipt        bool   `json:"auto_read_receipt"`
-	BusinessCallingEnabled bool   `json:"business_calling_enabled"`
+	Name                   string  `json:"name" validate:"required"`
+	AppID                  string  `json:"app_id"`
+	PhoneID                string  `json:"phone_id" validate:"required"`
+	BusinessID             string  `json:"business_id" validate:"required"`
+	AccessToken            string  `json:"access_token" validate:"required"`
+	AppSecret              string  `json:"app_secret"` // Meta App Secret for webhook signature verification
+	WebhookVerifyToken     string  `json:"webhook_verify_token"`
+	APIVersion             string  `json:"api_version"`
+	IsDefaultIncoming      bool    `json:"is_default_incoming"`
+	IsDefaultOutgoing      bool    `json:"is_default_outgoing"`
+	AutoReadReceipt        bool    `json:"auto_read_receipt"`
+	BusinessCallingEnabled bool    `json:"business_calling_enabled"`
+	DefaultTeamID          *string `json:"default_team_id"` // "" ou null limpa; uuid define
 }
 
 // AccountResponse represents the response for an account (without sensitive data)
@@ -58,6 +59,7 @@ type AccountResponse struct {
 	UpdatedByName          string     `json:"updated_by_name,omitempty"`
 	CreatedAt              string     `json:"created_at"`
 	UpdatedAt              string     `json:"updated_at"`
+	DefaultTeamID          *uuid.UUID `json:"default_team_id,omitempty"`
 }
 
 // ListAccounts returns all WhatsApp accounts for the organization
@@ -130,6 +132,19 @@ func (a *App) CreateAccount(r *fastglue.Request) error {
 		Status:                 "active",
 		CreatedByID:            &userID,
 		UpdatedByID:            &userID,
+	}
+
+	if req.DefaultTeamID != nil && *req.DefaultTeamID != "" {
+		tid, err := uuid.Parse(*req.DefaultTeamID)
+		if err != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid default_team_id", nil, "")
+		}
+		var count int64
+		a.DB.Model(&models.Team{}).Where("id = ? AND organization_id = ?", tid, orgID).Count(&count)
+		if count == 0 {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid default_team_id", nil, "")
+		}
+		account.DefaultTeamID = &tid
 	}
 
 	if err := a.encryptAccountSecrets(&account); err != nil {
@@ -261,6 +276,22 @@ func (a *App) UpdateAccount(r *fastglue.Request) error {
 	}
 	account.IsDefaultIncoming = req.IsDefaultIncoming
 	account.IsDefaultOutgoing = req.IsDefaultOutgoing
+
+	if req.DefaultTeamID != nil {
+		if *req.DefaultTeamID == "" {
+			account.DefaultTeamID = nil
+		} else if tid, err := uuid.Parse(*req.DefaultTeamID); err == nil {
+			var count int64
+			a.DB.Model(&models.Team{}).Where("id = ? AND organization_id = ?", tid, orgID).Count(&count)
+			if count == 0 {
+				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid default_team_id", nil, "")
+			}
+			account.DefaultTeamID = &tid
+		} else {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid default_team_id", nil, "")
+		}
+	}
+
 	account.UpdatedByID = &userID
 
 	if err := a.DB.Save(account).Error; err != nil {
@@ -270,6 +301,12 @@ func (a *App) UpdateAccount(r *fastglue.Request) error {
 
 	// Invalidate cache
 	a.InvalidateWhatsAppAccountCache(account.PhoneID)
+	a.InvalidateAccountDefaultTeamCache(account.OrganizationID, account.Name)
+	// On a rename the pre-update name's default-team entry would otherwise stay
+	// cached (a transient visibility over-grant) — drop it too.
+	if oldAccount.Name != account.Name {
+		a.InvalidateAccountDefaultTeamCache(account.OrganizationID, oldAccount.Name)
+	}
 
 	a.DB.Preload("CreatedBy").Preload("UpdatedBy").First(account, "id = ?", account.ID)
 
@@ -315,6 +352,7 @@ func (a *App) DeleteAccount(r *fastglue.Request) error {
 
 	// Invalidate cache
 	a.InvalidateWhatsAppAccountCache(account.PhoneID)
+	a.InvalidateAccountDefaultTeamCache(account.OrganizationID, account.Name)
 
 	a.logAudit(orgID, userID,
 		"account", id, models.AuditActionDeleted, account, nil)
@@ -472,6 +510,7 @@ func accountToResponse(acc models.WhatsAppAccount) AccountResponse {
 		UpdatedByID:            acc.UpdatedByID,
 		CreatedAt:              acc.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt:              acc.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		DefaultTeamID:          acc.DefaultTeamID,
 	}
 	if acc.CreatedBy != nil {
 		resp.CreatedByName = acc.CreatedBy.FullName
@@ -648,6 +687,7 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 
 	// Invalidate cache
 	a.InvalidateWhatsAppAccountCache(account.PhoneID)
+	a.InvalidateAccountDefaultTeamCache(account.OrganizationID, account.Name)
 
 	a.Log.Info("WhatsApp account connected via embedded signup successfully",
 		"account_id", account.ID,
@@ -931,6 +971,7 @@ func (a *App) RegisterPhoneNumber(r *fastglue.Request) error {
 
 	// Invalidate cache
 	a.InvalidateWhatsAppAccountCache(account.PhoneID)
+	a.InvalidateAccountDefaultTeamCache(account.OrganizationID, account.Name)
 
 	// Log audit!
 	a.DB.Preload("CreatedBy").Preload("UpdatedBy").First(account, "id = ?", account.ID)

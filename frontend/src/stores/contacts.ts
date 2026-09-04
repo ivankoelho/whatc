@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import { contactsService, messagesService } from '@/services/api'
+import { useAuthStore } from '@/stores/auth'
 
 // Phones are stored without leading + or whitespace (see CreateContact in
 // internal/handlers/contacts.go). Strip them from a digit-only query so a user
@@ -14,13 +15,20 @@ function normalizeContactSearch(raw: string): string {
   return trimmed
 }
 
+export type ContactStatus = 'new' | 'in_progress' | 'resolved'
+export type ContactStatusFilter = 'all' | ContactStatus
+
 export interface Contact {
   id: string
   phone_number: string
   name: string
   profile_name?: string
   avatar_url?: string
+  // `status` is legacy and always "active"; contact_status is the real
+  // service state of the conversation.
   status: string
+  contact_status: ContactStatus
+  last_message_preview?: string
   tags: string[]
   metadata: Record<string, any>
   last_message_at?: string
@@ -28,6 +36,7 @@ export interface Contact {
   service_window_open?: boolean
   unread_count: number
   assigned_user_id?: string
+  assigned_user_name?: string
   whatsapp_account?: string
   marketing_opt_out?: boolean
   created_at: string
@@ -78,11 +87,20 @@ export interface Message {
   reply_to_message?: ReplyPreview
   reactions?: Reaction[]
   whatsapp_account?: string
+  sent_by_user_id?: string
+  sent_by_user_name?: string
   created_at: string
   updated_at: string
 }
 
+export interface TypingAgent {
+  user_id: string
+  user_name: string
+  at: number
+}
+
 export const useContactsStore = defineStore('contacts', () => {
+  const authStore = useAuthStore()
   const contacts = ref<Contact[]>([])
   const currentContact = ref<Contact | null>(null)
   const messages = ref<Message[]>([])
@@ -92,8 +110,19 @@ export const useContactsStore = defineStore('contacts', () => {
   const hasMoreMessages = ref(false)
   const searchQuery = ref('')
   const selectedTags = ref<string[]>([])
+  const statusFilter = ref<ContactStatusFilter>('all')
+  const newCount = ref(0)
   const replyingTo = ref<Message | null>(null)
   const accountFilter = ref<string | null>(null)
+
+  // Record, not Map: Map is not reactive in Vue 3.
+  const typingByContact = ref<Record<string, TypingAgent>>({})
+
+  // Timer handles live outside the ref on purpose — they are scheduling
+  // detail, not UI state, and must not trigger re-renders.
+  const typingTimers: Record<string, ReturnType<typeof setTimeout>> = {}
+
+  const TYPING_TTL_MS = 3000
 
   // Contacts pagination
   const contactsPage = ref(1)
@@ -118,10 +147,12 @@ export const useContactsStore = defineStore('contacts', () => {
     isLoading.value = true
     try {
       const tagsParam = selectedTags.value.length > 0 ? selectedTags.value.join(',') : undefined
+      const statusParam = statusFilter.value === 'all' ? undefined : statusFilter.value
       const response = await contactsService.list({
         page: 1,
         limit: contactsLimit.value,
         tags: tagsParam,
+        status: statusParam,
         ...params
       })
       // API returns { status: "success", data: { contacts: [...], total: number } }
@@ -144,10 +175,14 @@ export const useContactsStore = defineStore('contacts', () => {
       const nextPage = contactsPage.value + 1
       const tagsParam = selectedTags.value.length > 0 ? selectedTags.value.join(',') : undefined
       const search = normalizeContactSearch(searchQuery.value) || undefined
+      // The status filter has to travel with pagination too, or scrolling
+      // silently mixes other statuses back into a filtered list.
+      const statusParam = statusFilter.value === 'all' ? undefined : statusFilter.value
       const response = await contactsService.list({
         page: nextPage,
         limit: contactsLimit.value,
         tags: tagsParam,
+        status: statusParam,
         search
       })
       const data = response.data.data || response.data
@@ -310,9 +345,23 @@ export const useContactsStore = defineStore('contacts', () => {
     }
 
     // Check if message already exists
-    const exists = messages.value.some(m => m.id === message.id)
-    if (!exists) {
+    const index = messages.value.findIndex(m => m.id === message.id)
+    if (index === -1) {
       messages.value.push(message)
+      return
+    }
+
+    // The same message reaches us twice on the sender's own client: once from
+    // the POST /messages response (whose MessageResponse omits the sender
+    // identity) and once from the org-wide websocket broadcast (which carries
+    // it). Whichever lands second must be able to fill the gap, or the
+    // sender's own bubble stays unlabelled until a reload.
+    if (message.sent_by_user_name && !messages.value[index].sent_by_user_name) {
+      messages.value[index] = {
+        ...messages.value[index],
+        sent_by_user_id: message.sent_by_user_id ?? messages.value[index].sent_by_user_id,
+        sent_by_user_name: message.sent_by_user_name,
+      }
     }
   }
 
@@ -364,6 +413,20 @@ export const useContactsStore = defineStore('contacts', () => {
     }
   }
 
+  function updateContactName(contactId: string, name: string) {
+    // The API returns the same value in both `name` and `profile_name`, and
+    // different parts of the UI read one or the other — sync both or the
+    // name changes in the panel but not in the conversation list.
+    const contact = contacts.value.find(c => c.id === contactId)
+    if (contact) {
+      contact.name = name
+      contact.profile_name = name
+    }
+    if (currentContact.value?.id === contactId) {
+      currentContact.value = { ...currentContact.value, name, profile_name: name }
+    }
+  }
+
   // Debounce server-side search so each keystroke doesn't fire a request.
   let searchDebounceHandle: ReturnType<typeof setTimeout> | null = null
   watch(searchQuery, (query) => {
@@ -373,6 +436,98 @@ export const useContactsStore = defineStore('contacts', () => {
       fetchContacts({ search })
     }, 300)
   })
+
+  async function setStatusFilter(status: ContactStatusFilter) {
+    if (statusFilter.value === status) return
+    statusFilter.value = status
+    const search = normalizeContactSearch(searchQuery.value) || undefined
+    await fetchContacts({ search })
+  }
+
+  async function fetchStatusCounts() {
+    try {
+      const response = await contactsService.statusCounts()
+      const data = response.data.data || response.data
+      newCount.value = data.new ?? 0
+    } catch (error) {
+      console.error('Failed to fetch status counts:', error)
+    }
+  }
+
+  async function updateContactStatus(id: string, status: ContactStatus) {
+    await contactsService.updateStatus(id, status)
+    // The WebSocket event does the list bookkeeping. Update the open chat
+    // straight away so the header button does not lag behind the click.
+    if (currentContact.value?.id === id) {
+      currentContact.value.contact_status = status
+    }
+  }
+
+  // applyStatusChange reconciles a contact_status_changed event with the list.
+  function applyStatusChange(payload: {
+    contact_id: string
+    old_status: string
+    new_status: string
+  }) {
+    const status = payload.new_status as ContactStatus
+
+    if (payload.old_status === 'new' && status !== 'new') {
+      newCount.value = Math.max(0, newCount.value - 1)
+    } else if (payload.old_status !== 'new' && status === 'new') {
+      newCount.value += 1
+    }
+
+    const contact = contacts.value.find(c => c.id === payload.contact_id)
+    if (contact) {
+      contact.contact_status = status
+      // Drop it from the list once it no longer matches the active filter.
+      if (statusFilter.value !== 'all' && statusFilter.value !== status) {
+        contacts.value = contacts.value.filter(c => c.id !== payload.contact_id)
+        contactsTotal.value = Math.max(0, contactsTotal.value - 1)
+      }
+    }
+
+    if (currentContact.value?.id === payload.contact_id) {
+      currentContact.value.contact_status = status
+    }
+  }
+
+  function clearTyping(contactId: string) {
+    if (typingTimers[contactId]) {
+      clearTimeout(typingTimers[contactId])
+      delete typingTimers[contactId]
+    }
+    if (typingByContact.value[contactId]) {
+      delete typingByContact.value[contactId]
+    }
+  }
+
+  // applyAgentTyping records that an agent is typing on a contact and schedules
+  // its expiry. Each new event restarts the countdown, so no explicit
+  // "stopped typing" signal is needed — and a closed tab or dropped connection
+  // cannot leave the indicator stuck.
+  function applyAgentTyping(payload: {
+    contact_id: string
+    user_id: string
+    user_name: string
+  }) {
+    // Never show the current user their own typing
+    if (payload.user_id === authStore.user?.id) return
+
+    typingByContact.value[payload.contact_id] = {
+      user_id: payload.user_id,
+      user_name: payload.user_name,
+      at: Date.now()
+    }
+
+    if (typingTimers[payload.contact_id]) {
+      clearTimeout(typingTimers[payload.contact_id])
+    }
+    typingTimers[payload.contact_id] = setTimeout(() => {
+      delete typingByContact.value[payload.contact_id]
+      delete typingTimers[payload.contact_id]
+    }, TYPING_TTL_MS)
+  }
 
   return {
     contacts,
@@ -384,6 +539,12 @@ export const useContactsStore = defineStore('contacts', () => {
     hasMoreMessages,
     searchQuery,
     selectedTags,
+    statusFilter,
+    newCount,
+    setStatusFilter,
+    fetchStatusCounts,
+    updateContactStatus,
+    applyStatusChange,
     replyingTo,
     filteredContacts,
     sortedContacts,
@@ -407,6 +568,10 @@ export const useContactsStore = defineStore('contacts', () => {
     setReplyingTo,
     clearReplyingTo,
     updateMessageReactions,
-    updateContactTags
+    updateContactTags,
+    updateContactName,
+    typingByContact,
+    applyAgentTyping,
+    clearTyping
   }
 })

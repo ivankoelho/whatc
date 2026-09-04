@@ -18,7 +18,12 @@ const (
 	flowsCacheTTL           = 6 * time.Hour
 	keywordRulesCacheTTL    = 6 * time.Hour
 	whatsappAccountCacheTTL = 6 * time.Hour
-	webhooksCacheTTL        = 6 * time.Hour
+	// Shorter than the rest on purpose: a stale value here is not a perf miss
+	// but a VISIBILITY error (agents seeing / not seeing a number's triage
+	// conversations). Explicit invalidation on account mutation keeps it correct
+	// immediately; the short TTL bounds a missed invalidation to minutes.
+	accountDefaultTeamCacheTTL = 5 * time.Minute
+	webhooksCacheTTL           = 6 * time.Hour
 	slaSettingsCacheTTL     = 6 * time.Hour
 	aiContextsCacheTTL      = 6 * time.Hour
 	userPermissionsCacheTTL = 6 * time.Hour
@@ -30,6 +35,7 @@ const (
 	flowsCachePrefix           = "chatbot:flows:"
 	keywordRulesCachePrefix    = "chatbot:keywords:"
 	whatsappAccountCachePrefix = "whatsapp:account:"
+	accountDefaultTeamPrefix   = "account:defaultteam:" // {org}:{accountName} -> team uuid or ""
 	webhooksCachePrefix        = "webhooks:"
 	slaSettingsCacheKey        = "chatbot:sla_enabled_settings"
 	aiContextsCachePrefix      = "chatbot:ai_contexts:"
@@ -264,6 +270,59 @@ func (a *App) InvalidateWhatsAppAccountCache(phoneID string) {
 	a.Redis.Del(ctx, cacheKey)
 }
 
+// getAccountDefaultTeamCached returns the default team configured on the named
+// WhatsApp account (nil = none), cached. Called on the visibility hot path —
+// once per connected client per broadcast for a teamless/general conversation —
+// so the DB is not hit each time. "No team" is cached as an empty string so a
+// negative result is not re-queried. Invalidated on any account mutation via
+// InvalidateAccountDefaultTeamCache. Falls back to a direct DB read when Redis
+// is unavailable (e.g. a test app without Redis).
+func (a *App) getAccountDefaultTeamCached(orgID uuid.UUID, accountName string) *uuid.UUID {
+	if accountName == "" {
+		return nil
+	}
+	ctx := context.Background()
+	cacheKey := fmt.Sprintf("%s%s:%s", accountDefaultTeamPrefix, orgID.String(), accountName)
+
+	if a.Redis != nil {
+		if cached, err := a.Redis.Get(ctx, cacheKey).Result(); err == nil {
+			if cached == "" {
+				return nil
+			}
+			if id, err := uuid.Parse(cached); err == nil {
+				return &id
+			}
+			return nil
+		}
+	}
+
+	var acct models.WhatsAppAccount
+	if err := a.DB.Select("default_team_id").
+		Where("organization_id = ? AND name = ?", orgID, accountName).
+		First(&acct).Error; err != nil {
+		return nil // do not cache a not-found (the account may be mid-creation)
+	}
+
+	val := ""
+	if acct.DefaultTeamID != nil {
+		val = acct.DefaultTeamID.String()
+	}
+	if a.Redis != nil {
+		a.Redis.Set(ctx, cacheKey, val, accountDefaultTeamCacheTTL)
+	}
+	return acct.DefaultTeamID
+}
+
+// InvalidateAccountDefaultTeamCache drops the cached default-team for one
+// account. Call it wherever an account's name or default_team_id can change.
+func (a *App) InvalidateAccountDefaultTeamCache(orgID uuid.UUID, accountName string) {
+	if a.Redis == nil || accountName == "" {
+		return
+	}
+	ctx := context.Background()
+	a.Redis.Del(ctx, fmt.Sprintf("%s%s:%s", accountDefaultTeamPrefix, orgID.String(), accountName))
+}
+
 // getWebhooksCached retrieves active webhooks for an organization from cache or database
 func (a *App) getWebhooksCached(orgID uuid.UUID) ([]models.Webhook, error) {
 	ctx := context.Background()
@@ -299,7 +358,15 @@ func (a *App) InvalidateWebhooksCache(orgID uuid.UUID) {
 	a.Redis.Del(ctx, cacheKey)
 }
 
-// getSLAEnabledSettingsCached retrieves all SLA-enabled chatbot settings from cache or database
+// getSLAEnabledSettingsCached retrieves the chatbot settings the SLA processor
+// must visit each tick from cache or database.
+//
+// This is intentionally broader than "SLA enabled": the human-attendance
+// inactivity sweep (close_inactive_attendances) is decoupled from SLA, so an org
+// can opt into it without turning SLA on. Such an org must still be loaded here
+// or its sweep would never run. processOrganizationSLA gates every genuine SLA
+// pass behind settings.SLA.Enabled, so an org loaded only for the sweep runs
+// nothing but the sweep.
 func (a *App) getSLAEnabledSettingsCached() ([]models.ChatbotSettings, error) {
 	ctx := context.Background()
 
@@ -314,7 +381,7 @@ func (a *App) getSLAEnabledSettingsCached() ([]models.ChatbotSettings, error) {
 
 	// Cache miss - fetch from database
 	var settings []models.ChatbotSettings
-	if err := a.DB.Where("sla_enabled = ?", true).Find(&settings).Error; err != nil {
+	if err := a.DB.Where("sla_enabled = ? OR close_inactive_attendances = ?", true, true).Find(&settings).Error; err != nil {
 		return nil, err
 	}
 

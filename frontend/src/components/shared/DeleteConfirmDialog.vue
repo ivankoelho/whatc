@@ -8,6 +8,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 
 const open = defineModel<boolean>('open', { default: false })
@@ -20,11 +22,14 @@ const props = withDefaults(defineProps<{
   cancelLabel?: string
   isSubmitting?: boolean
 }>(), {
-  title: 'Delete Item',
-  confirmLabel: 'Delete',
-  cancelLabel: 'Cancel',
   isSubmitting: false,
 })
+
+const { t } = useI18n()
+
+const titleText = computed(() => props.title || t('common.deleteItemTitle'))
+const confirmText = computed(() => props.confirmLabel || t('common.delete'))
+const cancelText = computed(() => props.cancelLabel || t('common.cancel'))
 
 const emit = defineEmits<{
   confirm: []
@@ -45,27 +50,27 @@ function handleCancel() {
   <AlertDialog v-model:open="open">
     <AlertDialogContent>
       <AlertDialogHeader>
-        <AlertDialogTitle>{{ title }}</AlertDialogTitle>
+        <AlertDialogTitle>{{ titleText }}</AlertDialogTitle>
         <AlertDialogDescription>
           <slot name="description">
             <template v-if="description">{{ description }}</template>
             <template v-else-if="itemName">
-              Are you sure you want to delete "{{ itemName }}"? This action cannot be undone.
+              {{ t('common.deleteNamed', { name: itemName }) }}
             </template>
             <template v-else>
-              Are you sure you want to delete this item? This action cannot be undone.
+              {{ t('common.deleteThisItem') }}
             </template>
           </slot>
         </AlertDialogDescription>
       </AlertDialogHeader>
       <AlertDialogFooter>
-        <AlertDialogCancel :disabled="isSubmitting" @click="handleCancel">{{ cancelLabel }}</AlertDialogCancel>
+        <AlertDialogCancel :disabled="isSubmitting" @click="handleCancel">{{ cancelText }}</AlertDialogCancel>
         <Button
           variant="destructive"
           :loading="isSubmitting"
           @click="handleConfirm"
         >
-          {{ confirmLabel }}
+          {{ confirmText }}
         </Button>
       </AlertDialogFooter>
     </AlertDialogContent>

@@ -606,6 +606,53 @@ func TestSaveIncomingMessage_WithMedia(t *testing.T) {
 	assert.Equal(t, "[image]", dbContact.LastMessagePreview)
 }
 
+func TestChatbotInput(t *testing.T) {
+	img := &MediaInfo{MediaURL: "/uploads/photo.jpg", MediaMimeType: "image/jpeg"}
+	tests := []struct {
+		name           string
+		messageText    string
+		buttonID       string
+		media          *MediaInfo
+		wantInput      string
+		wantActionable bool
+	}{
+		{"text only", "porcelanato cinza", "", nil, "porcelanato cinza", true},
+		{"button only", "", "realizar_pedido", nil, "", true},
+		{"media only feeds the url as input", "", "", img, "/uploads/photo.jpg", true},
+		{"media with caption keeps the caption", "essa aqui", "", img, "essa aqui", true},
+		{"nothing is not actionable", "", "", nil, "", false},
+		{"empty media url is not actionable", "", "", &MediaInfo{}, "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input, actionable := chatbotInput(tt.messageText, tt.buttonID, tt.media)
+			assert.Equal(t, tt.wantInput, input)
+			assert.Equal(t, tt.wantActionable, actionable)
+		})
+	}
+}
+
+func TestAddContactTags(t *testing.T) {
+	app := newProcessorTestApp(t)
+	org, _ := createProcessorTestOrg(t, app)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(contact).Update("tags", models.JSONBArray{"vip"}).Error)
+	contact.Tags = models.JSONBArray{"vip"}
+
+	// Adds new tags, de-dupes the already-present one, trims blank entries.
+	app.addContactTags(contact, []string{"orçamento", "vip", "  "})
+
+	var reloaded models.Contact
+	require.NoError(t, app.DB.First(&reloaded, contact.ID).Error)
+	got := []string{}
+	for _, tag := range reloaded.Tags {
+		if s, ok := tag.(string); ok {
+			got = append(got, s)
+		}
+	}
+	assert.Equal(t, []string{"vip", "orçamento"}, got)
+}
+
 func TestSaveIncomingMessage_WithReplyContext(t *testing.T) {
 	app := newProcessorTestApp(t)
 	org, account := createProcessorTestOrg(t, app)

@@ -2,14 +2,30 @@
 
 This project uses [vue-i18n](https://vue-i18n.intlify.dev/) for internationalization and [Crowdin](https://crowdin.com/) for translation management.
 
+## Supported Languages
+
+The application ships with **two** languages, auto-discovered from the `locales/` folder:
+
+- **English** (`en.json`) — the source/authoring locale.
+- **Português (Brasil)** (`pt-BR.json`) — the **default** locale for new users.
+
+`getDefaultLocale()` in `index.ts` selects pt-BR by default (and for any
+Portuguese browser variant), while `en` is still auto-selected for English
+browsers. `fallbackLocale` stays `en` so any missing key degrades to English.
+
+`en.json` and `pt-BR.json` must always share the exact same key set — this is
+enforced by `npm run i18n:keys`. Run `npm run i18n:scan` to verify no UI copy
+is left hardcoded outside the i18n system (see `frontend/scripts/`).
+
 ## Adding New Languages
 
 Languages are **auto-discovered** from the `locales/` folder. To add a new language:
 
-1. Create a new JSON file: `locales/{language_code}.json` (e.g., `es.json` for Spanish)
+1. Create a new JSON file: `locales/{language_code}.json` (e.g., `pt-BR.json` for Brazilian Portuguese)
 2. Copy the structure from `en.json`
-3. Translate all strings
-4. The language will automatically appear in the language switcher
+3. Translate all strings (keep the key set identical — `npm run i18n:keys`)
+4. Add a display name entry to `localeNames` in `index.ts`
+5. The language will automatically appear in the language switcher
 
 ## Using Translations in Components
 
@@ -73,7 +89,7 @@ import { setLocale, getLocale, SUPPORTED_LOCALES } from '@/i18n'
 const current = getLocale()
 
 // Change locale
-setLocale('es')
+setLocale('pt-BR')
 
 // List available locales
 console.log(SUPPORTED_LOCALES)
@@ -83,13 +99,11 @@ console.log(SUPPORTED_LOCALES)
 
 ```
 src/i18n/
-├── index.ts          # i18n configuration
+├── index.ts          # i18n configuration (default: pt-BR)
 ├── README.md         # This file
 └── locales/
     ├── en.json       # English (source)
-    ├── es.json       # Spanish
-    ├── fr.json       # French
-    └── ...           # Other languages
+    └── pt-BR.json    # Português (Brasil) — default
 ```
 
 ## Crowdin Integration

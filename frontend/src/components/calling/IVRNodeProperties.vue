@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { IVRNode, IVRNodeType } from '@/services/api'
 import { ivrFlowsService } from '@/services/api'
 import { useCallingStore } from '@/stores/calling'
@@ -24,6 +25,7 @@ const emit = defineEmits<{
   'delete': []
 }>()
 
+const { t } = useI18n()
 const callingStore = useCallingStore()
 const teamsStore = useTeamsStore()
 
@@ -67,7 +69,7 @@ async function handleFileSelect(event: Event) {
   const file = input.files?.[0]
   if (!file) return
   if (file.size > 5 * 1024 * 1024) {
-    toast.error('File too large (max 5MB)')
+    toast.error(t('calling.properties.fileTooLarge'))
     input.value = ''
     return
   }
@@ -79,10 +81,10 @@ async function handleFileSelect(event: Event) {
       // Uploading a clip and TTS text are mutually exclusive; clear greeting_text
       // so the backend doesn't TTS-regenerate and overwrite the uploaded audio_file.
       updateConfigEntries({ audio_file: filename, greeting_text: undefined })
-      toast.success('Audio uploaded')
+      toast.success(t('calling.properties.audioUploaded'))
     }
   } catch {
-    toast.error('Upload failed')
+    toast.error(t('calling.properties.uploadFailed'))
   } finally {
     isUploading.value = false
     input.value = ''
@@ -190,10 +192,10 @@ function updateHeaderValue(key: string, value: string) {
 const callbackEvents = ['on_waiting', 'on_connect'] as const
 type CallbackEvent = typeof callbackEvents[number]
 
-const callbackLabels: Record<CallbackEvent, string> = {
-  on_waiting: 'On Waiting',
-  on_connect: 'On Connect',
-}
+const callbackLabels = computed<Record<CallbackEvent, string>>(() => ({
+  on_waiting: t('calling.properties.onWaiting'),
+  on_connect: t('calling.properties.onConnect'),
+}))
 
 function getCallbackConfig(event: CallbackEvent) {
   return (config.value[event] as Record<string, any>) || {}
@@ -245,12 +247,24 @@ const hasAudio = computed(() => audioNodeTypes.includes(props.node.type))
 const greetingTab = computed(() =>
   config.value.greeting_text ? 'text' : 'audio'
 )
+
+// Localized node-type title shown in the editor header.
+const nodeTypeLabels = computed<Record<string, string>>(() => ({
+  greeting: t('calling.nodes.greeting'),
+  menu: t('calling.nodes.menu'),
+  gather: t('calling.nodes.gather'),
+  hangup: t('calling.nodes.hangup'),
+  http_callback: t('calling.nodes.httpCallback'),
+  transfer: t('calling.nodes.transfer'),
+  goto_flow: t('calling.nodes.gotoFlow'),
+  timing: t('calling.nodes.timing'),
+}))
 </script>
 
 <template>
   <div class="space-y-4 p-4">
     <div class="flex items-center justify-between">
-      <h3 class="font-semibold text-sm capitalize">{{ node.type.replace('_', ' ') }}</h3>
+      <h3 class="font-semibold text-sm capitalize">{{ nodeTypeLabels[node.type] || node.type.replace('_', ' ') }}</h3>
       <Button variant="ghost" size="icon" class="h-7 w-7" @click="emit('delete')">
         <Trash2 class="h-3.5 w-3.5 text-destructive" />
       </Button>
@@ -258,20 +272,20 @@ const greetingTab = computed(() =>
 
     <!-- Label -->
     <div class="space-y-1.5">
-      <Label class="text-xs">Label</Label>
+      <Label class="text-xs">{{ t('calling.properties.label') }}</Label>
       <Input :model-value="node.label" @update:model-value="updateLabel" class="h-8 text-sm" />
     </div>
 
     <!-- Audio Section (greeting, menu, gather, hangup) -->
     <div v-if="hasAudio" class="space-y-1.5">
-      <Label class="text-xs">Audio</Label>
+      <Label class="text-xs">{{ t('calling.properties.audio') }}</Label>
       <Tabs :default-value="greetingTab">
         <TabsList class="h-8">
           <TabsTrigger value="audio" class="text-xs h-7 px-2">
-            <Upload class="h-3 w-3 mr-1" /> Upload
+            <Upload class="h-3 w-3 mr-1" /> {{ t('calling.properties.upload') }}
           </TabsTrigger>
           <TabsTrigger value="text" class="text-xs h-7 px-2">
-            <Type class="h-3 w-3 mr-1" /> TTS
+            <Type class="h-3 w-3 mr-1" /> {{ t('calling.properties.tts') }}
           </TabsTrigger>
         </TabsList>
         <TabsContent value="audio" class="mt-2">
@@ -289,7 +303,7 @@ const greetingTab = computed(() =>
             <Button v-else variant="outline" size="sm" class="h-7 text-xs w-full" @click="triggerFileUpload" :disabled="isUploading">
               <Loader2 v-if="isUploading" class="h-3 w-3 mr-1 animate-spin" />
               <Upload v-else class="h-3 w-3 mr-1" />
-              Upload Audio
+              {{ t('calling.properties.uploadAudio') }}
             </Button>
             <input ref="audioFileInput" type="file" accept="audio/*" class="hidden" @change="handleFileSelect" />
           </div>
@@ -298,7 +312,7 @@ const greetingTab = computed(() =>
           <Textarea
             :model-value="config.greeting_text || ''"
             @update:model-value="(v: string) => updateConfigEntries(v ? { greeting_text: v, audio_file: undefined } : { greeting_text: v })"
-            placeholder="Enter text for TTS..."
+            :placeholder="t('calling.properties.ttsPlaceholder')"
             class="min-h-[60px] text-xs resize-none"
             :maxlength="500"
           />
@@ -309,29 +323,29 @@ const greetingTab = computed(() =>
     <!-- Greeting: interruptible -->
     <div v-if="node.type === 'greeting'" class="flex items-center gap-2">
       <Switch :checked="!!config.interruptible" @update:checked="(v: boolean) => updateConfig('interruptible', v)" />
-      <Label class="text-xs">Interruptible by DTMF</Label>
+      <Label class="text-xs">{{ t('calling.properties.interruptibleDtmf') }}</Label>
     </div>
 
     <!-- Menu: options -->
     <template v-if="node.type === 'menu'">
       <div class="space-y-1.5">
-        <Label class="text-xs">Timeout (seconds)</Label>
+        <Label class="text-xs">{{ t('calling.properties.timeoutSeconds') }}</Label>
         <Input type="number" :model-value="String(config.timeout_seconds || 10)" @update:model-value="(v: string) => updateConfig('timeout_seconds', parseInt(v) || 10)" class="h-8 text-sm" min="1" max="60" />
       </div>
       <div class="space-y-1.5">
-        <Label class="text-xs">Max Retries</Label>
+        <Label class="text-xs">{{ t('calling.properties.maxRetries') }}</Label>
         <Input type="number" :model-value="String(config.max_retries || 3)" @update:model-value="(v: string) => updateConfig('max_retries', parseInt(v) || 3)" class="h-8 text-sm" min="1" max="10" />
       </div>
       <div class="space-y-1.5">
         <div class="flex items-center justify-between">
-          <Label class="text-xs">Menu Options</Label>
+          <Label class="text-xs">{{ t('calling.properties.menuOptions') }}</Label>
           <Button variant="outline" size="sm" class="h-6 text-xs" @click="addMenuOption">
-            <Plus class="h-3 w-3 mr-1" /> Add
+            <Plus class="h-3 w-3 mr-1" /> {{ t('calling.properties.add') }}
           </Button>
         </div>
         <div v-for="(opt, digit) in (config.options || {})" :key="String(digit)" class="flex items-center gap-1.5">
           <span class="font-mono text-xs font-bold w-5 text-center">{{ digit }}</span>
-          <Input :model-value="(opt as any)?.label || ''" @update:model-value="(v: string) => updateMenuOption(String(digit), 'label', v)" placeholder="Label" class="h-7 text-xs flex-1" />
+          <Input :model-value="(opt as any)?.label || ''" @update:model-value="(v: string) => updateMenuOption(String(digit), 'label', v)" :placeholder="t('calling.properties.optionLabelPlaceholder')" class="h-7 text-xs flex-1" />
           <Button variant="ghost" size="icon" class="h-6 w-6" @click="removeMenuOption(String(digit))">
             <Trash2 class="h-3 w-3 text-destructive" />
           </Button>
@@ -342,23 +356,23 @@ const greetingTab = computed(() =>
     <!-- Gather: config -->
     <template v-if="node.type === 'gather'">
       <div class="space-y-1.5">
-        <Label class="text-xs">Max Digits</Label>
+        <Label class="text-xs">{{ t('calling.properties.maxDigits') }}</Label>
         <Input type="number" :model-value="String(config.max_digits || 10)" @update:model-value="(v: string) => updateConfig('max_digits', parseInt(v) || 10)" class="h-8 text-sm" min="1" max="20" />
       </div>
       <div class="space-y-1.5">
-        <Label class="text-xs">Terminator</Label>
+        <Label class="text-xs">{{ t('calling.properties.terminator') }}</Label>
         <Input :model-value="config.terminator || '#'" @update:model-value="(v: string) => updateConfig('terminator', v)" class="h-8 text-sm" />
       </div>
       <div class="space-y-1.5">
-        <Label class="text-xs">Store As (variable name)</Label>
-        <Input :model-value="config.store_as || ''" @update:model-value="(v: string) => updateConfig('store_as', v)" placeholder="e.g. account_number" class="h-8 text-sm" />
+        <Label class="text-xs">{{ t('calling.properties.storeAsVariable') }}</Label>
+        <Input :model-value="config.store_as || ''" @update:model-value="(v: string) => updateConfig('store_as', v)" :placeholder="t('calling.properties.accountNumberPlaceholder')" class="h-8 text-sm" />
       </div>
       <div class="space-y-1.5">
-        <Label class="text-xs">Timeout (seconds)</Label>
+        <Label class="text-xs">{{ t('calling.properties.timeoutSeconds') }}</Label>
         <Input type="number" :model-value="String(config.timeout_seconds || 10)" @update:model-value="(v: string) => updateConfig('timeout_seconds', parseInt(v) || 10)" class="h-8 text-sm" min="1" max="60" />
       </div>
       <div class="space-y-1.5">
-        <Label class="text-xs">Max Retries</Label>
+        <Label class="text-xs">{{ t('calling.properties.maxRetries') }}</Label>
         <Input type="number" :model-value="String(config.max_retries || 3)" @update:model-value="(v: string) => updateConfig('max_retries', parseInt(v) || 3)" class="h-8 text-sm" min="1" max="10" />
       </div>
     </template>
@@ -366,11 +380,11 @@ const greetingTab = computed(() =>
     <!-- HTTP Callback: config -->
     <template v-if="node.type === 'http_callback'">
       <div class="space-y-1.5">
-        <Label class="text-xs">URL</Label>
-        <Input :model-value="config.url || ''" @update:model-value="(v: string) => updateConfig('url', v)" placeholder="https://api.example.com/ivr" class="h-8 text-xs font-mono" />
+        <Label class="text-xs">{{ t('calling.properties.url') }}</Label>
+        <Input :model-value="config.url || ''" @update:model-value="(v: string) => updateConfig('url', v)" :placeholder="t('calling.properties.httpCallbackUrlPlaceholder')" class="h-8 text-xs font-mono" />
       </div>
       <div class="space-y-1.5">
-        <Label class="text-xs">Method</Label>
+        <Label class="text-xs">{{ t('calling.properties.method') }}</Label>
         <Select :model-value="config.method || 'GET'" @update:model-value="(v: any) => updateConfig('method', v)">
           <SelectTrigger class="h-8 text-sm"><SelectValue /></SelectTrigger>
           <SelectContent>
@@ -381,41 +395,41 @@ const greetingTab = computed(() =>
       </div>
       <div class="space-y-1.5">
         <div class="flex items-center justify-between">
-          <Label class="text-xs">Headers</Label>
+          <Label class="text-xs">{{ t('calling.properties.headers') }}</Label>
           <Button variant="outline" size="sm" class="h-6 text-xs" @click="addHeader">
-            <Plus class="h-3 w-3 mr-1" /> Add
+            <Plus class="h-3 w-3 mr-1" /> {{ t('calling.properties.add') }}
           </Button>
         </div>
         <div v-for="(val, key) in (config.headers || {})" :key="String(key)" class="flex items-center gap-1">
-          <Input :model-value="String(key)" @update:model-value="(v: string) => updateHeaderKey(String(key), v)" placeholder="Key" class="h-7 text-xs flex-1" />
-          <Input :model-value="String(val)" @update:model-value="(v: string) => updateHeaderValue(String(key), v)" placeholder="Value" class="h-7 text-xs flex-1" />
+          <Input :model-value="String(key)" @update:model-value="(v: string) => updateHeaderKey(String(key), v)" :placeholder="t('calling.properties.keyPlaceholder')" class="h-7 text-xs flex-1" />
+          <Input :model-value="String(val)" @update:model-value="(v: string) => updateHeaderValue(String(key), v)" :placeholder="t('calling.properties.valuePlaceholder')" class="h-7 text-xs flex-1" />
           <Button variant="ghost" size="icon" class="h-6 w-6" @click="removeHeader(String(key))">
             <Trash2 class="h-3 w-3 text-destructive" />
           </Button>
         </div>
       </div>
       <div class="space-y-1.5">
-        <Label class="text-xs">Body Template</Label>
+        <Label class="text-xs">{{ t('calling.properties.bodyTemplate') }}</Label>
         <Textarea :model-value="config.body_template || ''" @update:model-value="(v: string) => updateConfig('body_template', v)" placeholder='{"phone": "{{caller_phone}}"}' class="min-h-[60px] text-xs font-mono resize-none" />
       </div>
       <div class="space-y-1.5">
-        <Label class="text-xs">Timeout (seconds)</Label>
+        <Label class="text-xs">{{ t('calling.properties.timeoutSeconds') }}</Label>
         <Input type="number" :model-value="String(config.timeout_seconds || 10)" @update:model-value="(v: string) => updateConfig('timeout_seconds', parseInt(v) || 10)" class="h-8 text-sm" min="1" max="30" />
       </div>
       <div class="space-y-1.5">
-        <Label class="text-xs">Store Response As (variable name)</Label>
-        <Input :model-value="config.response_store_as || ''" @update:model-value="(v: string) => updateConfig('response_store_as', v)" placeholder="e.g. api_response" class="h-8 text-sm" />
+        <Label class="text-xs">{{ t('calling.properties.storeResponseAsVariable') }}</Label>
+        <Input :model-value="config.response_store_as || ''" @update:model-value="(v: string) => updateConfig('response_store_as', v)" :placeholder="t('calling.properties.apiResponsePlaceholder')" class="h-8 text-sm" />
       </div>
     </template>
 
     <!-- Transfer: team selector -->
     <template v-if="node.type === 'transfer'">
       <div class="space-y-1.5">
-        <Label class="text-xs">Team</Label>
+        <Label class="text-xs">{{ t('calling.properties.team') }}</Label>
         <Select :model-value="config.team_id || 'none'" @update:model-value="(v: any) => updateConfig('team_id', v === 'none' ? '' : v)">
-          <SelectTrigger class="h-8 text-sm"><SelectValue placeholder="Select team" /></SelectTrigger>
+          <SelectTrigger class="h-8 text-sm"><SelectValue :placeholder="t('calling.properties.selectTeam')" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="none">Select team...</SelectItem>
+            <SelectItem value="none">{{ t('calling.properties.selectTeamEllipsis') }}</SelectItem>
             <SelectItem v-for="team in teamsStore.teams" :key="team.id" :value="team.id">
               {{ team.name }}
             </SelectItem>
@@ -425,22 +439,22 @@ const greetingTab = computed(() =>
 
       <!-- HTTP Callbacks per lifecycle event -->
       <div class="space-y-2 mt-3">
-        <Label class="text-xs font-medium">HTTP Callbacks</Label>
-        <p class="text-[10px] text-muted-foreground">Configure API calls to your CRM at each transfer stage.</p>
+        <Label class="text-xs font-medium">{{ t('calling.properties.httpCallbacks') }}</Label>
+        <p class="text-[10px] text-muted-foreground">{{ t('calling.properties.httpCallbacksHint') }}</p>
 
         <div v-for="event in callbackEvents" :key="event" class="border rounded-md">
           <button class="w-full flex items-center justify-between px-3 py-1.5 text-xs font-medium hover:bg-muted/50" @click="updateCallbackField(event, '_expanded', !getCallbackConfig(event)._expanded)">
             <span>{{ callbackLabels[event] }}</span>
-            <span v-if="getCallbackConfig(event).url" class="text-[10px] text-emerald-500">Configured</span>
+            <span v-if="getCallbackConfig(event).url" class="text-[10px] text-emerald-500">{{ t('calling.properties.configured') }}</span>
           </button>
 
           <div v-if="getCallbackConfig(event)._expanded" class="px-3 pb-3 space-y-1.5 border-t">
             <div class="space-y-1 pt-2">
-              <Label class="text-[10px]">URL</Label>
-              <Input :model-value="getCallbackConfig(event).url || ''" @update:model-value="(v: string) => updateCallbackField(event, 'url', v)" placeholder="https://crm.example.com/api/call" class="h-7 text-xs font-mono" />
+              <Label class="text-[10px]">{{ t('calling.properties.url') }}</Label>
+              <Input :model-value="getCallbackConfig(event).url || ''" @update:model-value="(v: string) => updateCallbackField(event, 'url', v)" :placeholder="t('calling.properties.crmUrlPlaceholder')" class="h-7 text-xs font-mono" />
             </div>
             <div class="space-y-1">
-              <Label class="text-[10px]">Method</Label>
+              <Label class="text-[10px]">{{ t('calling.properties.method') }}</Label>
               <Select :model-value="getCallbackConfig(event).method || 'POST'" @update:model-value="(v: any) => updateCallbackField(event, 'method', v)">
                 <SelectTrigger class="h-7 text-xs"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -451,21 +465,21 @@ const greetingTab = computed(() =>
             </div>
             <div class="space-y-1">
               <div class="flex items-center justify-between">
-                <Label class="text-[10px]">Headers</Label>
+                <Label class="text-[10px]">{{ t('calling.properties.headers') }}</Label>
                 <Button variant="outline" size="sm" class="h-5 text-[10px] px-1.5" @click="addCallbackHeader(event)">
-                  <Plus class="h-2.5 w-2.5 mr-0.5" /> Add
+                  <Plus class="h-2.5 w-2.5 mr-0.5" /> {{ t('calling.properties.add') }}
                 </Button>
               </div>
               <div v-for="(val, key) in (getCallbackConfig(event).headers || {})" :key="String(key)" class="flex items-center gap-1">
-                <Input :model-value="String(key)" @update:model-value="(v: string) => updateCallbackHeaderKey(event, String(key), v)" placeholder="Key" class="h-6 text-[10px] flex-1" />
-                <Input :model-value="String(val)" @update:model-value="(v: string) => updateCallbackHeaderValue(event, String(key), v)" placeholder="Value" class="h-6 text-[10px] flex-1" />
+                <Input :model-value="String(key)" @update:model-value="(v: string) => updateCallbackHeaderKey(event, String(key), v)" :placeholder="t('calling.properties.keyPlaceholder')" class="h-6 text-[10px] flex-1" />
+                <Input :model-value="String(val)" @update:model-value="(v: string) => updateCallbackHeaderValue(event, String(key), v)" :placeholder="t('calling.properties.valuePlaceholder')" class="h-6 text-[10px] flex-1" />
                 <Button variant="ghost" size="icon" class="h-5 w-5" @click="removeCallbackHeader(event, String(key))">
                   <Trash2 class="h-2.5 w-2.5 text-destructive" />
                 </Button>
               </div>
             </div>
             <div v-if="(getCallbackConfig(event).method || 'POST') === 'POST'" class="space-y-1">
-              <Label class="text-[10px]">Body Template</Label>
+              <Label class="text-[10px]">{{ t('calling.properties.bodyTemplate') }}</Label>
               <Textarea :model-value="getCallbackConfig(event).body_template || ''" @update:model-value="(v: string) => updateCallbackField(event, 'body_template', v)" :placeholder='`{"phone": "{{caller_phone}}", "transfer_id": "{{transfer_id}}"}`' class="min-h-[50px] text-[10px] font-mono resize-none" />
             </div>
           </div>
@@ -475,13 +489,13 @@ const greetingTab = computed(() =>
       <!-- Available variables reference -->
       <div class="border rounded-md mt-2">
         <button class="w-full flex items-center justify-between px-3 py-1.5 text-xs font-medium hover:bg-muted/50" @click="updateConfig('_vars_expanded', !config._vars_expanded)">
-          <span>Available Variables</span>
+          <span>{{ t('calling.properties.availableVariables') }}</span>
         </button>
         <div v-if="config._vars_expanded" class="px-3 pb-2 border-t">
           <div class="flex flex-wrap gap-1 pt-2">
-            <code v-for="v in ['caller_phone', 'contact_id', 'call_log_id', 'transfer_id', 'team_id', 'whatsapp_account', 'status', 'transferred_at', 'ivr_path', 'agent_id *', 'agent_email *', 'agent_name *', 'hold_duration **', 'talk_duration **']" :key="v" class="bg-muted px-1.5 py-0.5 rounded text-[10px] cursor-pointer hover:bg-muted/80" :title="v.includes('*') ? 'Available on connect/complete only' : ''">{{ v.replace(' *', '').replace(' **', '') }}</code>
+            <code v-for="v in ['caller_phone', 'contact_id', 'call_log_id', 'transfer_id', 'team_id', 'whatsapp_account', 'status', 'transferred_at', 'ivr_path', 'agent_id *', 'agent_email *', 'agent_name *', 'hold_duration **', 'talk_duration **']" :key="v" class="bg-muted px-1.5 py-0.5 rounded text-[10px] cursor-pointer hover:bg-muted/80" :title="v.includes('*') ? t('calling.properties.varTooltipConnect') : ''">{{ v.replace(' *', '').replace(' **', '') }}</code>
           </div>
-          <p class="text-[9px] text-muted-foreground mt-1.5">* on_connect/on_complete only &nbsp; ** on_complete only</p>
+          <p class="text-[9px] text-muted-foreground mt-1.5">{{ t('calling.properties.varsFootnote') }}</p>
         </div>
       </div>
     </template>
@@ -489,11 +503,11 @@ const greetingTab = computed(() =>
     <!-- Goto Flow: flow selector -->
     <template v-if="node.type === 'goto_flow'">
       <div class="space-y-1.5">
-        <Label class="text-xs">Target Flow</Label>
+        <Label class="text-xs">{{ t('calling.properties.targetFlow') }}</Label>
         <Select :model-value="config.flow_id || 'none'" @update:model-value="(v: any) => updateConfig('flow_id', v === 'none' ? '' : v)">
-          <SelectTrigger class="h-8 text-sm"><SelectValue placeholder="Select flow" /></SelectTrigger>
+          <SelectTrigger class="h-8 text-sm"><SelectValue :placeholder="t('calling.properties.selectFlow')" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="none">Select flow...</SelectItem>
+            <SelectItem value="none">{{ t('calling.properties.selectFlowEllipsis') }}</SelectItem>
             <SelectItem v-for="flow in gotoFlowTargets" :key="flow.id" :value="flow.id">
               {{ flow.name }}
             </SelectItem>
@@ -505,7 +519,7 @@ const greetingTab = computed(() =>
     <!-- Timing: schedule -->
     <template v-if="node.type === 'timing'">
       <div class="space-y-1.5">
-        <Label class="text-xs">Schedule</Label>
+        <Label class="text-xs">{{ t('calling.properties.schedule') }}</Label>
         <div v-for="(entry, idx) in schedule" :key="idx" class="flex items-center gap-1.5 text-xs">
           <span class="w-12 capitalize">{{ entry.day.slice(0, 3) }}</span>
           <Switch :checked="entry.enabled" @update:checked="(v: boolean) => updateScheduleEntry(Number(idx), 'enabled', v)" />

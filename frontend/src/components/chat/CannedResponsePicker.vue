@@ -122,7 +122,7 @@ function selectResponse(response: CannedResponse) {
           <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             v-model="searchQuery"
-            placeholder="Search responses..."
+            :placeholder="$t('cannedResponses.searchResponses')"
             class="pl-8 h-9"
             @keydown.stop
           />
@@ -135,7 +135,7 @@ function selectResponse(response: CannedResponse) {
         </div>
 
         <div v-else-if="filteredResponses.length === 0" class="py-8 text-center text-muted-foreground text-sm">
-          No canned responses found
+          {{ $t('cannedResponses.noResponsesFound') }}
         </div>
 
         <div v-else class="p-2">

@@ -5,8 +5,8 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
-  MessageSquare,
   ChevronLeft,
   ChevronRight,
   Menu,
@@ -25,7 +25,7 @@ useI18n() // Enable $t() in template
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
-const isCollapsed = ref(false)
+const isCollapsed = ref(true)
 const isMobileMenuOpen = ref(false)
 
 // Refresh user data and connect WebSocket on mount
@@ -110,16 +110,14 @@ const handleLogout = async () => {
     <!-- Mobile header -->
     <header class="fixed top-0 left-0 right-0 z-50 flex h-12 items-center justify-between border-b border-white/[0.08] light:border-gray-200 bg-[#0a0a0b]/95 light:bg-white/95 backdrop-blur-sm px-3 md:hidden">
       <RouterLink to="/" class="flex items-center gap-2">
-        <div class="h-7 w-7 rounded-lg bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center shadow-lg shadow-emerald-500/20">
-          <MessageSquare class="h-4 w-4 text-white" />
-        </div>
-        <span class="font-semibold text-sm text-white light:text-gray-900">Whatomate</span>
+        <img src="/logo-atacadao.png" alt="WhatsApp ATC" class="h-7 w-7 rounded-lg object-cover shadow-lg shadow-black/20">
+        <span class="font-semibold text-sm text-white light:text-gray-900">WhatsApp ATC</span>
       </RouterLink>
       <Button
         variant="ghost"
         size="icon"
         class="h-8 w-8 text-white/70 hover:text-white hover:bg-white/[0.08] light:text-gray-600 light:hover:text-gray-900 light:hover:bg-gray-100"
-        aria-label="Toggle menu"
+        :aria-label="$t('nav.toggleMenu')"
         :aria-expanded="isMobileMenuOpen"
         @click="isMobileMenuOpen = !isMobileMenuOpen"
       >
@@ -145,19 +143,17 @@ const handleLogout = async () => {
         isCollapsed ? 'w-64 md:w-16' : 'w-64'
       ]"
       role="navigation"
-      aria-label="Main navigation"
+      :aria-label="$t('nav.mainNavigation')"
     >
       <!-- Logo (hidden on mobile, shown in header instead) -->
       <div class="hidden md:flex h-12 items-center justify-between px-3 border-b border-white/[0.08] light:border-gray-200">
         <RouterLink to="/" class="flex items-center gap-2">
-          <div class="h-7 w-7 rounded-lg bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center shadow-lg shadow-emerald-500/20">
-            <MessageSquare class="h-4 w-4 text-white" />
-          </div>
+          <img src="/logo-atacadao.png" alt="WhatsApp ATC" class="h-7 w-7 rounded-lg object-cover shadow-lg shadow-black/20 shrink-0">
           <span
             v-if="!isCollapsed"
             class="font-semibold text-sm text-white light:text-gray-900"
           >
-            Whatomate
+            WhatsApp ATC
           </span>
         </RouterLink>
         <Button
@@ -194,23 +190,31 @@ const handleLogout = async () => {
             <!-- Section items -->
             <div class="space-y-0.5">
               <template v-for="item in section.items" :key="item.path">
-                <RouterLink
-                  :to="item.path"
-                  :class="[
-                    'nav-active-indicator btn-press flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium transition-all duration-200',
-                    item.active
-                      ? 'bg-white/[0.08] text-white light:bg-gray-100 light:text-gray-900'
-                      : 'text-white/50 hover:text-white hover:bg-white/[0.06] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-50',
-                    isCollapsed && 'md:justify-center md:px-2'
-                  ]"
-                  :data-active="item.active"
-                  role="menuitem"
-                  :aria-current="item.active ? 'page' : undefined"
-                  @click="isMobileMenuOpen = false"
-                >
-                  <component :is="item.icon" class="h-4 w-4 shrink-0" aria-hidden="true" />
-                  <span :class="isCollapsed && 'md:sr-only'">{{ $t(item.name) }}</span>
-                </RouterLink>
+                <!-- ponytail: tooltip still mounts once isCollapsed flips true even on
+                     sub-md viewports where the label stays visible; needs viewport-width
+                     tracking to fix, out of scope for this pass -->
+                <Tooltip :disabled="!isCollapsed" :delay-duration="150">
+                  <TooltipTrigger as-child>
+                    <RouterLink
+                      :to="item.path"
+                      :class="[
+                        'nav-active-indicator btn-press flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium transition-all duration-200',
+                        item.active
+                          ? 'bg-white/[0.08] text-white light:bg-gray-100 light:text-gray-900'
+                          : 'text-white/50 hover:text-white hover:bg-white/[0.06] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-50',
+                        isCollapsed && 'md:justify-center md:px-2'
+                      ]"
+                      :data-active="item.active"
+                      role="menuitem"
+                      :aria-current="item.active ? 'page' : undefined"
+                      @click="isMobileMenuOpen = false"
+                    >
+                      <component :is="item.icon" class="h-4 w-4 shrink-0" aria-hidden="true" />
+                      <span :class="isCollapsed && 'md:sr-only'">{{ $t(item.name) }}</span>
+                    </RouterLink>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">{{ $t(item.name) }}</TooltipContent>
+                </Tooltip>
 
                 <!-- Submenu items -->
                 <template v-if="item.children && item.active && !isCollapsed">
@@ -242,23 +246,31 @@ const handleLogout = async () => {
       <div v-if="bottomSections.length > 0" class="border-t border-white/[0.06] light:border-gray-200 px-2 py-2">
         <template v-for="section in bottomSections" :key="section.label">
           <template v-for="item in section.items" :key="item.path">
-            <RouterLink
-              :to="item.path"
-              :class="[
-                'nav-active-indicator btn-press flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium transition-all duration-200',
-                item.active
-                  ? 'bg-white/[0.08] text-white light:bg-gray-100 light:text-gray-900'
-                  : 'text-white/50 hover:text-white hover:bg-white/[0.06] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-50',
-                isCollapsed && 'md:justify-center md:px-2'
-              ]"
-              :data-active="item.active"
-              role="menuitem"
-              :aria-current="item.active ? 'page' : undefined"
-              @click="isMobileMenuOpen = false"
-            >
-              <component :is="item.icon" class="h-4 w-4 shrink-0" aria-hidden="true" />
-              <span :class="isCollapsed && 'md:sr-only'">{{ $t(item.name) }}</span>
-            </RouterLink>
+            <!-- ponytail: tooltip still mounts once isCollapsed flips true even on
+                 sub-md viewports where the label stays visible; needs viewport-width
+                 tracking to fix, out of scope for this pass -->
+            <Tooltip :disabled="!isCollapsed" :delay-duration="150">
+              <TooltipTrigger as-child>
+                <RouterLink
+                  :to="item.path"
+                  :class="[
+                    'nav-active-indicator btn-press flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium transition-all duration-200',
+                    item.active
+                      ? 'bg-white/[0.08] text-white light:bg-gray-100 light:text-gray-900'
+                      : 'text-white/50 hover:text-white hover:bg-white/[0.06] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-50',
+                    isCollapsed && 'md:justify-center md:px-2'
+                  ]"
+                  :data-active="item.active"
+                  role="menuitem"
+                  :aria-current="item.active ? 'page' : undefined"
+                  @click="isMobileMenuOpen = false"
+                >
+                  <component :is="item.icon" class="h-4 w-4 shrink-0" aria-hidden="true" />
+                  <span :class="isCollapsed && 'md:sr-only'">{{ $t(item.name) }}</span>
+                </RouterLink>
+              </TooltipTrigger>
+              <TooltipContent side="right">{{ $t(item.name) }}</TooltipContent>
+            </Tooltip>
 
             <template v-if="item.children && item.active && !isCollapsed">
               <RouterLink

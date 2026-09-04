@@ -482,7 +482,9 @@ func (a *App) updateMessageStatus(whatsappMsgID, statusValue string, errors []We
 		}
 	}
 
-	// Broadcast status update via WebSocket
+	// Broadcast status update via WebSocket. Routed through the
+	// authorized-viewers gate (not BroadcastToOrg) since this reveals which
+	// conversation a message belongs to.
 	if a.WSHub != nil {
 		wsPayload := map[string]any{
 			"message_id": message.ID.String(),
@@ -491,7 +493,7 @@ func (a *App) updateMessageStatus(whatsappMsgID, statusValue string, errors []We
 		if errMsg, ok := updates["error_message"].(string); ok && errMsg != "" {
 			wsPayload["error_message"] = errMsg
 		}
-		a.WSHub.BroadcastToOrg(message.OrganizationID, websocket.WSMessage{
+		a.WSHub.BroadcastToAuthorizedViewers(message.OrganizationID, message.ContactID, websocket.WSMessage{
 			Type:    websocket.TypeStatusUpdate,
 			Payload: wsPayload,
 		})
@@ -584,10 +586,15 @@ func (a *App) processMarketingPreference(phoneNumberID, userPhone, bsuid, value 
 	// Find contact by phone number, or by BSUID if phone is empty
 	var contact models.Contact
 	if userPhone != "" {
-		if err := a.DB.Where("phone_number = ? AND organization_id = ?", userPhone, account.OrganizationID).First(&contact).Error; err != nil {
+		// Shared resolver, not a raw match: an opt-out must land on the contact
+		// even when WhatsApp reports a different spelling of the same number
+		// (formatting, "+" prefix, or Brazil's legacy 8-digit mobile form).
+		found, err := contactutil.FindContact(a.DB, account.OrganizationID, userPhone)
+		if err != nil {
 			a.Log.Info("Contact not found for marketing preference", "phone", userPhone)
 			return
 		}
+		contact = *found
 	} else if bsuid != "" {
 		if err := a.DB.Where("bsuid = ? AND organization_id = ?", bsuid, account.OrganizationID).First(&contact).Error; err != nil {
 			a.Log.Info("Contact not found by BSUID for marketing preference", "bsuid", bsuid)

@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/contactutil"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/templateutil"
 	"github.com/shridarpatil/whatomate/internal/utils"
@@ -20,6 +22,7 @@ import (
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
+	"gorm.io/gorm"
 )
 
 // ============================================================================
@@ -262,6 +265,26 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 	preview := a.getMessagePreview(req)
 	a.updateContactLastMessage(req.Contact, preview)
 
+	// A human messaging the customer owns the conversation. Without an
+	// attendance record the chatbot takes over the customer's reply — the
+	// bug this fixes. Campaigns bypass this function entirely and chatbot
+	// sends leave SentByUserID nil, so neither opens an attendance.
+	if opts.SentByUserID != nil {
+		a.createAgentInitiatedTransfer(req.Account, req.Contact, *opts.SentByUserID)
+	}
+
+	// An agent replying is what starts the service, and the only thing that
+	// takes a conversation out of the 'new' queue. Chatbot sends carry no
+	// SentByUserID and deliberately do not count.
+	if opts.SentByUserID != nil {
+		if _, err := a.transitionContactStatus(req.Contact,
+			models.ContactStatusInProgress,
+			[]models.ContactStatus{models.ContactStatusNew},
+			opts.SentByUserID); err != nil {
+			a.Log.Error("Failed to auto-transition contact status", "error", err, "contact_id", req.Contact.ID)
+		}
+	}
+
 	return msg, nil
 }
 
@@ -437,9 +460,11 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 		})
 		a.Log.Error("Failed to send message", "error", err, "message_id", msg.ID, "type", msg.MessageType)
 
-		// Broadcast failure status via WebSocket so frontend updates immediately
+		// Broadcast failure status via WebSocket so frontend updates immediately.
+		// Routed through the authorized-viewers gate (not BroadcastToOrg) since
+		// this reveals which conversation a message belongs to.
 		if opts.BroadcastWebSocket && a.WSHub != nil {
-			a.WSHub.BroadcastToOrg(req.Account.OrganizationID, websocket.WSMessage{
+			a.WSHub.BroadcastToAuthorizedViewers(req.Account.OrganizationID, req.Contact.ID, websocket.WSMessage{
 				Type: websocket.TypeStatusUpdate,
 				Payload: map[string]any{
 					"message_id":    msg.ID,
@@ -463,9 +488,11 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 		a.dispatchMessageSentWebhook(req.Account, req.Contact, msg)
 	}
 
-	// Broadcast status update via WebSocket
+	// Broadcast status update via WebSocket. Routed through the
+	// authorized-viewers gate (not BroadcastToOrg) since this reveals which
+	// conversation a message belongs to.
 	if opts.BroadcastWebSocket && a.WSHub != nil {
-		a.WSHub.BroadcastToOrg(req.Account.OrganizationID, websocket.WSMessage{
+		a.WSHub.BroadcastToAuthorizedViewers(req.Account.OrganizationID, req.Contact.ID, websocket.WSMessage{
 			Type: websocket.TypeStatusUpdate,
 			Payload: map[string]any{
 				"message_id": msg.ID,
@@ -500,22 +527,29 @@ func (a *App) broadcastNewMessage(orgID uuid.UUID, msg *models.Message, contact 
 	}
 
 	payload := map[string]any{
-		"id":               msg.ID.String(),
-		"contact_id":       contact.ID.String(),
-		"assigned_user_id": assignedUserIDStr,
-		"profile_name":     profileName,
-		"direction":        msg.Direction,
-		"message_type":     msg.MessageType,
-		"content":          map[string]string{"body": msg.Content},
-		"media_url":        msg.MediaURL,
-		"media_mime_type":  msg.MediaMimeType,
-		"media_filename":   msg.MediaFilename,
-		"interactive_data": msg.InteractiveData,
-		"status":           msg.Status,
-		"wamid":            msg.WhatsAppMessageID,
-		"created_at":       msg.CreatedAt,
-		"updated_at":       msg.UpdatedAt,
-		"is_reply":         msg.IsReply,
+		"id":                msg.ID.String(),
+		"contact_id":        contact.ID.String(),
+		"assigned_user_id":  assignedUserIDStr,
+		"profile_name":      profileName,
+		"direction":         msg.Direction,
+		"message_type":      msg.MessageType,
+		"content":           map[string]string{"body": msg.Content},
+		"media_url":         msg.MediaURL,
+		"media_mime_type":   msg.MediaMimeType,
+		"media_filename":    msg.MediaFilename,
+		"interactive_data":  msg.InteractiveData,
+		"status":            msg.Status,
+		"wamid":             msg.WhatsAppMessageID,
+		"created_at":        msg.CreatedAt,
+		"updated_at":        msg.UpdatedAt,
+		"is_reply":          msg.IsReply,
+		"sent_by_user_name": a.senderNameForBroadcast(msg),
+	}
+
+	// Sent alongside the name so the client can tell "the agent who sent this"
+	// apart from "an agent with the same display name" without a lookup.
+	if msg.SentByUserID != nil {
+		payload["sent_by_user_id"] = msg.SentByUserID.String()
 	}
 
 	// Add interactive data
@@ -539,19 +573,25 @@ func (a *App) broadcastNewMessage(orgID uuid.UUID, msg *models.Message, contact 
 		}
 	}
 
-	a.WSHub.BroadcastToOrg(orgID, websocket.WSMessage{
+	// Deliver only to clients authorized to view this conversation. The hub's
+	// injected authorizer (CanViewConversationByID) is the single source of
+	// truth; IgnoreContactFilter lets authorized clients update their sidebar
+	// even while viewing a different conversation.
+	a.WSHub.BroadcastNewMessageToAuthorized(orgID, contact.ID, websocket.WSMessage{
 		Type:    websocket.TypeNewMessage,
 		Payload: payload,
 	})
 }
 
-// broadcastReactionUpdate broadcasts a reaction update via WebSocket
+// broadcastReactionUpdate broadcasts a reaction update via WebSocket.
+// Routed through the authorized-viewers gate (not BroadcastToOrg) since
+// reaction activity reveals which conversation a message belongs to.
 func (a *App) broadcastReactionUpdate(orgID uuid.UUID, messageID, contactID uuid.UUID, reactions any) {
 	if a.WSHub == nil {
 		return
 	}
-	a.WSHub.BroadcastToOrg(orgID, websocket.WSMessage{
-		Type: "reaction_update",
+	a.WSHub.BroadcastToAuthorizedViewers(orgID, contactID, websocket.WSMessage{
+		Type: websocket.TypeReactionUpdate,
 		Payload: map[string]any{
 			"message_id": messageID.String(),
 			"contact_id": contactID.String(),
@@ -768,8 +808,15 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, fmt.Sprintf("Template is not approved (status: %s)", template.Status), nil, "")
 	}
 
-	// Get contact or use phone number directly
+	// Get contact or use phone number directly. Look the contact up before
+	// deciding anything about access: an EXISTING contact (by contact_id, or
+	// an existing phone match) must pass the visibility gate before we do
+	// anything else. A phone number with no existing contact means the agent
+	// is initiating a brand-new conversation, which is theirs by definition —
+	// it is created further below (after the WhatsApp account is resolved, so
+	// its WhatsAppAccount can be set) and the gate is skipped for it.
 	var contact *models.Contact
+	isNewContact := false
 
 	if req.ContactID != "" {
 		cID, err := uuid.Parse(req.ContactID)
@@ -782,24 +829,27 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 		}
 		contact = c
 	} else {
-		// Find or create contact from phone number
-		phoneNumber := req.PhoneNumber
-		var c models.Contact
-		err := a.DB.Where("phone_number = ? AND organization_id = ?", phoneNumber, orgID).First(&c).Error
-		if err != nil {
-			// Contact not found, create new one
-			c = models.Contact{
-				BaseModel:      models.BaseModel{ID: uuid.New()},
-				OrganizationID: orgID,
-				PhoneNumber:    phoneNumber,
-			}
-			if err := a.DB.Create(&c).Error; err != nil {
-				a.Log.Error("Failed to create contact", "error", err, "phone", phoneNumber)
-				return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create contact", nil, "")
-			}
-			a.Log.Info("Contact created from API", "contact_id", c.ID, "phone", phoneNumber)
+		// Resolve existence with the SAME identity semantics used everywhere
+		// else a phone number is matched to a contact: normalized (with/without
+		// leading '+') and Unscoped (soft-deleted contacts still count). A raw
+		// exact-match query here would miss a contact stored in the other
+		// format, or a soft-deleted-but-team-scoped one, and wrongly treat it
+		// as a brand-new conversation — skipping the gate below entirely.
+		if c, err := contactutil.FindContactUnscoped(a.DB, orgID, req.PhoneNumber); err == nil {
+			contact = c
+		} else if errors.Is(err, gorm.ErrRecordNotFound) {
+			isNewContact = true
+		} else {
+			// A real DB error must NOT be treated as "brand new" — that would
+			// skip the authorization gate below. Fail the request instead.
+			a.Log.Error("failed to resolve contact for template send", "error", err, "phone", req.PhoneNumber)
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to resolve contact", nil, "")
 		}
-		contact = &c
+	}
+
+	if contact != nil && !a.canInteractWithConversation(userID, orgID, contact) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You do not have access to this conversation", nil, "")
 	}
 
 	// Determine which WhatsApp account to use (explicit > template > contact > default)
@@ -814,6 +864,21 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 	account, err := a.resolveWhatsAppAccount(orgID, accountName)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, err.Error(), nil, "")
+	}
+
+	if isNewContact {
+		c := models.Contact{
+			BaseModel:       models.BaseModel{ID: uuid.New()},
+			OrganizationID:  orgID,
+			PhoneNumber:     contactutil.NormalizePhone(req.PhoneNumber),
+			WhatsAppAccount: account.Name,
+		}
+		if err := a.DB.Create(&c).Error; err != nil {
+			a.Log.Error("Failed to create contact", "error", err, "phone", req.PhoneNumber)
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create contact", nil, "")
+		}
+		a.Log.Info("Contact created from API", "contact_id", c.ID, "phone", req.PhoneNumber)
+		contact = &c
 	}
 
 	// Extract parameter names and resolve values
@@ -996,4 +1061,23 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 		UpdatedAt:       message.UpdatedAt,
 	}
 	return r.SendEnvelope(response)
+}
+
+// senderNameForBroadcast resolves the agent name for a websocket payload.
+// The message being broadcast was just created and has no preloaded relation,
+// so the name is fetched directly.
+//
+// It must agree with senderName(), the REST-side producer of the same field:
+// no agent (chatbot, campaign, API) and a blank display name both yield "",
+// which the UI renders as an unlabelled bubble. audit.GetUserName is
+// deliberately not used here — its "Unknown" fallback belongs to the audit
+// log, and leaking it here would make a message read "Unknown" live and
+// unlabelled after a refresh.
+func (a *App) senderNameForBroadcast(msg *models.Message) string {
+	if msg.SentByUserID == nil {
+		return ""
+	}
+	var name string
+	a.DB.Model(&models.User{}).Where("id = ?", *msg.SentByUserID).Pluck("full_name", &name)
+	return name
 }

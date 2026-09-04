@@ -7,14 +7,14 @@ const { colorMode, setColorMode } = useColorMode()
 </script>
 
 <template>
-  <div class="flex gap-0.5 px-1.5 py-1" role="radiogroup" aria-label="Color theme">
+  <div class="flex gap-0.5 px-1.5 py-1" role="radiogroup" :aria-label="$t('settings.themeColor')">
     <Button
       variant="ghost"
       size="icon"
       class="h-7 w-7"
       :class="colorMode === 'light' && 'bg-accent'"
       :aria-checked="colorMode === 'light'"
-      aria-label="Light theme"
+      :aria-label="$t('settings.themeLight')"
       role="radio"
       @click="setColorMode('light')"
     >
@@ -26,7 +26,7 @@ const { colorMode, setColorMode } = useColorMode()
       class="h-7 w-7"
       :class="colorMode === 'dark' && 'bg-accent'"
       :aria-checked="colorMode === 'dark'"
-      aria-label="Dark theme"
+      :aria-label="$t('settings.themeDark')"
       role="radio"
       @click="setColorMode('dark')"
     >
@@ -38,7 +38,7 @@ const { colorMode, setColorMode } = useColorMode()
       class="h-7 w-7"
       :class="colorMode === 'system' && 'bg-accent'"
       :aria-checked="colorMode === 'system'"
-      aria-label="System theme"
+      :aria-label="$t('settings.themeSystem')"
       role="radio"
       @click="setColorMode('system')"
     >

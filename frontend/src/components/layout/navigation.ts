@@ -21,7 +21,8 @@ import {
   Tags,
   PhoneCall,
   PhoneForwarded,
-  ScrollText
+  ScrollText,
+  ClipboardList
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
@@ -37,8 +38,6 @@ export interface NavItem {
 export interface NavSection {
   label: string
   items: NavItem[]
-  /** Permissions needed to show section — at least one must pass */
-  permissions: string[]
   /** Pin to bottom of sidebar */
   pinBottom?: boolean
 }
@@ -46,7 +45,6 @@ export interface NavSection {
 export const navigationSections: NavSection[] = [
   {
     label: 'nav.sectionMain',
-    permissions: ['analytics', 'chat'],
     items: [
       {
         name: 'nav.dashboard',
@@ -60,11 +58,16 @@ export const navigationSections: NavSection[] = [
         icon: MessageSquare,
         permission: 'chat'
       },
+      {
+        name: 'nav.crm',
+        path: '/crm/occurrences',
+        icon: ClipboardList,
+        permission: 'occurrences'
+      },
     ]
   },
   {
     label: 'nav.sectionMessaging',
-    permissions: ['settings.chatbot', 'chatbot.keywords', 'flows.chatbot', 'chatbot.ai', 'transfers', 'campaigns', 'templates', 'flows.whatsapp'],
     items: [
       {
         name: 'nav.chatbot',
@@ -102,7 +105,6 @@ export const navigationSections: NavSection[] = [
   },
   {
     label: 'nav.sectionCalling',
-    permissions: ['call_logs', 'ivr_flows', 'call_transfers'],
     items: [
       { name: 'nav.callLogs', path: '/calling/logs', icon: PhoneCall, permission: 'call_logs' },
       { name: 'nav.ivrFlows', path: '/calling/ivr-flows', icon: Workflow, permission: 'ivr_flows' },
@@ -111,7 +113,6 @@ export const navigationSections: NavSection[] = [
   },
   {
     label: 'nav.sectionAnalytics',
-    permissions: ['analytics.agents', 'analytics'],
     items: [
       {
         name: 'nav.agentAnalytics',
@@ -129,7 +130,6 @@ export const navigationSections: NavSection[] = [
   },
   {
     label: '',
-    permissions: ['settings.general', 'settings.chatbot', 'accounts', 'contacts', 'canned_responses', 'tags', 'teams', 'users', 'roles', 'api_keys', 'webhooks', 'custom_actions', 'settings.sso', 'audit_logs'],
     pinBottom: true,
     items: [
       {
@@ -137,7 +137,7 @@ export const navigationSections: NavSection[] = [
         path: '/settings',
         icon: Settings,
         permission: 'settings.general',
-        childPermissions: ['settings.general', 'settings.chatbot', 'accounts', 'contacts', 'canned_responses', 'tags', 'teams', 'users', 'roles', 'api_keys', 'webhooks', 'custom_actions', 'settings.sso', 'audit_logs'],
+        childPermissions: ['settings.general', 'settings.chatbot', 'accounts', 'contacts', 'canned_responses', 'tags', 'teams', 'users', 'roles', 'api_keys', 'webhooks', 'custom_actions', 'occurrences.stages', 'settings.sso', 'audit_logs'],
         children: [
           { name: 'nav.general', path: '/settings', icon: Settings, permission: 'settings.general' },
           { name: 'nav.chatbot', path: '/settings/chatbot', icon: Bot, permission: 'settings.chatbot' },
@@ -151,6 +151,7 @@ export const navigationSections: NavSection[] = [
           { name: 'nav.apiKeys', path: '/settings/api-keys', icon: Key, permission: 'api_keys' },
           { name: 'nav.webhooks', path: '/settings/webhooks', icon: Webhook, permission: 'webhooks' },
           { name: 'nav.customActions', path: '/settings/custom-actions', icon: Zap, permission: 'custom_actions' },
+          { name: 'nav.occurrenceStages', path: '/settings/occurrence-stages', icon: ClipboardList, permission: 'occurrences.stages' },
           { name: 'nav.sso', path: '/settings/sso', icon: ShieldCheck, permission: 'settings.sso' },
           { name: 'nav.auditLogs', path: '/settings/audit-logs', icon: ScrollText, permission: 'audit_logs' }
         ]

@@ -123,7 +123,7 @@ const refreshOrgs = async () => {
     <div v-if="!collapsed" class="space-y-1">
       <div class="flex items-center justify-between">
         <span class="text-[11px] font-medium text-muted-foreground uppercase tracking-wide px-1">
-          Organization
+          {{ $t('organizations.organization') }}
         </span>
         <Button
           v-if="canCreateOrg"
@@ -141,7 +141,7 @@ const refreshOrgs = async () => {
         @update:model-value="handleOrgChange"
       >
         <SelectTrigger class="h-8 text-[13px]">
-          <SelectValue placeholder="Select organization" />
+          <SelectValue :placeholder="$t('organizations.selectOrganization')" />
         </SelectTrigger>
         <SelectContent>
           <SelectItem
@@ -157,13 +157,13 @@ const refreshOrgs = async () => {
         </SelectContent>
       </Select>
       <div v-else-if="organizationsStore.loading" class="text-[12px] text-muted-foreground px-1">
-        Loading...
+        {{ $t('organizations.loading') }}
       </div>
       <div v-else-if="organizationsStore.error" class="text-[12px] text-destructive px-1">
         {{ organizationsStore.error }}
       </div>
       <div v-else class="text-[12px] text-muted-foreground px-1">
-        No organizations found
+        {{ $t('organizations.noOrganizations') }}
       </div>
     </div>
 

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import type { ButtonConfig } from '@/types/flow-preview'
 import { ExternalLink, Phone, PhoneCall } from 'lucide-vue-next'
 
@@ -6,6 +7,8 @@ defineProps<{
   buttons: ButtonConfig[]
   disabled?: boolean
 }>()
+
+const { t } = useI18n()
 
 const emit = defineEmits<{
   select: [button: ButtonConfig]
@@ -32,7 +35,7 @@ function handleClick(button: ButtonConfig) {
       <ExternalLink v-if="btn.type === 'url'" class="h-4 w-4" />
       <Phone v-else-if="btn.type === 'phone'" class="h-4 w-4" />
       <PhoneCall v-else-if="btn.type === 'voice_call'" class="h-4 w-4" />
-      {{ btn.title || 'Option' }}
+      {{ btn.title || t('chatbot.preview.option') }}
     </button>
   </div>
 </template>

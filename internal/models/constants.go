@@ -9,6 +9,24 @@ const (
 	AuditActionDeleted AuditAction = "deleted"
 )
 
+// ContactStatus represents the service state of a conversation.
+type ContactStatus string
+
+const (
+	ContactStatusNew        ContactStatus = "new"
+	ContactStatusInProgress ContactStatus = "in_progress"
+	ContactStatusResolved   ContactStatus = "resolved"
+)
+
+// IsValid reports whether s is one of the three known contact statuses.
+func (s ContactStatus) IsValid() bool {
+	switch s {
+	case ContactStatusNew, ContactStatusInProgress, ContactStatusResolved:
+		return true
+	}
+	return false
+}
+
 // TeamRole represents a user's role within a specific team (not organizational role)
 type TeamRole string
 
@@ -125,6 +143,11 @@ const (
 	TransferSourceFlow            TransferSource = "flow"
 	TransferSourceKeyword         TransferSource = "keyword"
 	TransferSourceChatbotDisabled TransferSource = "chatbot_disabled"
+
+	// TransferSourceAgentInitiated marks an attendance opened because an agent
+	// messaged the customer first. Without this record the chatbot would take
+	// over the customer's reply.
+	TransferSourceAgentInitiated TransferSource = "agent_initiated"
 )
 
 // CampaignStatus represents bulk message campaign states

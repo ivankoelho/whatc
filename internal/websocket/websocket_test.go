@@ -640,3 +640,50 @@ func TestHandleAuthMessage_FailedAuth_DoesNotReceiveBroadcast(t *testing.T) {
 
 	assertNoMessage(t, client)
 }
+
+// --- BroadcastToContactViewers ---
+
+func TestHub_BroadcastToContactViewers_OnlyReachesViewers(t *testing.T) {
+	hub := newTestHub(t)
+	orgID := uuid.New()
+	contactID := uuid.New()
+	otherContact := uuid.New()
+
+	viewing := newTestClient(hub, uuid.New(), orgID)
+	viewingOther := newTestClient(hub, uuid.New(), orgID)
+	noContact := newTestClient(hub, uuid.New(), orgID)
+
+	websocket.ClientSetCurrentContact(viewing, &contactID)
+	websocket.ClientSetCurrentContact(viewingOther, &otherContact)
+	websocket.ClientSetCurrentContact(noContact, nil)
+
+	hub.Register(viewing)
+	hub.Register(viewingOther)
+	hub.Register(noContact)
+	waitForClientCount(t, hub, 3)
+
+	msg := websocket.WSMessage{Type: websocket.TypeAgentTyping, Payload: "typing"}
+	hub.BroadcastToContactViewers(orgID, contactID, msg)
+
+	assertReceivesMessage(t, viewing, websocket.TypeAgentTyping)
+	assertNoMessage(t, viewingOther)
+	assertNoMessage(t, noContact)
+}
+
+func TestHub_BroadcastToContact_StillReachesClientsWithNoContact(t *testing.T) {
+	// Regression guard: conversation notes rely on this behaviour.
+	hub := newTestHub(t)
+	orgID := uuid.New()
+	contactID := uuid.New()
+
+	noContact := newTestClient(hub, uuid.New(), orgID)
+	websocket.ClientSetCurrentContact(noContact, nil)
+
+	hub.Register(noContact)
+	waitForClientCount(t, hub, 1)
+
+	msg := websocket.WSMessage{Type: websocket.TypeNewMessage, Payload: "note"}
+	hub.BroadcastToContact(orgID, contactID, msg)
+
+	assertReceivesMessage(t, noContact, websocket.TypeNewMessage)
+}

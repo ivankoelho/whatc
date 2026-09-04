@@ -51,6 +51,7 @@ const tree = computed(() => {
 
 <script lang="ts">
 import { defineComponent, h, type PropType } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 interface TNode {
   step: {
@@ -67,6 +68,7 @@ const TreeNodes = defineComponent({
     depth: { type: Number, default: 0 }
   },
   setup(props) {
+    const { t } = useI18n()
     return () => {
       if (!props.nodes.length) return null
 
@@ -118,7 +120,7 @@ const TreeNodes = defineComponent({
             rowContent = h('div', { class: 'flex items-center gap-2 py-1' }, [
               h('div', {
                 class: 'flex items-center justify-center h-6 px-1.5 rounded bg-muted text-xs font-medium shrink-0'
-              }, 'menu'),
+              }, t('calling.nodes.menuBadge')),
               h('span', { class: 'text-sm' }, step.label || '-'),
               step.outcome ? h('span', { class: 'text-xs text-muted-foreground' }, `(${step.outcome})`) : null,
             ])
@@ -127,14 +129,14 @@ const TreeNodes = defineComponent({
               h('div', {
                 class: 'flex items-center justify-center h-6 w-6 rounded-full bg-amber-600 shrink-0'
               }, [h(ArrowRight, { class: 'h-3 w-3 text-white' })]),
-              h('span', { class: 'text-sm' }, step.label || 'Transfer'),
+              h('span', { class: 'text-sm' }, step.label || t('calling.nodes.transfer')),
             ])
           } else if (step.type === 'hangup') {
             rowContent = h('div', { class: 'flex items-center gap-2 py-1' }, [
               h('div', {
                 class: 'flex items-center justify-center h-6 w-6 rounded-full bg-red-600 shrink-0 text-white text-xs'
               }, 'x'),
-              h('span', { class: 'text-sm' }, step.label || 'Hangup'),
+              h('span', { class: 'text-sm' }, step.label || t('calling.nodes.hangup')),
             ])
           } else if (step.type) {
             // greeting, timing, http_callback, gather, etc.

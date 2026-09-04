@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/websocket"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
@@ -215,17 +217,15 @@ func (a *App) ListAgentTransfers(r *fastglue.Request) error {
 		}
 	}
 
-	// Filter based on permissions
-	if !hasFullAccess {
-		// Users without full access see their assigned transfers + unassigned in their team queues + general queue
-		if len(userTeamIDs) > 0 {
-			query = query.Where("agent_transfers.agent_id = ? OR (agent_transfers.agent_id IS NULL AND (agent_transfers.team_id IS NULL OR agent_transfers.team_id IN ?))", userID, userTeamIDs)
-		} else {
-			// User not in any team - see own transfers + general queue only
-			query = query.Where("agent_transfers.agent_id = ? OR (agent_transfers.agent_id IS NULL AND agent_transfers.team_id IS NULL)", userID)
-		}
-	}
-	// Users with full access see all transfers (no filter applied)
+	// Visibility scoping: a user may list only transfers whose contact they can
+	// view. This is the SAME rule as canViewConversation (via scopeVisibleConversations),
+	// so the transfer list can never enumerate conversations the user cannot open.
+	// view_all holders get the unrestricted set; flag-off preserves the prior
+	// contacts:read-sees-all / else-own behaviour.
+	query = query.Where("agent_transfers.contact_id IN (?)",
+		a.scopeVisibleConversations(
+			a.DB.Model(&models.Contact{}).Where("organization_id = ?", orgID).Select("id"),
+			userID, orgID))
 
 	// Get total count before pagination (for frontend to know if more exist)
 	var totalCount int64
@@ -240,13 +240,10 @@ func (a *App) ListAgentTransfers(r *fastglue.Request) error {
 			countQuery = countQuery.Where("agent_transfers.team_id = ?", teamID)
 		}
 	}
-	if !hasFullAccess {
-		if len(userTeamIDs) > 0 {
-			countQuery = countQuery.Where("agent_transfers.agent_id = ? OR (agent_transfers.agent_id IS NULL AND (agent_transfers.team_id IS NULL OR agent_transfers.team_id IN ?))", userID, userTeamIDs)
-		} else {
-			countQuery = countQuery.Where("agent_transfers.agent_id = ? OR (agent_transfers.agent_id IS NULL AND agent_transfers.team_id IS NULL)", userID)
-		}
-	}
+	countQuery = countQuery.Where("agent_transfers.contact_id IN (?)",
+		a.scopeVisibleConversations(
+			a.DB.Model(&models.Contact{}).Where("organization_id = ?", orgID).Select("id"),
+			userID, orgID))
 	countQuery.Count(&totalCount)
 
 	// Apply pagination
@@ -622,6 +619,144 @@ func (a *App) CreateAgentTransfer(r *fastglue.Request) error {
 	})
 }
 
+// closeAttendance applies `updates` to a transfer and releases its contact in
+// a single transaction, then fires the release notifications.
+//
+// Atomicity is the point. Every close path used to mark the transfer closed
+// first and merely log a failed release. That combination is unrecoverable:
+// the transfer is no longer `active`, so no pass ever looks at it again, while
+// the contact stays pinned to its agent and `in_progress` — the exact state
+// this branch exists to eliminate. Rolling both writes back instead leaves the
+// attendance open, which every close path (SLA tick, inactivity tick, the
+// agent pressing close again) will naturally retry.
+//
+// `contact` may be nil when the contact row could not be loaded: there is then
+// nothing to release, and the transfer is closed on its own. Callers load the
+// contact themselves so they can decide what a failed load means.
+//
+// The side effects every close path shares — clearing chatbot tracking so the
+// client-inactivity SLA can't fire on a closed attendance, and dispatching the
+// transfer lifecycle webhook so integrations see the close — happen here,
+// once, after the commit. Each path keeps only what legitimately differs: its
+// own broadcast (resumed vs expired) and, for the SLA paths, the customer
+// message. `opts.webhookEvent` carries the event to dispatch (empty = none).
+func (a *App) closeAttendance(
+	transfer *models.AgentTransfer,
+	contact *models.Contact,
+	updates map[string]any,
+	actorID *uuid.UUID,
+	reason string,
+	opts closeAttendanceOptions,
+) error {
+	var previousStatus models.ContactStatus
+	if contact != nil {
+		previousStatus = contact.ContactStatus
+	}
+
+	var commit func()
+	err := a.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.AgentTransfer{}).
+			Where("id = ?", transfer.ID).
+			Updates(updates).Error; err != nil {
+			return err
+		}
+		if contact == nil {
+			return nil
+		}
+		fn, err := a.releaseContactTx(tx, contact, actorID, reason)
+		commit = fn
+		return err
+	})
+	if err != nil {
+		if contact != nil {
+			contact.ContactStatus = previousStatus
+		}
+		return err
+	}
+
+	if commit != nil {
+		commit()
+	}
+
+	// Post-commit side effects, common to every close path. Run only after the
+	// writes committed so a rolled-back attempt never clears tracking or tells
+	// an integration a conversation closed that is in fact still open.
+	if contact != nil {
+		a.ClearContactChatbotTracking(contact.ID)
+	}
+	if opts.webhookEvent != "" {
+		a.dispatchTransferLifecycleWebhook(transfer, contact, opts.webhookEvent)
+	}
+	return nil
+}
+
+// closeAttendanceOptions carries the parts of a close that legitimately differ
+// between paths. Kept as a struct so new per-path knobs don't churn every
+// closeAttendance call site.
+type closeAttendanceOptions struct {
+	// webhookEvent is dispatched once, after a successful commit. Empty skips
+	// the webhook. Every close path emits WebhookEventTransferResumed — the
+	// "attendance closed, chatbot active again" lifecycle event.
+	webhookEvent models.WebhookEvent
+}
+
+// dispatchTransferLifecycleWebhook fires a transfer lifecycle webhook for a
+// closed attendance. Contact fields come from the loaded contact when present,
+// falling back to the transfer's own phone number when the contact couldn't be
+// loaded, so the event is still well-formed.
+func (a *App) dispatchTransferLifecycleWebhook(transfer *models.AgentTransfer, contact *models.Contact, event models.WebhookEvent) {
+	data := TransferEventData{
+		TransferID:      transfer.ID.String(),
+		ContactID:       transfer.ContactID.String(),
+		ContactPhone:    transfer.PhoneNumber,
+		Source:          transfer.Source,
+		WhatsAppAccount: transfer.WhatsAppAccount,
+	}
+	if contact != nil {
+		data.ContactPhone = contact.PhoneNumber
+		data.ContactName = contact.ProfileName
+	}
+	a.DispatchWebhook(transfer.OrganizationID, event, data)
+}
+
+// closeActiveAttendanceForContact closes the contact's active attendance, if
+// it has one, and frees the contact — the close as seen from the contact side
+// rather than from a transfer id. Used by the "resolve" action, which is a
+// close and must therefore leave nothing open behind it.
+//
+// A contact with no active attendance is simply released.
+func (a *App) closeActiveAttendanceForContact(contact *models.Contact, actorID *uuid.UUID, reason string) error {
+	var transfer models.AgentTransfer
+	err := a.DB.Where("organization_id = ? AND contact_id = ? AND status = ?",
+		contact.OrganizationID, contact.ID, models.TransferStatusActive).
+		Order("transferred_at DESC").
+		First(&transfer).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return a.releaseContact(contact, actorID, reason)
+	}
+	if err != nil {
+		return err
+	}
+
+	// Same close as ResumeFromTransfer performs, so there is one notion of a
+	// closed attendance regardless of which button produced it — including the
+	// lifecycle webhook, which the resolve button used to skip.
+	now := time.Now()
+	if err := a.closeAttendance(&transfer, contact, map[string]any{
+		"status":     models.TransferStatusResumed,
+		"resumed_at": now,
+		"resumed_by": actorID,
+	}, actorID, reason, closeAttendanceOptions{webhookEvent: models.WebhookEventTransferResumed}); err != nil {
+		return err
+	}
+	transfer.Status = models.TransferStatusResumed
+	transfer.ResumedAt = &now
+	transfer.ResumedBy = actorID
+
+	a.broadcastTransferResumed(&transfer)
+	return nil
+}
+
 // ResumeFromTransfer resumes chatbot processing for a transferred contact
 func (a *App) ResumeFromTransfer(r *fastglue.Request) error {
 	orgID, userID, err := a.getOrgAndUserID(r)
@@ -643,36 +778,47 @@ func (a *App) ResumeFromTransfer(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Transfer is not active", nil, "")
 	}
 
-	// Update transfer
+	// Get contact for webhook data and release. The load error must be
+	// checked: on failure `contact` stays the zero value (ID == uuid.Nil,
+	// AssignedUserID == nil), and releaseContact would silently "succeed" on
+	// it — no assignment to clear, an UPDATE ... WHERE id = zero-uuid that
+	// matches zero rows, and a "Contact released" log line that looks fine.
+	// The real contact would stay pinned to the agent with nothing anywhere
+	// signalling the failure, so a failed load must skip the release instead.
+	var contact models.Contact
+	var toRelease *models.Contact
+	if err := a.DB.Where("id = ?", transfer.ContactID).First(&contact).Error; err != nil {
+		a.Log.Error("Failed to load contact for transfer resume; skipping release", "error", err, "transfer_id", transfer.ID, "contact_id", transfer.ContactID)
+	} else {
+		// Closing an attendance frees the contact: the next inbound message must
+		// start a fresh cycle through the flow, not return to whoever served it last.
+		toRelease = &contact
+	}
+
+	// Close and release together. If the release fails the close rolls back
+	// with it and the attendance stays open, so the agent can retry — better
+	// than a 200 over a half-closed conversation nobody owns.
 	now := time.Now()
+	if err := a.closeAttendance(transfer, toRelease, map[string]any{
+		"status":     models.TransferStatusResumed,
+		"resumed_at": now,
+		"resumed_by": userID,
+	}, &userID, "attendance closed", closeAttendanceOptions{webhookEvent: models.WebhookEventTransferResumed}); err != nil {
+		a.Log.Error("Failed to close attendance; nothing was changed",
+			"error", err,
+			"org_id", orgID,
+			"contact_id", transfer.ContactID,
+			"transfer_id", transfer.ID,
+		)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to resume transfer", nil, "")
+	}
 	transfer.Status = models.TransferStatusResumed
 	transfer.ResumedAt = &now
 	transfer.ResumedBy = &userID
 
-	if err := a.DB.Save(transfer).Error; err != nil {
-		a.Log.Error("Failed to resume transfer", "error", err, "transfer_id", transfer.ID)
-		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to resume transfer", nil, "")
-	}
-
-	// Clear chatbot tracking so client inactivity SLA doesn't trigger after transfer is closed
-	a.ClearContactChatbotTracking(transfer.ContactID)
-
-	// Broadcast WebSocket notification
+	// Broadcast WebSocket notification. Chatbot-tracking clear and the
+	// transfer.resumed webhook are handled inside closeAttendance.
 	a.broadcastTransferResumed(transfer)
-
-	// Get contact for webhook data
-	var contact models.Contact
-	a.DB.Where("id = ?", transfer.ContactID).First(&contact)
-
-	// Dispatch webhook for transfer resumed
-	a.DispatchWebhook(orgID, models.WebhookEventTransferResumed, TransferEventData{
-		TransferID:      transfer.ID.String(),
-		ContactID:       contact.ID.String(),
-		ContactPhone:    contact.PhoneNumber,
-		ContactName:     contact.ProfileName,
-		Source:          transfer.Source,
-		WhatsAppAccount: transfer.WhatsAppAccount,
-	})
 
 	return r.SendEnvelope(map[string]any{
 		"message": "Transfer resumed, chatbot is now active for this contact",
@@ -707,6 +853,18 @@ func (a *App) AssignAgentTransfer(r *fastglue.Request) error {
 
 	if transfer.Status != models.TransferStatusActive {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Transfer is not active", nil, "")
+	}
+
+	// Visibility gate: the caller must already be able to interact with this
+	// conversation. Without it a default agent (transfers:write) could self-assign
+	// onto another agent's active conversation and thereby gain read access.
+	var gateContact models.Contact
+	if err := a.DB.Where("id = ? AND organization_id = ?", transfer.ContactID, orgID).First(&gateContact).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
+	}
+	if !a.canInteractWithConversation(userID, orgID, &gateContact) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You do not have access to this conversation", nil, "")
 	}
 
 	// Determine target agent
@@ -832,6 +990,67 @@ func (a *App) AssignAgentTransfer(r *fastglue.Request) error {
 	return r.SendEnvelope(map[string]any{
 		"message":  "Transfer assigned successfully",
 		"agent_id": targetAgentID,
+	})
+}
+
+// UnassignTransfer removes the responsible agent from an attendance and returns
+// it to the team queue, leaving the attendance itself open.
+//
+// The relationship manager on the contact is cleared only when it points at the
+// agent being removed — the same conservative rule ReturnAgentTransfersToQueue
+// uses, so a manually set manager is never wiped as a side effect.
+func (a *App) UnassignTransfer(r *fastglue.Request) error {
+	orgID, userID, err := a.getOrgAndUserID(r)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+
+	if !a.HasPermission(userID, models.ResourceTransfers, models.ActionWrite, orgID) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You do not have permission to unassign transfers", nil, "")
+	}
+
+	transferID, err := parsePathUUID(r, "id", "transfer")
+	if err != nil {
+		return nil
+	}
+
+	transfer, err := findByIDAndOrg[models.AgentTransfer](a.DB, r, transferID, orgID, "Transfer")
+	if err != nil {
+		return nil
+	}
+
+	if transfer.Status != models.TransferStatusActive {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Transfer is not active", nil, "")
+	}
+
+	// Visibility gate: same as AssignAgentTransfer — a default agent must not be
+	// able to touch a conversation they cannot view.
+	var gateContact models.Contact
+	if err := a.DB.Where("id = ? AND organization_id = ?", transfer.ContactID, orgID).First(&gateContact).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
+	}
+	if !a.canInteractWithConversation(userID, orgID, &gateContact) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You do not have access to this conversation", nil, "")
+	}
+
+	previousAgentID := transfer.AgentID
+	if err := a.DB.Model(transfer).Update("agent_id", nil).Error; err != nil {
+		a.Log.Error("Failed to unassign transfer", "error", err, "transfer_id", transfer.ID)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to unassign transfer", nil, "")
+	}
+	transfer.AgentID = nil
+
+	if previousAgentID != nil {
+		a.DB.Model(&models.Contact{}).
+			Where("id = ? AND assigned_user_id = ?", transfer.ContactID, *previousAgentID).
+			Update("assigned_user_id", nil)
+	}
+
+	a.broadcastTransferAssigned(transfer)
+
+	return r.SendEnvelope(map[string]any{
+		"message": "Transfer returned to the team queue",
 	})
 }
 
@@ -1117,7 +1336,7 @@ func (a *App) broadcastTransferCreated(transfer *models.AgentTransfer, contact *
 		payload["team_id"] = transfer.TeamID.String()
 	}
 
-	a.WSHub.BroadcastToOrg(transfer.OrganizationID, websocket.WSMessage{
+	a.WSHub.BroadcastToAuthorizedViewers(transfer.OrganizationID, transfer.ContactID, websocket.WSMessage{
 		Type:    websocket.TypeAgentTransfer,
 		Payload: payload,
 	})
@@ -1141,7 +1360,7 @@ func (a *App) broadcastTransferResumed(transfer *models.AgentTransfer) {
 		payload["resumed_by"] = transfer.ResumedBy.String()
 	}
 
-	a.WSHub.BroadcastToOrg(transfer.OrganizationID, websocket.WSMessage{
+	a.WSHub.BroadcastToAuthorizedViewers(transfer.OrganizationID, transfer.ContactID, websocket.WSMessage{
 		Type:    websocket.TypeAgentTransferResume,
 		Payload: payload,
 	})
@@ -1170,7 +1389,7 @@ func (a *App) broadcastTransferAssigned(transfer *models.AgentTransfer) {
 		payload["team_id"] = nil
 	}
 
-	a.WSHub.BroadcastToOrg(transfer.OrganizationID, websocket.WSMessage{
+	a.WSHub.BroadcastToAuthorizedViewers(transfer.OrganizationID, transfer.ContactID, websocket.WSMessage{
 		Type:    websocket.TypeAgentTransferAssign,
 		Payload: payload,
 	})
@@ -1255,6 +1474,40 @@ func (a *App) createTransferToQueue(account *models.WhatsAppAccount, contact *mo
 	}
 
 	a.Log.Info("Transfer created to agent queue", "transfer_id", transfer.ID, "contact_id", contact.ID, "source", source)
+}
+
+// createAgentInitiatedTransfer opens an attendance when an agent messages a
+// contact that has none. The system models "a human owns this conversation"
+// solely as an active AgentTransfer, and no send path used to create one — so
+// the chatbot hijacked the customer's reply.
+//
+// Deliberately does NOT suppress outside business hours, unlike
+// createTransferToQueue: an agent messaging a customer at 11pm is a human
+// choosing to work, not an automated handoff.
+func (a *App) createAgentInitiatedTransfer(account *models.WhatsAppAccount, contact *models.Contact, agentID uuid.UUID) {
+	if a.hasActiveAgentTransfer(account.OrganizationID, contact.ID) {
+		return
+	}
+
+	settings, _ := a.getChatbotSettingsCached(account.OrganizationID, account.Name)
+
+	transfer := models.AgentTransfer{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  account.OrganizationID,
+		ContactID:       contact.ID,
+		WhatsAppAccount: account.Name,
+		PhoneNumber:     contact.PhoneNumber,
+		Status:          models.TransferStatusActive,
+		Source:          models.TransferSourceAgentInitiated,
+		AgentID:         &agentID,
+		TransferredAt:   time.Now(),
+	}
+
+	// endChatbotSession = true: human intervention wins over the bot.
+	if err := a.saveAndFinalizeTransfer(&transfer, account, contact, settings, true); err != nil {
+		a.Log.Error("Failed to open agent-initiated attendance",
+			"error", err, "contact_id", contact.ID, "agent_id", agentID)
+	}
 }
 
 // createTransferFromKeyword creates an agent transfer triggered by a keyword rule

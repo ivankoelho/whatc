@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Plus, Trash2 } from 'lucide-vue-next'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -45,6 +46,8 @@ const emit = defineEmits<{
   'update:panelConfig': [config: PanelConfig]
 }>()
 
+const { t } = useI18n()
+
 function update(config: PanelConfig) {
   emit('update:panelConfig', config)
 }
@@ -64,7 +67,7 @@ const unassignedVariables = computed(() =>
 function addSection() {
   const sections = [...props.panelConfig.sections, {
     id: `section_${Date.now()}`,
-    label: 'New section',
+    label: t('chatbot.panel.newSectionLabel'),
     columns: 1 as const,
     collapsible: true,
     default_collapsed: false,
@@ -132,7 +135,7 @@ function setField(sectionIndex: number, fieldIndex: number, patch: Partial<Panel
 <template>
   <div class="space-y-3 min-w-0 overflow-hidden">
     <div v-if="availableVariables.length > 0" class="text-[10px] text-muted-foreground space-y-1">
-      <div class="font-medium">Available variables</div>
+      <div class="font-medium">{{ t('chatbot.panel.availableVariables') }}</div>
       <div class="flex flex-wrap gap-1">
         <code
           v-for="(v, i) in availableVariables"
@@ -142,14 +145,14 @@ function setField(sectionIndex: number, fieldIndex: number, patch: Partial<Panel
       </div>
     </div>
     <div v-else class="text-[10px] text-muted-foreground p-2 border rounded bg-muted/30">
-      No variables captured yet. Add a Prompt node with a "Store response as" value, or an API node with response mapping.
+      {{ t('chatbot.panel.noVariablesCaptured') }}
     </div>
 
     <div class="space-y-2">
       <div class="flex items-center justify-between">
-        <Label class="text-xs">Sections</Label>
+        <Label class="text-xs">{{ t('chatbot.panel.sections') }}</Label>
         <Button variant="outline" size="sm" class="h-7 px-2 text-xs gap-1" @click="addSection">
-          <Plus class="h-3.5 w-3.5" /> Add Section
+          <Plus class="h-3.5 w-3.5" /> {{ t('chatbot.panel.addSection') }}
         </Button>
       </div>
 
@@ -157,7 +160,7 @@ function setField(sectionIndex: number, fieldIndex: number, patch: Partial<Panel
         v-if="panelConfig.sections.length === 0"
         class="text-[10px] text-muted-foreground p-2 border rounded bg-muted/30 text-center"
       >
-        No sections configured.
+        {{ t('chatbot.panel.noSections') }}
       </div>
 
       <div
@@ -169,7 +172,7 @@ function setField(sectionIndex: number, fieldIndex: number, patch: Partial<Panel
           <Input
             :model-value="section.label"
             @update:model-value="(v) => setSection(sectionIdx, { label: String(v ?? '') })"
-            placeholder="Section label"
+            :placeholder="t('chatbot.panel.sectionLabelPlaceholder')"
             class="h-7 text-xs flex-1"
           />
           <Button variant="ghost" size="icon" class="h-7 w-7" @click="removeSection(sectionIdx)">
@@ -179,7 +182,7 @@ function setField(sectionIndex: number, fieldIndex: number, patch: Partial<Panel
 
         <div class="flex items-center gap-3 text-[10px]">
           <div class="flex items-center gap-1">
-            <span class="text-muted-foreground">Columns:</span>
+            <span class="text-muted-foreground">{{ t('chatbot.panel.columns') }}</span>
             <Select
               :model-value="String(section.columns)"
               @update:model-value="(v) => setSection(sectionIdx, { columns: (Number(v) === 2 ? 2 : 1) })"
@@ -197,7 +200,7 @@ function setField(sectionIndex: number, fieldIndex: number, patch: Partial<Panel
               @update:checked="(v) => setSection(sectionIdx, { collapsible: v })"
               class="scale-75"
             />
-            <span class="text-muted-foreground">Collapsible</span>
+            <span class="text-muted-foreground">{{ t('chatbot.panel.collapsible') }}</span>
           </div>
           <div v-if="section.collapsible" class="flex items-center gap-1">
             <Switch
@@ -205,16 +208,16 @@ function setField(sectionIndex: number, fieldIndex: number, patch: Partial<Panel
               @update:checked="(v) => setSection(sectionIdx, { default_collapsed: v })"
               class="scale-75"
             />
-            <span class="text-muted-foreground">Collapsed by default</span>
+            <span class="text-muted-foreground">{{ t('chatbot.panel.collapsedByDefault') }}</span>
           </div>
         </div>
 
         <div class="space-y-1">
           <div class="flex items-center justify-between">
-            <span class="text-[10px] text-muted-foreground">Fields:</span>
+            <span class="text-[10px] text-muted-foreground">{{ t('chatbot.panel.fields') }}</span>
             <Select @update:model-value="(v: any) => addField(sectionIdx, v)">
               <SelectTrigger class="h-6 w-32 text-[10px]">
-                <SelectValue placeholder="Add field…" />
+                <SelectValue :placeholder="t('chatbot.panel.addFieldPlaceholder')" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem
@@ -228,7 +231,7 @@ function setField(sectionIndex: number, fieldIndex: number, patch: Partial<Panel
                   v-if="unassignedVariables.length === 0"
                   class="p-2 text-[10px] text-muted-foreground"
                 >
-                  No unused variables left.
+                  {{ t('chatbot.panel.noUnusedVariables') }}
                 </div>
               </SelectContent>
             </Select>
@@ -238,7 +241,7 @@ function setField(sectionIndex: number, fieldIndex: number, patch: Partial<Panel
             v-if="section.fields.length === 0"
             class="text-[10px] text-muted-foreground text-center py-1"
           >
-            No fields added.
+            {{ t('chatbot.panel.noFieldsAdded') }}
           </div>
 
           <div
@@ -251,7 +254,7 @@ function setField(sectionIndex: number, fieldIndex: number, patch: Partial<Panel
               <Input
                 :model-value="field.label"
                 @update:model-value="(v) => setField(sectionIdx, fieldIdx, { label: String(v ?? '') })"
-                placeholder="Display label"
+                :placeholder="t('chatbot.panel.displayLabelPlaceholder')"
                 class="h-6 text-[10px] flex-1"
               />
               <Button variant="ghost" size="icon" class="h-6 w-6" @click="removeField(sectionIdx, fieldIdx)">
@@ -265,9 +268,9 @@ function setField(sectionIndex: number, fieldIndex: number, patch: Partial<Panel
               >
                 <SelectTrigger class="h-6 text-[10px] w-20"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="text">Text</SelectItem>
-                  <SelectItem value="badge">Badge</SelectItem>
-                  <SelectItem value="tag">Tag</SelectItem>
+                  <SelectItem value="text">{{ t('chatbot.panel.typeText') }}</SelectItem>
+                  <SelectItem value="badge">{{ t('chatbot.panel.typeBadge') }}</SelectItem>
+                  <SelectItem value="tag">{{ t('chatbot.panel.typeTag') }}</SelectItem>
                 </SelectContent>
               </Select>
               <Select
@@ -277,11 +280,11 @@ function setField(sectionIndex: number, fieldIndex: number, patch: Partial<Panel
               >
                 <SelectTrigger class="h-6 text-[10px] flex-1"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="default">Default</SelectItem>
-                  <SelectItem value="success">Success</SelectItem>
-                  <SelectItem value="warning">Warning</SelectItem>
-                  <SelectItem value="error">Error</SelectItem>
-                  <SelectItem value="info">Info</SelectItem>
+                  <SelectItem value="default">{{ t('chatbot.panel.colorDefault') }}</SelectItem>
+                  <SelectItem value="success">{{ t('chatbot.panel.colorSuccess') }}</SelectItem>
+                  <SelectItem value="warning">{{ t('chatbot.panel.colorWarning') }}</SelectItem>
+                  <SelectItem value="error">{{ t('chatbot.panel.colorError') }}</SelectItem>
+                  <SelectItem value="info">{{ t('chatbot.panel.colorInfo') }}</SelectItem>
                 </SelectContent>
               </Select>
             </div>

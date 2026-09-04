@@ -266,6 +266,72 @@ func TestJSONBArray_Value(t *testing.T) {
 	}
 }
 
+func TestConversationsViewAllPermission(t *testing.T) {
+	// The permission must exist in the default set.
+	found := false
+	for _, p := range models.DefaultPermissions() {
+		if p.Resource == models.ResourceConversations && p.Action == models.ActionViewAll {
+			found = true
+		}
+	}
+	assert.True(t, found, "conversations:view_all must be a default permission")
+
+	roles := models.SystemRolePermissions()
+	// admin gets every default permission automatically.
+	assert.Contains(t, roles["admin"], "conversations:view_all")
+	// manager is a supervisor and must see all conversations.
+	assert.Contains(t, roles["manager"], "conversations:view_all")
+	// agent must NOT — that is the whole point.
+	assert.NotContains(t, roles["agent"], "conversations:view_all")
+}
+
+// TestOccurrenceStagesPermissionNotForAgent guards the pipeline-admin
+// permissions: managing stages is a manager/admin concern, not something
+// every agent gets alongside occurrences:read/write.
+func TestOccurrenceStagesPermissionNotForAgent(t *testing.T) {
+	roles := models.SystemRolePermissions()
+	// manager administers the pipeline and must have all three.
+	assert.Contains(t, roles["manager"], "occurrences.stages:read")
+	assert.Contains(t, roles["manager"], "occurrences.stages:write")
+	assert.Contains(t, roles["manager"], "occurrences.stages:delete")
+	// agent must NOT — that is the whole point.
+	assert.NotContains(t, roles["agent"], "occurrences.stages:read")
+	assert.NotContains(t, roles["agent"], "occurrences.stages:write")
+	assert.NotContains(t, roles["agent"], "occurrences.stages:delete")
+}
+
+// TestAgentHasContactNamePermission guards the seed data behind the
+// contact-rename feature: SeedSystemRolesForOrg and FixSystemRolePermissions
+// grant from this list, and the backfill's organisation guard skips any org
+// that already holds the permission — so a fresh organisation only ever gets
+// contacts.name:write through this entry. Drop it and every new org's agents
+// get 403 on rename, silently, with the rest of the suite still green.
+func TestAgentHasContactNamePermission(t *testing.T) {
+	roles := models.SystemRolePermissions()
+	assert.Contains(t, roles["agent"], "contacts.name:write")
+	// The permission's whole point is narrower than contacts:write — an
+	// agent who can rename must still not be able to edit the rest of the
+	// contact. Without this, "fixing" the feature by widening the agent to
+	// contacts:write would still pass.
+	assert.NotContains(t, roles["agent"], "contacts:write")
+}
+
+func TestViewTeamPermissionInCatalogButNotDefaultRoles(t *testing.T) {
+	// It must exist in the catalog so admins can assign it.
+	found := false
+	for _, p := range models.DefaultPermissions() {
+		if p.Resource == models.ResourceConversations && p.Action == models.ActionViewTeam {
+			found = true
+		}
+	}
+	assert.True(t, found, "conversations:view_team must be in DefaultPermissions")
+
+	// It must NOT be granted to manager or agent by default.
+	roles := models.SystemRolePermissions()
+	assert.NotContains(t, roles["manager"], "conversations:view_team")
+	assert.NotContains(t, roles["agent"], "conversations:view_team")
+}
+
 func TestJSONBArray_Scan(t *testing.T) {
 	t.Parallel()
 

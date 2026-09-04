@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { FlowStep, FlowData } from '@/types/flow-preview'
 import type { ChatFlowGraph } from '@/services/api'
 import { Button } from '@/components/ui/button'
@@ -35,6 +36,8 @@ const emit = defineEmits<{
   'update:listPickerOpen': [value: boolean]
 }>()
 
+const { t } = useI18n()
+
 const mode = ref<'edit' | 'preview'>(props.initialMode || 'edit')
 
 watch(() => props.initialMode, (newMode) => {
@@ -45,37 +48,43 @@ watch(() => props.initialMode, (newMode) => {
 
 // Step types that don't render as a WhatsApp message bubble — control-
 // flow nodes that operate on session state without sending anything.
-const controlNodeMeta: Record<string, { label: string; icon: any; description: string }> = {
+const controlNodeMeta = computed<Record<string, { label: string; icon: any; description: string }>>(() => ({
   condition: {
-    label: 'Condition',
+    label: t('chatbot.preview.ctrlConditionLabel'),
     icon: GitBranch,
-    description: 'Branches the flow based on a boolean expression. No WhatsApp message is sent.',
+    description: t('chatbot.preview.ctrlConditionDesc'),
   },
   timing: {
-    label: 'Timing',
+    label: t('chatbot.preview.ctrlTimingLabel'),
     icon: Clock,
-    description: 'Routes between in-hours and out-of-hours based on the schedule. No WhatsApp message is sent.',
+    description: t('chatbot.preview.ctrlTimingDesc'),
   },
   goto_flow: {
-    label: 'Go to Flow',
+    label: t('chatbot.preview.ctrlGotoFlowLabel'),
     icon: ExternalLink,
-    description: 'Jumps execution to another flow. Session variables carry forward.',
+    description: t('chatbot.preview.ctrlGotoFlowDesc'),
   },
   set_variable: {
-    label: 'Set Variable',
+    label: t('chatbot.preview.ctrlSetVariableLabel'),
     icon: Variable,
-    description: 'Assigns values to session variables. No WhatsApp message is sent.',
+    description: t('chatbot.preview.ctrlSetVariableDesc'),
   },
   end: {
-    label: 'End',
+    label: t('chatbot.preview.ctrlEndLabel'),
     icon: StopCircle,
-    description: 'Terminates the flow. The optional message below renders in WhatsApp on completion.',
+    description: t('chatbot.preview.ctrlEndDesc'),
   },
-}
+}))
 
 const controlNodeInfo = computed(() => {
   if (!props.selectedStep) return null
-  return controlNodeMeta[props.selectedStep.message_type] || null
+  return controlNodeMeta.value[props.selectedStep.message_type] || null
+})
+
+const transferTargetName = computed(() => {
+  const tid = props.selectedStep?.transfer_config?.team_id
+  if (tid === '_general') return t('chatbot.preview.generalQueue')
+  return props.teams.find(tm => tm.id === tid)?.name || t('chatbot.preview.team')
 })
 
 // Sync listPickerOpen with parent
@@ -101,7 +110,7 @@ const localListPickerOpen = computed({
           @click="mode = 'edit'"
         >
           <Edit3 class="h-3.5 w-3.5 mr-1.5" />
-          Edit
+          {{ t('chatbot.preview.edit') }}
         </Button>
         <Button
           variant="ghost"
@@ -114,12 +123,12 @@ const localListPickerOpen = computed({
           @click="mode = 'preview'"
         >
           <Play class="h-3.5 w-3.5 mr-1.5" />
-          Preview
+          {{ t('chatbot.preview.previewTab') }}
         </Button>
       </div>
 
       <div class="text-xs text-gray-500 dark:text-gray-400">
-        {{ mode === 'edit' ? 'Read-only preview of selected step' : 'Interactive flow simulation' }}
+        {{ mode === 'edit' ? t('chatbot.preview.readOnlyPreview') : t('chatbot.preview.interactiveSimulation') }}
       </div>
     </div>
 
@@ -148,7 +157,7 @@ const localListPickerOpen = computed({
                 {{ selectedStep.message }}
               </p>
               <p v-else class="text-xs text-gray-400 italic">
-                Use the right panel to configure this step.
+                {{ t('chatbot.preview.useRightPanel') }}
               </p>
             </div>
           </div>
@@ -164,8 +173,8 @@ const localListPickerOpen = computed({
                     <MessageSquare class="h-5 w-5" />
                   </div>
                   <div>
-                    <p class="font-medium text-sm">{{ flowData.name || 'WhatsApp Preview' }}</p>
-                    <p class="text-xs text-white/70">Step {{ (selectedStepIndex ?? 0) + 1 }}: {{ selectedStep.step_name }}</p>
+                    <p class="font-medium text-sm">{{ flowData.name || t('chatbot.preview.whatsappPreview') }}</p>
+                    <p class="text-xs text-white/70">{{ t('chatbot.preview.stepNumber', { index: (selectedStepIndex ?? 0) + 1 }) }} {{ selectedStep.step_name }}</p>
                   </div>
                 </div>
 
@@ -177,7 +186,7 @@ const localListPickerOpen = computed({
                     <div class="max-w-[85%]">
                       <div class="bg-white dark:bg-[#202c33] rounded-lg rounded-tl-none shadow-sm p-3">
                         <p v-if="selectedStep.message" class="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{{ selectedStep.message }}</p>
-                        <p v-else class="text-sm text-gray-400 italic">No message configured</p>
+                        <p v-else class="text-sm text-gray-400 italic">{{ t('chatbot.preview.noMessageConfigured') }}</p>
                         <p class="text-[10px] text-gray-400 text-right mt-1">12:00 PM</p>
                       </div>
 
@@ -189,7 +198,7 @@ const localListPickerOpen = computed({
                           class="w-full bg-white dark:bg-[#202c33] text-[#00a884] text-sm font-medium py-2.5 rounded-lg shadow-sm border-0 flex items-center justify-center gap-1.5"
                         >
                           <ExternalLink v-if="btn.type === 'url'" class="h-4 w-4" />
-                          {{ btn.title || `Option ${idx + 1}` }}
+                          {{ btn.title || t('chatbot.preview.optionN', { n: idx + 1 }) }}
                         </button>
                       </div>
 
@@ -202,14 +211,14 @@ const localListPickerOpen = computed({
                           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M3 4h18v2H3V4zm0 7h18v2H3v-2zm0 7h18v2H3v-2z"/>
                           </svg>
-                          Select an option
+                          {{ t('chatbot.preview.selectAnOption') }}
                         </button>
                       </div>
 
                       <!-- WhatsApp Flow Button -->
                       <div v-if="selectedStep.message_type === 'whatsapp_flow'" class="mt-1">
                         <button class="w-full bg-white dark:bg-[#202c33] text-[#00a884] text-sm font-medium py-2.5 rounded-lg shadow-sm border-0">
-                          {{ selectedStep.input_config?.flow_cta || 'Open Form' }}
+                          {{ selectedStep.input_config?.flow_cta || t('chatbot.preview.openForm') }}
                         </button>
                       </div>
                     </div>
@@ -221,16 +230,16 @@ const localListPickerOpen = computed({
                       <div class="bg-[#005c4b] light:bg-[#d9fdd3] rounded-lg rounded-tr-none shadow-sm p-3">
                         <p class="text-sm text-gray-200 light:text-gray-800 italic">
                           <template v-if="selectedStep.input_type === 'none'">
-                            (No response needed)
+                            {{ t('chatbot.preview.noResponseNeeded') }}
                           </template>
                           <template v-else-if="selectedStep.message_type === 'buttons'">
-                            User taps a button...
+                            {{ t('chatbot.preview.userTapsButton') }}
                           </template>
                           <template v-else-if="selectedStep.message_type === 'whatsapp_flow'">
-                            User completes form...
+                            {{ t('chatbot.preview.userCompletesForm') }}
                           </template>
                           <template v-else>
-                            User types {{ selectedStep.input_type }}...
+                            {{ t('chatbot.preview.userTypes', { type: selectedStep.input_type }) }}
                           </template>
                         </p>
                         <p class="text-[10px] text-gray-500 dark:text-gray-400 text-right mt-1 flex items-center justify-end gap-1">
@@ -246,7 +255,7 @@ const localListPickerOpen = computed({
                   <!-- Store As Info -->
                   <div v-if="selectedStep.store_as" class="flex justify-center">
                     <div class="bg-white/80 dark:bg-[#202c33]/80 text-xs text-gray-500 dark:text-gray-400 px-3 py-1 rounded-full">
-                      Response saved as <code class="font-mono text-[#00a884]">{{ selectedStep.store_as }}</code>
+                      {{ t('chatbot.preview.responseSavedAs') }} <code class="font-mono text-[#00a884]">{{ selectedStep.store_as }}</code>
                     </div>
                   </div>
 
@@ -254,7 +263,7 @@ const localListPickerOpen = computed({
                   <div v-if="selectedStep.message_type === 'transfer'" class="flex justify-center">
                     <div class="bg-amber-100 dark:bg-amber-900/30 text-xs text-amber-700 dark:text-amber-400 px-3 py-1.5 rounded-lg flex items-center gap-1.5">
                       <Users class="h-3 w-3" />
-                      <span>Conversation transferred to {{ selectedStep?.transfer_config?.team_id === '_general' ? 'General Queue' : teams.find(t => t.id === selectedStep?.transfer_config?.team_id)?.name || 'Team' }}</span>
+                      <span>{{ t('chatbot.preview.conversationTransferredTo', { target: transferTargetName }) }}</span>
                     </div>
                   </div>
 
@@ -262,7 +271,7 @@ const localListPickerOpen = computed({
                   <div v-if="selectedStep.message_type === 'api_fetch'" class="flex justify-center">
                     <div class="bg-blue-100 dark:bg-blue-900/30 text-xs text-blue-700 dark:text-blue-400 px-3 py-1.5 rounded-lg flex items-center gap-1.5">
                       <Globe class="h-3 w-3" />
-                      <span>Message populated from API</span>
+                      <span>{{ t('chatbot.preview.messagePopulatedFromApi') }}</span>
                     </div>
                   </div>
                   </div>
@@ -271,7 +280,7 @@ const localListPickerOpen = computed({
                 <!-- Input Bar -->
                 <div class="bg-[#f0f2f5] dark:bg-[#202c33] px-3 py-2 flex items-center gap-2 flex-shrink-0">
                   <div class="flex-1 bg-white dark:bg-[#2a3942] rounded-full px-4 py-2">
-                    <p class="text-sm text-gray-400">Type a message</p>
+                    <p class="text-sm text-gray-400">{{ t('chatbot.preview.typeAMessage') }}</p>
                   </div>
                   <div class="w-10 h-10 rounded-full bg-gray-300 dark:bg-gray-600 flex items-center justify-center">
                     <svg class="h-5 w-5 text-white" viewBox="0 0 24 24" fill="currentColor">
@@ -293,7 +302,7 @@ const localListPickerOpen = computed({
                           <path d="M6 18L18 6M6 6l12 12"/>
                         </svg>
                       </button>
-                      <span class="font-medium text-sm">Select an option</span>
+                      <span class="font-medium text-sm">{{ t('chatbot.preview.selectAnOption') }}</span>
                       <div class="w-5"></div>
                     </div>
                     <div class="max-h-[250px] overflow-y-auto">
@@ -309,7 +318,7 @@ const localListPickerOpen = computed({
                         <div v-else class="w-5 h-5 rounded-full border-2 border-[#00a884] flex items-center justify-center flex-shrink-0">
                           <span class="text-[10px] text-[#00a884] font-medium">{{ idx + 1 }}</span>
                         </div>
-                        <span class="text-sm text-gray-800 dark:text-gray-200 flex-1">{{ btn.title || `Option ${idx + 1}` }}</span>
+                        <span class="text-sm text-gray-800 dark:text-gray-200 flex-1">{{ btn.title || t('chatbot.preview.optionN', { n: idx + 1 }) }}</span>
                         <ExternalLink v-if="btn.type === 'url'" class="h-3 w-3 text-gray-400" />
                       </div>
                     </div>
@@ -326,16 +335,16 @@ const localListPickerOpen = computed({
                     <MessageSquare class="h-5 w-5" />
                   </div>
                   <div>
-                    <p class="font-medium text-sm">{{ flowData.name || 'WhatsApp Preview' }}</p>
-                    <p class="text-xs text-white/70">Select a step</p>
+                    <p class="font-medium text-sm">{{ flowData.name || t('chatbot.preview.whatsappPreview') }}</p>
+                    <p class="text-xs text-white/70">{{ t('chatbot.preview.selectAStep') }}</p>
                   </div>
                 </div>
                 <div class="flex-1 flex items-center justify-center">
-                  <p class="text-sm text-gray-500 dark:text-gray-400">Select a step to view preview</p>
+                  <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('chatbot.preview.selectAStepToView') }}</p>
                 </div>
                 <div class="bg-[#f0f2f5] dark:bg-[#202c33] px-3 py-2 flex items-center gap-2 flex-shrink-0">
                   <div class="flex-1 bg-white dark:bg-[#2a3942] rounded-full px-4 py-2">
-                    <p class="text-sm text-gray-400">Type a message</p>
+                    <p class="text-sm text-gray-400">{{ t('chatbot.preview.typeAMessage') }}</p>
                   </div>
                   <div class="w-10 h-10 rounded-full bg-gray-300 dark:bg-gray-600 flex items-center justify-center">
                     <svg class="h-5 w-5 text-white" viewBox="0 0 24 24" fill="currentColor">
