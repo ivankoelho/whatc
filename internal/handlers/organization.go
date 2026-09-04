@@ -269,9 +269,21 @@ func (a *App) IsCallingEnabledForOrg(orgID any) bool {
 
 // requireCallingEnabled checks if calling is enabled for the org and returns an error
 // envelope if not. Returns nil when calling is enabled and the handler can proceed.
+//
+// SendErrorEnvelope's own return value is nil on a successful write — it
+// reports whether the bytes went out, not whether the envelope was an
+// error. Returning it directly (as this used to) meant every caller's
+// `if err != nil { return nil }` guard never fired: a disabled org got the
+// error envelope written, then the handler kept running and wrote a SECOND,
+// success envelope on top of it, corrupting the response into two
+// concatenated JSON bodies (this is exactly what broke outgoing-call SDP
+// parsing in production for a disabled org). errEnvelopeSent is the
+// established sentinel this codebase uses elsewhere (see requireAuth,
+// decodeRequest) so the guard actually stops the handler.
 func (a *App) requireCallingEnabled(r *fastglue.Request, orgID uuid.UUID) error {
 	if !a.IsCallingEnabledForOrg(orgID) {
-		return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Calling is not enabled for this organization", nil, "")
+		_ = r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Calling is not enabled for this organization", nil, "")
+		return errEnvelopeSent
 	}
 	return nil
 }
