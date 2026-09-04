@@ -10,6 +10,29 @@ import (
 	"github.com/zerodha/fastglue"
 )
 
+// resolveWhatsAppAccountByName looks up an org's WhatsApp account by its
+// current exact name, falling back to a "name contains" match when that
+// misses.
+//
+// Account names aren't stable: renaming a line (e.g. adding a "[9600] -"
+// prefix once an org's second, third... line makes the plain business name
+// ambiguous) doesn't retroactively update the whatsapp_account string
+// already snapshotted onto existing contacts/messages at send/receive time.
+// A contact untouched since before such a rename still carries the old
+// name, and the frontend echoes that stored name back verbatim when
+// initiating a call for it — so an exact match alone 404s for every contact
+// whose account predates the most recent rename.
+func (a *App) resolveWhatsAppAccountByName(orgID uuid.UUID, name string) (*models.WhatsAppAccount, error) {
+	var account models.WhatsAppAccount
+	if err := a.DB.Where("organization_id = ? AND name = ?", orgID, name).First(&account).Error; err == nil {
+		return &account, nil
+	}
+	if err := a.DB.Where("organization_id = ? AND name ILIKE ?", orgID, "%"+name+"%").First(&account).Error; err != nil {
+		return nil, err
+	}
+	return &account, nil
+}
+
 // InitiateOutgoingCall handles POST /api/calls/outgoing
 // Lets an agent start a voice call to a WhatsApp consumer.
 func (a *App) InitiateOutgoingCall(r *fastglue.Request) error {
@@ -36,9 +59,8 @@ func (a *App) InitiateOutgoingCall(r *fastglue.Request) error {
 	}
 
 	// Look up account
-	var account models.WhatsAppAccount
-	if err := a.DB.Where("organization_id = ? AND name = ?", orgID, req.WhatsAppAccount).
-		First(&account).Error; err != nil {
+	account, err := a.resolveWhatsAppAccountByName(orgID, req.WhatsAppAccount)
+	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "WhatsApp account not found", nil, "")
 	}
 
@@ -135,9 +157,8 @@ func (a *App) SendCallPermissionRequest(r *fastglue.Request) error {
 	}
 
 	// Look up account
-	var account models.WhatsAppAccount
-	if err := a.DB.Where("organization_id = ? AND name = ?", orgID, req.WhatsAppAccount).
-		First(&account).Error; err != nil {
+	account, err := a.resolveWhatsAppAccountByName(orgID, req.WhatsAppAccount)
+	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "WhatsApp account not found", nil, "")
 	}
 
@@ -227,8 +248,8 @@ func (a *App) GetCallPermission(r *fastglue.Request) error {
 	}
 
 	// Look up WhatsApp account
-	var account models.WhatsAppAccount
-	if err := a.DB.Where("organization_id = ? AND name = ?", orgID, accountName).First(&account).Error; err != nil {
+	account, err := a.resolveWhatsAppAccountByName(orgID, accountName)
+	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "WhatsApp account not found", nil, "")
 	}
 
