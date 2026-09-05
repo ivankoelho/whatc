@@ -146,6 +146,7 @@ Nota interna (`POST /events` tipo `note`) continua existindo exatamente como na 
 - Na criação da Ocorrência (ou quando a prioridade muda), busca a política `occurrence_sla_policies` para `(organization_id, priority)` com `department_id`/`unit_id`/`category_id` nulos — a única forma de política que existe nesta fase — e calcula `response_deadline`/`resolution_deadline` a partir de `opened_at`.
 - Reaproveita o processo já existente em `internal/handlers/sla_processor.go`: novo passo `processOccurrenceSLA`, ao lado de `processOrganizationSLA`, gated por `occurrence_sla_enabled`. Nesta fase, o passo só **marca** `breached`/`breached_at` quando os prazos estouram — sem auto-fechar, sem escalonamento, sem notificação (viram insumo de relatório numa fase própria).
 - Mudar a prioridade depois de aberto recalcula os prazos a partir do momento da mudança (não retroage `opened_at`).
+- `first_response_at` só é preenchido pelo evento `reply` (§5) — uma resposta pública efetivamente enviada ao contato via WhatsApp. `note` nunca o preenche, nunca o encerra e nunca o adia; as duas semânticas não se confundem em nenhum ponto do cálculo de SLA.
 
 ## 7. Fila — conceito de API/UI
 
