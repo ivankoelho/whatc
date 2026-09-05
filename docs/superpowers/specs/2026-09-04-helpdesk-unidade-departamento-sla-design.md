@@ -248,3 +248,15 @@ Tudo aditivo: tabelas novas, colunas nulas, endpoints novos, telas novas.
 | Organização nunca configura política de SLA e Ocorrência nasce sem prazo | Seed automático de política padrão na primeira leitura, mesmo padrão de `ensureDefaultStages` |
 | Índice parcial de `occurrence_sla_policies` mal desenhado bloquear a fase seguinte (SLA por departamento) | Testado explicitamente: inserir linha mais específica junto com a org-wide sem conflito |
 | Tag de Unidade/Departamento na Team ficar incompleta (23 lojas × N setores pra marcar manualmente) | Fora do código: é trabalho de configuração único, não bloqueia a feature — Ocorrência sem Team tagueada simplesmente nasce sem unit/department, editável à mão |
+
+## 14. Roadmap futuro (fora desta fase)
+
+Objetivo de produto declarado: substituir o recurso de chamados do SULTS pelo Whatomate. A Fase 3 é o núcleo correto pra isso, mas não é paridade — falta o que vira **Fase 4 — Portal, Colaboração e Gestão de Chamados**, deliberadamente numa fase própria em vez de entrar no mesmo sprint:
+
+- Portal web do solicitante (fora do WhatsApp).
+- Participantes/colaboradores num chamado além do responsável único.
+- Etiquetas (tags livres, complementares à Categoria/Subcategoria estruturada).
+- Relatórios e dashboard (volume, SLA cumprido/violado, por unidade/departamento/agente).
+- Satisfação e reabertura de chamado encerrado.
+
+Nenhum item desta lista muda o schema decidido nas seções 3–4: `unit_id`/`department_id`/`category_id` em `Occurrence`, a tabela `occurrence_sla_policies` com colunas de escopo já prontas, e `occurrence_events` como timeline única são a base sobre a qual a Fase 4 se apoia — é por isso que a Fase 3 é implementada como está, sem adiantar nada desta lista.
