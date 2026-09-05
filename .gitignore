@@ -1,3 +1,6 @@
+# Isolated worktrees for subagent-driven development
+.worktrees/
+
 # Binaries
 /server
 /whatomate
