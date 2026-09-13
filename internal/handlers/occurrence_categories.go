@@ -10,16 +10,21 @@ import (
 )
 
 var (
-	errInvalidParent     = errors.New("invalid parent_id")
-	errNestedSubcategory = errors.New("a subcategory cannot itself have a parent")
+	errInvalidParent       = errors.New("invalid parent_id")
+	errNestedSubcategory   = errors.New("a subcategory cannot itself have a parent")
+	errReparentHasChildren = errors.New("category has subcategories and cannot become a subcategory itself")
 )
 
 // OccurrenceCategoryRequest is the create/update body for a category or subcategory.
+//
+// IsActive is a pointer so an absent field can be told apart from an explicit
+// false, mirroring req.Description/req.AssignedUserID in UpdateOccurrence:
+// nil means "field didn't participate in the request".
 type OccurrenceCategoryRequest struct {
 	Name     string  `json:"name"`
 	ParentID *string `json:"parent_id"`
 	Position int     `json:"position"`
-	IsActive bool    `json:"is_active"`
+	IsActive *bool   `json:"is_active"`
 }
 
 // ListOccurrenceCategories returns the org's category tree, flat (parent_id
@@ -82,9 +87,17 @@ func (a *App) CreateOccurrenceCategory(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, err.Error(), nil, "")
 	}
 
+	// A create omitting is_active should get the model's own default(true),
+	// not Go's zero value for bool — matching gorm:"default:true" on
+	// OccurrenceCategory.IsActive instead of silently overriding it.
+	isActive := true
+	if req.IsActive != nil {
+		isActive = *req.IsActive
+	}
+
 	category := models.OccurrenceCategory{
 		OrganizationID: orgID, Name: req.Name, ParentID: parentID,
-		Position: req.Position, IsActive: req.IsActive,
+		Position: req.Position, IsActive: isActive,
 	}
 	if err := a.DB.Create(&category).Error; err != nil {
 		a.Log.Error("Failed to create occurrence category", "error", err)
@@ -122,13 +135,36 @@ func (a *App) UpdateOccurrenceCategory(r *fastglue.Request) error {
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, err.Error(), nil, "")
 	}
-	if parentID != nil && *parentID == categoryID {
-		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "A category cannot be its own parent", nil, "")
+	if parentID != nil {
+		if *parentID == categoryID {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "A category cannot be its own parent", nil, "")
+		}
+		// The category being updated is about to become a subcategory itself
+		// (parent_id supplied and non-nil). resolveCategoryParent already
+		// enforces that the *new* parent is top-level; without this check
+		// nothing stops the category being reparented from already having
+		// children of its own, which would produce X → A → {B, C} — two
+		// levels of subcategory nesting the one-level rule exists to prevent.
+		var childCount int64
+		a.DB.Model(&models.OccurrenceCategory{}).Where("parent_id = ?", categoryID).Count(&childCount)
+		if childCount > 0 {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, errReparentHasChildren.Error(), nil, "")
+		}
 	}
 
-	if err := a.DB.Model(category).Updates(map[string]any{
-		"name": req.Name, "parent_id": parentID, "position": req.Position, "is_active": req.IsActive,
-	}).Error; err != nil {
+	updates := map[string]any{
+		"name": req.Name, "parent_id": parentID, "position": req.Position,
+	}
+	// Absent is_active leaves the existing value untouched — different from
+	// create's "default to true if omitted" — mirroring the nil-means-absent
+	// pointer pattern used by req.Description/req.AssignedUserID in
+	// UpdateOccurrence (a plain bool, as UpdateTeam's IsActive still uses,
+	// can't tell "omitted" from "explicit false" apart).
+	if req.IsActive != nil {
+		updates["is_active"] = *req.IsActive
+	}
+
+	if err := a.DB.Model(category).Updates(updates).Error; err != nil {
 		a.Log.Error("Failed to update occurrence category", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update category", nil, "")
 	}

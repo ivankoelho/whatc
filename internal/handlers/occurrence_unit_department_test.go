@@ -78,6 +78,30 @@ func TestCreateOccurrence_ManualUnitOverridesInheritedOne(t *testing.T) {
 	assert.Equal(t, override.ID, *occ.UnitID)
 }
 
+func TestCreateOccurrence_MalformedSourceTransferIDFallsBackToManual(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	admin := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&admin.ID))
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+
+	req := testutil.NewJSONRequest(t, map[string]any{
+		"contact_id": contact.ID.String(), "title": "Transfer ID malformado",
+		"source_transfer_id": "not-a-uuid",
+	})
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	require.NoError(t, app.CreateOccurrence(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var occ models.Occurrence
+	require.NoError(t, app.DB.Where("contact_id = ?", contact.ID).First(&occ).Error)
+	// Without the fix, Source is left at Go's zero value "" here, and GORM's
+	// default:'whatsapp' column silently applies on INSERT instead — wrongly
+	// marking as "whatsapp" a case with no transfer actually recorded.
+	assert.Equal(t, "manual", occ.Source)
+	assert.Nil(t, occ.SourceTransferID)
+}
+
 func TestCreateOccurrence_ManualHasSourceManual(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)

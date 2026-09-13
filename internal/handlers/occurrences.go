@@ -230,13 +230,24 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 		}
 		occ.AssignedUserID = assigneeID
 	}
+	// Default to "manual" unconditionally first, then override to "whatsapp"
+	// only on a successful parse that actually records a transfer. Without
+	// this, a malformed (non-UUID) source_transfer_id left occ.Source at Go's
+	// zero value "" — which GORM's `default:'whatsapp'` column then silently
+	// applied on INSERT (a zero-value field is omitted, not written as ""),
+	// wrongly marking as "whatsapp" a case with no transfer actually recorded.
+	// A malformed value is otherwise ignored here, not rejected with 400 —
+	// unlike unit_id/department_id/category_id a few lines below, which do
+	// 400 on a bad UUID. source_transfer_id has never followed that
+	// convention, in this handler or in the original plan's own example code,
+	// so this fix only closes the Source-defaulting gap and leaves that
+	// pre-existing ignore-invalid behavior as-is.
+	occ.Source = "manual"
 	if req.SourceTransferID != nil && *req.SourceTransferID != "" {
 		if id, err := uuid.Parse(*req.SourceTransferID); err == nil {
 			occ.SourceTransferID = &id
 			occ.Source = "whatsapp"
 		}
-	} else {
-		occ.Source = "manual"
 	}
 
 	// Inherit unit/department from the originating attendance's Team, then let
