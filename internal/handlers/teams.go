@@ -16,6 +16,8 @@ type TeamRequest struct {
 	AssignmentStrategy  models.AssignmentStrategy `json:"assignment_strategy"` // round_robin, load_balanced, manual
 	PerAgentTimeoutSecs int                       `json:"per_agent_timeout_secs"`
 	IsActive            bool                      `json:"is_active"`
+	UnitID              *string                   `json:"unit_id,omitempty"`
+	DepartmentID        *string                   `json:"department_id,omitempty"`
 }
 
 // TeamMemberRequest represents add member request
@@ -38,6 +40,8 @@ type TeamResponse struct {
 	CreatedByName       string                    `json:"created_by_name,omitempty"`
 	UpdatedByID         *uuid.UUID                `json:"updated_by_id,omitempty"`
 	UpdatedByName       string                    `json:"updated_by_name,omitempty"`
+	UnitID              *uuid.UUID                `json:"unit_id,omitempty"`
+	DepartmentID        *uuid.UUID                `json:"department_id,omitempty"`
 	CreatedAt           time.Time                 `json:"created_at"`
 	UpdatedAt           time.Time                 `json:"updated_at"`
 }
@@ -176,6 +180,26 @@ func (a *App) CreateTeam(r *fastglue.Request) error {
 		UpdatedByID:         &userID,
 	}
 
+	// Handle unit_id and department_id
+	if req.UnitID != nil {
+		if *req.UnitID == "" {
+			team.UnitID = nil
+		} else if id, err := uuid.Parse(*req.UnitID); err == nil {
+			team.UnitID = &id
+		} else {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid unit_id", nil, "")
+		}
+	}
+	if req.DepartmentID != nil {
+		if *req.DepartmentID == "" {
+			team.DepartmentID = nil
+		} else if id, err := uuid.Parse(*req.DepartmentID); err == nil {
+			team.DepartmentID = &id
+		} else {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid department_id", nil, "")
+		}
+	}
+
 	if err := a.DB.Create(&team).Error; err != nil {
 		a.Log.Error("Failed to create team", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create team", nil, "")
@@ -243,6 +267,24 @@ func (a *App) UpdateTeam(r *fastglue.Request) error {
 		team.AssignmentStrategy = req.AssignmentStrategy
 	}
 	team.PerAgentTimeoutSecs = req.PerAgentTimeoutSecs
+	if req.UnitID != nil {
+		if *req.UnitID == "" {
+			team.UnitID = nil
+		} else if id, err := uuid.Parse(*req.UnitID); err == nil {
+			team.UnitID = &id
+		} else {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid unit_id", nil, "")
+		}
+	}
+	if req.DepartmentID != nil {
+		if *req.DepartmentID == "" {
+			team.DepartmentID = nil
+		} else if id, err := uuid.Parse(*req.DepartmentID); err == nil {
+			team.DepartmentID = &id
+		} else {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid department_id", nil, "")
+		}
+	}
 	team.UpdatedByID = &userID
 
 	if err := a.DB.Save(&team).Error; err != nil {
@@ -528,6 +570,8 @@ func buildTeamResponse(team *models.Team, includeMembers bool) TeamResponse {
 		MemberCount:         len(team.Members),
 		CreatedByID:         team.CreatedByID,
 		UpdatedByID:         team.UpdatedByID,
+		UnitID:              team.UnitID,
+		DepartmentID:        team.DepartmentID,
 		CreatedAt:           team.CreatedAt,
 		UpdatedAt:           team.UpdatedAt,
 	}

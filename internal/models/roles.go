@@ -89,6 +89,8 @@ const (
 	ResourceAuditLogs               = "audit_logs"
 	ResourceOccurrences             = "occurrences"
 	ResourceOccurrenceStages        = "occurrences.stages"
+	ResourceUnits                   = "units"
+	ResourceDepartments             = "departments"
 )
 
 // PermissionAction constants for available actions
@@ -267,6 +269,16 @@ func DefaultPermissions() []Permission {
 		{Resource: ResourceOccurrenceStages, Action: ActionRead, Description: "View the occurrence pipeline configuration"},
 		{Resource: ResourceOccurrenceStages, Action: ActionWrite, Description: "Create and edit occurrence stages"},
 		{Resource: ResourceOccurrenceStages, Action: ActionDelete, Description: "Delete occurrence stages"},
+
+		// Help Desk — unidade e departamento. Listing is gated on occurrences:read
+		// (agents need unit/department names to work a case); these permissions
+		// govern administering the catalog itself.
+		{Resource: ResourceUnits, Action: ActionRead, Description: "View units"},
+		{Resource: ResourceUnits, Action: ActionWrite, Description: "Create and edit units"},
+		{Resource: ResourceUnits, Action: ActionDelete, Description: "Delete units"},
+		{Resource: ResourceDepartments, Action: ActionRead, Description: "View departments"},
+		{Resource: ResourceDepartments, Action: ActionWrite, Description: "Create and edit departments"},
+		{Resource: ResourceDepartments, Action: ActionDelete, Description: "Delete departments"},
 	}
 }
 
@@ -301,6 +313,8 @@ func SystemRolePermissions() map[string][]string {
 		// CRM: o gestor usa e administra o funil, coerente com ter settings.general:write
 		"occurrences:read", "occurrences:write",
 		"occurrences.stages:read", "occurrences.stages:write", "occurrences.stages:delete",
+		"units:read", "units:write", "units:delete",
+		"departments:read", "departments:write", "departments:delete",
 		// Conversations
 		"conversations:view_all",
 		// Contacts

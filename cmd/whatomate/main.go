@@ -699,6 +699,18 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/occurrences/{id}/events", app.CreateOccurrenceEvent)
 	g.POST("/api/occurrences/{id}/send-protocol", app.SendOccurrenceProtocol)
 
+	// CRM — unidades
+	g.GET("/api/units", app.ListUnits)
+	g.POST("/api/units", app.CreateUnit)
+	g.PUT("/api/units/{id}", app.UpdateUnit)
+	g.DELETE("/api/units/{id}", app.DeleteUnit)
+
+	// CRM — departamentos
+	g.GET("/api/departments", app.ListDepartments)
+	g.POST("/api/departments", app.CreateDepartment)
+	g.PUT("/api/departments/{id}", app.UpdateDepartment)
+	g.DELETE("/api/departments/{id}", app.DeleteDepartment)
+
 	// Media (serves media files for messages, auth-protected)
 	g.GET("/api/media/{message_id}", app.ServeMedia)
 
