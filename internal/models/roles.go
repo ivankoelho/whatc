@@ -90,6 +90,7 @@ const (
 	ResourceOccurrences             = "occurrences"
 	ResourceOccurrenceStages        = "occurrences.stages"
 	ResourceOccurrenceCategories    = "occurrences.categories"
+	ResourceOccurrenceSLAPolicies   = "occurrences.sla_policies"
 	ResourceUnits                   = "units"
 	ResourceDepartments             = "departments"
 )
@@ -273,6 +274,8 @@ func DefaultPermissions() []Permission {
 		{Resource: ResourceOccurrenceCategories, Action: ActionRead, Description: "View occurrence categories"},
 		{Resource: ResourceOccurrenceCategories, Action: ActionWrite, Description: "Create and edit occurrence categories"},
 		{Resource: ResourceOccurrenceCategories, Action: ActionDelete, Description: "Delete occurrence categories"},
+		{Resource: ResourceOccurrenceSLAPolicies, Action: ActionRead, Description: "View occurrence SLA policies"},
+		{Resource: ResourceOccurrenceSLAPolicies, Action: ActionWrite, Description: "Edit occurrence SLA policies"},
 
 		// Help Desk — unidade e departamento. Listing is gated on occurrences:read
 		// (agents need unit/department names to work a case); these permissions
@@ -318,6 +321,7 @@ func SystemRolePermissions() map[string][]string {
 		"occurrences:read", "occurrences:write",
 		"occurrences.stages:read", "occurrences.stages:write", "occurrences.stages:delete",
 		"occurrences.categories:read", "occurrences.categories:write", "occurrences.categories:delete",
+		"occurrences.sla_policies:read", "occurrences.sla_policies:write",
 		"units:read", "units:write", "units:delete",
 		"departments:read", "departments:write", "departments:delete",
 		// Conversations

@@ -23,3 +23,11 @@ func (a *App) CreateOccurrenceForTest(occ *models.Occurrence) error {
 func (a *App) NextProtocolNumberForTest(orgID uuid.UUID, year int) (string, error) {
 	return a.nextProtocolNumber(a.DB, orgID, year)
 }
+
+func (a *App) EnsureDefaultSLAPoliciesForTest(orgID uuid.UUID) error {
+	return a.ensureDefaultSLAPolicies(orgID)
+}
+
+func (a *App) GetSLAPolicyForTest(orgID uuid.UUID, priority models.OccurrencePriority) (*models.OccurrenceSLAPolicy, error) {
+	return a.getSLAPolicy(orgID, priority)
+}
