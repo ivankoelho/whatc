@@ -207,6 +207,16 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 		priority = models.OccurrencePriorityNormal
 	}
 
+	var responseDeadline, resolutionDeadline *time.Time
+	if policy, err := a.getSLAPolicy(orgID, priority); err != nil {
+		a.Log.Error("Failed to resolve SLA policy", "error", err, "organization_id", orgID)
+	} else {
+		now := time.Now()
+		rd := now.Add(time.Duration(policy.ResponseMinutes) * time.Minute)
+		xd := now.Add(time.Duration(policy.ResolutionMinutes) * time.Minute)
+		responseDeadline, resolutionDeadline = &rd, &xd
+	}
+
 	occ := models.Occurrence{
 		OrganizationID: orgID,
 		ContactID:      contactID,
@@ -215,6 +225,10 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 		StageID:        stage.ID,
 		Priority:       priority,
 		OpenedByUserID: userID,
+		SLA: models.SLATracking{
+			ResponseDeadline:   responseDeadline,
+			ResolutionDeadline: resolutionDeadline,
+		},
 	}
 	// req.AssignedUserID != nil is what says the field participated in the
 	// request at all; resolveAssignee alone can't tell "absent" from "sent
@@ -545,8 +559,17 @@ func (a *App) UpdateOccurrence(r *fastglue.Request) error {
 	if req.Description != nil {
 		updates["description"] = *req.Description
 	}
-	if req.Priority != "" {
+	if req.Priority != "" && req.Priority != string(occ.Priority) {
 		updates["priority"] = req.Priority
+		if policy, err := a.getSLAPolicy(orgID, models.OccurrencePriority(req.Priority)); err != nil {
+			a.Log.Error("Failed to resolve SLA policy on priority change", "error", err, "occurrence", occ.ID)
+		} else {
+			now := time.Now()
+			rd := now.Add(time.Duration(policy.ResponseMinutes) * time.Minute)
+			xd := now.Add(time.Duration(policy.ResolutionMinutes) * time.Minute)
+			updates["sla_response_deadline"] = rd
+			updates["sla_resolution_deadline"] = xd
+		}
 	}
 
 	// req.AssignedUserID != nil is what says the field participated in the

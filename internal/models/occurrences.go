@@ -86,6 +86,17 @@ type Occurrence struct {
 	// active logic — "manual" when there is no SourceTransferID.
 	Source string `gorm:"size:20;not null;default:'whatsapp'" json:"source"`
 
+	// SLA embeds the same struct AgentTransfer already uses for chat SLA
+	// (internal/models/chatbot.go:294) — response/resolution deadline, breach
+	// flag and timestamp. FirstResponseAt/FirstResponseByID are Occurrence-only:
+	// they are set exclusively by the "reply" event (Task 7), never by an
+	// internal note — that distinction is the whole point of first-response SLA.
+	SLA               SLATracking `gorm:"embedded"`
+	FirstResponseAt   *time.Time  `json:"first_response_at,omitempty"`
+	FirstResponseByID *uuid.UUID  `gorm:"type:uuid" json:"first_response_by_id,omitempty"`
+
+	FirstResponseBy *User `gorm:"foreignKey:FirstResponseByID" json:"first_response_by,omitempty"`
+
 	// Relations
 	Contact      *Contact         `gorm:"foreignKey:ContactID" json:"contact,omitempty"`
 	Stage        *OccurrenceStage `gorm:"foreignKey:StageID" json:"stage,omitempty"`
