@@ -180,24 +180,22 @@ func (a *App) CreateTeam(r *fastglue.Request) error {
 		UpdatedByID:         &userID,
 	}
 
-	// Handle unit_id and department_id
+	// Handle unit_id
 	if req.UnitID != nil {
-		if *req.UnitID == "" {
-			team.UnitID = nil
-		} else if id, err := uuid.Parse(*req.UnitID); err == nil {
-			team.UnitID = &id
-		} else {
+		id, _, err := parseOptionalUUID(req.UnitID)
+		if err != nil {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid unit_id", nil, "")
 		}
+		team.UnitID = id
 	}
+
+	// Handle department_id
 	if req.DepartmentID != nil {
-		if *req.DepartmentID == "" {
-			team.DepartmentID = nil
-		} else if id, err := uuid.Parse(*req.DepartmentID); err == nil {
-			team.DepartmentID = &id
-		} else {
+		id, _, err := parseOptionalUUID(req.DepartmentID)
+		if err != nil {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid department_id", nil, "")
 		}
+		team.DepartmentID = id
 	}
 
 	if err := a.DB.Create(&team).Error; err != nil {
@@ -267,24 +265,25 @@ func (a *App) UpdateTeam(r *fastglue.Request) error {
 		team.AssignmentStrategy = req.AssignmentStrategy
 	}
 	team.PerAgentTimeoutSecs = req.PerAgentTimeoutSecs
+
+	// Handle unit_id
 	if req.UnitID != nil {
-		if *req.UnitID == "" {
-			team.UnitID = nil
-		} else if id, err := uuid.Parse(*req.UnitID); err == nil {
-			team.UnitID = &id
-		} else {
+		id, _, err := parseOptionalUUID(req.UnitID)
+		if err != nil {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid unit_id", nil, "")
 		}
+		team.UnitID = id
 	}
+
+	// Handle department_id
 	if req.DepartmentID != nil {
-		if *req.DepartmentID == "" {
-			team.DepartmentID = nil
-		} else if id, err := uuid.Parse(*req.DepartmentID); err == nil {
-			team.DepartmentID = &id
-		} else {
+		id, _, err := parseOptionalUUID(req.DepartmentID)
+		if err != nil {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid department_id", nil, "")
 		}
+		team.DepartmentID = id
 	}
+
 	team.UpdatedByID = &userID
 
 	if err := a.DB.Save(&team).Error; err != nil {
@@ -556,6 +555,23 @@ func (a *App) RemoveTeamMember(r *fastglue.Request) error {
 	}
 
 	return r.SendEnvelope(map[string]string{"message": "Member removed from team"})
+}
+
+// parseOptionalUUID parses an optional *string field used by PATCH-style
+// request bodies: nil means "field absent, don't touch"; empty string means
+// "clear the field" (returns nil, nil); anything else must parse as a UUID.
+func parseOptionalUUID(raw *string) (id *uuid.UUID, clear bool, err error) {
+	if raw == nil {
+		return nil, false, nil
+	}
+	if *raw == "" {
+		return nil, true, nil
+	}
+	parsed, parseErr := uuid.Parse(*raw)
+	if parseErr != nil {
+		return nil, false, parseErr
+	}
+	return &parsed, false, nil
 }
 
 // Helper function to build team response
