@@ -88,11 +88,15 @@ type Occurrence struct {
 
 	// SLA embeds the same struct AgentTransfer already uses for chat SLA
 	// (internal/models/chatbot.go:294) — response/resolution deadline, breach
-	// flag and timestamp. FirstResponseAt/FirstResponseByID are Occurrence-only:
-	// they are set exclusively by the "reply" event (Task 7), never by an
-	// internal note — that distinction is the whole point of first-response SLA.
+	// flag and timestamp. SLA.FirstResponseAt doubles here as Occurrence's own
+	// "first public reply" timestamp (no separate top-level field: that would
+	// collide with this embedded one on the same first_response_at column).
+	// FirstResponseByID has no equivalent on SLATracking, so it stays a
+	// top-level field. Both SLA.FirstResponseAt and FirstResponseByID are
+	// Occurrence-only: they are set exclusively by the "reply" event (Task 7),
+	// never by an internal note — that distinction is the whole point of
+	// first-response SLA.
 	SLA               SLATracking `gorm:"embedded"`
-	FirstResponseAt   *time.Time  `json:"first_response_at,omitempty"`
 	FirstResponseByID *uuid.UUID  `gorm:"type:uuid" json:"first_response_by_id,omitempty"`
 
 	FirstResponseBy *User `gorm:"foreignKey:FirstResponseByID" json:"first_response_by,omitempty"`
