@@ -698,6 +698,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/occurrences/{id}/events", app.ListOccurrenceEvents)
 	g.POST("/api/occurrences/{id}/events", app.CreateOccurrenceEvent)
 	g.POST("/api/occurrences/{id}/send-protocol", app.SendOccurrenceProtocol)
+	g.POST("/api/occurrences/{id}/reply", app.ReplyToOccurrence)
 
 	// CRM — unidades
 	g.GET("/api/units", app.ListUnits)

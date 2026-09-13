@@ -12,6 +12,7 @@ type OccurrenceEventType string
 const (
 	OccurrenceEventOpened       OccurrenceEventType = "opened"
 	OccurrenceEventNote         OccurrenceEventType = "note"
+	OccurrenceEventReply        OccurrenceEventType = "reply"
 	OccurrenceEventStageChange  OccurrenceEventType = "stage_change"
 	OccurrenceEventAssignment   OccurrenceEventType = "assignment"
 	OccurrenceEventProtocolSent OccurrenceEventType = "protocol_sent"
