@@ -74,10 +74,25 @@ type Occurrence struct {
 	// attendance never closes the occurrence.
 	SourceTransferID *uuid.UUID `gorm:"type:uuid;index" json:"source_transfer_id,omitempty"`
 
+	// UnitID/DepartmentID default from the originating attendance's Team
+	// (AgentTransfer.TeamID, via SourceTransferID) when the occurrence is
+	// opened from a conversation; both are editable directly otherwise.
+	UnitID       *uuid.UUID `gorm:"type:uuid;index" json:"unit_id,omitempty"`
+	DepartmentID *uuid.UUID `gorm:"type:uuid;index" json:"department_id,omitempty"`
+	CategoryID   *uuid.UUID `gorm:"type:uuid;index" json:"category_id,omitempty"`
+
+	// Source documents where this case originated. Whatomate has one channel
+	// today (WhatsApp), so this is a placeholder for a future channel, not
+	// active logic — "manual" when there is no SourceTransferID.
+	Source string `gorm:"size:20;not null;default:'whatsapp'" json:"source"`
+
 	// Relations
 	Contact      *Contact         `gorm:"foreignKey:ContactID" json:"contact,omitempty"`
 	Stage        *OccurrenceStage `gorm:"foreignKey:StageID" json:"stage,omitempty"`
 	AssignedUser *User            `gorm:"foreignKey:AssignedUserID" json:"assigned_user,omitempty"`
+	Unit         *Unit               `gorm:"foreignKey:UnitID" json:"unit,omitempty"`
+	Department   *Department         `gorm:"foreignKey:DepartmentID" json:"department,omitempty"`
+	Category     *OccurrenceCategory `gorm:"foreignKey:CategoryID" json:"category,omitempty"`
 }
 
 func (Occurrence) TableName() string { return "occurrences" }

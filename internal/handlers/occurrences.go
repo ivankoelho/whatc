@@ -21,6 +21,9 @@ type CreateOccurrenceRequest struct {
 	Priority         string  `json:"priority"`
 	AssignedUserID   *string `json:"assigned_user_id"`
 	SourceTransferID *string `json:"source_transfer_id"`
+	UnitID           *string `json:"unit_id"`
+	DepartmentID     *string `json:"department_id"`
+	CategoryID       *string `json:"category_id"`
 }
 
 // OccurrenceResponse is the API shape of an occurrence.
@@ -39,6 +42,10 @@ type OccurrenceResponse struct {
 	OpenedAt         time.Time  `json:"opened_at"`
 	ClosedAt         *time.Time `json:"closed_at,omitempty"`
 	SourceTransferID *uuid.UUID `json:"source_transfer_id,omitempty"`
+	UnitID           *uuid.UUID `json:"unit_id,omitempty"`
+	DepartmentID     *uuid.UUID `json:"department_id,omitempty"`
+	CategoryID       *uuid.UUID `json:"category_id,omitempty"`
+	Source           string     `json:"source"`
 }
 
 func occurrenceToResponse(o models.Occurrence) OccurrenceResponse {
@@ -54,6 +61,10 @@ func occurrenceToResponse(o models.Occurrence) OccurrenceResponse {
 		OpenedAt:         o.OpenedAt,
 		ClosedAt:         o.ClosedAt,
 		SourceTransferID: o.SourceTransferID,
+		UnitID:           o.UnitID,
+		DepartmentID:     o.DepartmentID,
+		CategoryID:       o.CategoryID,
+		Source:           o.Source,
 	}
 	if o.Contact != nil {
 		resp.ContactName = o.Contact.ProfileName
@@ -102,6 +113,26 @@ func (a *App) resolveAssignee(orgID uuid.UUID, raw *string) (*uuid.UUID, error) 
 		return nil, errors.New("assigned_user_id does not belong to this organization")
 	}
 	return &id, nil
+}
+
+// unitDepartmentFromTransfer looks up the Team behind an AgentTransfer and
+// returns the unit/department it's tagged with. Both come back nil when the
+// transfer doesn't exist, has no team, or the team isn't tagged yet — a case
+// simply opens without them, editable by hand, matching the spec's decision
+// not to require every existing Team to be tagged before this feature works.
+func (a *App) unitDepartmentFromTransfer(orgID, transferID uuid.UUID) (unitID, departmentID *uuid.UUID) {
+	var transfer models.AgentTransfer
+	if err := a.DB.Where("id = ? AND organization_id = ?", transferID, orgID).First(&transfer).Error; err != nil {
+		return nil, nil
+	}
+	if transfer.TeamID == nil {
+		return nil, nil
+	}
+	var team models.Team
+	if err := a.DB.Where("id = ?", *transfer.TeamID).First(&team).Error; err != nil {
+		return nil, nil
+	}
+	return team.UnitID, team.DepartmentID
 }
 
 // broadcastOccurrenceMessage delivers a WebSocket message about an occurrence
@@ -202,6 +233,37 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 	if req.SourceTransferID != nil && *req.SourceTransferID != "" {
 		if id, err := uuid.Parse(*req.SourceTransferID); err == nil {
 			occ.SourceTransferID = &id
+			occ.Source = "whatsapp"
+		}
+	} else {
+		occ.Source = "manual"
+	}
+
+	// Inherit unit/department from the originating attendance's Team, then let
+	// an explicit request field override — manual entry always wins, since the
+	// case may not even have a source transfer.
+	if occ.SourceTransferID != nil {
+		occ.UnitID, occ.DepartmentID = a.unitDepartmentFromTransfer(orgID, *occ.SourceTransferID)
+	}
+	if req.UnitID != nil && *req.UnitID != "" {
+		if id, err := uuid.Parse(*req.UnitID); err == nil {
+			occ.UnitID = &id
+		} else {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid unit_id", nil, "")
+		}
+	}
+	if req.DepartmentID != nil && *req.DepartmentID != "" {
+		if id, err := uuid.Parse(*req.DepartmentID); err == nil {
+			occ.DepartmentID = &id
+		} else {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid department_id", nil, "")
+		}
+	}
+	if req.CategoryID != nil && *req.CategoryID != "" {
+		if id, err := uuid.Parse(*req.CategoryID); err == nil {
+			occ.CategoryID = &id
+		} else {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid category_id", nil, "")
 		}
 	}
 
@@ -252,6 +314,15 @@ func (a *App) ListOccurrences(r *fastglue.Request) error {
 	}
 	if contactID := string(r.RequestCtx.QueryArgs().Peek("contact_id")); contactID != "" {
 		query = query.Where("occurrences.contact_id = ?", contactID)
+	}
+	if unitID := string(r.RequestCtx.QueryArgs().Peek("unit_id")); unitID != "" {
+		query = query.Where("occurrences.unit_id = ?", unitID)
+	}
+	if departmentID := string(r.RequestCtx.QueryArgs().Peek("department_id")); departmentID != "" {
+		query = query.Where("occurrences.department_id = ?", departmentID)
+	}
+	if categoryID := string(r.RequestCtx.QueryArgs().Peek("category_id")); categoryID != "" {
+		query = query.Where("occurrences.category_id = ?", categoryID)
 	}
 	if protocol := string(r.RequestCtx.QueryArgs().Peek("protocol")); protocol != "" {
 		query = query.Where("occurrences.protocol_number ILIKE ?", "%"+protocol+"%")
@@ -343,6 +414,9 @@ type UpdateOccurrenceRequest struct {
 	Description    *string `json:"description"`
 	Priority       string  `json:"priority"`
 	AssignedUserID *string `json:"assigned_user_id"`
+	UnitID         *string `json:"unit_id"`
+	DepartmentID   *string `json:"department_id"`
+	CategoryID     *string `json:"category_id"`
 }
 
 // ChangeStageRequest moves a case to another stage.
@@ -483,6 +557,34 @@ func (a *App) UpdateOccurrence(r *fastglue.Request) error {
 			assigneeChanged = true
 		default:
 			assigneeChanged = *occ.AssignedUserID != *resolved
+		}
+	}
+
+	if req.UnitID != nil {
+		if *req.UnitID == "" {
+			updates["unit_id"] = nil
+		} else if id, err := uuid.Parse(*req.UnitID); err == nil {
+			updates["unit_id"] = id
+		} else {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid unit_id", nil, "")
+		}
+	}
+	if req.DepartmentID != nil {
+		if *req.DepartmentID == "" {
+			updates["department_id"] = nil
+		} else if id, err := uuid.Parse(*req.DepartmentID); err == nil {
+			updates["department_id"] = id
+		} else {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid department_id", nil, "")
+		}
+	}
+	if req.CategoryID != nil {
+		if *req.CategoryID == "" {
+			updates["category_id"] = nil
+		} else if id, err := uuid.Parse(*req.CategoryID); err == nil {
+			updates["category_id"] = id
+		} else {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid category_id", nil, "")
 		}
 	}
 
