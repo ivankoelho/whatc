@@ -117,6 +117,7 @@ func GetMigrationModels() []MigrationModel {
 
 		// CRM de ocorrências
 		{"OccurrenceStage", &models.OccurrenceStage{}},
+		{"OccurrenceCategory", &models.OccurrenceCategory{}},
 		{"Occurrence", &models.Occurrence{}},
 		{"OccurrenceEvent", &models.OccurrenceEvent{}},
 		{"OccurrenceCounter", &models.OccurrenceCounter{}},
