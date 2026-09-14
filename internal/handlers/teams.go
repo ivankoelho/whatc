@@ -186,6 +186,11 @@ func (a *App) CreateTeam(r *fastglue.Request) error {
 		if err != nil {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid unit_id", nil, "")
 		}
+		if id != nil {
+			if _, err := findByIDAndOrg[models.Unit](a.DB, r, *id, orgID, "Unit"); err != nil {
+				return nil
+			}
+		}
 		team.UnitID = id
 	}
 
@@ -194,6 +199,11 @@ func (a *App) CreateTeam(r *fastglue.Request) error {
 		id, _, err := parseOptionalUUID(req.DepartmentID)
 		if err != nil {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid department_id", nil, "")
+		}
+		if id != nil {
+			if _, err := findByIDAndOrg[models.Department](a.DB, r, *id, orgID, "Department"); err != nil {
+				return nil
+			}
 		}
 		team.DepartmentID = id
 	}
@@ -272,6 +282,11 @@ func (a *App) UpdateTeam(r *fastglue.Request) error {
 		if err != nil {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid unit_id", nil, "")
 		}
+		if id != nil {
+			if _, err := findByIDAndOrg[models.Unit](a.DB, r, *id, orgID, "Unit"); err != nil {
+				return nil
+			}
+		}
 		team.UnitID = id
 	}
 
@@ -280,6 +295,11 @@ func (a *App) UpdateTeam(r *fastglue.Request) error {
 		id, _, err := parseOptionalUUID(req.DepartmentID)
 		if err != nil {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid department_id", nil, "")
+		}
+		if id != nil {
+			if _, err := findByIDAndOrg[models.Department](a.DB, r, *id, orgID, "Department"); err != nil {
+				return nil
+			}
 		}
 		team.DepartmentID = id
 	}

@@ -271,25 +271,34 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 		occ.UnitID, occ.DepartmentID = a.unitDepartmentFromTransfer(orgID, *occ.SourceTransferID)
 	}
 	if req.UnitID != nil && *req.UnitID != "" {
-		if id, err := uuid.Parse(*req.UnitID); err == nil {
-			occ.UnitID = &id
-		} else {
+		id, err := uuid.Parse(*req.UnitID)
+		if err != nil {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid unit_id", nil, "")
 		}
+		if _, err := findByIDAndOrg[models.Unit](a.DB, r, id, orgID, "Unit"); err != nil {
+			return nil
+		}
+		occ.UnitID = &id
 	}
 	if req.DepartmentID != nil && *req.DepartmentID != "" {
-		if id, err := uuid.Parse(*req.DepartmentID); err == nil {
-			occ.DepartmentID = &id
-		} else {
+		id, err := uuid.Parse(*req.DepartmentID)
+		if err != nil {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid department_id", nil, "")
 		}
+		if _, err := findByIDAndOrg[models.Department](a.DB, r, id, orgID, "Department"); err != nil {
+			return nil
+		}
+		occ.DepartmentID = &id
 	}
 	if req.CategoryID != nil && *req.CategoryID != "" {
-		if id, err := uuid.Parse(*req.CategoryID); err == nil {
-			occ.CategoryID = &id
-		} else {
+		id, err := uuid.Parse(*req.CategoryID)
+		if err != nil {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid category_id", nil, "")
 		}
+		if _, err := findByIDAndOrg[models.OccurrenceCategory](a.DB, r, id, orgID, "Category"); err != nil {
+			return nil
+		}
+		occ.CategoryID = &id
 	}
 
 	if err := a.insertOccurrenceWithProtocol(&occ); err != nil {
@@ -597,28 +606,43 @@ func (a *App) UpdateOccurrence(r *fastglue.Request) error {
 	if req.UnitID != nil {
 		if *req.UnitID == "" {
 			updates["unit_id"] = nil
-		} else if id, err := uuid.Parse(*req.UnitID); err == nil {
-			updates["unit_id"] = id
 		} else {
-			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid unit_id", nil, "")
+			id, err := uuid.Parse(*req.UnitID)
+			if err != nil {
+				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid unit_id", nil, "")
+			}
+			if _, err := findByIDAndOrg[models.Unit](a.DB, r, id, orgID, "Unit"); err != nil {
+				return nil
+			}
+			updates["unit_id"] = id
 		}
 	}
 	if req.DepartmentID != nil {
 		if *req.DepartmentID == "" {
 			updates["department_id"] = nil
-		} else if id, err := uuid.Parse(*req.DepartmentID); err == nil {
-			updates["department_id"] = id
 		} else {
-			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid department_id", nil, "")
+			id, err := uuid.Parse(*req.DepartmentID)
+			if err != nil {
+				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid department_id", nil, "")
+			}
+			if _, err := findByIDAndOrg[models.Department](a.DB, r, id, orgID, "Department"); err != nil {
+				return nil
+			}
+			updates["department_id"] = id
 		}
 	}
 	if req.CategoryID != nil {
 		if *req.CategoryID == "" {
 			updates["category_id"] = nil
-		} else if id, err := uuid.Parse(*req.CategoryID); err == nil {
-			updates["category_id"] = id
 		} else {
-			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid category_id", nil, "")
+			id, err := uuid.Parse(*req.CategoryID)
+			if err != nil {
+				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid category_id", nil, "")
+			}
+			if _, err := findByIDAndOrg[models.OccurrenceCategory](a.DB, r, id, orgID, "Category"); err != nil {
+				return nil
+			}
+			updates["category_id"] = id
 		}
 	}
 

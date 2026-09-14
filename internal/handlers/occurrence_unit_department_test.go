@@ -120,3 +120,101 @@ func TestCreateOccurrence_ManualHasSourceManual(t *testing.T) {
 	assert.Equal(t, "manual", occ.Source)
 	assert.Nil(t, occ.UnitID)
 }
+
+// Finding 4 of the final branch review: unit_id/department_id/category_id
+// were accepted with a bare uuid.Parse and no check that the referenced row
+// belongs to the caller's organization.
+func TestCreateOccurrence_RejectsUnitFromAnotherOrg(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	admin := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&admin.ID))
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+
+	otherOrg := testutil.CreateTestOrganization(t, app.DB)
+	foreignUnit := models.Unit{OrganizationID: otherOrg.ID, Name: "Unidade de outra org"}
+	require.NoError(t, app.DB.Create(&foreignUnit).Error)
+
+	req := testutil.NewJSONRequest(t, map[string]any{
+		"contact_id": contact.ID.String(), "title": "Invasao",
+		"unit_id": foreignUnit.ID.String(),
+	})
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	require.NoError(t, app.CreateOccurrence(req))
+	assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req))
+
+	var count int64
+	app.DB.Model(&models.Occurrence{}).Where("contact_id = ?", contact.ID).Count(&count)
+	assert.EqualValues(t, 0, count, "an occurrence referencing another org's unit must not be created")
+}
+
+func TestCreateOccurrence_RejectsDepartmentFromAnotherOrg(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	admin := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&admin.ID))
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+
+	otherOrg := testutil.CreateTestOrganization(t, app.DB)
+	foreignDept := models.Department{OrganizationID: otherOrg.ID, Name: "Depto de outra org"}
+	require.NoError(t, app.DB.Create(&foreignDept).Error)
+
+	req := testutil.NewJSONRequest(t, map[string]any{
+		"contact_id": contact.ID.String(), "title": "Invasao",
+		"department_id": foreignDept.ID.String(),
+	})
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	require.NoError(t, app.CreateOccurrence(req))
+	assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req))
+}
+
+func TestCreateOccurrence_RejectsCategoryFromAnotherOrg(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	admin := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&admin.ID))
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+
+	otherOrg := testutil.CreateTestOrganization(t, app.DB)
+	foreignCategory := models.OccurrenceCategory{OrganizationID: otherOrg.ID, Name: "Categoria de outra org"}
+	require.NoError(t, app.DB.Create(&foreignCategory).Error)
+
+	req := testutil.NewJSONRequest(t, map[string]any{
+		"contact_id": contact.ID.String(), "title": "Invasao",
+		"category_id": foreignCategory.ID.String(),
+	})
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	require.NoError(t, app.CreateOccurrence(req))
+	assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req))
+}
+
+// UpdateOccurrence must apply the same org-ownership check as CreateOccurrence.
+func TestUpdateOccurrence_RejectsUnitFromAnotherOrg(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	admin := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&admin.ID))
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	stage, err := app.InitialStageForTest(org.ID)
+	require.NoError(t, err)
+	occ := models.Occurrence{
+		OrganizationID: org.ID, ContactID: contact.ID, Title: "Caso",
+		StageID: stage.ID, OpenedByUserID: user.ID,
+	}
+	require.NoError(t, app.CreateOccurrenceForTest(&occ))
+
+	otherOrg := testutil.CreateTestOrganization(t, app.DB)
+	foreignUnit := models.Unit{OrganizationID: otherOrg.ID, Name: "Unidade de outra org"}
+	require.NoError(t, app.DB.Create(&foreignUnit).Error)
+
+	req := testutil.NewJSONRequest(t, map[string]any{
+		"title": occ.Title, "unit_id": foreignUnit.ID.String(),
+	})
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	testutil.SetPathParam(req, "id", occ.ID.String())
+	require.NoError(t, app.UpdateOccurrence(req))
+	assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req))
+
+	require.NoError(t, app.DB.First(&occ, "id = ?", occ.ID).Error)
+	assert.Nil(t, occ.UnitID, "the foreign unit must not have been applied")
+}
