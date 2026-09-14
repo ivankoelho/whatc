@@ -113,6 +113,12 @@ func (p *SLAProcessor) processOrganizationSLA(settings models.ChatbotSettings, n
 	if settings.ClientInactivity.CloseInactiveAttendances {
 		p.closeInactiveAttendances(orgID, settings, now)
 	}
+
+	// Occurrence SLA — its own gate, independent of chat's SLA.Enabled, same
+	// reasoning as CloseInactiveAttendances above.
+	if settings.SLA.OccurrenceEnabled {
+		p.processOccurrenceSLA(orgID, now)
+	}
 }
 
 // autoCloseExpiredTransfers closes transfers that have exceeded their expiry time
@@ -714,4 +720,33 @@ func (a *App) ClearContactChatbotTracking(contactID uuid.UUID) {
 			"chatbot_last_message_at": nil,
 			"chatbot_reminder_sent":   false,
 		})
+}
+
+// processOccurrenceSLA marks breached=true/breached_at=now for occurrences
+// past their response or resolution deadline. It only marks — no auto-close,
+// no escalation, no notification for occurrences in this phase (see the
+// approved spec's non-objectives).
+func (p *SLAProcessor) processOccurrenceSLA(orgID uuid.UUID, now time.Time) {
+	// Response breach: past the response deadline, no public reply yet, not
+	// already marked breached (this call runs every tick — without the
+	// sla_breached=false guard it would rewrite breached_at forever).
+	//
+	// first_response_at is the SLATracking.FirstResponseAt column (embedded in
+	// Occurrence's SLA field, not a separate top-level column) — raw SQL still
+	// addresses it by its column name.
+	if err := p.app.DB.Model(&models.Occurrence{}).
+		Where("organization_id = ? AND sla_response_deadline < ? AND first_response_at IS NULL AND sla_breached = ?",
+			orgID, now, false).
+		Updates(map[string]any{"sla_breached": true, "sla_breached_at": now}).Error; err != nil {
+		p.app.Log.Error("Failed to mark occurrence response SLA breach", "error", err, "organization_id", orgID)
+	}
+
+	// Resolution breach: past the resolution deadline, still open (closed_at
+	// nil), not already marked.
+	if err := p.app.DB.Model(&models.Occurrence{}).
+		Where("organization_id = ? AND sla_resolution_deadline < ? AND closed_at IS NULL AND sla_breached = ?",
+			orgID, now, false).
+		Updates(map[string]any{"sla_breached": true, "sla_breached_at": now}).Error; err != nil {
+		p.app.Log.Error("Failed to mark occurrence resolution SLA breach", "error", err, "organization_id", orgID)
+	}
 }
