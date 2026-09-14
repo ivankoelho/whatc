@@ -175,6 +175,21 @@ func runServer(args []string) {
 		if err := database.BackfillContactNamePermission(db, lo); err != nil {
 			lo.Fatal("Contact name permission backfill failed", "error", err)
 		}
+
+		// Mesma janela: as onze permissões novas do catálogo de Help Desk
+		// (unidades, departamentos, categorias, políticas de SLA) precisam
+		// alcançar organizações existentes antes da primeira requisição.
+		if err := database.BackfillHelpdeskCatalogPermissions(db, lo); err != nil {
+			lo.Fatal("Helpdesk catalog permissions backfill failed", "error", err)
+		}
+
+		// Data fix, not a schema migration: AutoMigrate adding occurrences.source
+		// with a DB default backfilled every existing row to 'whatsapp',
+		// including cases opened manually. Runs once, guarded by the column's
+		// own default value, so re-running is a no-op.
+		if err := database.BackfillOccurrenceSourceForManualCases(db); err != nil {
+			lo.Fatal("Occurrence source backfill failed", "error", err)
+		}
 	}
 
 	// Connect to Redis
