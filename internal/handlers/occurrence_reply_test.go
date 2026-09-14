@@ -1,9 +1,11 @@
 package handlers_test
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
+	"github.com/shridarpatil/whatomate/internal/handlers"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/test/testutil"
 	"github.com/stretchr/testify/assert"
@@ -94,6 +96,24 @@ func TestReplyToOccurrence_SetsFirstResponseOnlyOnce(t *testing.T) {
 	app.DB.Model(&models.OccurrenceEvent{}).
 		Where("occurrence_id = ? AND type = ?", occ.ID, models.OccurrenceEventReply).Count(&replyEvents)
 	assert.EqualValues(t, 2, replyEvents)
+
+	// Finding 5 of the final branch review: OccurrenceResponse never exposed
+	// first_response_at/first_response_by_id, even though GetOccurrence funnels
+	// through it. Confirm the fix by reading the occurrence back through the API.
+	getReq := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(getReq, org.ID, user.ID)
+	testutil.SetPathParam(getReq, "id", occ.ID.String())
+	require.NoError(t, app.GetOccurrence(getReq))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(getReq))
+
+	var getResp struct {
+		Data handlers.OccurrenceResponse `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(getReq), &getResp))
+	require.NotNil(t, getResp.Data.FirstResponseAt)
+	assert.Equal(t, firstStamp.Unix(), getResp.Data.FirstResponseAt.Unix())
+	require.NotNil(t, getResp.Data.FirstResponseByID)
+	assert.Equal(t, user.ID, *getResp.Data.FirstResponseByID)
 }
 
 func TestCreateOccurrenceEvent_NoteNeverSetsFirstResponse(t *testing.T) {

@@ -1,9 +1,11 @@
 package handlers_test
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
+	"github.com/shridarpatil/whatomate/internal/handlers"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/test/testutil"
 	"github.com/stretchr/testify/assert"
@@ -125,4 +127,49 @@ func TestUpdateOccurrence_SLAPolicyLookupFailure_StillUpdatesWithoutDeadlines(t 
 	assert.Equal(t, "still_bogus_priority", string(occ.Priority))
 	assert.Nil(t, occ.SLA.ResponseDeadline, "deadlines must stay unset, not computed, when the policy lookup errors")
 	assert.Nil(t, occ.SLA.ResolutionDeadline, "deadlines must stay unset, not computed, when the policy lookup errors")
+}
+
+// TestOccurrenceResponse_ExposesSLAFields covers Finding 5 of the final
+// branch review: OccurrenceResponse never surfaced SLA/first-response fields,
+// even though every occurrence-returning endpoint funnels through it. This
+// checks the actual JSON the API returns, not just the DB row.
+func TestOccurrenceResponse_ExposesSLAFields(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	admin := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&admin.ID))
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+
+	createReq := testutil.NewJSONRequest(t, map[string]any{
+		"contact_id": contact.ID.String(), "title": "Urgente", "priority": "urgent",
+	})
+	testutil.SetAuthContext(createReq, org.ID, user.ID)
+	require.NoError(t, app.CreateOccurrence(createReq))
+
+	var createResp struct {
+		Data handlers.OccurrenceResponse `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(createReq), &createResp))
+	require.NotNil(t, createResp.Data.SLAResponseDeadline, "response deadline must be in the create response")
+	require.NotNil(t, createResp.Data.SLAResolutionDeadline, "resolution deadline must be in the create response")
+	// Default urgent policy: 30min response, 4h resolution (see defaultSLAPolicies).
+	assert.WithinDuration(t, time.Now().Add(30*time.Minute), *createResp.Data.SLAResponseDeadline, 5*time.Second)
+	assert.WithinDuration(t, time.Now().Add(4*time.Hour), *createResp.Data.SLAResolutionDeadline, 5*time.Second)
+	assert.False(t, createResp.Data.SLABreached)
+	assert.Nil(t, createResp.Data.FirstResponseAt, "a freshly opened case has no first response yet")
+
+	getReq := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(getReq, org.ID, user.ID)
+	testutil.SetPathParam(getReq, "id", createResp.Data.ID.String())
+	require.NoError(t, app.GetOccurrence(getReq))
+
+	var getResp struct {
+		Data handlers.OccurrenceResponse `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(getReq), &getResp))
+	require.NotNil(t, getResp.Data.SLAResponseDeadline)
+	// Not exact equality: Postgres' timestamp column truncates to microsecond
+	// precision, so the value read back after a round trip through the DB can
+	// differ from the in-memory value by a fraction of a microsecond.
+	assert.WithinDuration(t, *createResp.Data.SLAResponseDeadline, *getResp.Data.SLAResponseDeadline, time.Millisecond)
 }

@@ -46,25 +46,39 @@ type OccurrenceResponse struct {
 	DepartmentID     *uuid.UUID `json:"department_id,omitempty"`
 	CategoryID       *uuid.UUID `json:"category_id,omitempty"`
 	Source           string     `json:"source"`
+	// SLA/first-response fields, named to match AgentTransferResponse's
+	// existing sla_-prefixed convention for the same SLATracking struct.
+	SLAResponseDeadline   *time.Time `json:"sla_response_deadline,omitempty"`
+	SLAResolutionDeadline *time.Time `json:"sla_resolution_deadline,omitempty"`
+	SLABreached           bool       `json:"sla_breached"`
+	SLABreachedAt         *time.Time `json:"sla_breached_at,omitempty"`
+	FirstResponseAt       *time.Time `json:"first_response_at,omitempty"`
+	FirstResponseByID     *uuid.UUID `json:"first_response_by_id,omitempty"`
 }
 
 func occurrenceToResponse(o models.Occurrence) OccurrenceResponse {
 	resp := OccurrenceResponse{
-		ID:               o.ID,
-		ProtocolNumber:   o.ProtocolNumber,
-		ContactID:        o.ContactID,
-		Title:            o.Title,
-		Description:      o.Description,
-		StageID:          o.StageID,
-		Priority:         string(o.Priority),
-		AssignedUserID:   o.AssignedUserID,
-		OpenedAt:         o.OpenedAt,
-		ClosedAt:         o.ClosedAt,
-		SourceTransferID: o.SourceTransferID,
-		UnitID:           o.UnitID,
-		DepartmentID:     o.DepartmentID,
-		CategoryID:       o.CategoryID,
-		Source:           o.Source,
+		ID:                    o.ID,
+		ProtocolNumber:        o.ProtocolNumber,
+		ContactID:             o.ContactID,
+		Title:                 o.Title,
+		Description:           o.Description,
+		StageID:               o.StageID,
+		Priority:              string(o.Priority),
+		AssignedUserID:        o.AssignedUserID,
+		OpenedAt:              o.OpenedAt,
+		ClosedAt:              o.ClosedAt,
+		SourceTransferID:      o.SourceTransferID,
+		UnitID:                o.UnitID,
+		DepartmentID:          o.DepartmentID,
+		CategoryID:            o.CategoryID,
+		Source:                o.Source,
+		SLAResponseDeadline:   o.SLA.ResponseDeadline,
+		SLAResolutionDeadline: o.SLA.ResolutionDeadline,
+		SLABreached:           o.SLA.Breached,
+		SLABreachedAt:         o.SLA.BreachedAt,
+		FirstResponseAt:       o.SLA.FirstResponseAt,
+		FirstResponseByID:     o.FirstResponseByID,
 	}
 	if o.Contact != nil {
 		resp.ContactName = o.Contact.ProfileName
