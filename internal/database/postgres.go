@@ -463,6 +463,21 @@ func BackfillLastInboundAt(db *gorm.DB) error {
 	`).Error
 }
 
+// BackfillOccurrenceSourceForManualCases corrects occurrences.source for rows
+// that existed before that column did. AutoMigrate adding a column with
+// `default:'whatsapp'` backfills every existing row to 'whatsapp', including
+// cases that were opened manually (no source_transfer_id) — this undoes that
+// for exactly those rows. Guarded by source = 'whatsapp' AND
+// source_transfer_id IS NULL, so it never touches a row a later run (or the
+// application itself) already set correctly, making it idempotent.
+func BackfillOccurrenceSourceForManualCases(db *gorm.DB) error {
+	return db.Exec(`
+		UPDATE occurrences
+		SET source = 'manual'
+		WHERE source_transfer_id IS NULL AND source = 'whatsapp'
+	`).Error
+}
+
 // SeedPermissionsAndRoles seeds the default permissions and system roles
 func SeedPermissionsAndRoles(db *gorm.DB) error {
 	// Get all default permissions
