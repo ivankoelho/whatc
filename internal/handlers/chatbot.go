@@ -41,6 +41,9 @@ type ChatbotSettingsResponse struct {
 	SLAAutoCloseMessage    string   `json:"sla_auto_close_message"`
 	SLAWarningMessage      string   `json:"sla_warning_message"`
 	SLAEscalationNotifyIDs []string `json:"sla_escalation_notify_ids"`
+	// OccurrenceSLAEnabled gates SLA breach-marking for Occurrences,
+	// independent of SLAEnabled (chat's own SLA).
+	OccurrenceSLAEnabled bool `json:"occurrence_sla_enabled"`
 	// Client Inactivity Settings (Chatbot Only)
 	ClientReminderEnabled  bool   `json:"client_reminder_enabled"`
 	ClientReminderMinutes  int    `json:"client_reminder_minutes"`
@@ -190,6 +193,7 @@ func (a *App) GetChatbotSettings(r *fastglue.Request) error {
 		SLAAutoCloseMessage:    settings.SLA.AutoCloseMessage,
 		SLAWarningMessage:      settings.SLA.WarningMessage,
 		SLAEscalationNotifyIDs: settings.SLA.EscalationNotifyIDs,
+		OccurrenceSLAEnabled:   settings.SLA.OccurrenceEnabled,
 		// Client Inactivity Settings
 		ClientReminderEnabled:    settings.ClientInactivity.ReminderEnabled,
 		ClientReminderMinutes:    settings.ClientInactivity.ReminderMinutes,
@@ -250,6 +254,7 @@ func chatbotSLASnapshot(s *models.ChatbotSettings) map[string]any {
 		"sla_auto_close_message":     s.SLA.AutoCloseMessage,
 		"sla_warning_message":        s.SLA.WarningMessage,
 		"sla_escalation_notify_ids":  s.SLA.EscalationNotifyIDs,
+		"occurrence_sla_enabled":     s.SLA.OccurrenceEnabled,
 		"client_reminder_enabled":    s.ClientInactivity.ReminderEnabled,
 		"client_reminder_minutes":    s.ClientInactivity.ReminderMinutes,
 		"client_reminder_message":    s.ClientInactivity.ReminderMessage,
@@ -308,6 +313,7 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		SLAAutoCloseMessage    *string   `json:"sla_auto_close_message"`
 		SLAWarningMessage      *string   `json:"sla_warning_message"`
 		SLAEscalationNotifyIDs *[]string `json:"sla_escalation_notify_ids"`
+		OccurrenceSLAEnabled   *bool     `json:"occurrence_sla_enabled"`
 		// Client Inactivity Settings
 		ClientReminderEnabled    *bool   `json:"client_reminder_enabled"`
 		ClientReminderMinutes    *int    `json:"client_reminder_minutes"`
@@ -384,6 +390,7 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		req.SLAResolutionMinutes != nil || req.SLAEscalationMinutes != nil ||
 		req.SLAAutoCloseHours != nil || req.SLAAutoCloseMessage != nil ||
 		req.SLAWarningMessage != nil || req.SLAEscalationNotifyIDs != nil ||
+		req.OccurrenceSLAEnabled != nil ||
 		req.ClientReminderEnabled != nil || req.ClientReminderMinutes != nil ||
 		req.ClientReminderMessage != nil || req.ClientAutoCloseMinutes != nil ||
 		req.ClientAutoCloseMessage != nil || req.CloseInactiveAttendances != nil
@@ -493,6 +500,9 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 	}
 	if req.SLAEscalationNotifyIDs != nil {
 		settings.SLA.EscalationNotifyIDs = *req.SLAEscalationNotifyIDs
+	}
+	if req.OccurrenceSLAEnabled != nil {
+		settings.SLA.OccurrenceEnabled = *req.OccurrenceSLAEnabled
 	}
 
 	// Client Inactivity Settings

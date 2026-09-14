@@ -175,6 +175,21 @@ func runServer(args []string) {
 		if err := database.BackfillContactNamePermission(db, lo); err != nil {
 			lo.Fatal("Contact name permission backfill failed", "error", err)
 		}
+
+		// Mesma janela: as onze permissões novas do catálogo de Help Desk
+		// (unidades, departamentos, categorias, políticas de SLA) precisam
+		// alcançar organizações existentes antes da primeira requisição.
+		if err := database.BackfillHelpdeskCatalogPermissions(db, lo); err != nil {
+			lo.Fatal("Helpdesk catalog permissions backfill failed", "error", err)
+		}
+
+		// Data fix, not a schema migration: AutoMigrate adding occurrences.source
+		// with a DB default backfilled every existing row to 'whatsapp',
+		// including cases opened manually. Runs once, guarded by the column's
+		// own default value, so re-running is a no-op.
+		if err := database.BackfillOccurrenceSourceForManualCases(db); err != nil {
+			lo.Fatal("Occurrence source backfill failed", "error", err)
+		}
 	}
 
 	// Connect to Redis
@@ -698,6 +713,29 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/occurrences/{id}/events", app.ListOccurrenceEvents)
 	g.POST("/api/occurrences/{id}/events", app.CreateOccurrenceEvent)
 	g.POST("/api/occurrences/{id}/send-protocol", app.SendOccurrenceProtocol)
+	g.POST("/api/occurrences/{id}/reply", app.ReplyToOccurrence)
+
+	// CRM — unidades
+	g.GET("/api/units", app.ListUnits)
+	g.POST("/api/units", app.CreateUnit)
+	g.PUT("/api/units/{id}", app.UpdateUnit)
+	g.DELETE("/api/units/{id}", app.DeleteUnit)
+
+	// CRM — departamentos
+	g.GET("/api/departments", app.ListDepartments)
+	g.POST("/api/departments", app.CreateDepartment)
+	g.PUT("/api/departments/{id}", app.UpdateDepartment)
+	g.DELETE("/api/departments/{id}", app.DeleteDepartment)
+
+	// CRM — categorias de ocorrência
+	g.GET("/api/occurrence-categories", app.ListOccurrenceCategories)
+	g.POST("/api/occurrence-categories", app.CreateOccurrenceCategory)
+	g.PUT("/api/occurrence-categories/{id}", app.UpdateOccurrenceCategory)
+	g.DELETE("/api/occurrence-categories/{id}", app.DeleteOccurrenceCategory)
+
+	// CRM — políticas de SLA
+	g.GET("/api/occurrence-sla-policies", app.ListOccurrenceSLAPolicies)
+	g.PUT("/api/occurrence-sla-policies/{priority}", app.UpsertOccurrenceSLAPolicy)
 
 	// Media (serves media files for messages, auth-protected)
 	g.GET("/api/media/{message_id}", app.ServeMedia)

@@ -117,9 +117,15 @@ func GetMigrationModels() []MigrationModel {
 
 		// CRM de ocorrências
 		{"OccurrenceStage", &models.OccurrenceStage{}},
+		{"OccurrenceCategory", &models.OccurrenceCategory{}},
+		{"OccurrenceSLAPolicy", &models.OccurrenceSLAPolicy{}},
 		{"Occurrence", &models.Occurrence{}},
 		{"OccurrenceEvent", &models.OccurrenceEvent{}},
 		{"OccurrenceCounter", &models.OccurrenceCounter{}},
+
+		// Help Desk — unidade e departamento
+		{"Unit", &models.Unit{}},
+		{"Department", &models.Department{}},
 
 		{"AuditLog", &models.AuditLog{}},
 	}
@@ -454,6 +460,21 @@ func BackfillLastInboundAt(db *gorm.DB) error {
 			GROUP BY contact_id
 		) sub
 		WHERE c.id = sub.contact_id AND c.last_inbound_at IS NULL AND c.deleted_at IS NULL
+	`).Error
+}
+
+// BackfillOccurrenceSourceForManualCases corrects occurrences.source for rows
+// that existed before that column did. AutoMigrate adding a column with
+// `default:'whatsapp'` backfills every existing row to 'whatsapp', including
+// cases that were opened manually (no source_transfer_id) — this undoes that
+// for exactly those rows. Guarded by source = 'whatsapp' AND
+// source_transfer_id IS NULL, so it never touches a row a later run (or the
+// application itself) already set correctly, making it idempotent.
+func BackfillOccurrenceSourceForManualCases(db *gorm.DB) error {
+	return db.Exec(`
+		UPDATE occurrences
+		SET source = 'manual'
+		WHERE source_transfer_id IS NULL AND source = 'whatsapp'
 	`).Error
 }
 

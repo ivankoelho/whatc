@@ -152,6 +152,7 @@ func TestApp_UpdateChatbotSettings(t *testing.T) {
 			"ai_system_prompt":        "You are a helpful assistant.",
 			"sla_enabled":             true,
 			"sla_response_minutes":    10,
+			"occurrence_sla_enabled":  true,
 		})
 		testutil.SetAuthContext(req, org.ID, user.ID)
 
@@ -194,6 +195,10 @@ func TestApp_UpdateChatbotSettings(t *testing.T) {
 		assert.Equal(t, 1000, getResp.Data.Settings.AIMaxTokens)
 		assert.True(t, getResp.Data.Settings.SLAEnabled)
 		assert.Equal(t, 10, getResp.Data.Settings.SLAResponseMinutes)
+		// Finding 1: occurrence_sla_enabled previously had no write path — it
+		// existed only in the model, the cache WHERE clause and the processor
+		// gate, so no org could ever turn it on.
+		assert.True(t, getResp.Data.Settings.OccurrenceSLAEnabled)
 	})
 
 	t.Run("rejects a close time at or below the reminder", func(t *testing.T) {

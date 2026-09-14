@@ -192,6 +192,172 @@ func BackfillOccurrencePermissions(db *gorm.DB, lo logf.Logger) error {
 	return nil
 }
 
+// helpdeskCatalogGrants concede administração do catálogo de Help Desk
+// (unidades, departamentos, categorias e políticas de SLA de ocorrência) a
+// quem já administra o funil de ocorrências. occurrences.stages:write é o
+// sinal de equivalência: é exatamente a permissão que SystemRolePermissions
+// já empacota junto com as onze daqui para o papel "manager" (ver
+// internal/models/roles.go), então um papel que já administra etapas hoje é
+// quem deveria administrar este catálogo também. Um "agent" nunca tem
+// occurrences.stages:write, então nunca recebe nada daqui — coerente com
+// SystemRolePermissions, que não dá units/departments/categories/sla_policies
+// a agentes.
+var helpdeskCatalogGrants = []grantRule{
+	{models.ResourceOccurrenceStages, models.ActionWrite, models.ResourceUnits, models.ActionRead},
+	{models.ResourceOccurrenceStages, models.ActionWrite, models.ResourceUnits, models.ActionWrite},
+	{models.ResourceOccurrenceStages, models.ActionWrite, models.ResourceUnits, models.ActionDelete},
+	{models.ResourceOccurrenceStages, models.ActionWrite, models.ResourceDepartments, models.ActionRead},
+	{models.ResourceOccurrenceStages, models.ActionWrite, models.ResourceDepartments, models.ActionWrite},
+	{models.ResourceOccurrenceStages, models.ActionWrite, models.ResourceDepartments, models.ActionDelete},
+	{models.ResourceOccurrenceStages, models.ActionWrite, models.ResourceOccurrenceCategories, models.ActionRead},
+	{models.ResourceOccurrenceStages, models.ActionWrite, models.ResourceOccurrenceCategories, models.ActionWrite},
+	{models.ResourceOccurrenceStages, models.ActionWrite, models.ResourceOccurrenceCategories, models.ActionDelete},
+	{models.ResourceOccurrenceStages, models.ActionWrite, models.ResourceOccurrenceSLAPolicies, models.ActionRead},
+	{models.ResourceOccurrenceStages, models.ActionWrite, models.ResourceOccurrenceSLAPolicies, models.ActionWrite},
+}
+
+// helpdeskCatalogPermissionKeys são as onze permissões que este backfill
+// distribui. A guarda de "já foi semeado" compara contra esta lista em vez do
+// tamanho de helpdeskCatalogGrants, que tem uma única origem repetida onze
+// vezes.
+var helpdeskCatalogPermissionKeys = []string{
+	models.ResourceUnits + ":" + models.ActionRead,
+	models.ResourceUnits + ":" + models.ActionWrite,
+	models.ResourceUnits + ":" + models.ActionDelete,
+	models.ResourceDepartments + ":" + models.ActionRead,
+	models.ResourceDepartments + ":" + models.ActionWrite,
+	models.ResourceDepartments + ":" + models.ActionDelete,
+	models.ResourceOccurrenceCategories + ":" + models.ActionRead,
+	models.ResourceOccurrenceCategories + ":" + models.ActionWrite,
+	models.ResourceOccurrenceCategories + ":" + models.ActionDelete,
+	models.ResourceOccurrenceSLAPolicies + ":" + models.ActionRead,
+	models.ResourceOccurrenceSLAPolicies + ":" + models.ActionWrite,
+}
+
+// helpdeskCatalogMigratedClause is the NOT EXISTS reused both for the
+// diagnostic pending-orgs count and the real guard inside the INSERT: an
+// organisation counts as migrated once some live role of theirs already has
+// any permission under one of this catalog's four resources. Four LIKEs
+// because "occurrences.categories" and "occurrences.sla_policies" are two
+// distinct sub-resources of "occurrences.", not a shared prefix between them.
+//
+// orgColumn names the column that identifies "this organisation" in the
+// enclosing query ("o.id" for the plain count, "r.organization_id" inside the
+// INSERT) — the only thing that differs between the two call sites.
+//
+// percent is the LIKE wildcard: a literal "%" for db.Raw (sent to Postgres
+// as-is) but "%%" when the caller is about to run the result through
+// fmt.Sprintf, which would otherwise consume a lone "%" as a format verb and
+// corrupt the SQL. Sharing one clause between those two contexts without this
+// parameter is exactly the kind of subtle bug this comment is here to head
+// off — sending literal "%%" to Postgres degrades every guard into "resource
+// LIKE '...%%'", which never matches anything and silently disables
+// idempotency, re-granting on every boot without ever tripping ON CONFLICT.
+func helpdeskCatalogMigratedClause(orgColumn, percent string) string {
+	return fmt.Sprintf(`
+	SELECT 1
+	FROM custom_roles r2
+	JOIN role_permissions rp2 ON rp2.custom_role_id = r2.id
+	JOIN permissions p2 ON p2.id = rp2.permission_id
+	WHERE r2.organization_id = %s
+	  AND r2.deleted_at IS NULL
+	  AND (
+	        p2.resource LIKE 'units%s'
+	     OR p2.resource LIKE 'departments%s'
+	     OR p2.resource LIKE 'occurrences.categories%s'
+	     OR p2.resource LIKE 'occurrences.sla_policies%s'
+	  )`, orgColumn, percent, percent, percent, percent)
+}
+
+// BackfillHelpdeskCatalogPermissions concede as onze permissões novas da Fase
+// 3 (unidades, departamentos, categorias e políticas de SLA de ocorrência)
+// aos papéis que já administram o funil de ocorrências.
+//
+// Existe pela mesma razão que BackfillOccurrencePermissions:
+// FixSystemRolePermissions pula qualquer papel que já tenha permissões, então
+// uma organização cujo papel "manager" já tinha permissões antes desta Fase
+// nunca ganha as onze novas por aquele caminho — elas ficam inacessíveis
+// exceto por SQL direto.
+//
+// É PURAMENTE ADITIVO como o outro backfill: nunca revoga nada. Idempotência
+// também é por organização: uma organização que já tenha qualquer papel com
+// qualquer permissão units%/departments%/occurrences.categories%/
+// occurrences.sla_policies% é pulada inteira.
+func BackfillHelpdeskCatalogPermissions(db *gorm.DB, lo logf.Logger) error {
+	var seededRows []string
+	if err := db.Model(&models.Permission{}).
+		Where("resource IN ?", []string{
+			models.ResourceUnits, models.ResourceDepartments,
+			models.ResourceOccurrenceCategories, models.ResourceOccurrenceSLAPolicies,
+		}).
+		Pluck("resource || ':' || action", &seededRows).Error; err != nil {
+		return fmt.Errorf("failed to count helpdesk catalog permissions: %w", err)
+	}
+	seeded := make(map[string]bool, len(seededRows))
+	for _, k := range seededRows {
+		seeded[k] = true
+	}
+	for _, key := range helpdeskCatalogPermissionKeys {
+		if !seeded[key] {
+			lo.Warn("Helpdesk catalog permissions backfill: permissions not seeded yet, did nothing")
+			return nil
+		}
+	}
+
+	var pendingOrgs int64
+	if err := db.Raw(`
+		SELECT COUNT(*)
+		FROM organizations o
+		WHERE NOT EXISTS (` + helpdeskCatalogMigratedClause("o.id", "%") + `)`).Scan(&pendingOrgs).Error; err != nil {
+		return fmt.Errorf("failed to count organisations pending the helpdesk catalog backfill: %w", err)
+	}
+	if pendingOrgs == 0 {
+		lo.Info("Helpdesk catalog permissions backfill: nothing pending, all organisations already migrated")
+		return nil
+	}
+
+	// Um único INSERT, pela mesma razão documentada em
+	// BackfillOccurrencePermissions: dentro de um statement só o Postgres lê
+	// um snapshot fixo, então a guarda "organização ainda não migrada" não vê
+	// as próprias linhas que este INSERT está gravando.
+	placeholders := make([]string, len(helpdeskCatalogGrants))
+	args := make([]any, 0, len(helpdeskCatalogGrants)*4)
+	for i, g := range helpdeskCatalogGrants {
+		placeholders[i] = "(?,?,?,?)"
+		args = append(args, g.fromResource, g.fromAction, g.toResource, g.toAction)
+	}
+
+	query := fmt.Sprintf(`
+		INSERT INTO role_permissions (custom_role_id, permission_id)
+		SELECT r.id, target.id
+		FROM custom_roles r
+		JOIN role_permissions rp ON rp.custom_role_id = r.id
+		JOIN permissions src ON src.id = rp.permission_id
+		JOIN (VALUES %s) AS g(from_resource, from_action, to_resource, to_action)
+		  ON src.resource = g.from_resource AND src.action = g.from_action
+		JOIN permissions target
+		  ON target.resource = g.to_resource AND target.action = g.to_action
+		WHERE r.deleted_at IS NULL
+		  AND NOT EXISTS (
+			SELECT 1 FROM role_permissions existing
+			WHERE existing.custom_role_id = r.id
+			  AND existing.permission_id = target.id
+		  )
+		  AND NOT EXISTS (`+helpdeskCatalogMigratedClause("r.organization_id", "%%")+`)
+		ON CONFLICT (custom_role_id, permission_id) DO NOTHING`,
+		strings.Join(placeholders, ","),
+	)
+
+	res := db.Exec(query, args...)
+	if res.Error != nil {
+		return fmt.Errorf("failed to grant helpdesk catalog permissions: %w", res.Error)
+	}
+
+	lo.Info("Helpdesk catalog permissions backfill complete",
+		"organisations_processed", pendingOrgs, "links_granted", res.RowsAffected)
+	return nil
+}
+
 // BackfillContactNamePermission concede contacts.name:write aos papéis que
 // já renomeiam contatos hoje e aos que atendem conversas.
 //

@@ -280,6 +280,55 @@ func TestApp_CreateTeam_MissingName(t *testing.T) {
 	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
 }
 
+// Finding 4 of the final branch review: unit_id/department_id were accepted
+// with a bare uuid.Parse and no check that the referenced Unit/Department
+// belongs to the caller's organization.
+func TestApp_CreateTeam_RejectsUnitFromAnotherOrg(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	user := createAdminUser(t, app, org.ID)
+
+	otherOrg := testutil.CreateTestOrganization(t, app.DB)
+	foreignUnit := models.Unit{OrganizationID: otherOrg.ID, Name: "Unidade de outra org"}
+	require.NoError(t, app.DB.Create(&foreignUnit).Error)
+
+	unitID := foreignUnit.ID.String()
+	reqBody := handlers.TeamRequest{Name: "Time invasor", UnitID: &unitID}
+	req := testutil.NewJSONRequest(t, reqBody)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+
+	err := app.CreateTeam(req)
+	require.NoError(t, err)
+	assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req))
+
+	var count int64
+	app.DB.Model(&models.Team{}).Where("organization_id = ?", org.ID).Count(&count)
+	assert.EqualValues(t, 0, count, "a team referencing another org's unit must not be created")
+}
+
+func TestApp_CreateTeam_RejectsDepartmentFromAnotherOrg(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	user := createAdminUser(t, app, org.ID)
+
+	otherOrg := testutil.CreateTestOrganization(t, app.DB)
+	foreignDept := models.Department{OrganizationID: otherOrg.ID, Name: "Depto de outra org"}
+	require.NoError(t, app.DB.Create(&foreignDept).Error)
+
+	deptID := foreignDept.ID.String()
+	reqBody := handlers.TeamRequest{Name: "Time invasor", DepartmentID: &deptID}
+	req := testutil.NewJSONRequest(t, reqBody)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+
+	err := app.CreateTeam(req)
+	require.NoError(t, err)
+	assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req))
+}
+
 // --- UpdateTeam Tests ---
 
 func TestApp_UpdateTeam_Success(t *testing.T) {

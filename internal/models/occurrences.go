@@ -12,6 +12,7 @@ type OccurrenceEventType string
 const (
 	OccurrenceEventOpened       OccurrenceEventType = "opened"
 	OccurrenceEventNote         OccurrenceEventType = "note"
+	OccurrenceEventReply        OccurrenceEventType = "reply"
 	OccurrenceEventStageChange  OccurrenceEventType = "stage_change"
 	OccurrenceEventAssignment   OccurrenceEventType = "assignment"
 	OccurrenceEventProtocolSent OccurrenceEventType = "protocol_sent"
@@ -74,10 +75,40 @@ type Occurrence struct {
 	// attendance never closes the occurrence.
 	SourceTransferID *uuid.UUID `gorm:"type:uuid;index" json:"source_transfer_id,omitempty"`
 
+	// UnitID/DepartmentID default from the originating attendance's Team
+	// (AgentTransfer.TeamID, via SourceTransferID) when the occurrence is
+	// opened from a conversation; both are editable directly otherwise.
+	UnitID       *uuid.UUID `gorm:"type:uuid;index" json:"unit_id,omitempty"`
+	DepartmentID *uuid.UUID `gorm:"type:uuid;index" json:"department_id,omitempty"`
+	CategoryID   *uuid.UUID `gorm:"type:uuid;index" json:"category_id,omitempty"`
+
+	// Source documents where this case originated. Whatomate has one channel
+	// today (WhatsApp), so this is a placeholder for a future channel, not
+	// active logic — "manual" when there is no SourceTransferID.
+	Source string `gorm:"size:20;not null;default:'whatsapp'" json:"source"`
+
+	// SLA embeds the same struct AgentTransfer already uses for chat SLA
+	// (internal/models/chatbot.go:294) — response/resolution deadline, breach
+	// flag and timestamp. SLA.FirstResponseAt doubles here as Occurrence's own
+	// "first public reply" timestamp (no separate top-level field: that would
+	// collide with this embedded one on the same first_response_at column).
+	// FirstResponseByID has no equivalent on SLATracking, so it stays a
+	// top-level field. Both SLA.FirstResponseAt and FirstResponseByID are
+	// Occurrence-only: they are set exclusively by the "reply" event (Task 7),
+	// never by an internal note — that distinction is the whole point of
+	// first-response SLA.
+	SLA               SLATracking `gorm:"embedded"`
+	FirstResponseByID *uuid.UUID  `gorm:"type:uuid" json:"first_response_by_id,omitempty"`
+
+	FirstResponseBy *User `gorm:"foreignKey:FirstResponseByID" json:"first_response_by,omitempty"`
+
 	// Relations
 	Contact      *Contact         `gorm:"foreignKey:ContactID" json:"contact,omitempty"`
 	Stage        *OccurrenceStage `gorm:"foreignKey:StageID" json:"stage,omitempty"`
 	AssignedUser *User            `gorm:"foreignKey:AssignedUserID" json:"assigned_user,omitempty"`
+	Unit         *Unit               `gorm:"foreignKey:UnitID" json:"unit,omitempty"`
+	Department   *Department         `gorm:"foreignKey:DepartmentID" json:"department,omitempty"`
+	Category     *OccurrenceCategory `gorm:"foreignKey:CategoryID" json:"category,omitempty"`
 }
 
 func (Occurrence) TableName() string { return "occurrences" }
