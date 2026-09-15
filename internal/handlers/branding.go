@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/shridarpatil/whatomate/internal/audit"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -102,9 +103,16 @@ const brandingMaxUploadSize = 5 << 20
 //     blocks until the first fully finishes and sees fresh state.
 //  5. Size-bounded before any disk write (5MB).
 func (a *App) UploadLoginBackground(r *fastglue.Request) error {
-	_, _, err := a.requireAuth(r, models.ResourceSettingsGeneral, models.ActionWrite)
+	orgID, userID, err := a.requireAuth(r, models.ResourceSettingsGeneral, models.ActionWrite)
 	if err != nil {
 		return nil
+	}
+	// branding_settings is a system-wide singleton (no organization_id) --
+	// requireAuth above only proves the caller can write settings.general in
+	// THEIR org, which would let any org's admin overwrite every tenant's
+	// login page. Restrict the actual mutation to super admins.
+	if !a.IsSuperAdmin(userID) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Only super admins can change system branding", nil, "")
 	}
 
 	fileHeader, err := r.RequestCtx.FormFile("file")
@@ -203,6 +211,17 @@ func (a *App) UploadLoginBackground(r *fastglue.Request) error {
 		}
 	}
 
+	// branding_settings has no owning org, so there's no "correct" orgID for
+	// this entry. We attribute it to the acting super admin's own org (the
+	// same (orgID, resourceID=orgID) shape organization.go already uses for
+	// resource_type "settings.general") purely so it surfaces in the
+	// AuditLogPanel of whichever org they happened to be viewing -- the true
+	// affected scope is global, not that one org.
+	audit.LogAudit(a.DB, orgID, userID, audit.GetUserName(a.DB, userID),
+		models.ResourceSettingsGeneral, orgID, models.AuditActionUpdated,
+		map[string]any{"login_background_path": oldRelPath},
+		map[string]any{"login_background_path": newRelPath})
+
 	return r.SendEnvelope(map[string]any{
 		"login_background_url": fmt.Sprintf("/api/branding/login-background?v=%d", time.Now().Unix()),
 	})
@@ -213,9 +232,13 @@ func (a *App) UploadLoginBackground(r *fastglue.Request) error {
 // UploadLoginBackground — a delete racing an upload (or another delete) must
 // never leave the database and disk pointing at inconsistent state.
 func (a *App) DeleteLoginBackground(r *fastglue.Request) error {
-	_, _, err := a.requireAuth(r, models.ResourceSettingsGeneral, models.ActionWrite)
+	orgID, userID, err := a.requireAuth(r, models.ResourceSettingsGeneral, models.ActionWrite)
 	if err != nil {
 		return nil
+	}
+	// Same system-wide-singleton reasoning as UploadLoginBackground.
+	if !a.IsSuperAdmin(userID) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Only super admins can change system branding", nil, "")
 	}
 
 	basePath := a.getMediaStoragePath()
@@ -255,6 +278,12 @@ func (a *App) DeleteLoginBackground(r *fastglue.Request) error {
 			a.Log.Error("Failed to remove branding file", "path", oldRelPath, "error", err)
 		}
 	}
+
+	// Same pragmatic org attribution as UploadLoginBackground -- see comment there.
+	audit.LogAudit(a.DB, orgID, userID, audit.GetUserName(a.DB, userID),
+		models.ResourceSettingsGeneral, orgID, models.AuditActionUpdated,
+		map[string]any{"login_background_path": oldRelPath},
+		map[string]any{"login_background_path": ""})
 
 	return r.SendEnvelope(map[string]any{"deleted": true})
 }

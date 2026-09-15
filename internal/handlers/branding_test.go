@@ -149,7 +149,12 @@ func TestUploadLoginBackground_RejectedForUserWithoutPermission(t *testing.T) {
 	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(req))
 }
 
-func TestUploadLoginBackground_AcceptsRealImageDespiteMismatchedHeader(t *testing.T) {
+// TestUploadLoginBackground_RejectedForOrgAdminNotSuperAdmin proves the
+// upload endpoint now enforces the super-admin gate on TOP of the
+// settings.general:write permission check -- an org admin who would have
+// passed the old check alone must still be rejected, because
+// branding_settings is a system-wide singleton, not scoped to their org.
+func TestUploadLoginBackground_RejectedForOrgAdminNotSuperAdmin(t *testing.T) {
 	app := newTestApp(t)
 	dir := t.TempDir()
 	app.Config.Storage.LocalPath = dir
@@ -158,6 +163,25 @@ func TestUploadLoginBackground_AcceptsRealImageDespiteMismatchedHeader(t *testin
 	org := testutil.CreateTestOrganization(t, app.DB)
 	admin := testutil.CreateAdminRole(t, app.DB, org.ID)
 	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&admin.ID))
+
+	req := newMultipartUploadRequest(t, "file", "bg.jpg", jpegMagicBytes())
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	require.NoError(t, app.UploadLoginBackground(req))
+	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(req))
+}
+
+func TestUploadLoginBackground_AcceptsRealImageDespiteMismatchedHeader(t *testing.T) {
+	app := newTestApp(t)
+	dir := t.TempDir()
+	app.Config.Storage.LocalPath = dir
+	require.NoError(t, database.EnsureBrandingSettingsRow(app.DB))
+
+	org := testutil.CreateTestOrganization(t, app.DB)
+	// getUserPermissionsCached requires a role even for a super admin (it
+	// looks up the role before checking the IsSuperAdmin flag) -- any role
+	// works here since IsSuperAdmin short-circuits the actual permission set.
+	adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID), testutil.WithSuperAdmin())
 
 	req := newMultipartUploadRequest(t, "file", "bg.jpg", jpegMagicBytes())
 	testutil.SetAuthContext(req, org.ID, user.ID)
@@ -177,16 +201,25 @@ func TestUploadLoginBackground_RejectsSpoofedContentType(t *testing.T) {
 	app.Config.Storage.LocalPath = dir
 	require.NoError(t, database.EnsureBrandingSettingsRow(app.DB))
 
-	org := testutil.CreateTestOrganization(t, app.DB)
-	admin := testutil.CreateAdminRole(t, app.DB, org.ID)
-	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&admin.ID))
-
 	// branding_settings is a global singleton row shared by every test in
 	// this file (EnsureBrandingSettingsRow is ON CONFLICT DO NOTHING, so it
-	// never resets an existing row) — snapshot the pre-call state rather
-	// than assuming it starts empty, so this test is order-independent.
-	var before models.BrandingSettings
-	require.NoError(t, app.DB.Where("id = ?", models.BrandingSettingsSingletonID).First(&before).Error)
+	// never resets an existing row) — explicitly clear it to a known state
+	// (same technique TestDeleteLoginBackground_NoOpWhenAlreadyEmpty uses)
+	// rather than snapshotting whatever a previous test left behind, so this
+	// test's regression guard doesn't depend on execution order.
+	require.NoError(t, app.DB.Model(&models.BrandingSettings{}).
+		Where("id = ?", models.BrandingSettingsSingletonID).
+		Updates(map[string]any{
+			"login_background_path":         "",
+			"login_background_content_type": "",
+		}).Error)
+
+	org := testutil.CreateTestOrganization(t, app.DB)
+	// getUserPermissionsCached requires a role even for a super admin (it
+	// looks up the role before checking the IsSuperAdmin flag) -- any role
+	// works here since IsSuperAdmin short-circuits the actual permission set.
+	adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID), testutil.WithSuperAdmin())
 
 	// The multipart part below declares Content-Type: image/jpeg, but the
 	// bytes are plain text — proves validation is by sniffed content, not
@@ -198,8 +231,8 @@ func TestUploadLoginBackground_RejectsSpoofedContentType(t *testing.T) {
 
 	var row models.BrandingSettings
 	require.NoError(t, app.DB.Where("id = ?", models.BrandingSettingsSingletonID).First(&row).Error)
-	assert.Equal(t, before.LoginBackgroundPath, row.LoginBackgroundPath, "a rejected upload must not touch the stored config")
-	assert.Equal(t, before.LoginBackgroundContentType, row.LoginBackgroundContentType, "a rejected upload must not touch the stored config")
+	assert.Empty(t, row.LoginBackgroundPath, "a rejected upload must not touch the stored config")
+	assert.Empty(t, row.LoginBackgroundContentType, "a rejected upload must not touch the stored config")
 }
 
 func TestUploadLoginBackground_RejectsOversizedFile(t *testing.T) {
@@ -209,8 +242,11 @@ func TestUploadLoginBackground_RejectsOversizedFile(t *testing.T) {
 	require.NoError(t, database.EnsureBrandingSettingsRow(app.DB))
 
 	org := testutil.CreateTestOrganization(t, app.DB)
-	admin := testutil.CreateAdminRole(t, app.DB, org.ID)
-	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&admin.ID))
+	// getUserPermissionsCached requires a role even for a super admin (it
+	// looks up the role before checking the IsSuperAdmin flag) -- any role
+	// works here since IsSuperAdmin short-circuits the actual permission set.
+	adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID), testutil.WithSuperAdmin())
 
 	oversized := append(jpegMagicBytes(), make([]byte, 6<<20)...) // >5MB
 	req := newMultipartUploadRequest(t, "file", "bg.jpg", oversized)
@@ -233,8 +269,11 @@ func TestUploadLoginBackground_ExtensionChangeLeavesNoOrphan(t *testing.T) {
 	require.NoError(t, database.EnsureBrandingSettingsRow(app.DB))
 
 	org := testutil.CreateTestOrganization(t, app.DB)
-	admin := testutil.CreateAdminRole(t, app.DB, org.ID)
-	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&admin.ID))
+	// getUserPermissionsCached requires a role even for a super admin (it
+	// looks up the role before checking the IsSuperAdmin flag) -- any role
+	// works here since IsSuperAdmin short-circuits the actual permission set.
+	adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID), testutil.WithSuperAdmin())
 
 	first := newMultipartUploadRequest(t, "file", "bg.jpg", jpegMagicBytes())
 	testutil.SetAuthContext(first, org.ID, user.ID)
@@ -308,6 +347,20 @@ func TestDeleteLoginBackground_RejectedForUserWithoutPermission(t *testing.T) {
 	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(req))
 }
 
+func TestDeleteLoginBackground_RejectedForOrgAdminNotSuperAdmin(t *testing.T) {
+	app := newTestApp(t)
+	require.NoError(t, database.EnsureBrandingSettingsRow(app.DB))
+
+	org := testutil.CreateTestOrganization(t, app.DB)
+	admin := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&admin.ID))
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	require.NoError(t, app.DeleteLoginBackground(req))
+	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(req))
+}
+
 func TestDeleteLoginBackground_ClearsConfigAndRemovesFile(t *testing.T) {
 	app := newTestApp(t)
 	dir := t.TempDir()
@@ -315,8 +368,11 @@ func TestDeleteLoginBackground_ClearsConfigAndRemovesFile(t *testing.T) {
 	require.NoError(t, database.EnsureBrandingSettingsRow(app.DB))
 
 	org := testutil.CreateTestOrganization(t, app.DB)
-	admin := testutil.CreateAdminRole(t, app.DB, org.ID)
-	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&admin.ID))
+	// getUserPermissionsCached requires a role even for a super admin (it
+	// looks up the role before checking the IsSuperAdmin flag) -- any role
+	// works here since IsSuperAdmin short-circuits the actual permission set.
+	adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID), testutil.WithSuperAdmin())
 
 	uploadReq := newMultipartUploadRequest(t, "file", "bg.jpg", jpegMagicBytes())
 	testutil.SetAuthContext(uploadReq, org.ID, user.ID)
@@ -356,8 +412,11 @@ func TestDeleteLoginBackground_NoOpWhenAlreadyEmpty(t *testing.T) {
 		}).Error)
 
 	org := testutil.CreateTestOrganization(t, app.DB)
-	admin := testutil.CreateAdminRole(t, app.DB, org.ID)
-	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&admin.ID))
+	// getUserPermissionsCached requires a role even for a super admin (it
+	// looks up the role before checking the IsSuperAdmin flag) -- any role
+	// works here since IsSuperAdmin short-circuits the actual permission set.
+	adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID), testutil.WithSuperAdmin())
 
 	req := testutil.NewGETRequest(t)
 	testutil.SetAuthContext(req, org.ID, user.ID)
