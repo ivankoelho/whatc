@@ -26,6 +26,7 @@ const email = ref('')
 const password = ref('')
 const isLoading = ref(false)
 const ssoProviders = ref<SSOProvider[]>([])
+const loginBackgroundUrl = ref<string | null>(null)
 
 // SSO provider icons (using simple SVG paths)
 const providerIcons: Record<string, string> = {
@@ -54,13 +55,27 @@ onMounted(async () => {
     router.replace({ query: { ...route.query, sso_error: undefined } })
   }
 
-  // Fetch enabled SSO providers
-  try {
-    const response = await api.get('/auth/sso/providers')
-    ssoProviders.value = response.data.data || []
-  } catch {
-    ssoProviders.value = []
-  }
+  await Promise.all([
+    (async () => {
+      try {
+        const response = await api.get('/auth/sso/providers')
+        ssoProviders.value = response.data.data || []
+      } catch {
+        ssoProviders.value = []
+      }
+    })(),
+    (async () => {
+      try {
+        const response = await api.get('/branding')
+        const url = response.data?.data?.login_background_url ?? response.data?.login_background_url
+        loginBackgroundUrl.value = url ?? null
+      } catch {
+        // A tela de login nunca pode travar por causa dessa config opcional
+        // -- qualquer falha aqui (rede, 500, JSON malformado) vira "sem imagem".
+        loginBackgroundUrl.value = null
+      }
+    })()
+  ])
 })
 
 const handleLogin = async () => {
@@ -92,82 +107,106 @@ const initiateSSO = (provider: string) => {
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-[#0a0a0b] light:bg-gradient-to-br light:from-gray-50 light:to-gray-100 p-4">
-    <div class="w-full max-w-md rounded-2xl border border-white/[0.08] bg-white/[0.02] backdrop-blur light:bg-white light:border-gray-200 light:shadow-xl">
-      <div class="p-8 space-y-1 text-center">
-        <div class="flex justify-center mb-4">
-          <div class="h-12 w-12 rounded-xl bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center shadow-lg shadow-emerald-500/20">
-            <MessageSquare class="h-7 w-7 text-white" />
-          </div>
+  <div class="min-h-screen flex bg-[#0a0a0b] light:bg-gray-50">
+    <!-- Painel de marca -->
+    <div
+      class="hidden lg:flex lg:w-1/2 relative flex-col justify-between p-12 bg-gradient-to-br from-emerald-600 to-green-800"
+      :style="loginBackgroundUrl ? { backgroundImage: `url(${loginBackgroundUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' } : {}"
+    >
+      <div v-if="loginBackgroundUrl" class="absolute inset-0 bg-black/40" />
+      <div class="relative flex items-center gap-3">
+        <div class="h-10 w-10 rounded-xl bg-white/10 backdrop-blur flex items-center justify-center">
+          <MessageSquare class="h-6 w-6 text-white" />
         </div>
-        <h2 class="text-2xl font-bold text-white light:text-gray-900">{{ $t('auth.welcomeTitle') }}</h2>
-        <p class="text-white/50 light:text-gray-500">
-          {{ $t('auth.welcomeSubtitle') }}
+        <span class="text-white font-semibold text-lg">Whatomate</span>
+      </div>
+      <div class="relative">
+        <p class="text-3xl font-bold text-white leading-tight">
+          Todo o seu atendimento<br />
+          Centralizado e em tempo real<br />
+          num só lugar.
         </p>
       </div>
+    </div>
 
-      <form @submit.prevent="handleLogin">
-        <div class="px-8 pb-4 space-y-4">
-          <div class="space-y-2">
-            <Label for="email" class="text-white/70 light:text-gray-700">{{ $t('common.email') }}</Label>
-            <Input
-              id="email"
-              v-model="email"
-              type="email"
-              :placeholder="$t('auth.emailPlaceholder')"
-              :disabled="isLoading"
-              autocomplete="email"
-            />
+    <!-- Painel de formulário -->
+    <div class="flex-1 flex items-center justify-center p-4">
+      <div class="w-full max-w-md rounded-2xl border border-white/[0.08] bg-white/[0.02] backdrop-blur light:bg-white light:border-gray-200 light:shadow-xl">
+        <div class="p-8 space-y-1 text-center">
+          <div class="flex justify-center mb-4 lg:hidden">
+            <div class="h-12 w-12 rounded-xl bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+              <MessageSquare class="h-7 w-7 text-white" />
+            </div>
           </div>
-          <div class="space-y-2">
-            <Label for="password" class="text-white/70 light:text-gray-700">{{ $t('auth.password') }}</Label>
-            <Input
-              id="password"
-              v-model="password"
-              type="password"
-              :placeholder="$t('auth.passwordPlaceholder')"
-              :disabled="isLoading"
-              autocomplete="current-password"
-            />
+          <h2 class="text-2xl font-bold text-white light:text-gray-900">{{ $t('auth.welcomeTitle') }}</h2>
+          <p class="text-white/50 light:text-gray-500">
+            {{ $t('auth.welcomeSubtitle') }}
+          </p>
+        </div>
+
+        <form @submit.prevent="handleLogin">
+          <div class="px-8 pb-4 space-y-4">
+            <div class="space-y-2">
+              <Label for="email" class="text-white/70 light:text-gray-700">{{ $t('common.email') }}</Label>
+              <Input
+                id="email"
+                v-model="email"
+                type="email"
+                :placeholder="$t('auth.emailPlaceholder')"
+                :disabled="isLoading"
+                autocomplete="email"
+              />
+            </div>
+            <div class="space-y-2">
+              <Label for="password" class="text-white/70 light:text-gray-700">{{ $t('auth.password') }}</Label>
+              <Input
+                id="password"
+                v-model="password"
+                type="password"
+                :placeholder="$t('auth.passwordPlaceholder')"
+                :disabled="isLoading"
+                autocomplete="current-password"
+              />
+            </div>
+            <Button type="submit" class="w-full bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 text-white shadow-lg shadow-emerald-500/20" :disabled="isLoading">
+              <Loader2 v-if="isLoading" class="mr-2 h-4 w-4 animate-spin" />
+              {{ $t('auth.signIn') }}
+            </Button>
           </div>
-          <Button type="submit" class="w-full bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 text-white shadow-lg shadow-emerald-500/20" :disabled="isLoading">
-            <Loader2 v-if="isLoading" class="mr-2 h-4 w-4 animate-spin" />
-            {{ $t('auth.signIn') }}
+        </form>
+
+        <!-- SSO Section -->
+        <div v-if="ssoProviders.length > 0" class="px-8 pb-4 space-y-3">
+          <div class="relative my-2">
+            <Separator class="bg-white/[0.08] light:bg-gray-200" />
+            <span class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-[#0a0a0b] light:bg-white px-2 text-xs text-white/40 light:text-gray-500">
+              {{ $t('auth.orContinueWith') }}
+            </span>
+          </div>
+
+          <Button
+            v-for="provider in ssoProviders"
+            :key="provider.provider"
+            variant="outline"
+            class="w-full justify-start gap-3 transition-colors bg-white/[0.04] border-white/[0.1] text-white/70 hover:bg-white/[0.08] hover:text-white light:bg-white light:border-gray-200 light:text-gray-700 light:hover:bg-gray-50"
+            :class="providerColors[provider.provider] || providerColors.custom"
+            @click="initiateSSO(provider.provider)"
+          >
+            <svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+              <path :d="providerIcons[provider.provider] || providerIcons.custom" />
+            </svg>
+            {{ provider.name }}
           </Button>
         </div>
-      </form>
 
-      <!-- SSO Section -->
-      <div v-if="ssoProviders.length > 0" class="px-8 pb-4 space-y-3">
-        <div class="relative my-2">
-          <Separator class="bg-white/[0.08] light:bg-gray-200" />
-          <span class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-[#0a0a0b] light:bg-white px-2 text-xs text-white/40 light:text-gray-500">
-            {{ $t('auth.orContinueWith') }}
-          </span>
+        <div class="px-8 pb-8">
+          <p class="text-sm text-center text-white/40 light:text-gray-500">
+            {{ $t('auth.noAccount') }}
+            <RouterLink to="/register" class="text-emerald-400 light:text-emerald-600 hover:underline">
+              {{ $t('auth.signUp') }}
+            </RouterLink>
+          </p>
         </div>
-
-        <Button
-          v-for="provider in ssoProviders"
-          :key="provider.provider"
-          variant="outline"
-          class="w-full justify-start gap-3 transition-colors bg-white/[0.04] border-white/[0.1] text-white/70 hover:bg-white/[0.08] hover:text-white light:bg-white light:border-gray-200 light:text-gray-700 light:hover:bg-gray-50"
-          :class="providerColors[provider.provider] || providerColors.custom"
-          @click="initiateSSO(provider.provider)"
-        >
-          <svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
-            <path :d="providerIcons[provider.provider] || providerIcons.custom" />
-          </svg>
-          {{ provider.name }}
-        </Button>
-      </div>
-
-      <div class="px-8 pb-8">
-        <p class="text-sm text-center text-white/40 light:text-gray-500">
-          {{ $t('auth.noAccount') }}
-          <RouterLink to="/register" class="text-emerald-400 light:text-emerald-600 hover:underline">
-            {{ $t('auth.signUp') }}
-          </RouterLink>
-        </p>
       </div>
     </div>
   </div>
