@@ -16,6 +16,8 @@ type TeamRequest struct {
 	AssignmentStrategy  models.AssignmentStrategy `json:"assignment_strategy"` // round_robin, load_balanced, manual
 	PerAgentTimeoutSecs int                       `json:"per_agent_timeout_secs"`
 	IsActive            bool                      `json:"is_active"`
+	UnitID              *string                   `json:"unit_id,omitempty"`
+	DepartmentID        *string                   `json:"department_id,omitempty"`
 }
 
 // TeamMemberRequest represents add member request
@@ -38,6 +40,8 @@ type TeamResponse struct {
 	CreatedByName       string                    `json:"created_by_name,omitempty"`
 	UpdatedByID         *uuid.UUID                `json:"updated_by_id,omitempty"`
 	UpdatedByName       string                    `json:"updated_by_name,omitempty"`
+	UnitID              *uuid.UUID                `json:"unit_id,omitempty"`
+	DepartmentID        *uuid.UUID                `json:"department_id,omitempty"`
 	CreatedAt           time.Time                 `json:"created_at"`
 	UpdatedAt           time.Time                 `json:"updated_at"`
 }
@@ -176,6 +180,34 @@ func (a *App) CreateTeam(r *fastglue.Request) error {
 		UpdatedByID:         &userID,
 	}
 
+	// Handle unit_id
+	if req.UnitID != nil {
+		id, _, err := parseOptionalUUID(req.UnitID)
+		if err != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid unit_id", nil, "")
+		}
+		if id != nil {
+			if _, err := findByIDAndOrg[models.Unit](a.DB, r, *id, orgID, "Unit"); err != nil {
+				return nil
+			}
+		}
+		team.UnitID = id
+	}
+
+	// Handle department_id
+	if req.DepartmentID != nil {
+		id, _, err := parseOptionalUUID(req.DepartmentID)
+		if err != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid department_id", nil, "")
+		}
+		if id != nil {
+			if _, err := findByIDAndOrg[models.Department](a.DB, r, *id, orgID, "Department"); err != nil {
+				return nil
+			}
+		}
+		team.DepartmentID = id
+	}
+
 	if err := a.DB.Create(&team).Error; err != nil {
 		a.Log.Error("Failed to create team", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create team", nil, "")
@@ -243,6 +275,35 @@ func (a *App) UpdateTeam(r *fastglue.Request) error {
 		team.AssignmentStrategy = req.AssignmentStrategy
 	}
 	team.PerAgentTimeoutSecs = req.PerAgentTimeoutSecs
+
+	// Handle unit_id
+	if req.UnitID != nil {
+		id, _, err := parseOptionalUUID(req.UnitID)
+		if err != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid unit_id", nil, "")
+		}
+		if id != nil {
+			if _, err := findByIDAndOrg[models.Unit](a.DB, r, *id, orgID, "Unit"); err != nil {
+				return nil
+			}
+		}
+		team.UnitID = id
+	}
+
+	// Handle department_id
+	if req.DepartmentID != nil {
+		id, _, err := parseOptionalUUID(req.DepartmentID)
+		if err != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid department_id", nil, "")
+		}
+		if id != nil {
+			if _, err := findByIDAndOrg[models.Department](a.DB, r, *id, orgID, "Department"); err != nil {
+				return nil
+			}
+		}
+		team.DepartmentID = id
+	}
+
 	team.UpdatedByID = &userID
 
 	if err := a.DB.Save(&team).Error; err != nil {
@@ -516,6 +577,23 @@ func (a *App) RemoveTeamMember(r *fastglue.Request) error {
 	return r.SendEnvelope(map[string]string{"message": "Member removed from team"})
 }
 
+// parseOptionalUUID parses an optional *string field used by PATCH-style
+// request bodies: nil means "field absent, don't touch"; empty string means
+// "clear the field" (returns nil, nil); anything else must parse as a UUID.
+func parseOptionalUUID(raw *string) (id *uuid.UUID, clear bool, err error) {
+	if raw == nil {
+		return nil, false, nil
+	}
+	if *raw == "" {
+		return nil, true, nil
+	}
+	parsed, parseErr := uuid.Parse(*raw)
+	if parseErr != nil {
+		return nil, false, parseErr
+	}
+	return &parsed, false, nil
+}
+
 // Helper function to build team response
 func buildTeamResponse(team *models.Team, includeMembers bool) TeamResponse {
 	resp := TeamResponse{
@@ -528,6 +606,8 @@ func buildTeamResponse(team *models.Team, includeMembers bool) TeamResponse {
 		MemberCount:         len(team.Members),
 		CreatedByID:         team.CreatedByID,
 		UpdatedByID:         team.UpdatedByID,
+		UnitID:              team.UnitID,
+		DepartmentID:        team.DepartmentID,
 		CreatedAt:           team.CreatedAt,
 		UpdatedAt:           team.UpdatedAt,
 	}

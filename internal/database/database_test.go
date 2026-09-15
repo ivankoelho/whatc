@@ -317,3 +317,111 @@ func TestBackfillContactStatus_Idempotent(t *testing.T) {
 	require.NoError(t, db.Model(&models.Contact{}).Where("id = ?", c.ID).Pluck("contact_status", &s).Error)
 	assert.Equal(t, "resolved", s)
 }
+
+// TestBackfillOccurrenceSourceForManualCases covers Finding 3 of the final
+// branch review: AutoMigrate adding occurrences.source with
+// `default:'whatsapp'` backfilled every pre-existing row to 'whatsapp',
+// including cases that were opened manually (no source_transfer_id). The fix
+// corrects exactly those rows and leaves a real transfer-sourced row alone.
+func TestBackfillOccurrenceSourceForManualCases(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	cleanAll(t, db)
+	org := testutil.CreateTestOrganization(t, db)
+	contact := testutil.CreateTestContact(t, db, org.ID)
+
+	stage := models.OccurrenceStage{OrganizationID: org.ID, Name: "Aberto"}
+	require.NoError(t, db.Create(&stage).Error)
+
+	// Simulates a pre-existing row wrongly stamped 'whatsapp' by the column's
+	// own DB default on AutoMigrate: no source_transfer_id, yet source =
+	// 'whatsapp'.
+	manual := models.Occurrence{
+		OrganizationID: org.ID, ContactID: contact.ID, ProtocolNumber: "MANUAL-1",
+		Title: "Aberto manualmente", StageID: stage.ID, OpenedByUserID: uuid.New(),
+	}
+	require.NoError(t, db.Create(&manual).Error)
+	require.NoError(t, db.Model(&manual).Update("source", "whatsapp").Error)
+
+	// A genuinely transfer-sourced row must be left untouched.
+	transferID := uuid.New()
+	fromTransfer := models.Occurrence{
+		OrganizationID: org.ID, ContactID: contact.ID, ProtocolNumber: "TRANSFER-1",
+		Title: "Aberto por transferência", StageID: stage.ID, OpenedByUserID: uuid.New(),
+		SourceTransferID: &transferID,
+	}
+	require.NoError(t, db.Create(&fromTransfer).Error)
+	require.NoError(t, db.Model(&fromTransfer).Update("source", "whatsapp").Error)
+
+	require.NoError(t, database.BackfillOccurrenceSourceForManualCases(db))
+
+	sourceOf := func(id uuid.UUID) string {
+		var s string
+		require.NoError(t, db.Model(&models.Occurrence{}).Where("id = ?", id).Pluck("source", &s).Error)
+		return s
+	}
+	assert.Equal(t, "manual", sourceOf(manual.ID),
+		"a row with no source_transfer_id must be corrected to 'manual'")
+	assert.Equal(t, "whatsapp", sourceOf(fromTransfer.ID),
+		"a row with a real source_transfer_id must be left untouched")
+}
+
+// A second run is a no-op: once corrected to 'manual', the row no longer
+// matches the guard (source = 'whatsapp' AND source_transfer_id IS NULL), so
+// re-running never flips it back or errors.
+func TestBackfillOccurrenceSourceForManualCases_Idempotent(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	cleanAll(t, db)
+	org := testutil.CreateTestOrganization(t, db)
+	contact := testutil.CreateTestContact(t, db, org.ID)
+	stage := models.OccurrenceStage{OrganizationID: org.ID, Name: "Aberto"}
+	require.NoError(t, db.Create(&stage).Error)
+
+	occ := models.Occurrence{
+		OrganizationID: org.ID, ContactID: contact.ID, ProtocolNumber: "MANUAL-2",
+		Title: "Aberto manualmente", StageID: stage.ID, OpenedByUserID: uuid.New(),
+	}
+	require.NoError(t, db.Create(&occ).Error)
+	require.NoError(t, db.Model(&occ).Update("source", "whatsapp").Error)
+
+	require.NoError(t, database.BackfillOccurrenceSourceForManualCases(db))
+	require.NoError(t, database.BackfillOccurrenceSourceForManualCases(db))
+
+	var s string
+	require.NoError(t, db.Model(&models.Occurrence{}).Where("id = ?", occ.ID).Pluck("source", &s).Error)
+	assert.Equal(t, "manual", s)
+}
+
+func TestEnsureBrandingSettingsRow_CreatesTheSingletonRow(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	cleanAll(t, db)
+
+	require.NoError(t, database.EnsureBrandingSettingsRow(db))
+
+	var row models.BrandingSettings
+	require.NoError(t, db.Where("id = ?", models.BrandingSettingsSingletonID).First(&row).Error)
+	assert.Equal(t, models.BrandingSettingsSingletonID, row.ID)
+	assert.Empty(t, row.LoginBackgroundPath)
+}
+
+func TestEnsureBrandingSettingsRow_IsIdempotent(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	cleanAll(t, db)
+
+	require.NoError(t, database.EnsureBrandingSettingsRow(db))
+	// Simula um upload já ter acontecido antes de uma segunda chamada ao seed
+	// (ex: reiniciar com -migrate depois de já estar configurado).
+	require.NoError(t, db.Model(&models.BrandingSettings{}).
+		Where("id = ?", models.BrandingSettingsSingletonID).
+		Update("login_background_path", "branding/login-background.jpg").Error)
+
+	require.NoError(t, database.EnsureBrandingSettingsRow(db))
+
+	var count int64
+	db.Model(&models.BrandingSettings{}).Count(&count)
+	assert.EqualValues(t, 1, count, "must never create a second row")
+
+	var row models.BrandingSettings
+	require.NoError(t, db.Where("id = ?", models.BrandingSettingsSingletonID).First(&row).Error)
+	assert.Equal(t, "branding/login-background.jpg", row.LoginBackgroundPath,
+		"re-running the seed must not overwrite an existing configuration")
+}

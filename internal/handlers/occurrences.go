@@ -21,6 +21,9 @@ type CreateOccurrenceRequest struct {
 	Priority         string  `json:"priority"`
 	AssignedUserID   *string `json:"assigned_user_id"`
 	SourceTransferID *string `json:"source_transfer_id"`
+	UnitID           *string `json:"unit_id"`
+	DepartmentID     *string `json:"department_id"`
+	CategoryID       *string `json:"category_id"`
 }
 
 // OccurrenceResponse is the API shape of an occurrence.
@@ -39,21 +42,43 @@ type OccurrenceResponse struct {
 	OpenedAt         time.Time  `json:"opened_at"`
 	ClosedAt         *time.Time `json:"closed_at,omitempty"`
 	SourceTransferID *uuid.UUID `json:"source_transfer_id,omitempty"`
+	UnitID           *uuid.UUID `json:"unit_id,omitempty"`
+	DepartmentID     *uuid.UUID `json:"department_id,omitempty"`
+	CategoryID       *uuid.UUID `json:"category_id,omitempty"`
+	Source           string     `json:"source"`
+	// SLA/first-response fields, named to match AgentTransferResponse's
+	// existing sla_-prefixed convention for the same SLATracking struct.
+	SLAResponseDeadline   *time.Time `json:"sla_response_deadline,omitempty"`
+	SLAResolutionDeadline *time.Time `json:"sla_resolution_deadline,omitempty"`
+	SLABreached           bool       `json:"sla_breached"`
+	SLABreachedAt         *time.Time `json:"sla_breached_at,omitempty"`
+	FirstResponseAt       *time.Time `json:"first_response_at,omitempty"`
+	FirstResponseByID     *uuid.UUID `json:"first_response_by_id,omitempty"`
 }
 
 func occurrenceToResponse(o models.Occurrence) OccurrenceResponse {
 	resp := OccurrenceResponse{
-		ID:               o.ID,
-		ProtocolNumber:   o.ProtocolNumber,
-		ContactID:        o.ContactID,
-		Title:            o.Title,
-		Description:      o.Description,
-		StageID:          o.StageID,
-		Priority:         string(o.Priority),
-		AssignedUserID:   o.AssignedUserID,
-		OpenedAt:         o.OpenedAt,
-		ClosedAt:         o.ClosedAt,
-		SourceTransferID: o.SourceTransferID,
+		ID:                    o.ID,
+		ProtocolNumber:        o.ProtocolNumber,
+		ContactID:             o.ContactID,
+		Title:                 o.Title,
+		Description:           o.Description,
+		StageID:               o.StageID,
+		Priority:              string(o.Priority),
+		AssignedUserID:        o.AssignedUserID,
+		OpenedAt:              o.OpenedAt,
+		ClosedAt:              o.ClosedAt,
+		SourceTransferID:      o.SourceTransferID,
+		UnitID:                o.UnitID,
+		DepartmentID:          o.DepartmentID,
+		CategoryID:            o.CategoryID,
+		Source:                o.Source,
+		SLAResponseDeadline:   o.SLA.ResponseDeadline,
+		SLAResolutionDeadline: o.SLA.ResolutionDeadline,
+		SLABreached:           o.SLA.Breached,
+		SLABreachedAt:         o.SLA.BreachedAt,
+		FirstResponseAt:       o.SLA.FirstResponseAt,
+		FirstResponseByID:     o.FirstResponseByID,
 	}
 	if o.Contact != nil {
 		resp.ContactName = o.Contact.ProfileName
@@ -102,6 +127,26 @@ func (a *App) resolveAssignee(orgID uuid.UUID, raw *string) (*uuid.UUID, error) 
 		return nil, errors.New("assigned_user_id does not belong to this organization")
 	}
 	return &id, nil
+}
+
+// unitDepartmentFromTransfer looks up the Team behind an AgentTransfer and
+// returns the unit/department it's tagged with. Both come back nil when the
+// transfer doesn't exist, has no team, or the team isn't tagged yet — a case
+// simply opens without them, editable by hand, matching the spec's decision
+// not to require every existing Team to be tagged before this feature works.
+func (a *App) unitDepartmentFromTransfer(orgID, transferID uuid.UUID) (unitID, departmentID *uuid.UUID) {
+	var transfer models.AgentTransfer
+	if err := a.DB.Where("id = ? AND organization_id = ?", transferID, orgID).First(&transfer).Error; err != nil {
+		return nil, nil
+	}
+	if transfer.TeamID == nil {
+		return nil, nil
+	}
+	var team models.Team
+	if err := a.DB.Where("id = ?", *transfer.TeamID).First(&team).Error; err != nil {
+		return nil, nil
+	}
+	return team.UnitID, team.DepartmentID
 }
 
 // broadcastOccurrenceMessage delivers a WebSocket message about an occurrence
@@ -176,6 +221,16 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 		priority = models.OccurrencePriorityNormal
 	}
 
+	var responseDeadline, resolutionDeadline *time.Time
+	if policy, err := a.getSLAPolicy(orgID, priority); err != nil {
+		a.Log.Error("Failed to resolve SLA policy", "error", err, "organization_id", orgID)
+	} else {
+		now := time.Now()
+		rd := now.Add(time.Duration(policy.ResponseMinutes) * time.Minute)
+		xd := now.Add(time.Duration(policy.ResolutionMinutes) * time.Minute)
+		responseDeadline, resolutionDeadline = &rd, &xd
+	}
+
 	occ := models.Occurrence{
 		OrganizationID: orgID,
 		ContactID:      contactID,
@@ -184,6 +239,10 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 		StageID:        stage.ID,
 		Priority:       priority,
 		OpenedByUserID: userID,
+		SLA: models.SLATracking{
+			ResponseDeadline:   responseDeadline,
+			ResolutionDeadline: resolutionDeadline,
+		},
 	}
 	// req.AssignedUserID != nil is what says the field participated in the
 	// request at all; resolveAssignee alone can't tell "absent" from "sent
@@ -199,10 +258,61 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 		}
 		occ.AssignedUserID = assigneeID
 	}
+	// Default to "manual" unconditionally first, then override to "whatsapp"
+	// only on a successful parse that actually records a transfer. Without
+	// this, a malformed (non-UUID) source_transfer_id left occ.Source at Go's
+	// zero value "" — which GORM's `default:'whatsapp'` column then silently
+	// applied on INSERT (a zero-value field is omitted, not written as ""),
+	// wrongly marking as "whatsapp" a case with no transfer actually recorded.
+	// A malformed value is otherwise ignored here, not rejected with 400 —
+	// unlike unit_id/department_id/category_id a few lines below, which do
+	// 400 on a bad UUID. source_transfer_id has never followed that
+	// convention, in this handler or in the original plan's own example code,
+	// so this fix only closes the Source-defaulting gap and leaves that
+	// pre-existing ignore-invalid behavior as-is.
+	occ.Source = "manual"
 	if req.SourceTransferID != nil && *req.SourceTransferID != "" {
 		if id, err := uuid.Parse(*req.SourceTransferID); err == nil {
 			occ.SourceTransferID = &id
+			occ.Source = "whatsapp"
 		}
+	}
+
+	// Inherit unit/department from the originating attendance's Team, then let
+	// an explicit request field override — manual entry always wins, since the
+	// case may not even have a source transfer.
+	if occ.SourceTransferID != nil {
+		occ.UnitID, occ.DepartmentID = a.unitDepartmentFromTransfer(orgID, *occ.SourceTransferID)
+	}
+	if req.UnitID != nil && *req.UnitID != "" {
+		id, err := uuid.Parse(*req.UnitID)
+		if err != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid unit_id", nil, "")
+		}
+		if _, err := findByIDAndOrg[models.Unit](a.DB, r, id, orgID, "Unit"); err != nil {
+			return nil
+		}
+		occ.UnitID = &id
+	}
+	if req.DepartmentID != nil && *req.DepartmentID != "" {
+		id, err := uuid.Parse(*req.DepartmentID)
+		if err != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid department_id", nil, "")
+		}
+		if _, err := findByIDAndOrg[models.Department](a.DB, r, id, orgID, "Department"); err != nil {
+			return nil
+		}
+		occ.DepartmentID = &id
+	}
+	if req.CategoryID != nil && *req.CategoryID != "" {
+		id, err := uuid.Parse(*req.CategoryID)
+		if err != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid category_id", nil, "")
+		}
+		if _, err := findByIDAndOrg[models.OccurrenceCategory](a.DB, r, id, orgID, "Category"); err != nil {
+			return nil
+		}
+		occ.CategoryID = &id
 	}
 
 	if err := a.insertOccurrenceWithProtocol(&occ); err != nil {
@@ -252,6 +362,15 @@ func (a *App) ListOccurrences(r *fastglue.Request) error {
 	}
 	if contactID := string(r.RequestCtx.QueryArgs().Peek("contact_id")); contactID != "" {
 		query = query.Where("occurrences.contact_id = ?", contactID)
+	}
+	if unitID := string(r.RequestCtx.QueryArgs().Peek("unit_id")); unitID != "" {
+		query = query.Where("occurrences.unit_id = ?", unitID)
+	}
+	if departmentID := string(r.RequestCtx.QueryArgs().Peek("department_id")); departmentID != "" {
+		query = query.Where("occurrences.department_id = ?", departmentID)
+	}
+	if categoryID := string(r.RequestCtx.QueryArgs().Peek("category_id")); categoryID != "" {
+		query = query.Where("occurrences.category_id = ?", categoryID)
 	}
 	if protocol := string(r.RequestCtx.QueryArgs().Peek("protocol")); protocol != "" {
 		query = query.Where("occurrences.protocol_number ILIKE ?", "%"+protocol+"%")
@@ -343,6 +462,9 @@ type UpdateOccurrenceRequest struct {
 	Description    *string `json:"description"`
 	Priority       string  `json:"priority"`
 	AssignedUserID *string `json:"assigned_user_id"`
+	UnitID         *string `json:"unit_id"`
+	DepartmentID   *string `json:"department_id"`
+	CategoryID     *string `json:"category_id"`
 }
 
 // ChangeStageRequest moves a case to another stage.
@@ -460,8 +582,17 @@ func (a *App) UpdateOccurrence(r *fastglue.Request) error {
 	if req.Description != nil {
 		updates["description"] = *req.Description
 	}
-	if req.Priority != "" {
+	if req.Priority != "" && req.Priority != string(occ.Priority) {
 		updates["priority"] = req.Priority
+		if policy, err := a.getSLAPolicy(orgID, models.OccurrencePriority(req.Priority)); err != nil {
+			a.Log.Error("Failed to resolve SLA policy on priority change", "error", err, "occurrence", occ.ID)
+		} else {
+			now := time.Now()
+			rd := now.Add(time.Duration(policy.ResponseMinutes) * time.Minute)
+			xd := now.Add(time.Duration(policy.ResolutionMinutes) * time.Minute)
+			updates["sla_response_deadline"] = rd
+			updates["sla_resolution_deadline"] = xd
+		}
 	}
 
 	// req.AssignedUserID != nil is what says the field participated in the
@@ -483,6 +614,49 @@ func (a *App) UpdateOccurrence(r *fastglue.Request) error {
 			assigneeChanged = true
 		default:
 			assigneeChanged = *occ.AssignedUserID != *resolved
+		}
+	}
+
+	if req.UnitID != nil {
+		if *req.UnitID == "" {
+			updates["unit_id"] = nil
+		} else {
+			id, err := uuid.Parse(*req.UnitID)
+			if err != nil {
+				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid unit_id", nil, "")
+			}
+			if _, err := findByIDAndOrg[models.Unit](a.DB, r, id, orgID, "Unit"); err != nil {
+				return nil
+			}
+			updates["unit_id"] = id
+		}
+	}
+	if req.DepartmentID != nil {
+		if *req.DepartmentID == "" {
+			updates["department_id"] = nil
+		} else {
+			id, err := uuid.Parse(*req.DepartmentID)
+			if err != nil {
+				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid department_id", nil, "")
+			}
+			if _, err := findByIDAndOrg[models.Department](a.DB, r, id, orgID, "Department"); err != nil {
+				return nil
+			}
+			updates["department_id"] = id
+		}
+	}
+	if req.CategoryID != nil {
+		if *req.CategoryID == "" {
+			updates["category_id"] = nil
+		} else {
+			id, err := uuid.Parse(*req.CategoryID)
+			if err != nil {
+				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid category_id", nil, "")
+			}
+			if _, err := findByIDAndOrg[models.OccurrenceCategory](a.DB, r, id, orgID, "Category"); err != nil {
+				return nil
+			}
+			updates["category_id"] = id
 		}
 	}
 

@@ -11,6 +11,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 )
 
@@ -117,11 +118,20 @@ func GetMigrationModels() []MigrationModel {
 
 		// CRM de ocorrências
 		{"OccurrenceStage", &models.OccurrenceStage{}},
+		{"OccurrenceCategory", &models.OccurrenceCategory{}},
+		{"OccurrenceSLAPolicy", &models.OccurrenceSLAPolicy{}},
 		{"Occurrence", &models.Occurrence{}},
 		{"OccurrenceEvent", &models.OccurrenceEvent{}},
 		{"OccurrenceCounter", &models.OccurrenceCounter{}},
 
+		// Help Desk — unidade e departamento
+		{"Unit", &models.Unit{}},
+		{"Department", &models.Department{}},
+
 		{"AuditLog", &models.AuditLog{}},
+
+		// Configuração de sistema (não por organização)
+		{"BrandingSettings", &models.BrandingSettings{}},
 	}
 }
 
@@ -455,6 +465,33 @@ func BackfillLastInboundAt(db *gorm.DB) error {
 		) sub
 		WHERE c.id = sub.contact_id AND c.last_inbound_at IS NULL AND c.deleted_at IS NULL
 	`).Error
+}
+
+// BackfillOccurrenceSourceForManualCases corrects occurrences.source for rows
+// that existed before that column did. AutoMigrate adding a column with
+// `default:'whatsapp'` backfills every existing row to 'whatsapp', including
+// cases that were opened manually (no source_transfer_id) — this undoes that
+// for exactly those rows. Guarded by source = 'whatsapp' AND
+// source_transfer_id IS NULL, so it never touches a row a later run (or the
+// application itself) already set correctly, making it idempotent.
+func BackfillOccurrenceSourceForManualCases(db *gorm.DB) error {
+	return db.Exec(`
+		UPDATE occurrences
+		SET source = 'manual'
+		WHERE source_transfer_id IS NULL AND source = 'whatsapp'
+	`).Error
+}
+
+// EnsureBrandingSettingsRow seeds the one branding_settings row this system
+// ever has, keyed by the fixed models.BrandingSettingsSingletonID. Runs once
+// at migrate time; ON CONFLICT DO NOTHING makes re-running a safe no-op —
+// the same idiom ensureDefaultSLAPolicies already uses for seeding under
+// concurrency, here applied to the primary key directly instead of a partial
+// unique index (there is exactly one row, ever, so the PK alone is enough).
+func EnsureBrandingSettingsRow(db *gorm.DB) error {
+	row := models.BrandingSettings{}
+	row.ID = models.BrandingSettingsSingletonID
+	return db.Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error
 }
 
 // SeedPermissionsAndRoles seeds the default permissions and system roles

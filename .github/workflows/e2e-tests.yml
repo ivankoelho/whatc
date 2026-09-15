@@ -117,9 +117,18 @@ jobs:
       - name: Start backend with migrations
         run: |
           ./whatomate server -migrate &
-          sleep 10
-          # Verify server is running
-          curl -f http://localhost:8080/health || exit 1
+          # Poll for readiness instead of a fixed sleep -- migrations grow as
+          # features are added, so a single fixed delay is a flaky race, not
+          # a real readiness check.
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8080/health > /dev/null; then
+              echo "Backend healthy after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::Backend did not become healthy within 30s"
+          exit 1
         env:
           WHATOMATE_CONFIG: config.toml
 

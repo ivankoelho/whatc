@@ -128,11 +128,18 @@ func runMigrations(db *gorm.DB) error {
 		&models.CallPermission{},
 		// CRM de ocorrências
 		&models.OccurrenceStage{},
+		&models.OccurrenceCategory{},
+		&models.OccurrenceSLAPolicy{},
 		&models.Occurrence{},
 		&models.OccurrenceEvent{},
 		&models.OccurrenceCounter{},
+		// Help Desk — unidade e departamento
+		&models.Unit{},
+		&models.Department{},
 		// Audit
 		&models.AuditLog{},
+		// Branding
+		&models.BrandingSettings{},
 	)
 }
 
@@ -167,6 +174,25 @@ func cleanupTables(db *gorm.DB) {
 		"templates",
 		"whatsapp_flows",
 		"whatsapp_accounts",
+		// Calling / IVR
+		"call_logs",
+		"ivr_flows",
+		"call_transfers",
+		"call_permissions",
+		// CRM de ocorrências
+		"occurrence_sla_policies",
+		"occurrence_counters",
+		"occurrence_events",
+		"occurrences",
+		"occurrence_categories",
+		"occurrence_stages",
+		// Help Desk — unidade e departamento
+		"departments",
+		"units",
+		// Conversation notes
+		"conversation_notes",
+		// Branding
+		"branding_settings",
 		// Roles and permissions
 		"role_permissions",
 		"custom_roles",
@@ -213,6 +239,20 @@ func TruncateTables(db *gorm.DB) {
 		"templates",
 		"whatsapp_flows",
 		"whatsapp_accounts",
+		"call_logs",
+		"ivr_flows",
+		"call_transfers",
+		"call_permissions",
+		"occurrence_sla_policies",
+		"occurrence_counters",
+		"occurrence_events",
+		"occurrences",
+		"occurrence_categories",
+		"occurrence_stages",
+		"departments",
+		"units",
+		"conversation_notes",
+		"branding_settings",
 		"role_permissions",
 		"custom_roles",
 		"permissions",

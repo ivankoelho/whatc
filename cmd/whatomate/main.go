@@ -175,6 +175,29 @@ func runServer(args []string) {
 		if err := database.BackfillContactNamePermission(db, lo); err != nil {
 			lo.Fatal("Contact name permission backfill failed", "error", err)
 		}
+
+		// Mesma janela: as onze permissões novas do catálogo de Help Desk
+		// (unidades, departamentos, categorias, políticas de SLA) precisam
+		// alcançar organizações existentes antes da primeira requisição.
+		if err := database.BackfillHelpdeskCatalogPermissions(db, lo); err != nil {
+			lo.Fatal("Helpdesk catalog permissions backfill failed", "error", err)
+		}
+
+		// Data fix, not a schema migration: AutoMigrate adding occurrences.source
+		// with a DB default backfilled every existing row to 'whatsapp',
+		// including cases opened manually. Runs once, guarded by the column's
+		// own default value, so re-running is a no-op.
+		if err := database.BackfillOccurrenceSourceForManualCases(db); err != nil {
+			lo.Fatal("Occurrence source backfill failed", "error", err)
+		}
+
+		// Semeia a linha única de configuração de marca do sistema. Precisa
+		// rodar aqui, depois do AutoMigrate (a tabela precisa existir) e antes
+		// do ListenAndServe — os handlers de branding assumem que a linha já
+		// existe, nunca fazem get-or-create.
+		if err := database.EnsureBrandingSettingsRow(db); err != nil {
+			lo.Fatal("Branding settings seed failed", "error", err)
+		}
 	}
 
 	// Connect to Redis
@@ -518,6 +541,13 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 		g.GET("/api/auth/sso/{provider}/callback", app.CallbackSSO)
 	}
 
+	// Branding do sistema (config única, não por organização) — os dois GETs
+	// são públicos porque a tela de login carrega antes de qualquer auth.
+	g.GET("/api/branding", app.GetPublicBranding)
+	g.GET("/api/branding/login-background", app.ServeLoginBackground)
+	g.POST("/api/branding/login-background", app.UploadLoginBackground)
+	g.DELETE("/api/branding/login-background", app.DeleteLoginBackground)
+
 	// Webhook routes (public - for Meta)
 	g.GET("/api/webhook", app.WebhookVerify)
 	g.POST("/api/webhook", app.WebhookHandler)
@@ -536,7 +566,14 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 		// Skip auth for public routes
 		if path == "/health" || path == "/ready" ||
 			path == "/api/auth/login" || path == "/api/auth/register" || path == "/api/auth/refresh" ||
-			path == "/api/auth/logout" || path == "/api/webhook" || path == "/ws" {
+			path == "/api/auth/logout" || path == "/api/webhook" || path == "/ws" ||
+			path == "/api/branding" {
+			return r
+		}
+		// /api/branding/login-background is public for GET (the login page
+		// loads it before any auth) but the POST upload below requires auth —
+		// only skip the middleware for the read, not the write.
+		if path == "/api/branding/login-background" && string(r.RequestCtx.Method()) == "GET" {
 			return r
 		}
 		// Skip auth for SSO routes (they handle their own auth via state tokens)
@@ -698,6 +735,29 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/occurrences/{id}/events", app.ListOccurrenceEvents)
 	g.POST("/api/occurrences/{id}/events", app.CreateOccurrenceEvent)
 	g.POST("/api/occurrences/{id}/send-protocol", app.SendOccurrenceProtocol)
+	g.POST("/api/occurrences/{id}/reply", app.ReplyToOccurrence)
+
+	// CRM — unidades
+	g.GET("/api/units", app.ListUnits)
+	g.POST("/api/units", app.CreateUnit)
+	g.PUT("/api/units/{id}", app.UpdateUnit)
+	g.DELETE("/api/units/{id}", app.DeleteUnit)
+
+	// CRM — departamentos
+	g.GET("/api/departments", app.ListDepartments)
+	g.POST("/api/departments", app.CreateDepartment)
+	g.PUT("/api/departments/{id}", app.UpdateDepartment)
+	g.DELETE("/api/departments/{id}", app.DeleteDepartment)
+
+	// CRM — categorias de ocorrência
+	g.GET("/api/occurrence-categories", app.ListOccurrenceCategories)
+	g.POST("/api/occurrence-categories", app.CreateOccurrenceCategory)
+	g.PUT("/api/occurrence-categories/{id}", app.UpdateOccurrenceCategory)
+	g.DELETE("/api/occurrence-categories/{id}", app.DeleteOccurrenceCategory)
+
+	// CRM — políticas de SLA
+	g.GET("/api/occurrence-sla-policies", app.ListOccurrenceSLAPolicies)
+	g.PUT("/api/occurrence-sla-policies/{priority}", app.UpsertOccurrenceSLAPolicy)
 
 	// Media (serves media files for messages, auth-protected)
 	g.GET("/api/media/{message_id}", app.ServeMedia)

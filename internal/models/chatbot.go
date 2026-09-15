@@ -37,6 +37,11 @@ type SLAConfig struct {
 	AutoCloseMessage    string      `gorm:"column:sla_auto_close_message;type:text" json:"sla_auto_close_message"`                     // Message to customer when chat is auto-closed
 	WarningMessage      string      `gorm:"column:sla_warning_message;type:text" json:"sla_warning_message"`                           // Message to customer when SLA breached
 	EscalationNotifyIDs StringArray `gorm:"column:sla_escalation_notify_ids;type:jsonb;default:'[]'" json:"sla_escalation_notify_ids"` // User IDs to notify on escalation
+	// OccurrenceEnabled gates SLA breach-marking for Occurrences, independent of
+	// Enabled (that one is chat's own SLA). Mirrors ClientInactivityConfig's
+	// CloseInactiveAttendances: its own switch, so enabling chat SLA never
+	// silently turns on occurrence SLA processing for an org that never asked.
+	OccurrenceEnabled bool `gorm:"column:occurrence_sla_enabled;default:false" json:"occurrence_sla_enabled"`
 }
 
 // ClientInactivityConfig holds client inactivity and reminder settings

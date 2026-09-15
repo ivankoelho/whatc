@@ -177,11 +177,21 @@ type Team struct {
 	CreatedByID         *uuid.UUID         `gorm:"type:uuid" json:"created_by_id,omitempty"`
 	UpdatedByID         *uuid.UUID         `gorm:"type:uuid" json:"updated_by_id,omitempty"`
 
+	// UnitID/DepartmentID tag which store+sector combination this Team
+	// represents. Additive metadata only — chat routing, round-robin
+	// assignment and everything else about Team is unaffected; these two
+	// fields exist only for Occurrence to read at creation time (see
+	// docs/superpowers/specs/2026-09-04-helpdesk-unidade-departamento-sla-design.md §3).
+	UnitID       *uuid.UUID `gorm:"type:uuid;index" json:"unit_id,omitempty"`
+	DepartmentID *uuid.UUID `gorm:"type:uuid;index" json:"department_id,omitempty"`
+
 	// Relations
 	Organization *Organization `gorm:"foreignKey:OrganizationID" json:"organization,omitempty"`
 	Members      []TeamMember  `gorm:"foreignKey:TeamID" json:"members,omitempty"`
 	CreatedBy    *User         `gorm:"foreignKey:CreatedByID" json:"created_by,omitempty"`
 	UpdatedBy    *User         `gorm:"foreignKey:UpdatedByID" json:"updated_by,omitempty"`
+	Unit         *Unit         `gorm:"foreignKey:UnitID" json:"unit,omitempty"`
+	Department   *Department   `gorm:"foreignKey:DepartmentID" json:"department,omitempty"`
 }
 
 func (Team) TableName() string {
