@@ -541,6 +541,11 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 		g.GET("/api/auth/sso/{provider}/callback", app.CallbackSSO)
 	}
 
+	// Branding do sistema (config única, não por organização) — os dois GETs
+	// são públicos porque a tela de login carrega antes de qualquer auth.
+	g.GET("/api/branding", app.GetPublicBranding)
+	g.GET("/api/branding/login-background", app.ServeLoginBackground)
+
 	// Webhook routes (public - for Meta)
 	g.GET("/api/webhook", app.WebhookVerify)
 	g.POST("/api/webhook", app.WebhookHandler)
@@ -559,7 +564,8 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 		// Skip auth for public routes
 		if path == "/health" || path == "/ready" ||
 			path == "/api/auth/login" || path == "/api/auth/register" || path == "/api/auth/refresh" ||
-			path == "/api/auth/logout" || path == "/api/webhook" || path == "/ws" {
+			path == "/api/auth/logout" || path == "/api/webhook" || path == "/ws" ||
+			path == "/api/branding" || path == "/api/branding/login-background" {
 			return r
 		}
 		// Skip auth for SSO routes (they handle their own auth via state tokens)
