@@ -207,3 +207,54 @@ func (a *App) UploadLoginBackground(r *fastglue.Request) error {
 		"login_background_url": fmt.Sprintf("/api/branding/login-background?v=%d", time.Now().Unix()),
 	})
 }
+
+// DeleteLoginBackground clears the configured background image, reverting
+// the login page to its default gradient. Same lock-before-file-I/O shape as
+// UploadLoginBackground — a delete racing an upload (or another delete) must
+// never leave the database and disk pointing at inconsistent state.
+func (a *App) DeleteLoginBackground(r *fastglue.Request) error {
+	_, _, err := a.requireAuth(r, models.ResourceSettingsGeneral, models.ActionWrite)
+	if err != nil {
+		return nil
+	}
+
+	basePath := a.getMediaStoragePath()
+
+	tx := a.DB.Begin()
+	defer func() {
+		if rec := recover(); rec != nil {
+			tx.Rollback()
+		}
+	}()
+
+	var row models.BrandingSettings
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ?", models.BrandingSettingsSingletonID).First(&row).Error; err != nil {
+		tx.Rollback()
+		a.Log.Error("Failed to lock branding settings row", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update branding settings", nil, "")
+	}
+	oldRelPath := row.LoginBackgroundPath
+
+	if err := tx.Model(&row).Updates(map[string]any{
+		"login_background_path":         "",
+		"login_background_content_type": "",
+	}).Error; err != nil {
+		tx.Rollback()
+		a.Log.Error("Failed to clear branding settings", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update branding settings", nil, "")
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		a.Log.Error("Failed to commit branding settings clear", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update branding settings", nil, "")
+	}
+
+	if oldRelPath != "" {
+		if err := os.Remove(filepath.Join(basePath, oldRelPath)); err != nil && !os.IsNotExist(err) {
+			a.Log.Error("Failed to remove branding file", "path", oldRelPath, "error", err)
+		}
+	}
+
+	return r.SendEnvelope(map[string]any{"deleted": true})
+}

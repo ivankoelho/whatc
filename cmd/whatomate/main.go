@@ -546,6 +546,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/branding", app.GetPublicBranding)
 	g.GET("/api/branding/login-background", app.ServeLoginBackground)
 	g.POST("/api/branding/login-background", app.UploadLoginBackground)
+	g.DELETE("/api/branding/login-background", app.DeleteLoginBackground)
 
 	// Webhook routes (public - for Meta)
 	g.GET("/api/webhook", app.WebhookVerify)

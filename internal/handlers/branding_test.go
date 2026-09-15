@@ -293,3 +293,74 @@ func newMultipartUploadRequestWithContentType(t *testing.T, fieldName, filename 
 
 	return &fastglue.Request{RequestCtx: ctx}
 }
+
+func TestDeleteLoginBackground_RejectedForUserWithoutPermission(t *testing.T) {
+	app := newTestApp(t)
+	require.NoError(t, database.EnsureBrandingSettingsRow(app.DB))
+
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	require.NoError(t, app.DeleteLoginBackground(req))
+	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(req))
+}
+
+func TestDeleteLoginBackground_ClearsConfigAndRemovesFile(t *testing.T) {
+	app := newTestApp(t)
+	dir := t.TempDir()
+	app.Config.Storage.LocalPath = dir
+	require.NoError(t, database.EnsureBrandingSettingsRow(app.DB))
+
+	org := testutil.CreateTestOrganization(t, app.DB)
+	admin := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&admin.ID))
+
+	uploadReq := newMultipartUploadRequest(t, "file", "bg.jpg", jpegMagicBytes())
+	testutil.SetAuthContext(uploadReq, org.ID, user.ID)
+	require.NoError(t, app.UploadLoginBackground(uploadReq))
+	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(uploadReq))
+	require.FileExists(t, filepath.Join(dir, "branding", "login-background.jpg"))
+
+	deleteReq := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(deleteReq, org.ID, user.ID)
+	require.NoError(t, app.DeleteLoginBackground(deleteReq))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(deleteReq))
+
+	assert.NoFileExists(t, filepath.Join(dir, "branding", "login-background.jpg"))
+
+	var row models.BrandingSettings
+	require.NoError(t, app.DB.Where("id = ?", models.BrandingSettingsSingletonID).First(&row).Error)
+	assert.Empty(t, row.LoginBackgroundPath)
+	assert.Empty(t, row.LoginBackgroundContentType)
+
+	getReq := testutil.NewGETRequest(t)
+	require.NoError(t, app.GetPublicBranding(getReq))
+	assert.Contains(t, string(testutil.GetResponseBody(getReq)), `"login_background_url":null`)
+}
+
+func TestDeleteLoginBackground_NoOpWhenAlreadyEmpty(t *testing.T) {
+	app := newTestApp(t)
+	require.NoError(t, database.EnsureBrandingSettingsRow(app.DB))
+
+	// Explicitly clear the row to ensure a clean starting state for this test,
+	// since the singleton row is shared across all tests in this file and
+	// a previous test may have left it populated.
+	require.NoError(t, app.DB.Model(&models.BrandingSettings{}).
+		Where("id = ?", models.BrandingSettingsSingletonID).
+		Updates(map[string]any{
+			"login_background_path":         "",
+			"login_background_content_type": "",
+		}).Error)
+
+	org := testutil.CreateTestOrganization(t, app.DB)
+	admin := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&admin.ID))
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	require.NoError(t, app.DeleteLoginBackground(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req), "deleting an already-empty config must succeed, not error")
+}
