@@ -190,6 +190,14 @@ func runServer(args []string) {
 		if err := database.BackfillOccurrenceSourceForManualCases(db); err != nil {
 			lo.Fatal("Occurrence source backfill failed", "error", err)
 		}
+
+		// Semeia a linha única de configuração de marca do sistema. Precisa
+		// rodar aqui, depois do AutoMigrate (a tabela precisa existir) e antes
+		// do ListenAndServe — os handlers de branding assumem que a linha já
+		// existe, nunca fazem get-or-create.
+		if err := database.EnsureBrandingSettingsRow(db); err != nil {
+			lo.Fatal("Branding settings seed failed", "error", err)
+		}
 	}
 
 	// Connect to Redis
