@@ -217,10 +217,17 @@ func (a *App) UploadLoginBackground(r *fastglue.Request) error {
 	// resource_type "settings.general") purely so it surfaces in the
 	// AuditLogPanel of whichever org they happened to be viewing -- the true
 	// affected scope is global, not that one org.
+	// "uploaded_at" is present only in the new snapshot, so ComputeChanges
+	// always sees a diff on it -- even when old/new login_background_path are
+	// identical (replacing a JPEG with a different JPEG keeps the same
+	// deterministic per-MIME-type path). Without this, a same-format
+	// replacement produces a zero-change diff and LogAudit's own
+	// len(changes)==0 guard silently drops the entry, the most common upload
+	// case going unaudited.
 	audit.LogAudit(a.DB, orgID, userID, audit.GetUserName(a.DB, userID),
 		models.ResourceSettingsGeneral, orgID, models.AuditActionUpdated,
 		map[string]any{"login_background_path": oldRelPath},
-		map[string]any{"login_background_path": newRelPath})
+		map[string]any{"login_background_path": newRelPath, "uploaded_at": time.Now().UTC()})
 
 	return r.SendEnvelope(map[string]any{
 		"login_background_url": fmt.Sprintf("/api/branding/login-background?v=%d", time.Now().Unix()),

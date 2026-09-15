@@ -257,6 +257,7 @@ async function uploadLoginBackground(event: Event) {
     const data = response.data.data || response.data
     loginBackgroundUrl.value = data.login_background_url ? withBasePath(data.login_background_url) : null
     toast.success(t('settings.loginBackgroundUploaded'))
+    refreshActivityLog(generalLogKey)
   } catch (error) {
     toast.error(t('settings.loginBackgroundUploadFailed'))
   } finally {
@@ -271,6 +272,7 @@ async function removeLoginBackground() {
     await brandingService.deleteLoginBackground()
     loginBackgroundUrl.value = null
     toast.success(t('settings.loginBackgroundRemoved'))
+    refreshActivityLog(generalLogKey)
   } catch (error) {
     toast.error(t('settings.loginBackgroundRemoveFailed'))
   } finally {
