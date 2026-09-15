@@ -1,10 +1,9 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
@@ -39,22 +38,17 @@ func (a *App) ServeLoginBackground(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "No background image configured", nil, "")
 	}
 
-	baseDir, err := filepath.Abs(a.getMediaStoragePath())
+	fullPath, err := a.resolveSafeStoragePath(row.LoginBackgroundPath)
 	if err != nil {
-		a.Log.Error("Storage configuration error", "error", err)
-		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Storage configuration error", nil, "")
-	}
-	fullPath, err := filepath.Abs(filepath.Join(baseDir, filepath.Clean(row.LoginBackgroundPath)))
-	if err != nil || !strings.HasPrefix(fullPath, baseDir+string(os.PathSeparator)) {
-		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid file path", nil, "")
-	}
-
-	info, err := os.Lstat(fullPath)
-	if err != nil {
-		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "File not found", nil, "")
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid file path", nil, "")
+		switch {
+		case errors.Is(err, errStorageConfig):
+			a.Log.Error("Storage configuration error", "error", err)
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Storage configuration error", nil, "")
+		case errors.Is(err, errStorageFileNotFound):
+			return r.SendErrorEnvelope(fasthttp.StatusNotFound, "File not found", nil, "")
+		default:
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid file path", nil, "")
+		}
 	}
 
 	data, err := os.ReadFile(fullPath)

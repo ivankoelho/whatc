@@ -100,3 +100,30 @@ func TestServeLoginBackground_RejectsPathTraversal(t *testing.T) {
 	require.NoError(t, app.ServeLoginBackground(req))
 	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
 }
+
+func TestServeLoginBackground_RejectsSymlink(t *testing.T) {
+	app := newTestApp(t)
+	dir := t.TempDir()
+	app.Config.Storage.LocalPath = dir
+	require.NoError(t, database.EnsureBrandingSettingsRow(app.DB))
+
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "branding"), 0755))
+
+	// Real file outside storage.
+	outsideDir := t.TempDir()
+	target := filepath.Join(outsideDir, "real.txt")
+	require.NoError(t, os.WriteFile(target, []byte("contents"), 0644))
+
+	// Symlink inside storage pointing to outside file.
+	link := filepath.Join(dir, "branding", "linked.txt")
+	require.NoError(t, os.Symlink(target, link))
+
+	require.NoError(t, app.DB.Model(&models.BrandingSettings{}).
+		Where("id = ?", models.BrandingSettingsSingletonID).
+		Update("login_background_path", "branding/linked.txt").Error)
+
+	req := testutil.NewGETRequest(t)
+	require.NoError(t, app.ServeLoginBackground(req))
+	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req),
+		"symlinked background files must be rejected to prevent reading arbitrary host files")
+}

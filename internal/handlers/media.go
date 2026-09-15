@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,43 @@ import (
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
 )
+
+// Sentinel errors returned by resolveSafeStoragePath, distinguishing which
+// safety check failed so callers can map each to their own HTTP response.
+var (
+	errStorageConfig       = errors.New("storage configuration error")
+	errInvalidStoragePath  = errors.New("invalid storage path")
+	errStorageFileNotFound = errors.New("storage file not found")
+)
+
+// resolveSafeStoragePath resolves relPath against the storage base
+// directory, rejecting anything that escapes the base directory (path
+// traversal) or resolves to a symlink. Returns the absolute, validated path
+// ready for os.ReadFile, or an error wrapping one of errStorageConfig,
+// errInvalidStoragePath, or errStorageFileNotFound describing which check
+// failed (check with errors.Is).
+func (a *App) resolveSafeStoragePath(relPath string) (string, error) {
+	baseDir, err := filepath.Abs(a.getMediaStoragePath())
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", errStorageConfig, err)
+	}
+
+	fullPath, err := filepath.Abs(filepath.Join(baseDir, filepath.Clean(relPath)))
+	if err != nil || !strings.HasPrefix(fullPath, baseDir+string(os.PathSeparator)) {
+		return "", errInvalidStoragePath
+	}
+
+	// Reject symlinks.
+	info, err := os.Lstat(fullPath)
+	if err != nil {
+		return "", errStorageFileNotFound
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", errInvalidStoragePath
+	}
+
+	return fullPath, nil
+}
 
 // getMediaStoragePath returns the base path for media storage
 func (a *App) getMediaStoragePath() string {
@@ -189,23 +227,17 @@ func (a *App) ServeMedia(r *fastglue.Request) error {
 
 	// Security: prevent directory traversal and symlink attacks
 	filePath := filepath.Clean(message.MediaURL)
-	baseDir, err := filepath.Abs(a.getMediaStoragePath())
+	fullPath, err := a.resolveSafeStoragePath(message.MediaURL)
 	if err != nil {
-		a.Log.Error("Storage configuration error", "error", err)
-		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Storage configuration error", nil, "")
-	}
-	fullPath, err := filepath.Abs(filepath.Join(baseDir, filePath))
-	if err != nil || !strings.HasPrefix(fullPath, baseDir+string(os.PathSeparator)) {
-		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid file path", nil, "")
-	}
-
-	// Reject symlinks
-	info, err := os.Lstat(fullPath)
-	if err != nil {
-		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "File not found", nil, "")
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid file path", nil, "")
+		switch {
+		case errors.Is(err, errStorageConfig):
+			a.Log.Error("Storage configuration error", "error", err)
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Storage configuration error", nil, "")
+		case errors.Is(err, errStorageFileNotFound):
+			return r.SendErrorEnvelope(fasthttp.StatusNotFound, "File not found", nil, "")
+		default:
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid file path", nil, "")
+		}
 	}
 
 	// Read file
