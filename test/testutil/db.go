@@ -138,6 +138,8 @@ func runMigrations(db *gorm.DB) error {
 		&models.Department{},
 		// Audit
 		&models.AuditLog{},
+		// Branding
+		&models.BrandingSettings{},
 	)
 }
 
@@ -189,6 +191,8 @@ func cleanupTables(db *gorm.DB) {
 		"units",
 		// Conversation notes
 		"conversation_notes",
+		// Branding
+		"branding_settings",
 		// Roles and permissions
 		"role_permissions",
 		"custom_roles",
@@ -248,6 +252,7 @@ func TruncateTables(db *gorm.DB) {
 		"departments",
 		"units",
 		"conversation_notes",
+		"branding_settings",
 		"role_permissions",
 		"custom_roles",
 		"permissions",

@@ -390,3 +390,38 @@ func TestBackfillOccurrenceSourceForManualCases_Idempotent(t *testing.T) {
 	require.NoError(t, db.Model(&models.Occurrence{}).Where("id = ?", occ.ID).Pluck("source", &s).Error)
 	assert.Equal(t, "manual", s)
 }
+
+func TestEnsureBrandingSettingsRow_CreatesTheSingletonRow(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	cleanAll(t, db)
+
+	require.NoError(t, database.EnsureBrandingSettingsRow(db))
+
+	var row models.BrandingSettings
+	require.NoError(t, db.Where("id = ?", models.BrandingSettingsSingletonID).First(&row).Error)
+	assert.Equal(t, models.BrandingSettingsSingletonID, row.ID)
+	assert.Empty(t, row.LoginBackgroundPath)
+}
+
+func TestEnsureBrandingSettingsRow_IsIdempotent(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	cleanAll(t, db)
+
+	require.NoError(t, database.EnsureBrandingSettingsRow(db))
+	// Simula um upload já ter acontecido antes de uma segunda chamada ao seed
+	// (ex: reiniciar com -migrate depois de já estar configurado).
+	require.NoError(t, db.Model(&models.BrandingSettings{}).
+		Where("id = ?", models.BrandingSettingsSingletonID).
+		Update("login_background_path", "branding/login-background.jpg").Error)
+
+	require.NoError(t, database.EnsureBrandingSettingsRow(db))
+
+	var count int64
+	db.Model(&models.BrandingSettings{}).Count(&count)
+	assert.EqualValues(t, 1, count, "must never create a second row")
+
+	var row models.BrandingSettings
+	require.NoError(t, db.Where("id = ?", models.BrandingSettingsSingletonID).First(&row).Error)
+	assert.Equal(t, "branding/login-background.jpg", row.LoginBackgroundPath,
+		"re-running the seed must not overwrite an existing configuration")
+}

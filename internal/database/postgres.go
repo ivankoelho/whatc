@@ -11,6 +11,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 )
 
@@ -128,6 +129,9 @@ func GetMigrationModels() []MigrationModel {
 		{"Department", &models.Department{}},
 
 		{"AuditLog", &models.AuditLog{}},
+
+		// Configuração de sistema (não por organização)
+		{"BrandingSettings", &models.BrandingSettings{}},
 	}
 }
 
@@ -476,6 +480,18 @@ func BackfillOccurrenceSourceForManualCases(db *gorm.DB) error {
 		SET source = 'manual'
 		WHERE source_transfer_id IS NULL AND source = 'whatsapp'
 	`).Error
+}
+
+// EnsureBrandingSettingsRow seeds the one branding_settings row this system
+// ever has, keyed by the fixed models.BrandingSettingsSingletonID. Runs once
+// at migrate time; ON CONFLICT DO NOTHING makes re-running a safe no-op —
+// the same idiom ensureDefaultSLAPolicies already uses for seeding under
+// concurrency, here applied to the primary key directly instead of a partial
+// unique index (there is exactly one row, ever, so the PK alone is enough).
+func EnsureBrandingSettingsRow(db *gorm.DB) error {
+	row := models.BrandingSettings{}
+	row.ID = models.BrandingSettingsSingletonID
+	return db.Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error
 }
 
 // SeedPermissionsAndRoles seeds the default permissions and system roles
