@@ -39,9 +39,11 @@ Uma tabela nova, linha única (sem `organization_id` — é config de sistema, n
 ```
 GET    /api/branding                    -- público, sem auth
 GET    /api/branding/login-background   -- público, sem auth (serve o arquivo)
-POST   /api/settings/branding/login-background    -- settings.general:write, multipart upload
-DELETE /api/settings/branding/login-background     -- settings.general:write
+POST   /api/branding/login-background   -- settings.general:write, multipart upload
+DELETE /api/branding/login-background   -- settings.general:write
 ```
+
+(Correção pós-validação no código: o spec original tinha `POST`/`DELETE` sob um prefixo `/api/settings/branding/...` que não existe em nenhum outro lugar do backend — as configurações "gerais" hoje vivem em `/api/chatbot/settings`, e endpoints como `/api/units` já usam o mesmo path pra GET público e POST/DELETE autenticado, diferenciando só pelo verbo. `/api/branding/login-background` segue essa convenção real em vez de inventar uma nova.)
 
 - `GET /api/branding`: contrato mínimo, só um campo, sempre presente:
   ```json
