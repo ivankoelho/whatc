@@ -545,6 +545,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	// são públicos porque a tela de login carrega antes de qualquer auth.
 	g.GET("/api/branding", app.GetPublicBranding)
 	g.GET("/api/branding/login-background", app.ServeLoginBackground)
+	g.POST("/api/branding/login-background", app.UploadLoginBackground)
 
 	// Webhook routes (public - for Meta)
 	g.GET("/api/webhook", app.WebhookVerify)
@@ -565,7 +566,13 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 		if path == "/health" || path == "/ready" ||
 			path == "/api/auth/login" || path == "/api/auth/register" || path == "/api/auth/refresh" ||
 			path == "/api/auth/logout" || path == "/api/webhook" || path == "/ws" ||
-			path == "/api/branding" || path == "/api/branding/login-background" {
+			path == "/api/branding" {
+			return r
+		}
+		// /api/branding/login-background is public for GET (the login page
+		// loads it before any auth) but the POST upload below requires auth —
+		// only skip the middleware for the read, not the write.
+		if path == "/api/branding/login-background" && string(r.RequestCtx.Method()) == "GET" {
 			return r
 		}
 		// Skip auth for SSO routes (they handle their own auth via state tokens)
