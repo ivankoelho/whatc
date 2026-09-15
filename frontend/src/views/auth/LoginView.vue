@@ -3,7 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
-import { api } from '@/services/api'
+import { api, brandingService } from '@/services/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -66,9 +66,10 @@ onMounted(async () => {
     })(),
     (async () => {
       try {
-        const response = await api.get('/branding')
+        const response = await brandingService.getPublic()
         const url = response.data?.data?.login_background_url ?? response.data?.login_background_url
-        loginBackgroundUrl.value = url ?? null
+        const basePath = ((window as any).__BASE_PATH__ ?? '').replace(/\/$/, '')
+        loginBackgroundUrl.value = url ? `${basePath}${url}` : null
       } catch {
         // A tela de login nunca pode travar por causa dessa config opcional
         // -- qualquer falha aqui (rede, 500, JSON malformado) vira "sem imagem".
@@ -121,10 +122,8 @@ const initiateSSO = (provider: string) => {
         <span class="text-white font-semibold text-lg">Whatomate</span>
       </div>
       <div class="relative">
-        <p class="text-3xl font-bold text-white leading-tight">
-          Todo o seu atendimento<br />
-          Centralizado e em tempo real<br />
-          num só lugar.
+        <p class="text-3xl font-bold text-white leading-tight whitespace-pre-line">
+          {{ $t('auth.brandTagline') }}
         </p>
       </div>
     </div>

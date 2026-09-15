@@ -29,6 +29,7 @@ const orgID = computed(
 )
 const userID = computed(() => authStore.user?.id || '')
 const canWriteAccounts = computed(() => authStore.hasPermission('accounts', 'write'))
+const isSuperAdmin = computed(() => authStore.user?.is_super_admin ?? false)
 
 const isSubmitting = ref(false)
 const isLoading = ref(true)
@@ -86,12 +87,33 @@ function refreshActivityLog(key: typeof generalLogKey) {
   setTimeout(() => { key.value++ }, 500)
 }
 
+// Backend-emitted branding URLs are root-absolute; prefix the base path the
+// same way every other media URL in this codebase does (see ChatView.vue's
+// getMediaUrl, MediaViewerDialog.vue) so it resolves under a base_path deploy.
+function withBasePath(url: string): string {
+  const basePath = ((window as any).__BASE_PATH__ ?? '').replace(/\/$/, '')
+  return `${basePath}${url}`
+}
+
 onMounted(async () => {
+  // Branding is a purely cosmetic, optional config -- isolated with its own
+  // try/catch (same principle as LoginView.vue's onMounted) so a failure
+  // there can never take down the rest of this page via a shared Promise.all.
+  ;(async () => {
+    try {
+      const response = await brandingService.getPublic()
+      const data = response.data.data || response.data
+      const url = data?.login_background_url ?? null
+      loginBackgroundUrl.value = url ? withBasePath(url) : null
+    } catch {
+      loginBackgroundUrl.value = null
+    }
+  })()
+
   try {
-    const [orgResponse, userResponse, brandingResponse] = await Promise.all([
+    const [orgResponse, userResponse] = await Promise.all([
       organizationService.getSettings(),
-      usersService.me(),
-      brandingService.getPublic()
+      usersService.me()
     ])
 
     // Organization settings
@@ -125,9 +147,6 @@ onMounted(async () => {
         campaign_updates: user.settings.campaign_updates ?? true
       }
     }
-
-    const brandingData = brandingResponse.data.data || brandingResponse.data
-    loginBackgroundUrl.value = brandingData?.login_background_url ?? null
   } catch (error) {
     console.error('Failed to load settings:', error)
   } finally {
@@ -236,7 +255,7 @@ async function uploadLoginBackground(event: Event) {
   try {
     const response = await brandingService.uploadLoginBackground(file)
     const data = response.data.data || response.data
-    loginBackgroundUrl.value = data.login_background_url
+    loginBackgroundUrl.value = data.login_background_url ? withBasePath(data.login_background_url) : null
     toast.success(t('settings.loginBackgroundUploaded'))
   } catch (error) {
     toast.error(t('settings.loginBackgroundUploadFailed'))
@@ -377,8 +396,9 @@ function togglePlayAudio(type: 'hold_music' | 'ringback') {
               </div>
             </div>
 
-            <!-- Login Background Card -->
-            <div class="mt-6 rounded-xl border border-white/[0.08] bg-white/[0.02] light:bg-white light:border-gray-200">
+            <!-- Login Background Card (Gated on isSuperAdmin -- branding_settings is a
+                 system-wide singleton, not per-organization; see branding.go) -->
+            <div v-if="isSuperAdmin" class="mt-6 rounded-xl border border-white/[0.08] bg-white/[0.02] light:bg-white light:border-gray-200">
               <div class="p-6 pb-3">
                 <h3 class="text-lg font-semibold text-white light:text-gray-900">{{ $t('settings.loginBackground') }}</h3>
                 <p class="text-sm text-white/40 light:text-gray-500">{{ $t('settings.loginBackgroundDesc') }}</p>
