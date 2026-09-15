@@ -758,6 +758,19 @@ export const organizationService = {
   }
 }
 
+// Branding (system-wide, not per-organization — see docs/superpowers/specs/2026-09-15-login-branding-design.md)
+export const brandingService = {
+  getPublic: () => api.get('/branding'),
+  uploadLoginBackground: (file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post('/branding/login-background', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+  },
+  deleteLoginBackground: () => api.delete('/branding/login-background')
+}
+
 // Organizations
 export interface Organization {
   id: string

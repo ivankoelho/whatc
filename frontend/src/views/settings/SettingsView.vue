@@ -13,7 +13,7 @@ import { PageHeader, AuditLogPanel } from '@/components/shared'
 import LanguageSwitcher from '@/components/LanguageSwitcher.vue'
 import { toast } from 'vue-sonner'
 import { Settings, Bell, Loader2, Globe, Phone, Upload, Play, Pause, Music } from 'lucide-vue-next'
-import { usersService, organizationService } from '@/services/api'
+import { usersService, organizationService, brandingService } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
@@ -70,6 +70,11 @@ const ringbackAudio = ref<HTMLAudioElement | null>(null)
 const playingHoldMusic = ref(false)
 const playingRingback = ref(false)
 
+const loginBackgroundUrl = ref<string | null>(null)
+const isUploadingLoginBackground = ref(false)
+const isRemovingLoginBackground = ref(false)
+const loginBackgroundInput = ref<HTMLInputElement | null>(null)
+
 // Bump these keys to force the AuditLogPanel to remount and refetch after a save.
 // The backend writes audit entries asynchronously in a goroutine, so we delay
 // the remount slightly to give the write time to hit the DB before refetching.
@@ -83,9 +88,10 @@ function refreshActivityLog(key: typeof generalLogKey) {
 
 onMounted(async () => {
   try {
-    const [orgResponse, userResponse] = await Promise.all([
+    const [orgResponse, userResponse, brandingResponse] = await Promise.all([
       organizationService.getSettings(),
-      usersService.me()
+      usersService.me(),
+      brandingService.getPublic()
     ])
 
     // Organization settings
@@ -119,6 +125,9 @@ onMounted(async () => {
         campaign_updates: user.settings.campaign_updates ?? true
       }
     }
+
+    const brandingData = brandingResponse.data.data || brandingResponse.data
+    loginBackgroundUrl.value = brandingData?.login_background_url ?? null
   } catch (error) {
     console.error('Failed to load settings:', error)
   } finally {
@@ -215,6 +224,38 @@ async function uploadAudio(type: 'hold_music' | 'ringback', event: Event) {
     if (isHold) isUploadingHoldMusic.value = false
     else isUploadingRingback.value = false
     input.value = ''
+  }
+}
+
+async function uploadLoginBackground(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input?.files?.[0]
+  if (!file) return
+
+  isUploadingLoginBackground.value = true
+  try {
+    const response = await brandingService.uploadLoginBackground(file)
+    const data = response.data.data || response.data
+    loginBackgroundUrl.value = data.login_background_url
+    toast.success(t('settings.loginBackgroundUploaded'))
+  } catch (error) {
+    toast.error(t('settings.loginBackgroundUploadFailed'))
+  } finally {
+    isUploadingLoginBackground.value = false
+    input.value = ''
+  }
+}
+
+async function removeLoginBackground() {
+  isRemovingLoginBackground.value = true
+  try {
+    await brandingService.deleteLoginBackground()
+    loginBackgroundUrl.value = null
+    toast.success(t('settings.loginBackgroundRemoved'))
+  } catch (error) {
+    toast.error(t('settings.loginBackgroundRemoveFailed'))
+  } finally {
+    isRemovingLoginBackground.value = false
   }
 }
 
@@ -332,6 +373,40 @@ function togglePlayAudio(type: 'hold_music' | 'ringback') {
                     <Loader2 v-if="isSubmitting" class="mr-2 h-4 w-4 animate-spin" />
                     {{ $t('settings.save') }}
                   </Button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Login Background Card -->
+            <div class="mt-6 rounded-xl border border-white/[0.08] bg-white/[0.02] light:bg-white light:border-gray-200">
+              <div class="p-6 pb-3">
+                <h3 class="text-lg font-semibold text-white light:text-gray-900">{{ $t('settings.loginBackground') }}</h3>
+                <p class="text-sm text-white/40 light:text-gray-500">{{ $t('settings.loginBackgroundDesc') }}</p>
+              </div>
+              <div class="p-6 pt-3 space-y-3">
+                <div v-if="loginBackgroundUrl" class="rounded-lg overflow-hidden border border-white/[0.08] light:border-gray-200 h-32 w-full max-w-sm">
+                  <img :src="loginBackgroundUrl" :alt="$t('settings.loginBackground')" class="h-full w-full object-cover" />
+                </div>
+                <p v-else class="text-sm text-white/50 light:text-gray-500">{{ $t('settings.noFileUploaded') }}</p>
+                <div class="flex items-center gap-2">
+                  <input ref="loginBackgroundInput" type="file" accept="image/jpeg,image/png,image/webp" class="hidden" @change="uploadLoginBackground" />
+                  <Button variant="outline" size="sm" class="bg-white/[0.04] border-white/[0.1] text-white/70 hover:bg-white/[0.08] hover:text-white light:bg-white light:border-gray-200 light:text-gray-700 light:hover:bg-gray-50" @click="loginBackgroundInput?.click()" :disabled="isUploadingLoginBackground">
+                    <Loader2 v-if="isUploadingLoginBackground" class="mr-2 h-4 w-4 animate-spin" />
+                    <Upload v-else class="mr-2 h-4 w-4" />
+                    {{ $t('settings.uploadImage') }}
+                  </Button>
+                  <Button
+                    v-if="loginBackgroundUrl"
+                    variant="ghost"
+                    size="sm"
+                    class="text-white/50 hover:text-white light:text-gray-500 light:hover:text-gray-900"
+                    @click="removeLoginBackground"
+                    :disabled="isRemovingLoginBackground"
+                  >
+                    <Loader2 v-if="isRemovingLoginBackground" class="mr-2 h-4 w-4 animate-spin" />
+                    {{ $t('common.remove') }}
+                  </Button>
+                  <span class="text-xs text-white/30 light:text-gray-400">.jpg, .png, .webp (max 5MB)</span>
                 </div>
               </div>
             </div>
