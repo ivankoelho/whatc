@@ -30,9 +30,9 @@ Uma tabela nova, linha única (sem `organization_id` — é config de sistema, n
 | Campo | Tipo | Observação |
 |---|---|---|
 | `login_background_path` | string, nulo | Caminho relativo dentro de `storage.local_path`, ex: `branding/login-background.jpg` |
-| `login_background_content_type` | string, nulo | `image/jpeg`, `image/png`, etc. — usado ao servir o arquivo |
+| `login_background_content_type` | string, nulo | Tipo real detectado por sniffing do conteúdo (ver §4.1) — nunca o `Content-Type` que o cliente mandou |
 
-`BaseModel` padrão (id, created_at, updated_at, deleted_at). Leitura sempre pega a primeira linha (`ORDER BY created_at ASC LIMIT 1`); se não existir nenhuma, cria uma vazia na primeira escrita — mesmo padrão preguiçoso de `ensureDefaultStages`/`ensureDefaultSLAPolicies`, mas aqui garantindo no máximo uma linha (sem necessidade de índice único parcial: só o backend escreve nela, nunca em paralelo por múltiplas organizações).
+`BaseModel` padrão, mas com um desvio deliberado: o `ID` **não** usa o default `gen_random_uuid()` — é semeado com um UUID fixo e conhecido em tempo de migração (`00000000-0000-0000-0000-000000000001`, mesmo valor sempre). Isso elimina de vez a pergunta "que linha é a linha certa": não existe get-or-create em request nenhum, só get-by-id-fixo. A linha nasce uma única vez, no boot com `-migrate`, junto dos outros seeds que já existem (`CreateDefaultAdmin`, os backfills de permissão) — inserção via `clause.OnConflict{DoNothing: true}` no PK, o mesmo idioma já usado em `ensureDefaultSLAPolicies` (Fase 3 de Ocorrências) para semear com segurança sob concorrência, sem precisar de índice único adicional (o PK já garante unicidade). Se a seed nunca rodou (deploy antigo sem `-migrate`), os handlers tratam "linha não encontrada" como erro 500 explícito — não deveria acontecer em operação normal, e não vale a pena um get-or-create silencioso só para esse caso extremo.
 
 ## 4. API
 
@@ -43,12 +43,47 @@ POST   /api/settings/branding/login-background    -- settings.general:write, mul
 DELETE /api/settings/branding/login-background     -- settings.general:write
 ```
 
-- `GET /api/branding`: devolve `{"login_background_url": "/api/branding/login-background?v=<updated_at>"}` quando configurado, ou `{"login_background_url": null}` quando não. O `?v=` é cache-busting simples (timestamp da última atualização), evita o navegador servir uma imagem trocada a partir do cache do HTTP.
-- `GET /api/branding/login-background`: serve o arquivo com `Content-Type` salvo, mesma proteção contra path traversal/symlink já usada em `ServeMedia` (`internal/handlers/media.go`). 404 se não houver imagem configurada.
-- `POST .../login-background`: aceita `multipart/form-data`, campo `file`. Valida: presente, `Content-Type` começa com `image/`, tamanho ≤ 5MB (limite novo — não existe precedente explícito no código atual para uploads de mídia, mas é um valor sensato para uma imagem de fundo). Salva em `<storage.local_path>/branding/login-background.<ext>`, sobrescrevendo o arquivo anterior se existir. Atualiza (ou cria) a linha única de `branding_settings`.
-- `DELETE .../login-background`: remove o arquivo do disco (se existir) e limpa os dois campos da linha — a tela de login volta a mostrar o gradiente padrão.
+- `GET /api/branding`: contrato mínimo, só um campo, sempre presente:
+  ```json
+  {"login_background_url": null}
+  ```
+  ou
+  ```json
+  {"login_background_url": "/api/branding/login-background?v=1757930000"}
+  ```
+  Nunca `created_at`, `updated_at`, `id` nem qualquer outro campo interno da tabela — só o suficiente pro frontend decidir "tem imagem ou não" e montar a URL. O `?v=` é o unix timestamp de `updated_at`, cache-busting simples para o navegador não servir uma imagem trocada a partir do cache HTTP.
+- `GET /api/branding/login-background`: serve o arquivo com o `Content-Type` salvo (o sniffado, não o do header de upload), mesma proteção contra path traversal/symlink já usada em `ServeMedia` (`internal/handlers/media.go`). 404 se não houver imagem configurada.
+- `POST .../login-background`: aceita `multipart/form-data`, campo `file`. Ver §4.1 para a sequência completa de validação, escrita atômica e troca segura do arquivo.
+- `DELETE .../login-background`: mesma seção de lock/transação do upload (§4.1), só que zerando os dois campos e removendo o arquivo após o commit.
 
 Nenhum dos dois endpoints de leitura pública expõe nada além da imagem em si — sem vazamento de dados de organização, usuário ou config sensível.
+
+## 4.1 Upload — sequência atômica, com validação real e segura sob concorrência
+
+Cinco garantias, cada uma resolvendo um problema concreto:
+
+1. **Validação por conteúdo, não por header.** O `Content-Type` que o multipart manda é só um chute do cliente — `internal/handlers/campaigns.go:883-896` hoje confia nele, e é exatamente esse ponto fraco que este endpoint não repete. Os bytes lidos passam por `http.DetectContentType` (stdlib `net/http`, sem dependência nova) logo após a leitura; só o tipo *detectado* é aceito contra a lista `{image/jpeg, image/png, image/webp}` (mesmo subconjunto de imagens que `campaigns.go` já aceita) e é esse tipo detectado — nunca o do header — que vira `login_background_content_type` no banco e o `Content-Type` servido depois.
+2. **Escrita atômica.** Segue literalmente o padrão de `internal/tts/piper.go:72-93`: grava em `<caminho-final>.tmp` primeiro, e só faz `os.Rename(tmp, final)` depois da escrita completa. `os.Rename` no mesmo diretório é atômico no nível do filesystem — o processo nunca observa um arquivo pela metade. Se o processo for interrompido antes do rename, o `.tmp` fica órfão (removido na próxima tentativa) e o arquivo antigo continua intacto e servindo.
+3. **Extensão pode mudar sem período de dois arquivos coexistindo como "o atual".** O nome final já embute a extensão detectada (`login-background.jpg` num upload, `login-background.png` no próximo) — reaproveita `getExtensionFromMimeType` (`internal/handlers/media.go:33`). O arquivo da extensão antiga só é apagado **depois** que a transação abaixo confirma (`COMMIT`) que o banco já aponta pro novo caminho. Nunca antes. Se o processo cair entre o rename do novo arquivo e o commit, o pior caso é um arquivo órfão da extensão nova sobrando no disco — nunca perda da imagem que já estava no ar.
+4. **Concorrência: tudo sob um lock de linha, do início ao fim.** Não é só a atualização do banco que precisa ser serializada — é a sequência inteira (ler caminho antigo → escrever novo arquivo → apontar banco pro novo → só então apagar o antigo). Por isso o lock é tomado **antes** da escrita do arquivo, não só na hora do `UPDATE`:
+   ```go
+   tx := a.DB.Begin()
+   var row models.BrandingSettings
+   tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+       Where("id = ?", brandingSettingsSingletonID).First(&row)   // mesmo idioma de agent_transfers.go:1107 (sem SKIP LOCKED -- aqui não é fila, é singleton: a segunda requisição deve ESPERAR e pegar o estado fresco, não pular)
+   oldPath := row.LoginBackgroundPath
+   // ... sniff, escreve .tmp, os.Rename para o caminho final (extensão detectada) ...
+   tx.Model(&row).Updates(map[string]any{
+       "login_background_path":         newRelPath,
+       "login_background_content_type": sniffedType,
+   })
+   tx.Commit()
+   if oldPath != "" && oldPath != newRelPath {
+       _ = os.Remove(filepath.Join(basePath, oldPath)) // best-effort, não falha a resposta -- o banco já é a fonte da verdade
+   }
+   ```
+   Uma segunda requisição concorrente bloqueia no `FOR UPDATE` até a primeira commitar; quando destrava, já enxerga o `oldPath` atualizado pela primeira — as duas nunca decidem "qual arquivo é o atual" com informação desatualizada, e os dois arquivos finais (se as extensões diferirem) nunca coexistem como ponteiro válido ao mesmo tempo. Sem índice único novo, sem mutex de processo — só o lock de linha que `agent_transfers.go` já usa em produção para exatamente esse tipo de corrida.
+5. **Limite de tamanho.** 5MB, validado antes de qualquer escrita em disco (`io.LimitReader`, mesmo padrão de `campaigns.go:871-880`, só que menor porque isso é uma imagem de fundo, não mídia de campanha).
 
 ## 5. Frontend
 
@@ -69,21 +104,24 @@ Chaves de i18n novas em `pt-BR.json`/`en.json`, na mesma posição relativa nos 
 
 ## 6. Tratamento de erros
 
-- Upload de arquivo não-imagem → 400, mensagem clara.
-- Upload maior que 5MB → 400.
-- Falha ao escrever no disco (permissão, disco cheio) → 500, log do erro, config não é atualizada (o arquivo antigo continua servindo até uma tentativa bem-sucedida).
-- `GET /api/branding` nunca deve derrubar a tela de login: qualquer erro do lado do frontend ao buscar essa config é engolido e tratado como "sem imagem configurada".
+- Arquivo cujo conteúdo sniffado não é um dos três tipos aceitos → 400, mensagem clara. Vale mesmo que o header do multipart diga `image/jpeg` — é o conteúdo que decide, não o header (§4.1, ponto 1).
+- Upload maior que 5MB → 400, antes de qualquer escrita em disco.
+- Falha ao escrever o `.tmp` ou ao fazer o rename (permissão, disco cheio) → 500, log do erro, transação nunca chega a commitar — `branding_settings` continua apontando pro arquivo anterior, que continua servindo normalmente.
+- Falha ao remover o arquivo antigo depois do commit → log do erro, mas a resposta ao cliente já foi 200 (o banco já está correto e é a fonte da verdade; um arquivo órfão no disco não é visível a ninguém, é higiene, não correção).
+- `GET /api/branding` nunca deve derrubar a tela de login: qualquer erro do lado do frontend ao buscar essa config (rede, 500, JSON malformado) é engolido e tratado como "sem imagem configurada" — o frontend trata explicitamente `login_background_url === null` como "sem imagem" e qualquer falha na própria chamada do mesmo jeito, nunca deixando a tela de login travada esperando essa config opcional.
 
 ## 7. Verificação
 
 **Go**
 - Upload aceito para `settings.general:write`, rejeitado (403) para quem não tem essa permissão.
-- Upload de arquivo não-imagem rejeitado (400).
-- Upload acima do limite de tamanho rejeitado (400).
-- `GET /api/branding` sem autenticação alguma retorna 200 (endpoint público de verdade, não só "não checado").
-- `GET /api/branding/login-background` serve o `Content-Type` correto e nega path traversal (mesmo teste de segurança que já existe para `ServeMedia`).
-- `DELETE` remove o arquivo do disco e volta o `GET /api/branding` a `null`.
-- Segunda chamada de upload sobrescreve a primeira (sem acumular arquivos órfãos no disco).
+- Upload com `Content-Type: image/jpeg` no header mas conteúdo que não é uma imagem de verdade (ex: um `.txt` renomeado) → rejeitado (400) — prova que a validação é por sniffing, não por header (mockar um header mentiroso é o teste que realmente prova o ponto 1 do §4.1).
+- Upload acima do limite de tamanho rejeitado (400), sem nenhum arquivo `.tmp` sobrando no disco.
+- Upload de jpg seguido de upload de png: depois do segundo, `login-background.jpg` não existe mais no disco e `login-background.png` é o único arquivo de fundo presente — prova o ponto 3 do §4.1 (extensão muda sem período de dois arquivos válidos).
+- Duas goroutines fazendo upload concorrente (um jpg, um png) contra a mesma linha: ao final, o arquivo apontado por `branding_settings.login_background_path` é o que corresponde ao upload que venceu a corrida do lock, e é o único arquivo de imagem restante no diretório `branding/` — prova o ponto 4 do §4.1 (lock cobre a sequência inteira, não só o UPDATE).
+- `GET /api/branding` sem autenticação alguma retorna 200 com exatamente o campo `login_background_url` (nenhum outro campo no JSON) — endpoint público de verdade, contrato mínimo confirmado.
+- `GET /api/branding/login-background` serve o `Content-Type` sniffado (não o do header original do upload) e nega path traversal (mesmo teste de segurança que já existe para `ServeMedia`).
+- `DELETE` remove o arquivo do disco só depois do commit e volta o `GET /api/branding` a `{"login_background_url": null}`.
+- Interromper o processo (ou simular falha) entre a escrita do `.tmp` e o `os.Rename`: o arquivo final antigo continua intacto e servindo — prova o ponto 2 do §4.1 (atomicidade).
 
 **Manual (navegador)**
 - Login sem nenhuma imagem configurada → gradiente verde.
