@@ -60,6 +60,7 @@ export const useOccurrencesStore = defineStore('occurrences', () => {
     unit_id?: string
     department_id?: string
     category_id?: string
+    what_happened_id?: string
     sale_channel?: string
     invoice_number?: string
     purchase_date?: string

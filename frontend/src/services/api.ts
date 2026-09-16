@@ -1329,6 +1329,8 @@ export interface Occurrence {
   department_name?: string
   category_id?: string
   category_name?: string
+  what_happened_id?: string
+  what_happened_name?: string
   sale_channel?: string
   invoice_number?: string
   purchase_date?: string
@@ -1386,6 +1388,7 @@ export const occurrencesService = {
     unit_id?: string
     department_id?: string
     category_id?: string
+    what_happened_id?: string
     sale_channel?: string
     invoice_number?: string
     purchase_date?: string
@@ -1397,6 +1400,8 @@ export const occurrencesService = {
     description?: string
     priority?: 'low' | 'normal' | 'high' | 'urgent'
     assigned_user_id?: string | null
+    category_id?: string | null
+    what_happened_id?: string | null
   }) => api.put<ApiEnvelope<Occurrence>>(`/occurrences/${id}`, data),
   changeStage: (id: string, stageId: string) =>
     api.put<ApiEnvelope<Occurrence>>(`/occurrences/${id}/stage`, { stage_id: stageId }),
@@ -1435,6 +1440,27 @@ export const departmentsService = {
 
 export const occurrenceCategoriesService = {
   list: () => api.get<ApiEnvelope<{ categories: OccurrenceCategory[] }>>('/occurrence-categories'),
+  create: (data: { name: string; parent_id?: string | null; position: number; is_active?: boolean }) =>
+    api.post<ApiEnvelope<OccurrenceCategory>>('/occurrence-categories', data),
+  update: (id: string, data: { name: string; parent_id?: string | null; position: number; is_active?: boolean }) =>
+    api.put<ApiEnvelope<OccurrenceCategory>>(`/occurrence-categories/${id}`, data),
+  delete: (id: string) => api.delete<ApiEnvelope<{ deleted: boolean }>>(`/occurrence-categories/${id}`),
+}
+
+export interface OccurrenceWhatHappened {
+  id: string
+  name: string
+  position: number
+  is_active: boolean
+}
+
+export const occurrenceWhatHappenedService = {
+  list: () => api.get<ApiEnvelope<{ reasons: OccurrenceWhatHappened[] }>>('/occurrence-what-happened'),
+  create: (data: { name: string; position: number; is_active?: boolean }) =>
+    api.post<ApiEnvelope<OccurrenceWhatHappened>>('/occurrence-what-happened', data),
+  update: (id: string, data: { name: string; position: number; is_active?: boolean }) =>
+    api.put<ApiEnvelope<OccurrenceWhatHappened>>(`/occurrence-what-happened/${id}`, data),
+  delete: (id: string) => api.delete<ApiEnvelope<{ deleted: boolean }>>(`/occurrence-what-happened/${id}`),
 }
 
 export interface OccurrenceSLAPolicy {

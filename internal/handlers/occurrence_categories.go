@@ -7,6 +7,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
+	"gorm.io/gorm/clause"
 )
 
 var (
@@ -14,6 +15,40 @@ var (
 	errNestedSubcategory   = errors.New("a subcategory cannot itself have a parent")
 	errReparentHasChildren = errors.New("category has subcategories and cannot become a subcategory itself")
 )
+
+// defaultCategories are the six case types the product owner specified
+// directly, seeded the first time an organisation reads this list — same
+// pattern as ensureDefaultStages.
+var defaultCategories = []string{
+	"Troca de Produto",
+	"Devolução com Estorno",
+	"Reagendamento de Entrega",
+	"Orientação Fiscal",
+	"Realizar Pedido",
+	"Segunda via de NFe",
+}
+
+// ensureDefaultCategories seeds the six default top-level categories on
+// first read. See ensureDefaultWhatHappened for why plain count-then-insert
+// is enough here (no uniqueness constraint to race against).
+func (a *App) ensureDefaultCategories(orgID uuid.UUID) error {
+	var count int64
+	if err := a.DB.Model(&models.OccurrenceCategory{}).
+		Where("organization_id = ?", orgID).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+
+	rows := make([]models.OccurrenceCategory, len(defaultCategories))
+	for i, name := range defaultCategories {
+		rows[i] = models.OccurrenceCategory{
+			OrganizationID: orgID, Name: name, Position: i, IsActive: true,
+		}
+	}
+	return a.DB.Clauses(clause.OnConflict{DoNothing: true}).Create(&rows).Error
+}
 
 // OccurrenceCategoryRequest is the create/update body for a category or subcategory.
 //
@@ -34,6 +69,11 @@ func (a *App) ListOccurrenceCategories(r *fastglue.Request) error {
 	orgID, _, err := a.requireAuth(r, models.ResourceOccurrences, models.ActionRead)
 	if err != nil {
 		return nil
+	}
+
+	if err := a.ensureDefaultCategories(orgID); err != nil {
+		a.Log.Error("Failed to seed default occurrence categories", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to load categories", nil, "")
 	}
 
 	var categories []models.OccurrenceCategory

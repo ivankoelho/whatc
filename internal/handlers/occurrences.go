@@ -24,6 +24,7 @@ type CreateOccurrenceRequest struct {
 	UnitID           *string `json:"unit_id"`
 	DepartmentID     *string `json:"department_id"`
 	CategoryID       *string `json:"category_id"`
+	WhatHappenedID   *string `json:"what_happened_id"`
 
 	// Sale context (§8 of the SAC MVP spec) — all optional, filled manually
 	// by the agent, no ERP lookup.
@@ -68,6 +69,8 @@ type OccurrenceResponse struct {
 	DepartmentName   string     `json:"department_name,omitempty"`
 	CategoryID       *uuid.UUID `json:"category_id,omitempty"`
 	CategoryName     string     `json:"category_name,omitempty"`
+	WhatHappenedID   *uuid.UUID `json:"what_happened_id,omitempty"`
+	WhatHappenedName string     `json:"what_happened_name,omitempty"`
 	Source           string     `json:"source"`
 
 	SaleChannel        string     `json:"sale_channel,omitempty"`
@@ -100,6 +103,7 @@ func occurrenceToResponse(o models.Occurrence) OccurrenceResponse {
 		UnitID:                o.UnitID,
 		DepartmentID:          o.DepartmentID,
 		CategoryID:            o.CategoryID,
+		WhatHappenedID:        o.WhatHappenedID,
 		Source:                o.Source,
 		SLAResponseDeadline:   o.SLA.ResponseDeadline,
 		SLAResolutionDeadline: o.SLA.ResolutionDeadline,
@@ -130,6 +134,9 @@ func occurrenceToResponse(o models.Occurrence) OccurrenceResponse {
 	}
 	if o.Category != nil {
 		resp.CategoryName = o.Category.Name
+	}
+	if o.WhatHappened != nil {
+		resp.WhatHappenedName = o.WhatHappened.Name
 	}
 	return resp
 }
@@ -374,6 +381,20 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 		category = cat
 	}
 
+	var whatHappened *models.OccurrenceWhatHappened
+	if req.WhatHappenedID != nil && *req.WhatHappenedID != "" {
+		id, err := uuid.Parse(*req.WhatHappenedID)
+		if err != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid what_happened_id", nil, "")
+		}
+		wh, err := findByIDAndOrg[models.OccurrenceWhatHappened](a.DB, r, id, orgID, "Reason")
+		if err != nil {
+			return nil
+		}
+		occ.WhatHappenedID = &id
+		whatHappened = wh
+	}
+
 	// Derive the title when the agent didn't type one: "Categoria — Produto",
 	// or "Categoria — Atendimento SAC" without a product, per the SAC MVP
 	// spec (§8) — the product asked not to ask for a title when it can be
@@ -411,6 +432,7 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 	occ.Stage = stage
 	occ.Contact = contact
 	occ.Category = category
+	occ.WhatHappened = whatHappened
 	// Reload the assignee relation so the broadcast payload's
 	// assigned_user_name isn't silently empty for the common case (an
 	// occurrence defaults its assignee to its creator) — the REST response
@@ -460,6 +482,9 @@ func (a *App) ListOccurrences(r *fastglue.Request) error {
 	if categoryID := string(r.RequestCtx.QueryArgs().Peek("category_id")); categoryID != "" {
 		query = query.Where("occurrences.category_id = ?", categoryID)
 	}
+	if whatHappenedID := string(r.RequestCtx.QueryArgs().Peek("what_happened_id")); whatHappenedID != "" {
+		query = query.Where("occurrences.what_happened_id = ?", whatHappenedID)
+	}
 	if protocol := string(r.RequestCtx.QueryArgs().Peek("protocol")); protocol != "" {
 		query = query.Where("occurrences.protocol_number ILIKE ?", "%"+protocol+"%")
 	}
@@ -485,7 +510,7 @@ func (a *App) ListOccurrences(r *fastglue.Request) error {
 
 	var occurrences []models.Occurrence
 	if err := query.
-		Preload("Contact").Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").
+		Preload("Contact").Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").Preload("WhatHappened").
 		Order("occurrences.opened_at DESC").
 		Limit(pg.Limit).Offset(pg.Offset).
 		Find(&occurrences).Error; err != nil {
@@ -529,7 +554,7 @@ func (a *App) ListContactOccurrences(r *fastglue.Request) error {
 
 	var occurrences []models.Occurrence
 	if err := a.DB.Where("organization_id = ? AND contact_id = ?", orgID, contactID).
-		Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").
+		Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").Preload("WhatHappened").
 		Order("opened_at DESC").Find(&occurrences).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError,
 			"Failed to list occurrences", nil, "")
@@ -553,6 +578,7 @@ type UpdateOccurrenceRequest struct {
 	UnitID         *string `json:"unit_id"`
 	DepartmentID   *string `json:"department_id"`
 	CategoryID     *string `json:"category_id"`
+	WhatHappenedID *string `json:"what_happened_id"`
 }
 
 // ChangeStageRequest moves a case to another stage.
@@ -638,7 +664,7 @@ func (a *App) GetOccurrence(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
-	a.DB.Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").First(occ, occ.ID)
+	a.DB.Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").Preload("WhatHappened").First(occ, occ.ID)
 	return r.SendEnvelope(occurrenceToResponse(*occ))
 }
 
@@ -747,6 +773,20 @@ func (a *App) UpdateOccurrence(r *fastglue.Request) error {
 			updates["category_id"] = id
 		}
 	}
+	if req.WhatHappenedID != nil {
+		if *req.WhatHappenedID == "" {
+			updates["what_happened_id"] = nil
+		} else {
+			id, err := uuid.Parse(*req.WhatHappenedID)
+			if err != nil {
+				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid what_happened_id", nil, "")
+			}
+			if _, err := findByIDAndOrg[models.OccurrenceWhatHappened](a.DB, r, id, orgID, "Reason"); err != nil {
+				return nil
+			}
+			updates["what_happened_id"] = id
+		}
+	}
 
 	if err := a.DB.Model(occ).Updates(updates).Error; err != nil {
 		a.Log.Error("Failed to update occurrence", "error", err)
@@ -763,7 +803,7 @@ func (a *App) UpdateOccurrence(r *fastglue.Request) error {
 		})
 	}
 
-	a.DB.Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").First(occ, occ.ID)
+	a.DB.Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").Preload("WhatHappened").First(occ, occ.ID)
 	resp := occurrenceToResponse(*occ)
 
 	a.broadcastOccurrenceMessage(orgID, occ.ContactID, occ.AssignedUserID, websocket.WSMessage{
@@ -830,7 +870,7 @@ func (a *App) ChangeOccurrenceStage(r *fastglue.Request) error {
 	}
 	// Preload (not just occ.Stage = target) so the broadcast payload's
 	// assigned_user_name isn't silently empty — mirrors UpdateOccurrence.
-	a.DB.Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").First(occ, occ.ID)
+	a.DB.Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").Preload("WhatHappened").First(occ, occ.ID)
 
 	resp := occurrenceToResponse(*occ)
 	a.broadcastOccurrenceMessage(orgID, occ.ContactID, occ.AssignedUserID, websocket.WSMessage{

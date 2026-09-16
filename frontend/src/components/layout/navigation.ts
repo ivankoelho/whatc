@@ -24,7 +24,9 @@ import {
   ScrollText,
   ClipboardList,
   Building2,
-  Timer
+  Timer,
+  Tag,
+  HelpCircle
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
@@ -156,6 +158,8 @@ export const navigationSections: NavSection[] = [
           { name: 'nav.occurrenceStages', path: '/settings/occurrence-stages', icon: ClipboardList, permission: 'occurrences.stages' },
           { name: 'nav.units', path: '/settings/units', icon: Building2, permission: 'units' },
           { name: 'nav.slaPolicies', path: '/settings/occurrence-sla-policies', icon: Timer, permission: 'occurrences.sla_policies' },
+          { name: 'nav.occurrenceCategories', path: '/settings/occurrence-categories', icon: Tag, permission: 'occurrences.categories' },
+          { name: 'nav.whatHappened', path: '/settings/occurrence-what-happened', icon: HelpCircle, permission: 'occurrences.what_happened' },
           { name: 'nav.sso', path: '/settings/sso', icon: ShieldCheck, permission: 'settings.sso' },
           { name: 'nav.auditLogs', path: '/settings/audit-logs', icon: ScrollText, permission: 'audit_logs' }
         ]

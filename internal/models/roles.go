@@ -91,22 +91,23 @@ const (
 	ResourceOccurrenceStages        = "occurrences.stages"
 	ResourceOccurrenceCategories    = "occurrences.categories"
 	ResourceOccurrenceSLAPolicies   = "occurrences.sla_policies"
+	ResourceOccurrenceWhatHappened  = "occurrences.what_happened"
 	ResourceUnits                   = "units"
 	ResourceDepartments             = "departments"
 )
 
 // PermissionAction constants for available actions
 const (
-	ActionRead    = "read"
-	ActionWrite   = "write"
-	ActionDelete  = "delete"
-	ActionSync    = "sync"
-	ActionExecute = "execute"
-	ActionImport  = "import"
-	ActionExport  = "export"
-	ActionPickup  = "pickup"
-	ActionAssign  = "assign"
-	ActionViewAll = "view_all"
+	ActionRead     = "read"
+	ActionWrite    = "write"
+	ActionDelete   = "delete"
+	ActionSync     = "sync"
+	ActionExecute  = "execute"
+	ActionImport   = "import"
+	ActionExport   = "export"
+	ActionPickup   = "pickup"
+	ActionAssign   = "assign"
+	ActionViewAll  = "view_all"
 	ActionViewTeam = "view_team"
 )
 
@@ -274,6 +275,9 @@ func DefaultPermissions() []Permission {
 		{Resource: ResourceOccurrenceCategories, Action: ActionRead, Description: "View occurrence categories"},
 		{Resource: ResourceOccurrenceCategories, Action: ActionWrite, Description: "Create and edit occurrence categories"},
 		{Resource: ResourceOccurrenceCategories, Action: ActionDelete, Description: "Delete occurrence categories"},
+		{Resource: ResourceOccurrenceWhatHappened, Action: ActionRead, Description: "View occurrence \"what happened\" reasons"},
+		{Resource: ResourceOccurrenceWhatHappened, Action: ActionWrite, Description: "Create and edit occurrence \"what happened\" reasons"},
+		{Resource: ResourceOccurrenceWhatHappened, Action: ActionDelete, Description: "Delete occurrence \"what happened\" reasons"},
 		{Resource: ResourceOccurrenceSLAPolicies, Action: ActionRead, Description: "View occurrence SLA policies"},
 		{Resource: ResourceOccurrenceSLAPolicies, Action: ActionWrite, Description: "Edit occurrence SLA policies"},
 
@@ -321,6 +325,7 @@ func SystemRolePermissions() map[string][]string {
 		"occurrences:read", "occurrences:write",
 		"occurrences.stages:read", "occurrences.stages:write", "occurrences.stages:delete",
 		"occurrences.categories:read", "occurrences.categories:write", "occurrences.categories:delete",
+		"occurrences.what_happened:read", "occurrences.what_happened:write", "occurrences.what_happened:delete",
 		"occurrences.sla_policies:read", "occurrences.sla_policies:write",
 		"units:read", "units:write", "units:delete",
 		"departments:read", "departments:write", "departments:delete",

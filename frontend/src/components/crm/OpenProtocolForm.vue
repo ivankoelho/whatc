@@ -13,8 +13,10 @@ import {
   contactsService,
   unitsService,
   occurrenceCategoriesService,
+  occurrenceWhatHappenedService,
   type Unit,
   type OccurrenceCategory,
+  type OccurrenceWhatHappened,
 } from '@/services/api'
 import type { Contact } from '@/stores/contacts'
 import { useOccurrencesStore } from '@/stores/occurrences'
@@ -92,23 +94,27 @@ const units = ref<Unit[]>([])
 
 // --- Ocorrência ---
 const categoryId = ref('')
+const whatHappenedId = ref('')
 const priority = ref<'low' | 'normal' | 'high' | 'urgent'>('normal')
 const description = ref('')
 const internalNote = ref('')
 const categories = ref<OccurrenceCategory[]>([])
+const whatHappenedOptions = ref<OccurrenceWhatHappened[]>([])
 
 const saleChannels = ['loja_fisica', 'whatsapp', 'telefone', 'site'] as const
 
 onMounted(async () => {
   try {
-    const [unitsRes, categoriesRes] = await Promise.all([
+    const [unitsRes, categoriesRes, whatHappenedRes] = await Promise.all([
       unitsService.list(),
       occurrenceCategoriesService.list(),
+      occurrenceWhatHappenedService.list(),
     ])
     units.value = unitsRes.data.data.units
     categories.value = categoriesRes.data.data.categories
+    whatHappenedOptions.value = whatHappenedRes.data.data.reasons
   } catch {
-    // Unidade/categoria são opcionais no MVP — form segue funcional sem elas.
+    // Unidade/categoria/motivo são opcionais no MVP — form segue funcional sem eles.
   }
 })
 
@@ -130,6 +136,7 @@ function resetForm() {
   unitId.value = ''
   productDescription.value = ''
   categoryId.value = ''
+  whatHappenedId.value = ''
   priority.value = 'normal'
   description.value = ''
   internalNote.value = ''
@@ -177,6 +184,7 @@ async function submit() {
       description: description.value.trim(),
       priority: priority.value,
       category_id: categoryId.value || undefined,
+      what_happened_id: whatHappenedId.value || undefined,
       unit_id: unitId.value || undefined,
       sale_channel: saleChannel.value || undefined,
       invoice_number: invoiceNumber.value.trim() || undefined,
@@ -321,6 +329,15 @@ function goToProtocol() {
                 <SelectTrigger><SelectValue :placeholder="t('occurrences.categoryPlaceholder')" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem v-for="c in categories" :key="c.id" :value="c.id">{{ c.name }}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div class="space-y-2">
+              <Label>{{ t('occurrences.whatHappenedLabel') }}</Label>
+              <Select v-model="whatHappenedId">
+                <SelectTrigger><SelectValue :placeholder="t('occurrences.whatHappenedPlaceholder')" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem v-for="w in whatHappenedOptions" :key="w.id" :value="w.id">{{ w.name }}</SelectItem>
                 </SelectContent>
               </Select>
             </div>

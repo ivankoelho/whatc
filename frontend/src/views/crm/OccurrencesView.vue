@@ -11,6 +11,7 @@ import { PageHeader, SearchInput, DataTable, ErrorState, type Column } from '@/c
 import { useOccurrencesStore } from '@/stores/occurrences'
 import type { Occurrence } from '@/services/api'
 import { formatDate } from '@/lib/utils'
+import { slaStatus } from '@/lib/occurrence-sla'
 import { getErrorMessage } from '@/lib/api-utils'
 import { toast } from 'vue-sonner'
 import { useSearchPagination } from '@/composables/useSearchPagination'
@@ -40,12 +41,6 @@ const columns = computed<Column<Occurrence>[]>(() => [
   { key: 'assigned_user_name', label: t('occurrences.columnAssignee') },
   { key: 'opened_at', label: t('occurrences.columnOpenedAt') },
 ])
-
-function slaStatus(occ: Occurrence): 'overdue' | 'on_time' | 'none' {
-  if (!occ.sla_resolution_deadline) return 'none'
-  if (occ.sla_breached || (!occ.closed_at && new Date(occ.sla_resolution_deadline) < new Date())) return 'overdue'
-  return 'on_time'
-}
 
 async function fetchOccurrences() {
   // O quadro reusa `searchQuery` (useSearchPagination não sabe de modo), mas
