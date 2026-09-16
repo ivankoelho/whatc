@@ -29,6 +29,7 @@ type ContactResponse struct {
 	PhoneNumber string    `json:"phone_number"`
 	Name        string    `json:"name"`
 	ProfileName string    `json:"profile_name"`
+	CPFCNPJ     string    `json:"cpf_cnpj,omitempty"`
 	AvatarURL   string    `json:"avatar_url"`
 	// Status is a legacy field, always "active". Kept untouched so existing
 	// integrations do not break; ContactStatus is the real service state.
@@ -1440,8 +1441,22 @@ type CreateContactRequest struct {
 	PhoneNumber     string         `json:"phone_number"`
 	ProfileName     string         `json:"profile_name"`
 	WhatsAppAccount string         `json:"whatsapp_account"`
+	CPFCNPJ         string         `json:"cpf_cnpj"`
 	Tags            []string       `json:"tags"`
 	Metadata        map[string]any `json:"metadata"`
+}
+
+// normalizeDocument strips everything but digits from a CPF/CNPJ. No check
+// digit validation in this phase — it is cadastral text, not a value any
+// decision is made from yet.
+func normalizeDocument(doc string) string {
+	digits := make([]byte, 0, len(doc))
+	for i := 0; i < len(doc); i++ {
+		if doc[i] >= '0' && doc[i] <= '9' {
+			digits = append(digits, doc[i])
+		}
+	}
+	return string(digits)
 }
 
 // CreateContact creates a new contact or restores a soft-deleted one
@@ -1488,6 +1503,9 @@ func (a *App) CreateContact(r *fastglue.Request) error {
 			if req.WhatsAppAccount != "" {
 				updates["whats_app_account"] = req.WhatsAppAccount
 			}
+			if req.CPFCNPJ != "" {
+				updates["cpf_cnpj"] = normalizeDocument(req.CPFCNPJ)
+			}
 			if req.Tags != nil {
 				tagsArray := make(models.JSONBArray, len(req.Tags))
 				for i, tag := range req.Tags {
@@ -1525,6 +1543,7 @@ func (a *App) CreateContact(r *fastglue.Request) error {
 		PhoneNumber:     normalizedPhone,
 		ProfileName:     req.ProfileName,
 		WhatsAppAccount: req.WhatsAppAccount,
+		CPFCNPJ:         normalizeDocument(req.CPFCNPJ),
 		AssignedUserID:  &userID,
 	}
 
@@ -1557,6 +1576,7 @@ func (a *App) CreateContact(r *fastglue.Request) error {
 type UpdateContactRequest struct {
 	ProfileName        *string         `json:"profile_name"`
 	WhatsAppAccount    *string         `json:"whatsapp_account"`
+	CPFCNPJ            *string         `json:"cpf_cnpj"`
 	Tags               []string        `json:"tags"`
 	Metadata           *map[string]any `json:"metadata"`
 	AssignedUserID     *uuid.UUID      `json:"assigned_user_id"`
@@ -1610,6 +1630,9 @@ func (a *App) UpdateContact(r *fastglue.Request) error {
 	}
 	if req.WhatsAppAccount != nil {
 		updates["whats_app_account"] = *req.WhatsAppAccount
+	}
+	if req.CPFCNPJ != nil {
+		updates["cpf_cnpj"] = normalizeDocument(*req.CPFCNPJ)
 	}
 	if req.Tags != nil {
 		tagsArray := make(models.JSONBArray, len(req.Tags))
@@ -1705,10 +1728,14 @@ func (a *App) buildContactResponse(contact *models.Contact, orgID uuid.UUID) Con
 
 	phoneNumber := contact.PhoneNumber
 	profileName := contact.ProfileName
+	cpfCNPJ := contact.CPFCNPJ
 	shouldMask := a.ShouldMaskPhoneNumbers(orgID)
 	if shouldMask {
 		phoneNumber = utils.MaskPhoneNumber(phoneNumber)
 		profileName = utils.MaskIfPhoneNumber(profileName)
+		if cpfCNPJ != "" {
+			cpfCNPJ = utils.MaskPhoneNumber(cpfCNPJ)
+		}
 	}
 
 	// 24-hour service window: open if customer messaged within the last 24 hours.
@@ -1729,6 +1756,7 @@ func (a *App) buildContactResponse(contact *models.Contact, orgID uuid.UUID) Con
 		PhoneNumber:        phoneNumber,
 		Name:               profileName,
 		ProfileName:        profileName,
+		CPFCNPJ:            cpfCNPJ,
 		Status:             "active",
 		ContactStatus:      contact.ContactStatus,
 		Tags:               tags,

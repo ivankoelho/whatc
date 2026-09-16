@@ -87,6 +87,14 @@ type Occurrence struct {
 	// active logic — "manual" when there is no SourceTransferID.
 	Source string `gorm:"size:20;not null;default:'whatsapp'" json:"source"`
 
+	// Sale context, filled manually by the agent in this phase (no ERP
+	// lookup yet). All optional — the case can be opened without a purchase
+	// on file at all.
+	SaleChannel        string     `gorm:"size:30" json:"sale_channel,omitempty"`
+	InvoiceNumber      string     `gorm:"size:50" json:"invoice_number,omitempty"`
+	PurchaseDate       *time.Time `json:"purchase_date,omitempty"`
+	ProductDescription string     `gorm:"size:255" json:"product_description,omitempty"`
+
 	// SLA embeds the same struct AgentTransfer already uses for chat SLA
 	// (internal/models/chatbot.go:294) — response/resolution deadline, breach
 	// flag and timestamp. SLA.FirstResponseAt doubles here as Occurrence's own
@@ -103,9 +111,9 @@ type Occurrence struct {
 	FirstResponseBy *User `gorm:"foreignKey:FirstResponseByID" json:"first_response_by,omitempty"`
 
 	// Relations
-	Contact      *Contact         `gorm:"foreignKey:ContactID" json:"contact,omitempty"`
-	Stage        *OccurrenceStage `gorm:"foreignKey:StageID" json:"stage,omitempty"`
-	AssignedUser *User            `gorm:"foreignKey:AssignedUserID" json:"assigned_user,omitempty"`
+	Contact      *Contact            `gorm:"foreignKey:ContactID" json:"contact,omitempty"`
+	Stage        *OccurrenceStage    `gorm:"foreignKey:StageID" json:"stage,omitempty"`
+	AssignedUser *User               `gorm:"foreignKey:AssignedUserID" json:"assigned_user,omitempty"`
 	Unit         *Unit               `gorm:"foreignKey:UnitID" json:"unit,omitempty"`
 	Department   *Department         `gorm:"foreignKey:DepartmentID" json:"department,omitempty"`
 	Category     *OccurrenceCategory `gorm:"foreignKey:CategoryID" json:"category,omitempty"`

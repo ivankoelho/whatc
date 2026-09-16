@@ -358,11 +358,15 @@ func (a *WhatsAppAccount) DecryptSecrets(encryptionKey string) {
 // Contact represents a WhatsApp contact/profile
 type Contact struct {
 	BaseModel
-	OrganizationID     uuid.UUID  `gorm:"type:uuid;index;not null" json:"organization_id"`
-	PhoneNumber        string     `gorm:"size:50;not null" json:"phone_number"`
-	ProfileName        string     `gorm:"size:255" json:"profile_name"`
-	WhatsAppAccount    string     `gorm:"size:100;index" json:"whatsapp_account"` // References WhatsAppAccount.Name
-	AssignedUserID     *uuid.UUID `gorm:"type:uuid;index" json:"assigned_user_id,omitempty"`
+	OrganizationID  uuid.UUID `gorm:"type:uuid;index;not null" json:"organization_id"`
+	PhoneNumber     string    `gorm:"size:50;not null" json:"phone_number"`
+	ProfileName     string    `gorm:"size:255" json:"profile_name"`
+	WhatsAppAccount string    `gorm:"size:100;index" json:"whatsapp_account"` // References WhatsAppAccount.Name
+	// CPFCNPJ is cadastral only in this phase — no format validation, no
+	// uniqueness constraint, no ERP lookup. It exists so the future ERP D-1
+	// integration has a column to key off of without a migration.
+	CPFCNPJ        string     `gorm:"size:20;index" json:"cpf_cnpj,omitempty"`
+	AssignedUserID *uuid.UUID `gorm:"type:uuid;index" json:"assigned_user_id,omitempty"`
 
 	// TeamID is the conversation's effective team during triage — set by the
 	// chatbot flow (per-button), NOT the active transfer (AgentTransfer.TeamID)
@@ -377,9 +381,9 @@ type Contact struct {
 	// 'new' until an agent actually replies — an inbound message alone does not
 	// pull it out of the queue.
 	ContactStatus ContactStatus `gorm:"size:20;not null;default:'new'" json:"contact_status"`
-	Tags               JSONBArray `gorm:"type:jsonb;default:'[]'" json:"tags"`
-	Metadata           JSONB      `gorm:"type:jsonb;default:'{}'" json:"metadata"`
-	LastInboundAt      *time.Time `json:"last_inbound_at,omitempty"` // When customer last sent a message (for 24h window tracking)
+	Tags          JSONBArray    `gorm:"type:jsonb;default:'[]'" json:"tags"`
+	Metadata      JSONB         `gorm:"type:jsonb;default:'{}'" json:"metadata"`
+	LastInboundAt *time.Time    `json:"last_inbound_at,omitempty"` // When customer last sent a message (for 24h window tracking)
 
 	// Marketing opt-out (from Meta user_preferences webhook)
 	MarketingOptOut bool `gorm:"default:false" json:"marketing_opt_out"`

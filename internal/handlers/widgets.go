@@ -119,11 +119,12 @@ type DataPoint struct {
 
 // Available data sources and their filterable fields
 var widgetDataSources = map[string][]string{
-	"messages":  {"status", "direction", "message_type", "whatsapp_account"},
-	"contacts":  {"whatsapp_account", "is_read"},
-	"campaigns": {"status", "message_status"},
-	"transfers": {"status", "source"},
-	"sessions":  {"status"},
+	"messages":    {"status", "direction", "message_type", "whatsapp_account"},
+	"contacts":    {"whatsapp_account", "is_read"},
+	"campaigns":   {"status", "message_status"},
+	"transfers":   {"status", "source"},
+	"sessions":    {"status"},
+	"occurrences": {"priority", "stage_id", "category_id", "unit_id", "department_id", "sale_channel"},
 }
 
 // Available metrics
@@ -137,6 +138,71 @@ var staticDisplayTypes = map[string]bool{
 	"shortcuts": true,
 }
 
+// occurrenceDashboardWidgets are the 5 SAC cards seeded once per
+// organization (see ensureDefaultSACWidgets), same seed-on-first-read
+// pattern as ensureDefaultStages/ensureDefaultSLAPolicies.
+var occurrenceDashboardWidgets = []models.Widget{
+	{
+		Name: "Protocolos em aberto", Description: "Novos, em andamento e aguardando atendimento",
+		DataSource: "occurrences", Metric: "count", Field: "open",
+		DisplayType: "number", Color: "blue", Size: "small", ShowChange: false,
+		IsShared: true, IsDefault: true,
+	},
+	{
+		Name: "Protocolos vencidos", Description: "SLA de resolução estourado",
+		DataSource: "occurrences", Metric: "count", Field: "breached",
+		DisplayType: "number", Color: "red", Size: "small", ShowChange: false,
+		IsShared: true, IsDefault: true,
+	},
+	{
+		Name: "Tempo médio de resposta", Description: "Primeira resposta menos abertura, em minutos",
+		DataSource: "occurrences", Metric: "avg", Field: "response_time",
+		DisplayType: "number", Color: "purple", Size: "small", ShowChange: true,
+		IsShared: true, IsDefault: true,
+	},
+	{
+		Name: "Resolvidos", Description: "Encerrados no período selecionado",
+		DataSource: "occurrences", Metric: "count", Field: "resolved",
+		DisplayType: "number", Color: "green", Size: "small", ShowChange: true,
+		IsShared: true, IsDefault: true,
+	},
+	{
+		Name: "Protocolos mais recentes", Description: "Últimas ocorrências abertas",
+		DataSource: "occurrences", Metric: "count", DisplayType: "table",
+		Color: "cyan", Size: "medium", ShowChange: false,
+		IsShared: true, IsDefault: true,
+	},
+}
+
+// ensureDefaultSACWidgets seeds the 5 SAC cards for an organization the
+// first time its widgets are read, if none exist yet.
+//
+// ponytail: no unique index backs this the way occurrence_stages' partial
+// index does, so two requests racing on an organization's very first ever
+// widget fetch could double-seed. Low stakes (cosmetic duplicate cards, no
+// data corruption) and narrow window (only until the first successful seed)
+// — accepted for the MVP; add a partial unique index on
+// (organization_id, data_source, field) WHERE is_default if it's ever hit.
+func (a *App) ensureDefaultSACWidgets(orgID uuid.UUID) error {
+	var count int64
+	if err := a.DB.Model(&models.Widget{}).
+		Where("organization_id = ? AND data_source = ? AND is_default = true", orgID, "occurrences").
+		Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+
+	widgets := make([]models.Widget, len(occurrenceDashboardWidgets))
+	for i, w := range occurrenceDashboardWidgets {
+		w.OrganizationID = orgID
+		w.DisplayOrder = i
+		widgets[i] = w
+	}
+	return a.DB.Create(&widgets).Error
+}
+
 // ListWidgets returns all widgets for the user (their own + shared)
 func (a *App) ListWidgets(r *fastglue.Request) error {
 	orgID, userID, err := a.getOrgAndUserID(r)
@@ -147,6 +213,10 @@ func (a *App) ListWidgets(r *fastglue.Request) error {
 	// Check analytics read permission
 	if !a.HasPermission(userID, models.ResourceAnalytics, models.ActionRead, orgID) {
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You don't have permission to view analytics", nil, "")
+	}
+
+	if err := a.ensureDefaultSACWidgets(orgID); err != nil {
+		a.Log.Error("Failed to seed default SAC widgets", "error", err)
 	}
 
 	// Get user's own widgets + shared widgets from org
@@ -710,6 +780,10 @@ func (a *App) GetAllWidgetsData(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
 	}
 
+	if err := a.ensureDefaultSACWidgets(orgID); err != nil {
+		a.Log.Error("Failed to seed default SAC widgets", "error", err)
+	}
+
 	// Parse date range from query params
 	fromStr := string(r.RequestCtx.QueryArgs().Peek("from"))
 	toStr := string(r.RequestCtx.QueryArgs().Peek("to"))
@@ -820,6 +894,10 @@ func (a *App) executeWidgetQuery(orgID uuid.UUID, widget models.Widget, fromStr,
 	case "sessions":
 		currentValue = a.querySessions(orgID, widget.Metric, filters, periodStart, periodEnd)
 		previousValue = a.querySessions(orgID, widget.Metric, filters, previousPeriodStart, previousPeriodEnd)
+
+	case "occurrences":
+		currentValue = a.queryOccurrences(orgID, widget.Metric, widget.Field, filters, periodStart, periodEnd)
+		previousValue = a.queryOccurrences(orgID, widget.Metric, widget.Field, filters, previousPeriodStart, previousPeriodEnd)
 	}
 
 	response.Value = currentValue
@@ -939,6 +1017,53 @@ func (a *App) querySessions(orgID uuid.UUID, _ string, filters []FilterInput, st
 	return float64(count)
 }
 
+// queryOccurrences computes the SAC dashboard metrics. "open" and "breached"
+// are current-state snapshots that deliberately ignore the [start, end]
+// period passed in — see the design spec's §3: a protocol that's been open
+// for three months must not vanish from "Protocolos em aberto" just because
+// the dashboard's date filter is set to "last 7 days". "resolved" and
+// "response_time" are period-scoped like every other widget, over closed_at
+// and opened_at respectively.
+func (a *App) queryOccurrences(orgID uuid.UUID, metric, field string, filters []FilterInput, start, end time.Time) float64 {
+	base := func() *gorm.DB {
+		q := a.DB.Model(&models.Occurrence{}).Where("organization_id = ?", orgID)
+		for _, f := range filters {
+			q = applyFilter("occurrences", q, f)
+		}
+		return q
+	}
+
+	switch field {
+	case "open":
+		var count int64
+		base().Where("closed_at IS NULL").Count(&count)
+		return float64(count)
+	case "breached":
+		var count int64
+		base().Where("closed_at IS NULL AND sla_resolution_deadline IS NOT NULL AND sla_resolution_deadline < ?", time.Now()).
+			Count(&count)
+		return float64(count)
+	case "resolved":
+		var count int64
+		base().Where("closed_at >= ? AND closed_at <= ?", start, end).Count(&count)
+		return float64(count)
+	case "response_time":
+		var val float64
+		base().Where("opened_at >= ? AND opened_at <= ? AND first_response_at IS NOT NULL", start, end).
+			Select("COALESCE(AVG(EXTRACT(EPOCH FROM (first_response_at - opened_at))/60), 0)").
+			Scan(&val)
+		return val
+	}
+
+	// Generic fallback for an ad-hoc widget built through the "+ Add widget"
+	// dialog rather than one of the 5 seeded cards above (metric is always
+	// "count" for occurrences today — sum/avg beyond response_time has no
+	// use case yet).
+	var count int64
+	base().Where("opened_at >= ? AND opened_at <= ?", start, end).Count(&count)
+	return float64(count)
+}
+
 func (a *App) getChartData(orgID uuid.UUID, widget models.Widget, filters []FilterInput, start, end time.Time) []ChartPoint {
 	chartData := make([]ChartPoint, 0)
 
@@ -1020,6 +1145,14 @@ var allowedFilterFields = map[string]map[string]bool{
 		"status":  true,
 		"flow_id": true,
 	},
+	"occurrences": {
+		"priority":      true,
+		"stage_id":      true,
+		"category_id":   true,
+		"unit_id":       true,
+		"department_id": true,
+		"sale_channel":  true,
+	},
 }
 
 // allowedAggregateFields enumerates the columns each data source is
@@ -1044,6 +1177,8 @@ func resolveDataSourceTable(dataSource string) (tableName, dateField string, ok 
 		return "agent_transfers", "transferred_at", true
 	case "sessions":
 		return "chatbot_sessions", "created_at", true
+	case "occurrences":
+		return "occurrences", "opened_at", true
 	default:
 		return "", "", false
 	}
@@ -1384,6 +1519,20 @@ var tableQuerySQL = map[string]struct{ base, orderBy string }{
 			FROM chatbot_sessions s LEFT JOIN contacts c ON c.id = s.contact_id
 			WHERE s.organization_id = ? AND s.created_at >= ? AND s.created_at <= ?`,
 		orderBy: " ORDER BY s.created_at DESC LIMIT 10",
+	},
+	"occurrences": {
+		// Raw SQL bypasses GORM's automatic soft-delete scope, unlike every
+		// other query in this file — o.deleted_at IS NULL is explicit here
+		// for that reason (the other table_rows sources above share this gap
+		// pre-existing; not introducing it fresh, just not repeating it).
+		base: `SELECT o.id, COALESCE(c.profile_name, c.phone_number) as label,
+			o.protocol_number || ' · ' || o.title as sub_label,
+			COALESCE(s.name, '') as status, '' as direction, o.opened_at as created_at
+			FROM occurrences o
+			LEFT JOIN contacts c ON c.id = o.contact_id
+			LEFT JOIN occurrence_stages s ON s.id = o.stage_id
+			WHERE o.organization_id = ? AND o.opened_at >= ? AND o.opened_at <= ? AND o.deleted_at IS NULL`,
+		orderBy: " ORDER BY o.opened_at DESC LIMIT 10",
 	},
 }
 

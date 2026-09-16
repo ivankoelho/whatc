@@ -53,14 +53,35 @@ export const useOccurrencesStore = defineStore('occurrences', () => {
 
   async function createOccurrence(payload: {
     contact_id: string
-    title: string
+    title?: string
     description?: string
     priority?: 'low' | 'normal' | 'high' | 'urgent'
     source_transfer_id?: string
+    unit_id?: string
+    department_id?: string
+    category_id?: string
+    sale_channel?: string
+    invoice_number?: string
+    purchase_date?: string
+    product_description?: string
+    internal_note?: string
   }) {
     const res = await occurrencesService.create(payload)
     await fetchContactOccurrences(payload.contact_id)
     return res.data.data
+  }
+
+  // Tries to send the protocol right after creation. A 422 means the 24h
+  // service window is closed — that's an expected outcome the UI must show
+  // plainly (spec §16/§17), not an error to throw past the caller.
+  async function trySendProtocol(occurrenceId: string): Promise<boolean> {
+    try {
+      await occurrencesService.sendProtocol(occurrenceId)
+      return true
+    } catch (e: any) {
+      if (e?.response?.status === 422) return false
+      throw e
+    }
   }
 
   async function changeStage(occurrenceId: string, stageId: string) {
@@ -96,6 +117,6 @@ export const useOccurrencesStore = defineStore('occurrences', () => {
   return {
     occurrences, total, contactOccurrences, stages, events, isLoading,
     fetchStages, stageColor, fetchOccurrences, fetchColumn, fetchContactOccurrences, fetchEvents,
-    createOccurrence, changeStage, moveStage, addNote, sendProtocol, clear,
+    createOccurrence, changeStage, moveStage, addNote, sendProtocol, trySendProtocol, clear,
   }
 })

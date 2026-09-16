@@ -23,6 +23,7 @@ export interface Contact {
   phone_number: string
   name: string
   profile_name?: string
+  cpf_cnpj?: string
   avatar_url?: string
   // `status` is legacy and always "active"; contact_status is the real
   // service state of the conversation.

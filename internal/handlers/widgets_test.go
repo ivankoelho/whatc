@@ -80,7 +80,7 @@ func TestApp_ListWidgets_Success(t *testing.T) {
 	}
 	err = json.Unmarshal(testutil.GetResponseBody(req), &resp)
 	require.NoError(t, err)
-	assert.Len(t, resp.Data.Widgets, 2)
+	assert.Len(t, nonDefaultWidgets(resp.Data.Widgets), 2)
 }
 
 func TestApp_ListWidgets_NoPermission(t *testing.T) {
@@ -130,8 +130,22 @@ func TestApp_ListWidgets_FiltersByOrganization(t *testing.T) {
 	}
 	err = json.Unmarshal(testutil.GetResponseBody(req), &resp)
 	require.NoError(t, err)
-	assert.Len(t, resp.Data.Widgets, 1)
-	assert.Equal(t, "Org1 Widget", resp.Data.Widgets[0].Name)
+	nonDefault := nonDefaultWidgets(resp.Data.Widgets)
+	assert.Len(t, nonDefault, 1)
+	assert.Equal(t, "Org1 Widget", nonDefault[0].Name)
+}
+
+// nonDefaultWidgets filters out the 5 SAC cards ensureDefaultSACWidgets seeds
+// automatically on first read (see widgets.go), so tests asserting on
+// user-created widgets aren't coupled to how many default cards exist.
+func nonDefaultWidgets(widgets []handlers.WidgetResponse) []handlers.WidgetResponse {
+	out := make([]handlers.WidgetResponse, 0, len(widgets))
+	for _, w := range widgets {
+		if !w.IsDefault {
+			out = append(out, w)
+		}
+	}
+	return out
 }
 
 func TestApp_ListWidgets_Unauthorized(t *testing.T) {
