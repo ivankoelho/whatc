@@ -24,6 +24,26 @@ type CreateOccurrenceRequest struct {
 	UnitID           *string `json:"unit_id"`
 	DepartmentID     *string `json:"department_id"`
 	CategoryID       *string `json:"category_id"`
+	WhatHappenedID   *string `json:"what_happened_id"`
+
+	// Sale context (§8 of the SAC MVP spec) — all optional, filled manually
+	// by the agent, no ERP lookup.
+	SaleChannel        string  `json:"sale_channel"`
+	InvoiceNumber      string  `json:"invoice_number"`
+	PurchaseDate       string  `json:"purchase_date"` // "2006-01-02", optional
+	ProductDescription string  `json:"product_description"`
+	InternalNote       *string `json:"internal_note"`
+}
+
+// occurrenceSaleChannels is the closed list the sale_channel field is
+// validated against. Deliberately not a DB enum/CHECK — the spec calls this
+// "an enumeration that can later become a configurable catalog without a
+// migration".
+var occurrenceSaleChannels = map[string]bool{
+	"loja_fisica": true,
+	"whatsapp":    true,
+	"telefone":    true,
+	"site":        true,
 }
 
 // OccurrenceResponse is the API shape of an occurrence.
@@ -32,6 +52,7 @@ type OccurrenceResponse struct {
 	ProtocolNumber   string     `json:"protocol_number"`
 	ContactID        uuid.UUID  `json:"contact_id"`
 	ContactName      string     `json:"contact_name"`
+	ContactPhone     string     `json:"contact_phone,omitempty"`
 	Title            string     `json:"title"`
 	Description      string     `json:"description"`
 	StageID          uuid.UUID  `json:"stage_id"`
@@ -43,9 +64,19 @@ type OccurrenceResponse struct {
 	ClosedAt         *time.Time `json:"closed_at,omitempty"`
 	SourceTransferID *uuid.UUID `json:"source_transfer_id,omitempty"`
 	UnitID           *uuid.UUID `json:"unit_id,omitempty"`
+	UnitName         string     `json:"unit_name,omitempty"`
 	DepartmentID     *uuid.UUID `json:"department_id,omitempty"`
+	DepartmentName   string     `json:"department_name,omitempty"`
 	CategoryID       *uuid.UUID `json:"category_id,omitempty"`
+	CategoryName     string     `json:"category_name,omitempty"`
+	WhatHappenedID   *uuid.UUID `json:"what_happened_id,omitempty"`
+	WhatHappenedName string     `json:"what_happened_name,omitempty"`
 	Source           string     `json:"source"`
+
+	SaleChannel        string     `json:"sale_channel,omitempty"`
+	InvoiceNumber      string     `json:"invoice_number,omitempty"`
+	PurchaseDate       *time.Time `json:"purchase_date,omitempty"`
+	ProductDescription string     `json:"product_description,omitempty"`
 	// SLA/first-response fields, named to match AgentTransferResponse's
 	// existing sla_-prefixed convention for the same SLATracking struct.
 	SLAResponseDeadline   *time.Time `json:"sla_response_deadline,omitempty"`
@@ -72,6 +103,7 @@ func occurrenceToResponse(o models.Occurrence) OccurrenceResponse {
 		UnitID:                o.UnitID,
 		DepartmentID:          o.DepartmentID,
 		CategoryID:            o.CategoryID,
+		WhatHappenedID:        o.WhatHappenedID,
 		Source:                o.Source,
 		SLAResponseDeadline:   o.SLA.ResponseDeadline,
 		SLAResolutionDeadline: o.SLA.ResolutionDeadline,
@@ -79,15 +111,32 @@ func occurrenceToResponse(o models.Occurrence) OccurrenceResponse {
 		SLABreachedAt:         o.SLA.BreachedAt,
 		FirstResponseAt:       o.SLA.FirstResponseAt,
 		FirstResponseByID:     o.FirstResponseByID,
+		SaleChannel:           o.SaleChannel,
+		InvoiceNumber:         o.InvoiceNumber,
+		PurchaseDate:          o.PurchaseDate,
+		ProductDescription:    o.ProductDescription,
 	}
 	if o.Contact != nil {
 		resp.ContactName = o.Contact.ProfileName
+		resp.ContactPhone = o.Contact.PhoneNumber
 	}
 	if o.Stage != nil {
 		resp.StageName = o.Stage.Name
 	}
 	if o.AssignedUser != nil {
 		resp.AssignedUserName = o.AssignedUser.FullName
+	}
+	if o.Unit != nil {
+		resp.UnitName = o.Unit.Name
+	}
+	if o.Department != nil {
+		resp.DepartmentName = o.Department.Name
+	}
+	if o.Category != nil {
+		resp.CategoryName = o.Category.Name
+	}
+	if o.WhatHappened != nil {
+		resp.WhatHappenedName = o.WhatHappened.Name
 	}
 	return resp
 }
@@ -189,8 +238,18 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 	if err := a.decodeRequest(r, &req); err != nil {
 		return nil
 	}
-	if req.Title == "" {
-		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "title is required", nil, "")
+
+	if req.SaleChannel != "" && !occurrenceSaleChannels[req.SaleChannel] {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid sale_channel", nil, "")
+	}
+
+	var purchaseDate *time.Time
+	if req.PurchaseDate != "" {
+		pd, err := time.ParseInLocation("2006-01-02", req.PurchaseDate, a.orgLocation(orgID))
+		if err != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "purchase_date must be YYYY-MM-DD", nil, "")
+		}
+		purchaseDate = &pd
 	}
 
 	contactID, err := uuid.Parse(req.ContactID)
@@ -232,13 +291,17 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 	}
 
 	occ := models.Occurrence{
-		OrganizationID: orgID,
-		ContactID:      contactID,
-		Title:          req.Title,
-		Description:    req.Description,
-		StageID:        stage.ID,
-		Priority:       priority,
-		OpenedByUserID: userID,
+		OrganizationID:     orgID,
+		ContactID:          contactID,
+		Title:              req.Title,
+		Description:        req.Description,
+		StageID:            stage.ID,
+		Priority:           priority,
+		OpenedByUserID:     userID,
+		SaleChannel:        req.SaleChannel,
+		InvoiceNumber:      req.InvoiceNumber,
+		PurchaseDate:       purchaseDate,
+		ProductDescription: req.ProductDescription,
 		SLA: models.SLATracking{
 			ResponseDeadline:   responseDeadline,
 			ResolutionDeadline: resolutionDeadline,
@@ -304,15 +367,50 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 		}
 		occ.DepartmentID = &id
 	}
+	var category *models.OccurrenceCategory
 	if req.CategoryID != nil && *req.CategoryID != "" {
 		id, err := uuid.Parse(*req.CategoryID)
 		if err != nil {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid category_id", nil, "")
 		}
-		if _, err := findByIDAndOrg[models.OccurrenceCategory](a.DB, r, id, orgID, "Category"); err != nil {
+		cat, err := findByIDAndOrg[models.OccurrenceCategory](a.DB, r, id, orgID, "Category")
+		if err != nil {
 			return nil
 		}
 		occ.CategoryID = &id
+		category = cat
+	}
+
+	var whatHappened *models.OccurrenceWhatHappened
+	if req.WhatHappenedID != nil && *req.WhatHappenedID != "" {
+		id, err := uuid.Parse(*req.WhatHappenedID)
+		if err != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid what_happened_id", nil, "")
+		}
+		wh, err := findByIDAndOrg[models.OccurrenceWhatHappened](a.DB, r, id, orgID, "Reason")
+		if err != nil {
+			return nil
+		}
+		occ.WhatHappenedID = &id
+		whatHappened = wh
+	}
+
+	// Derive the title when the agent didn't type one: "Categoria — Produto",
+	// or "Categoria — Atendimento SAC" without a product, per the SAC MVP
+	// spec (§8) — the product asked not to ask for a title when it can be
+	// derived from fields already on the form. Without a category either,
+	// there's nothing meaningful to prefix — just the product (or the
+	// generic fallback alone), rather than a literal "Ocorrência —" filler.
+	if occ.Title == "" {
+		product := occ.ProductDescription
+		if product == "" {
+			product = "Atendimento SAC"
+		}
+		if category != nil {
+			occ.Title = category.Name + " — " + product
+		} else {
+			occ.Title = product
+		}
 	}
 
 	if err := a.insertOccurrenceWithProtocol(&occ); err != nil {
@@ -321,8 +419,20 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 			"Failed to create occurrence", nil, "")
 	}
 
+	if req.InternalNote != nil && *req.InternalNote != "" {
+		a.DB.Create(&models.OccurrenceEvent{
+			OrganizationID: orgID,
+			OccurrenceID:   occ.ID,
+			Type:           models.OccurrenceEventNote,
+			Content:        *req.InternalNote,
+			CreatedByID:    &userID,
+		})
+	}
+
 	occ.Stage = stage
 	occ.Contact = contact
+	occ.Category = category
+	occ.WhatHappened = whatHappened
 	// Reload the assignee relation so the broadcast payload's
 	// assigned_user_name isn't silently empty for the common case (an
 	// occurrence defaults its assignee to its creator) — the REST response
@@ -372,6 +482,9 @@ func (a *App) ListOccurrences(r *fastglue.Request) error {
 	if categoryID := string(r.RequestCtx.QueryArgs().Peek("category_id")); categoryID != "" {
 		query = query.Where("occurrences.category_id = ?", categoryID)
 	}
+	if whatHappenedID := string(r.RequestCtx.QueryArgs().Peek("what_happened_id")); whatHappenedID != "" {
+		query = query.Where("occurrences.what_happened_id = ?", whatHappenedID)
+	}
 	if protocol := string(r.RequestCtx.QueryArgs().Peek("protocol")); protocol != "" {
 		query = query.Where("occurrences.protocol_number ILIKE ?", "%"+protocol+"%")
 	}
@@ -397,7 +510,7 @@ func (a *App) ListOccurrences(r *fastglue.Request) error {
 
 	var occurrences []models.Occurrence
 	if err := query.
-		Preload("Contact").Preload("Stage").Preload("AssignedUser").
+		Preload("Contact").Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").Preload("WhatHappened").
 		Order("occurrences.opened_at DESC").
 		Limit(pg.Limit).Offset(pg.Offset).
 		Find(&occurrences).Error; err != nil {
@@ -441,7 +554,7 @@ func (a *App) ListContactOccurrences(r *fastglue.Request) error {
 
 	var occurrences []models.Occurrence
 	if err := a.DB.Where("organization_id = ? AND contact_id = ?", orgID, contactID).
-		Preload("Stage").Preload("AssignedUser").
+		Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").Preload("WhatHappened").
 		Order("opened_at DESC").Find(&occurrences).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError,
 			"Failed to list occurrences", nil, "")
@@ -465,6 +578,7 @@ type UpdateOccurrenceRequest struct {
 	UnitID         *string `json:"unit_id"`
 	DepartmentID   *string `json:"department_id"`
 	CategoryID     *string `json:"category_id"`
+	WhatHappenedID *string `json:"what_happened_id"`
 }
 
 // ChangeStageRequest moves a case to another stage.
@@ -550,7 +664,7 @@ func (a *App) GetOccurrence(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
-	a.DB.Preload("Stage").Preload("AssignedUser").First(occ, occ.ID)
+	a.DB.Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").Preload("WhatHappened").First(occ, occ.ID)
 	return r.SendEnvelope(occurrenceToResponse(*occ))
 }
 
@@ -659,6 +773,20 @@ func (a *App) UpdateOccurrence(r *fastglue.Request) error {
 			updates["category_id"] = id
 		}
 	}
+	if req.WhatHappenedID != nil {
+		if *req.WhatHappenedID == "" {
+			updates["what_happened_id"] = nil
+		} else {
+			id, err := uuid.Parse(*req.WhatHappenedID)
+			if err != nil {
+				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid what_happened_id", nil, "")
+			}
+			if _, err := findByIDAndOrg[models.OccurrenceWhatHappened](a.DB, r, id, orgID, "Reason"); err != nil {
+				return nil
+			}
+			updates["what_happened_id"] = id
+		}
+	}
 
 	if err := a.DB.Model(occ).Updates(updates).Error; err != nil {
 		a.Log.Error("Failed to update occurrence", "error", err)
@@ -675,7 +803,7 @@ func (a *App) UpdateOccurrence(r *fastglue.Request) error {
 		})
 	}
 
-	a.DB.Preload("Stage").Preload("AssignedUser").First(occ, occ.ID)
+	a.DB.Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").Preload("WhatHappened").First(occ, occ.ID)
 	resp := occurrenceToResponse(*occ)
 
 	a.broadcastOccurrenceMessage(orgID, occ.ContactID, occ.AssignedUserID, websocket.WSMessage{
@@ -742,7 +870,7 @@ func (a *App) ChangeOccurrenceStage(r *fastglue.Request) error {
 	}
 	// Preload (not just occ.Stage = target) so the broadcast payload's
 	// assigned_user_name isn't silently empty — mirrors UpdateOccurrence.
-	a.DB.Preload("Stage").Preload("AssignedUser").First(occ, occ.ID)
+	a.DB.Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").Preload("WhatHappened").First(occ, occ.ID)
 
 	resp := occurrenceToResponse(*occ)
 	a.broadcastOccurrenceMessage(orgID, occ.ContactID, occ.AssignedUserID, websocket.WSMessage{

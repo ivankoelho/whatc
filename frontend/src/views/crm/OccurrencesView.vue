@@ -6,10 +6,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { PageHeader, SearchInput, DataTable, ErrorState, type Column } from '@/components/shared'
 import { useOccurrencesStore } from '@/stores/occurrences'
 import type { Occurrence } from '@/services/api'
 import { formatDate } from '@/lib/utils'
+import { slaStatus } from '@/lib/occurrence-sla'
 import { getErrorMessage } from '@/lib/api-utils'
 import { toast } from 'vue-sonner'
 import { useSearchPagination } from '@/composables/useSearchPagination'
@@ -17,12 +19,14 @@ import { ClipboardList, List, LayoutGrid } from 'lucide-vue-next'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useOccurrenceViewMode } from '@/composables/useOccurrenceViewMode'
 import OccurrenceBoard from '@/components/crm/OccurrenceBoard.vue'
+import OpenProtocolForm from '@/components/crm/OpenProtocolForm.vue'
 
 const { t } = useI18n()
 const router = useRouter()
 const store = useOccurrencesStore()
 const { mode } = useOccurrenceViewMode()
 
+const activeTab = ref<'list' | 'open'>('list')
 const stageFilter = ref('all')
 const error = ref(false)
 
@@ -30,7 +34,10 @@ const columns = computed<Column<Occurrence>[]>(() => [
   { key: 'protocol_number', label: t('occurrences.columnProtocol') },
   { key: 'title', label: t('occurrences.columnTitle') },
   { key: 'contact_name', label: t('occurrences.columnContact') },
+  { key: 'contact_phone', label: t('occurrences.columnPhone') },
   { key: 'stage_name', label: t('occurrences.columnStage') },
+  { key: 'unit_name', label: t('occurrences.columnUnit') },
+  { key: 'sla', label: t('occurrences.columnSLA') },
   { key: 'assigned_user_name', label: t('occurrences.columnAssignee') },
   { key: 'opened_at', label: t('occurrences.columnOpenedAt') },
 ])
@@ -68,6 +75,12 @@ watch(mode, newMode => {
   if (newMode === 'list') fetchOccurrences()
 })
 
+// Refetch when coming back from "Abrir protocolo" — a protocol just
+// registered there wouldn't otherwise show up until a manual refresh.
+watch(activeTab, newTab => {
+  if (newTab === 'list') fetchOccurrences()
+})
+
 function onStageFilterChange() {
   currentPage.value = 1
   fetchOccurrences()
@@ -90,6 +103,23 @@ onMounted(async () => {
   <div class="flex flex-col h-full bg-[#0a0a0b] light:bg-gray-50">
     <PageHeader :title="$t('occurrences.title')" :description="$t('occurrences.subtitle')" :icon="ClipboardList" icon-gradient="bg-gradient-to-br from-violet-500 to-purple-600 shadow-violet-500/20" />
 
+    <Tabs v-model="activeTab" class="flex-1 min-h-0 flex flex-col">
+      <div class="px-6 pt-4">
+        <TabsList>
+          <TabsTrigger value="list">{{ $t('occurrences.tabInProgress') }}</TabsTrigger>
+          <TabsTrigger value="open">{{ $t('occurrences.tabOpenProtocol') }}</TabsTrigger>
+        </TabsList>
+      </div>
+
+      <TabsContent value="open" class="flex-1 min-h-0">
+        <ScrollArea orientation="vertical" class="flex-1 h-full">
+          <div class="p-6">
+            <OpenProtocolForm />
+          </div>
+        </ScrollArea>
+      </TabsContent>
+
+      <TabsContent value="list" class="flex-1 min-h-0">
     <ErrorState
       v-if="error"
       :title="$t('common.loadErrorTitle')"
@@ -99,7 +129,7 @@ onMounted(async () => {
       @retry="fetchOccurrences"
     />
 
-    <ScrollArea v-else orientation="vertical" class="flex-1">
+    <ScrollArea v-else orientation="vertical" class="flex-1 h-full">
       <div class="p-6">
         <Card>
           <CardHeader>
@@ -162,12 +192,29 @@ onMounted(async () => {
                     {{ occ.contact_name }}
                   </div>
                 </template>
+                <template #cell-contact_phone="{ item: occ }">
+                  <div class="cursor-pointer text-muted-foreground" @click="goToDetail(occ)">
+                    {{ occ.contact_phone }}
+                  </div>
+                </template>
                 <template #cell-stage_name="{ item: occ }">
                   <div class="cursor-pointer" @click="goToDetail(occ)">
                     <Badge
                       variant="outline"
                       :style="{ borderColor: store.stageColor(occ.stage_id), color: store.stageColor(occ.stage_id) }"
                     >{{ occ.stage_name }}</Badge>
+                  </div>
+                </template>
+                <template #cell-unit_name="{ item: occ }">
+                  <div class="cursor-pointer text-muted-foreground" @click="goToDetail(occ)">
+                    {{ occ.unit_name || '—' }}
+                  </div>
+                </template>
+                <template #cell-sla="{ item: occ }">
+                  <div class="cursor-pointer" @click="goToDetail(occ)">
+                    <Badge v-if="slaStatus(occ) === 'overdue'" variant="destructive">{{ $t('occurrences.slaOverdue') }}</Badge>
+                    <Badge v-else-if="slaStatus(occ) === 'on_time'" variant="outline">{{ $t('occurrences.slaOnTime') }}</Badge>
+                    <span v-else class="text-muted-foreground">{{ $t('occurrences.slaNone') }}</span>
                   </div>
                 </template>
                 <template #cell-assigned_user_name="{ item: occ }">
@@ -187,5 +234,7 @@ onMounted(async () => {
         </Card>
       </div>
     </ScrollArea>
+      </TabsContent>
+    </Tabs>
   </div>
 </template>

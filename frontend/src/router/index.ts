@@ -306,6 +306,30 @@ const router = createRouter({
           meta: { permission: 'occurrences.stages' }
         },
         {
+          path: 'settings/units',
+          name: 'units',
+          component: () => import('@/views/settings/UnitsView.vue'),
+          meta: { permission: 'units' }
+        },
+        {
+          path: 'settings/occurrence-sla-policies',
+          name: 'occurrence-sla-policies',
+          component: () => import('@/views/settings/OccurrenceSLAPoliciesView.vue'),
+          meta: { permission: 'occurrences.sla_policies' }
+        },
+        {
+          path: 'settings/occurrence-categories',
+          name: 'occurrence-categories',
+          component: () => import('@/views/settings/OccurrenceCategoriesView.vue'),
+          meta: { permission: 'occurrences.categories' }
+        },
+        {
+          path: 'settings/occurrence-what-happened',
+          name: 'occurrence-what-happened',
+          component: () => import('@/views/settings/OccurrenceWhatHappenedView.vue'),
+          meta: { permission: 'occurrences.what_happened' }
+        },
+        {
           path: 'settings/audit-logs',
           name: 'audit-logs',
           component: () => import('@/views/settings/AuditLogsView.vue'),
@@ -392,6 +416,10 @@ const navigationOrder = [
     { path: '/settings/webhooks', permission: 'webhooks' },
     { path: '/settings/custom-actions', permission: 'custom_actions' },
     { path: '/settings/occurrence-stages', permission: 'occurrences.stages' },
+    { path: '/settings/units', permission: 'units' },
+    { path: '/settings/occurrence-sla-policies', permission: 'occurrences.sla_policies' },
+    { path: '/settings/occurrence-categories', permission: 'occurrences.categories' },
+    { path: '/settings/occurrence-what-happened', permission: 'occurrences.what_happened' },
     { path: '/settings/sso', permission: 'settings.sso' }
   ]}
 ]

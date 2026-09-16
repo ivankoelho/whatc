@@ -46,7 +46,7 @@ func (a *App) GetDashboardStats(r *fastglue.Request) error {
 	var periodStart, periodEnd time.Time
 	if fromStr != "" && toStr != "" {
 		var errMsg string
-		periodStart, periodEnd, errMsg = parseDateRange(fromStr, toStr)
+		periodStart, periodEnd, errMsg = parseDateRange(fromStr, toStr, a.orgLocation(orgID))
 		if errMsg != "" {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, errMsg, nil, "")
 		}

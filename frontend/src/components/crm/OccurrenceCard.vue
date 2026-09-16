@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Badge } from '@/components/ui/badge'
 import type { Occurrence } from '@/services/api'
+import { slaStatus } from '@/lib/occurrence-sla'
 
 defineProps<{ occurrence: Occurrence; disabled?: boolean }>()
 
@@ -40,5 +41,9 @@ const PRIORITY_KEY = {
       <span class="text-white/30 light:text-gray-400">{{ $t('occurrences.assigneeLabel') }}:</span>
       {{ occurrence.assigned_user_name || $t('occurrences.unassigned') }}
     </p>
+    <div class="mt-2">
+      <Badge v-if="slaStatus(occurrence) === 'overdue'" variant="destructive" class="text-xs">{{ $t('occurrences.slaOverdue') }}</Badge>
+      <Badge v-else-if="slaStatus(occurrence) === 'on_time'" variant="outline" class="text-xs">{{ $t('occurrences.slaOnTime') }}</Badge>
+    </div>
   </div>
 </template>

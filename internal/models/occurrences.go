@@ -82,10 +82,23 @@ type Occurrence struct {
 	DepartmentID *uuid.UUID `gorm:"type:uuid;index" json:"department_id,omitempty"`
 	CategoryID   *uuid.UUID `gorm:"type:uuid;index" json:"category_id,omitempty"`
 
+	// WhatHappenedID classifies the root cause, independent from CategoryID
+	// (the type of case/action needed) — see OccurrenceWhatHappened's own
+	// doc comment for why these are two separate dimensions.
+	WhatHappenedID *uuid.UUID `gorm:"type:uuid;index" json:"what_happened_id,omitempty"`
+
 	// Source documents where this case originated. Whatomate has one channel
 	// today (WhatsApp), so this is a placeholder for a future channel, not
 	// active logic — "manual" when there is no SourceTransferID.
 	Source string `gorm:"size:20;not null;default:'whatsapp'" json:"source"`
+
+	// Sale context, filled manually by the agent in this phase (no ERP
+	// lookup yet). All optional — the case can be opened without a purchase
+	// on file at all.
+	SaleChannel        string     `gorm:"size:30" json:"sale_channel,omitempty"`
+	InvoiceNumber      string     `gorm:"size:50" json:"invoice_number,omitempty"`
+	PurchaseDate       *time.Time `json:"purchase_date,omitempty"`
+	ProductDescription string     `gorm:"size:255" json:"product_description,omitempty"`
 
 	// SLA embeds the same struct AgentTransfer already uses for chat SLA
 	// (internal/models/chatbot.go:294) — response/resolution deadline, breach
@@ -103,12 +116,13 @@ type Occurrence struct {
 	FirstResponseBy *User `gorm:"foreignKey:FirstResponseByID" json:"first_response_by,omitempty"`
 
 	// Relations
-	Contact      *Contact         `gorm:"foreignKey:ContactID" json:"contact,omitempty"`
-	Stage        *OccurrenceStage `gorm:"foreignKey:StageID" json:"stage,omitempty"`
-	AssignedUser *User            `gorm:"foreignKey:AssignedUserID" json:"assigned_user,omitempty"`
-	Unit         *Unit               `gorm:"foreignKey:UnitID" json:"unit,omitempty"`
-	Department   *Department         `gorm:"foreignKey:DepartmentID" json:"department,omitempty"`
-	Category     *OccurrenceCategory `gorm:"foreignKey:CategoryID" json:"category,omitempty"`
+	Contact      *Contact                `gorm:"foreignKey:ContactID" json:"contact,omitempty"`
+	Stage        *OccurrenceStage        `gorm:"foreignKey:StageID" json:"stage,omitempty"`
+	AssignedUser *User                   `gorm:"foreignKey:AssignedUserID" json:"assigned_user,omitempty"`
+	Unit         *Unit                   `gorm:"foreignKey:UnitID" json:"unit,omitempty"`
+	Department   *Department             `gorm:"foreignKey:DepartmentID" json:"department,omitempty"`
+	Category     *OccurrenceCategory     `gorm:"foreignKey:CategoryID" json:"category,omitempty"`
+	WhatHappened *OccurrenceWhatHappened `gorm:"foreignKey:WhatHappenedID" json:"what_happened,omitempty"`
 }
 
 func (Occurrence) TableName() string { return "occurrences" }

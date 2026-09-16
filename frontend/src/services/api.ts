@@ -1312,6 +1312,7 @@ export interface Occurrence {
   protocol_number: string
   contact_id: string
   contact_name: string
+  contact_phone?: string
   title: string
   description: string
   stage_id: string
@@ -1322,6 +1323,44 @@ export interface Occurrence {
   opened_at: string
   closed_at?: string
   source_transfer_id?: string
+  unit_id?: string
+  unit_name?: string
+  department_id?: string
+  department_name?: string
+  category_id?: string
+  category_name?: string
+  what_happened_id?: string
+  what_happened_name?: string
+  sale_channel?: string
+  invoice_number?: string
+  purchase_date?: string
+  product_description?: string
+  sla_response_deadline?: string
+  sla_resolution_deadline?: string
+  sla_breached?: boolean
+  first_response_at?: string
+}
+
+export interface Unit {
+  id: string
+  name: string
+  code?: string
+  type?: string
+  active: boolean
+}
+
+export interface Department {
+  id: string
+  name: string
+  active: boolean
+}
+
+export interface OccurrenceCategory {
+  id: string
+  name: string
+  parent_id?: string
+  position: number
+  is_active: boolean
 }
 
 export interface OccurrenceEvent {
@@ -1341,17 +1380,28 @@ export const occurrencesService = {
   get: (id: string) => api.get<ApiEnvelope<Occurrence>>(`/occurrences/${id}`),
   create: (data: {
     contact_id: string
-    title: string
+    title?: string
     description?: string
     priority?: 'low' | 'normal' | 'high' | 'urgent'
     assigned_user_id?: string
     source_transfer_id?: string
+    unit_id?: string
+    department_id?: string
+    category_id?: string
+    what_happened_id?: string
+    sale_channel?: string
+    invoice_number?: string
+    purchase_date?: string
+    product_description?: string
+    internal_note?: string
   }) => api.post<ApiEnvelope<Occurrence>>('/occurrences', data),
   update: (id: string, data: {
     title: string
     description?: string
     priority?: 'low' | 'normal' | 'high' | 'urgent'
     assigned_user_id?: string | null
+    category_id?: string | null
+    what_happened_id?: string | null
   }) => api.put<ApiEnvelope<Occurrence>>(`/occurrences/${id}`, data),
   changeStage: (id: string, stageId: string) =>
     api.put<ApiEnvelope<Occurrence>>(`/occurrences/${id}/stage`, { stage_id: stageId }),
@@ -1369,6 +1419,60 @@ export const occurrencesService = {
   updateStage: (id: string, data: Partial<OccurrenceStage>) =>
     api.put<ApiEnvelope<OccurrenceStage>>(`/occurrence-stages/${id}`, data),
   deleteStage: (id: string) => api.delete<ApiEnvelope<{ deleted: boolean }>>(`/occurrence-stages/${id}`),
+}
+
+// Units / Departments / Occurrence categories — Fase 3 of the Ocorrências
+// backend (see docs/superpowers/specs/2026-09-04-helpdesk-unidade-departamento-sla-design.md).
+// List-only: this MVP only needs them to populate the "Abrir protocolo" form
+// dropdowns, not the CRUD settings screens (still unbuilt on the frontend).
+export const unitsService = {
+  list: () => api.get<ApiEnvelope<{ units: Unit[] }>>('/units'),
+  create: (data: { name: string; code?: string; type?: string; active: boolean }) =>
+    api.post<ApiEnvelope<Unit>>('/units', data),
+  update: (id: string, data: { name: string; code?: string; type?: string; active: boolean }) =>
+    api.put<ApiEnvelope<Unit>>(`/units/${id}`, data),
+  delete: (id: string) => api.delete<ApiEnvelope<{ deleted: boolean }>>(`/units/${id}`),
+}
+
+export const departmentsService = {
+  list: () => api.get<ApiEnvelope<{ departments: Department[] }>>('/departments'),
+}
+
+export const occurrenceCategoriesService = {
+  list: () => api.get<ApiEnvelope<{ categories: OccurrenceCategory[] }>>('/occurrence-categories'),
+  create: (data: { name: string; parent_id?: string | null; position: number; is_active?: boolean }) =>
+    api.post<ApiEnvelope<OccurrenceCategory>>('/occurrence-categories', data),
+  update: (id: string, data: { name: string; parent_id?: string | null; position: number; is_active?: boolean }) =>
+    api.put<ApiEnvelope<OccurrenceCategory>>(`/occurrence-categories/${id}`, data),
+  delete: (id: string) => api.delete<ApiEnvelope<{ deleted: boolean }>>(`/occurrence-categories/${id}`),
+}
+
+export interface OccurrenceWhatHappened {
+  id: string
+  name: string
+  position: number
+  is_active: boolean
+}
+
+export const occurrenceWhatHappenedService = {
+  list: () => api.get<ApiEnvelope<{ reasons: OccurrenceWhatHappened[] }>>('/occurrence-what-happened'),
+  create: (data: { name: string; position: number; is_active?: boolean }) =>
+    api.post<ApiEnvelope<OccurrenceWhatHappened>>('/occurrence-what-happened', data),
+  update: (id: string, data: { name: string; position: number; is_active?: boolean }) =>
+    api.put<ApiEnvelope<OccurrenceWhatHappened>>(`/occurrence-what-happened/${id}`, data),
+  delete: (id: string) => api.delete<ApiEnvelope<{ deleted: boolean }>>(`/occurrence-what-happened/${id}`),
+}
+
+export interface OccurrenceSLAPolicy {
+  priority: 'low' | 'normal' | 'high' | 'urgent'
+  response_minutes: number
+  resolution_minutes: number
+}
+
+export const occurrenceSLAPoliciesService = {
+  list: () => api.get<ApiEnvelope<{ policies: OccurrenceSLAPolicy[] }>>('/occurrence-sla-policies'),
+  upsert: (priority: string, data: { response_minutes: number; resolution_minutes: number }) =>
+    api.put<ApiEnvelope<OccurrenceSLAPolicy>>(`/occurrence-sla-policies/${priority}`, data),
 }
 
 export default api

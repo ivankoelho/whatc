@@ -358,6 +358,60 @@ func BackfillHelpdeskCatalogPermissions(db *gorm.DB, lo logf.Logger) error {
 	return nil
 }
 
+// BackfillWhatHappenedPermission concede occurrences.what_happened:{read,write,delete}
+// aos papéis que já administram occurrences.categories — a permissão irmã
+// mais próxima, já que as duas telas de catálogo (Categorias e "O que
+// aconteceu") nascem juntas e são gerenciadas pelas mesmas pessoas.
+//
+// Existe como backfill PRÓPRIO, não como uma quinta entrada em
+// helpdeskCatalogGrants/helpdeskCatalogMigratedClause: aquela guarda de
+// idempotência considera uma organização "migrada" assim que QUALQUER uma
+// das quatro permissões antigas já existir — uma organização que já tinha
+// occurrences.categories:read antes desta mudança seria marcada "já
+// migrada" e nunca receberia occurrences.what_happened, exatamente o gap
+// que a lição da Fase 3 (ver memória do projeto) pede para evitar.
+//
+// Puramente aditivo: nunca revoga nada.
+func BackfillWhatHappenedPermission(db *gorm.DB, lo logf.Logger) error {
+	var seeded int64
+	if err := db.Model(&models.Permission{}).
+		Where("resource = ?", models.ResourceOccurrenceWhatHappened).
+		Count(&seeded).Error; err != nil {
+		return fmt.Errorf("failed to count the what-happened permission: %w", err)
+	}
+	if seeded == 0 {
+		lo.Warn("occurrences.what_happened permissions not seeded yet, did nothing")
+		return nil
+	}
+
+	res := db.Exec(`
+		INSERT INTO role_permissions (custom_role_id, permission_id)
+		SELECT DISTINCT r.id, target.id
+		FROM custom_roles r
+		JOIN role_permissions rp ON rp.custom_role_id = r.id
+		JOIN permissions src ON src.id = rp.permission_id
+		JOIN permissions target ON target.resource = ? AND target.action = src.action
+		WHERE r.deleted_at IS NULL
+		  AND src.resource = ?
+		  AND NOT EXISTS (
+		    SELECT 1 FROM role_permissions existing
+		    WHERE existing.custom_role_id = r.id AND existing.permission_id = target.id
+		  )
+		ON CONFLICT DO NOTHING`,
+		models.ResourceOccurrenceWhatHappened, models.ResourceOccurrenceCategories,
+	)
+	if res.Error != nil {
+		return fmt.Errorf("failed to grant the what-happened permission: %w", res.Error)
+	}
+
+	if res.RowsAffected == 0 {
+		lo.Info("what-happened permission backfill: nothing pending")
+		return nil
+	}
+	lo.Info("what-happened permission backfill complete", "links_granted", res.RowsAffected)
+	return nil
+}
+
 // BackfillContactNamePermission concede contacts.name:write aos papéis que
 // já renomeiam contatos hoje e aos que atendem conversas.
 //

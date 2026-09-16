@@ -66,11 +66,11 @@ func (a *App) ListCallLogs(r *fastglue.Request) error {
 	}
 
 	// Date range filter
-	if start, ok := parseDateParam(r, "start_date"); ok {
+	if start, ok := parseDateParam(r, "start_date", a.orgLocation(orgID)); ok {
 		query = query.Where("call_logs.created_at >= ?", start)
 		countQuery = countQuery.Where("created_at >= ?", start)
 	}
-	if end, ok := parseDateParam(r, "end_date"); ok {
+	if end, ok := parseDateParam(r, "end_date", a.orgLocation(orgID)); ok {
 		query = query.Where("call_logs.created_at <= ?", endOfDay(end))
 		countQuery = countQuery.Where("created_at <= ?", endOfDay(end))
 	}

@@ -183,6 +183,13 @@ func runServer(args []string) {
 			lo.Fatal("Helpdesk catalog permissions backfill failed", "error", err)
 		}
 
+		// Same window: occurrences.what_happened is a new resource added after
+		// the helpdesk catalog backfill above, so it needs its own guard rather
+		// than piggybacking on that one's already-migrated check.
+		if err := database.BackfillWhatHappenedPermission(db, lo); err != nil {
+			lo.Fatal("What-happened permission backfill failed", "error", err)
+		}
+
 		// Data fix, not a schema migration: AutoMigrate adding occurrences.source
 		// with a DB default backfilled every existing row to 'whatsapp',
 		// including cases opened manually. Runs once, guarded by the column's
@@ -754,6 +761,11 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/occurrence-categories", app.CreateOccurrenceCategory)
 	g.PUT("/api/occurrence-categories/{id}", app.UpdateOccurrenceCategory)
 	g.DELETE("/api/occurrence-categories/{id}", app.DeleteOccurrenceCategory)
+
+	g.GET("/api/occurrence-what-happened", app.ListOccurrenceWhatHappened)
+	g.POST("/api/occurrence-what-happened", app.CreateOccurrenceWhatHappened)
+	g.PUT("/api/occurrence-what-happened/{id}", app.UpdateOccurrenceWhatHappened)
+	g.DELETE("/api/occurrence-what-happened/{id}", app.DeleteOccurrenceWhatHappened)
 
 	// CRM — políticas de SLA
 	g.GET("/api/occurrence-sla-policies", app.ListOccurrenceSLAPolicies)

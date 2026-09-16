@@ -18,6 +18,26 @@ import (
 // written an error envelope to the response. Callers should return nil to the framework.
 var errEnvelopeSent = errors.New("error envelope sent")
 
+// appLocation is the deployment-wide default timezone a bare "YYYY-MM-DD"
+// query param is parsed in when an organization hasn't picked one under
+// Configurações → Geral → Fuso horário padrão (org.Settings["timezone"];
+// see orgLocation in organization.go). Without a location at all, time.Parse
+// defaults to UTC, so "today" typed by a Bahia-based user silently excluded
+// anything that happened after ~21:00 local time from any period filter —
+// found while verifying the SAC dashboard widgets.
+//
+// America/Bahia has no DST (Brazil dropped it in 2019), so the FixedZone
+// fallback is not an approximation — it's the fixed offset LoadLocation
+// would also always return, kept only in case the tzdata package isn't
+// available in a given runtime.
+var appLocation = func() *time.Location {
+	loc, err := time.LoadLocation("America/Bahia")
+	if err != nil {
+		return time.FixedZone("America/Bahia", -3*60*60)
+	}
+	return loc
+}()
+
 // parsePathUUID extracts a UUID from a path parameter. On failure, it sends a
 // 400 error envelope and returns uuid.Nil plus an error.
 func parsePathUUID(r *fastglue.Request, param, label string) (uuid.UUID, error) {
@@ -69,12 +89,12 @@ func parsePaginationWithDefaults(r *fastglue.Request, defaultLimit, maxLimit int
 // parseDateParam parses a YYYY-MM-DD date from the named query parameter.
 // Returns the parsed time and true on success, or zero time and false if the
 // parameter is missing or malformed.
-func parseDateParam(r *fastglue.Request, param string) (time.Time, bool) {
+func parseDateParam(r *fastglue.Request, param string, loc *time.Location) (time.Time, bool) {
 	s := string(r.RequestCtx.QueryArgs().Peek(param))
 	if s == "" {
 		return time.Time{}, false
 	}
-	t, err := time.Parse("2006-01-02", s)
+	t, err := time.ParseInLocation("2006-01-02", s, loc)
 	if err != nil {
 		return time.Time{}, false
 	}
@@ -118,13 +138,13 @@ func listEnvelope(key string, items, total any, pg Pagination) map[string]any {
 // parseDateRange parses start and end date strings in YYYY-MM-DD format.
 // Applies end-of-day to the end date. Returns an error message suitable for
 // display if parsing fails.
-func parseDateRange(startStr, endStr string) (start, end time.Time, errMsg string) {
+func parseDateRange(startStr, endStr string, loc *time.Location) (start, end time.Time, errMsg string) {
 	var err error
-	start, err = time.Parse("2006-01-02", startStr)
+	start, err = time.ParseInLocation("2006-01-02", startStr, loc)
 	if err != nil {
 		return time.Time{}, time.Time{}, "Invalid start date format. Use YYYY-MM-DD"
 	}
-	end, err = time.Parse("2006-01-02", endStr)
+	end, err = time.ParseInLocation("2006-01-02", endStr, loc)
 	if err != nil {
 		return time.Time{}, time.Time{}, "Invalid end date format. Use YYYY-MM-DD"
 	}

@@ -129,7 +129,7 @@ func TestParseDateParam_Valid(t *testing.T) {
 	req := testutil.NewGETRequest(t)
 	testutil.SetQueryParam(req, "start_date", "2024-06-15")
 
-	result, ok := parseDateParam(req, "start_date")
+	result, ok := parseDateParam(req, "start_date", appLocation)
 	assert.True(t, ok)
 	assert.Equal(t, 2024, result.Year())
 	assert.Equal(t, time.June, result.Month())
@@ -141,7 +141,7 @@ func TestParseDateParam_Invalid(t *testing.T) {
 	req := testutil.NewGETRequest(t)
 	testutil.SetQueryParam(req, "start_date", "not-a-date")
 
-	_, ok := parseDateParam(req, "start_date")
+	_, ok := parseDateParam(req, "start_date", appLocation)
 	assert.False(t, ok)
 }
 
@@ -149,7 +149,7 @@ func TestParseDateParam_Missing(t *testing.T) {
 	t.Parallel()
 	req := testutil.NewGETRequest(t)
 
-	_, ok := parseDateParam(req, "start_date")
+	_, ok := parseDateParam(req, "start_date", appLocation)
 	assert.False(t, ok)
 }
 
@@ -158,7 +158,7 @@ func TestParseDateParam_WrongFormat(t *testing.T) {
 	req := testutil.NewGETRequest(t)
 	testutil.SetQueryParam(req, "start_date", "15/06/2024")
 
-	_, ok := parseDateParam(req, "start_date")
+	_, ok := parseDateParam(req, "start_date", appLocation)
 	assert.False(t, ok)
 }
 
@@ -331,7 +331,7 @@ func TestMaskIfPhoneNumber(t *testing.T) {
 func TestParseDateRange_Valid(t *testing.T) {
 	t.Parallel()
 
-	start, end, errMsg := parseDateRange("2024-01-15", "2024-01-20")
+	start, end, errMsg := parseDateRange("2024-01-15", "2024-01-20", appLocation)
 
 	assert.Empty(t, errMsg)
 	assert.Equal(t, 2024, start.Year())
@@ -351,7 +351,7 @@ func TestParseDateRange_Valid(t *testing.T) {
 func TestParseDateRange_InvalidStartDate(t *testing.T) {
 	t.Parallel()
 
-	_, _, errMsg := parseDateRange("invalid", "2024-01-20")
+	_, _, errMsg := parseDateRange("invalid", "2024-01-20", appLocation)
 
 	assert.Contains(t, errMsg, "Invalid start date")
 }
@@ -359,7 +359,7 @@ func TestParseDateRange_InvalidStartDate(t *testing.T) {
 func TestParseDateRange_InvalidEndDate(t *testing.T) {
 	t.Parallel()
 
-	_, _, errMsg := parseDateRange("2024-01-15", "invalid")
+	_, _, errMsg := parseDateRange("2024-01-15", "invalid", appLocation)
 
 	assert.Contains(t, errMsg, "Invalid end date")
 }
@@ -384,7 +384,7 @@ func TestParseDateRange_WrongFormat(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			_, _, errMsg := parseDateRange(tt.startStr, tt.endStr)
+			_, _, errMsg := parseDateRange(tt.startStr, tt.endStr, appLocation)
 			assert.Contains(t, errMsg, tt.wantErr)
 		})
 	}
@@ -393,7 +393,7 @@ func TestParseDateRange_WrongFormat(t *testing.T) {
 func TestParseDateRange_SameDay(t *testing.T) {
 	t.Parallel()
 
-	start, end, errMsg := parseDateRange("2024-06-15", "2024-06-15")
+	start, end, errMsg := parseDateRange("2024-06-15", "2024-06-15", appLocation)
 
 	assert.Empty(t, errMsg)
 	assert.Equal(t, start.Day(), end.Day())
