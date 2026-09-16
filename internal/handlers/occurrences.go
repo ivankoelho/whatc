@@ -43,7 +43,6 @@ var occurrenceSaleChannels = map[string]bool{
 	"whatsapp":    true,
 	"telefone":    true,
 	"site":        true,
-	"outro":       true,
 }
 
 // OccurrenceResponse is the API shape of an occurrence.
@@ -239,7 +238,7 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 
 	var purchaseDate *time.Time
 	if req.PurchaseDate != "" {
-		pd, err := time.Parse("2006-01-02", req.PurchaseDate)
+		pd, err := time.ParseInLocation("2006-01-02", req.PurchaseDate, appLocation)
 		if err != nil {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "purchase_date must be YYYY-MM-DD", nil, "")
 		}

@@ -22,15 +22,30 @@ import { debounce } from '@/lib/utils'
 import { getErrorMessage } from '@/lib/api-utils'
 import { toast } from 'vue-sonner'
 
+const props = defineProps<{
+  // Quando aberto a partir de uma conversa, o cliente e a origem já são
+  // conhecidos — pula a etapa de busca por telefone (§7 da spec: preserva a
+  // relação Contato ↔ Conversa ↔ Ocorrência, sem pedir de novo o que o chat
+  // já sabe).
+  contactId?: string
+  contactPhone?: string
+  contactName?: string
+  sourceTransferId?: string
+}>()
+
+const emit = defineEmits<{ created: [occurrenceId: string] }>()
+
 const { t } = useI18n()
 const router = useRouter()
 const store = useOccurrencesStore()
 
 // --- Cliente ---
-const phone = ref('')
+const phone = ref(props.contactPhone || '')
 const searching = ref(false)
-const foundContact = ref<Contact | null>(null)
-const searchedOnce = ref(false)
+const foundContact = ref<Contact | null>(props.contactId
+  ? ({ id: props.contactId, phone_number: props.contactPhone || '', profile_name: props.contactName || '' } as Contact)
+  : null)
+const searchedOnce = ref(!!props.contactId)
 const newContactName = ref('')
 const cpfCnpj = ref('')
 
@@ -82,7 +97,7 @@ const description = ref('')
 const internalNote = ref('')
 const categories = ref<OccurrenceCategory[]>([])
 
-const saleChannels = ['loja_fisica', 'whatsapp', 'telefone', 'site', 'outro'] as const
+const saleChannels = ['loja_fisica', 'whatsapp', 'telefone', 'site'] as const
 
 onMounted(async () => {
   try {
@@ -102,9 +117,11 @@ const submitting = ref(false)
 const result = ref<{ protocolId: string; protocolNumber: string; title: string; sent: boolean } | null>(null)
 
 function resetForm() {
-  phone.value = ''
-  foundContact.value = null
-  searchedOnce.value = false
+  phone.value = props.contactPhone || ''
+  foundContact.value = props.contactId
+    ? ({ id: props.contactId, phone_number: props.contactPhone || '', profile_name: props.contactName || '' } as Contact)
+    : null
+  searchedOnce.value = !!props.contactId
   newContactName.value = ''
   cpfCnpj.value = ''
   saleChannel.value = ''
@@ -166,6 +183,7 @@ async function submit() {
       purchase_date: purchaseDate.value || undefined,
       product_description: productDescription.value.trim() || undefined,
       internal_note: internalNote.value.trim() || undefined,
+      source_transfer_id: props.sourceTransferId,
     })
 
     const sent = await store.trySendProtocol(occurrence.id)
@@ -176,6 +194,7 @@ async function submit() {
       title: occurrence.title,
       sent,
     }
+    emit('created', occurrence.id)
   } catch (e) {
     toast.error(getErrorMessage(e, t('chat.occurrenceCreateFailed')))
   } finally {
@@ -237,7 +256,7 @@ function goToProtocol() {
               <p class="text-xs text-muted-foreground">{{ foundContact.phone_number }}</p>
             </div>
           </div>
-          <Button variant="ghost" size="sm" @click="changeContact">{{ t('occurrences.changeContact') }}</Button>
+          <Button v-if="!props.contactId" variant="ghost" size="sm" @click="changeContact">{{ t('occurrences.changeContact') }}</Button>
         </div>
 
         <div v-else-if="searchedOnce" class="rounded-md border border-dashed p-3 space-y-2">

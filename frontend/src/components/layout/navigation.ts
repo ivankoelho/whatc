@@ -22,7 +22,8 @@ import {
   PhoneCall,
   PhoneForwarded,
   ScrollText,
-  ClipboardList
+  ClipboardList,
+  Building2
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
@@ -152,6 +153,7 @@ export const navigationSections: NavSection[] = [
           { name: 'nav.webhooks', path: '/settings/webhooks', icon: Webhook, permission: 'webhooks' },
           { name: 'nav.customActions', path: '/settings/custom-actions', icon: Zap, permission: 'custom_actions' },
           { name: 'nav.occurrenceStages', path: '/settings/occurrence-stages', icon: ClipboardList, permission: 'occurrences.stages' },
+          { name: 'nav.units', path: '/settings/units', icon: Building2, permission: 'units' },
           { name: 'nav.sso', path: '/settings/sso', icon: ShieldCheck, permission: 'settings.sso' },
           { name: 'nav.auditLogs', path: '/settings/audit-logs', icon: ScrollText, permission: 'audit_logs' }
         ]

@@ -2781,6 +2781,8 @@ async function sendMediaMessage() {
     <ContactOccurrencesPanel
       v-if="contactsStore.currentContact && isOccurrencesPanelOpen && canReadOccurrences"
       :contact-id="contactsStore.currentContact.id"
+      :contact-phone="contactsStore.currentContact.phone_number"
+      :contact-name="contactsStore.currentContact.profile_name || contactsStore.currentContact.name"
       :source-transfer-id="activeTransferId ?? undefined"
     />
 

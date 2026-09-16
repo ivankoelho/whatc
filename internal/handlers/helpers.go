@@ -18,6 +18,27 @@ import (
 // written an error envelope to the response. Callers should return nil to the framework.
 var errEnvelopeSent = errors.New("error envelope sent")
 
+// appLocation is the timezone a bare "YYYY-MM-DD" query param (dashboard date
+// filters, purchase_date, etc.) is interpreted in. Without it, time.Parse
+// defaults to UTC, so "today" typed by a Bahia-based user silently excludes
+// anything that happened after ~21:00 local time from any period filter —
+// found while verifying the SAC dashboard widgets. This is a single-region
+// deployment (no per-organization timezone setting exists anywhere in this
+// codebase), so one fixed default is correct; a real multi-timezone need
+// would make this an organization setting instead.
+//
+// America/Bahia has no DST (Brazil dropped it in 2019), so the FixedZone
+// fallback is not an approximation — it's the fixed offset LoadLocation
+// would also always return, kept only in case the tzdata package isn't
+// available in a given runtime.
+var appLocation = func() *time.Location {
+	loc, err := time.LoadLocation("America/Bahia")
+	if err != nil {
+		return time.FixedZone("America/Bahia", -3*60*60)
+	}
+	return loc
+}()
+
 // parsePathUUID extracts a UUID from a path parameter. On failure, it sends a
 // 400 error envelope and returns uuid.Nil plus an error.
 func parsePathUUID(r *fastglue.Request, param, label string) (uuid.UUID, error) {
@@ -74,7 +95,7 @@ func parseDateParam(r *fastglue.Request, param string) (time.Time, bool) {
 	if s == "" {
 		return time.Time{}, false
 	}
-	t, err := time.Parse("2006-01-02", s)
+	t, err := time.ParseInLocation("2006-01-02", s, appLocation)
 	if err != nil {
 		return time.Time{}, false
 	}
@@ -120,11 +141,11 @@ func listEnvelope(key string, items, total any, pg Pagination) map[string]any {
 // display if parsing fails.
 func parseDateRange(startStr, endStr string) (start, end time.Time, errMsg string) {
 	var err error
-	start, err = time.Parse("2006-01-02", startStr)
+	start, err = time.ParseInLocation("2006-01-02", startStr, appLocation)
 	if err != nil {
 		return time.Time{}, time.Time{}, "Invalid start date format. Use YYYY-MM-DD"
 	}
-	end, err = time.Parse("2006-01-02", endStr)
+	end, err = time.ParseInLocation("2006-01-02", endStr, appLocation)
 	if err != nil {
 		return time.Time{}, time.Time{}, "Invalid end date format. Use YYYY-MM-DD"
 	}
