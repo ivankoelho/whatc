@@ -122,7 +122,8 @@ const initiateSSO = (provider: string) => {
     </div>
 
     <!-- Painel de formulário -->
-    <div class="flex-1 flex flex-col items-center justify-center p-4">
+    <div class="flex-1 flex flex-col p-4">
+      <div class="flex-1 flex items-center justify-center">
       <div class="w-full max-w-md rounded-2xl border border-white/[0.08] bg-white/[0.02] backdrop-blur light:bg-white light:border-gray-200 light:shadow-xl">
         <div class="p-8 space-y-1 text-center">
           <div class="flex justify-center mb-4 lg:hidden">
@@ -203,10 +204,11 @@ const initiateSSO = (provider: string) => {
           </p>
         </div>
       </div>
+      </div>
 
       <footer
         v-if="footerText || footerVersion"
-        class="mt-4 text-center text-xs text-white/30 light:text-gray-400"
+        class="pt-4 text-center text-xs text-white/30 light:text-gray-400"
       >
         <span v-if="footerText">© {{ currentYear }} {{ footerText }}</span>
         <span v-if="footerText && footerVersion"> · </span>
