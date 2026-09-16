@@ -128,6 +128,10 @@ test.describe('Create Organization via Sidebar', () => {
 
   // Helper to find the plus button in the org switcher
   async function getOrgPlusButton(page: any) {
+    // Sidebar starts collapsed by default (AppLayout.vue), which hides the
+    // org switcher entirely (v-if="!collapsed" in OrganizationSwitcher.vue).
+    await page.getByTestId('sidebar-toggle').click()
+
     const sidebar = page.locator('aside')
     // Use exact match for the "Organization" label to avoid matching "No organizations found"
     const orgLabel = sidebar.getByText('Organization', { exact: true })

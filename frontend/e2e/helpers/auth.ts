@@ -58,9 +58,10 @@ export async function loginAsAgent(page: Page) {
 }
 
 export async function logout(page: Page) {
-  // Click user menu in sidebar - it's in the aside element (not nav), button contains user's email
-  const userMenuButton = page.locator('aside').getByRole('button').filter({ hasText: /@/ }).first()
-  await userMenuButton.click()
+  // Sidebar starts collapsed by default (AppLayout.vue), which hides the
+  // user's name/email text (v-if="!collapsed") -- a testid survives that,
+  // text-content matching doesn't.
+  await page.getByTestId('user-menu-trigger').click()
   // Click logout in popover
   await page.getByRole('button', { name: /Log out/i }).click()
   // Wait for redirect to login
