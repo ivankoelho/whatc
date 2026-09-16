@@ -18,6 +18,16 @@ type BrandingSettings struct {
 	LoginBackgroundPath        string `gorm:"size:500" json:"login_background_path,omitempty"`
 	LoginBackgroundContentType string `gorm:"size:100" json:"login_background_content_type,omitempty"`
 
+	// System logo, shown in the app sidebar and the login page's brand panel
+	// in place of the default icon+name. Same upload/serve shape as the
+	// login background image.
+	LogoPath        string `gorm:"size:500" json:"logo_path,omitempty"`
+	LogoContentType string `gorm:"size:100" json:"logo_content_type,omitempty"`
+
+	// SystemName replaces the hardcoded product name in the login welcome
+	// title and next to the logo — free text set by a super admin.
+	SystemName string `gorm:"size:100" json:"system_name,omitempty"`
+
 	// Login page footer: copyright/rights notice and the system version
 	// string, both free text set by a super admin — this codebase has no
 	// build-time version stamping, so the version is whatever they type.

@@ -760,7 +760,13 @@ export const organizationService = {
 
 // Branding (system-wide, not per-organization — see docs/superpowers/specs/2026-09-15-login-branding-design.md)
 export const brandingService = {
-  getPublic: () => api.get<ApiEnvelope<{ login_background_url: string | null; footer_text: string | null; footer_version: string | null }>>('/branding'),
+  getPublic: () => api.get<ApiEnvelope<{
+    login_background_url: string | null
+    logo_url: string | null
+    system_name: string | null
+    footer_text: string | null
+    footer_version: string | null
+  }>>('/branding'),
   uploadLoginBackground: (file: File) => {
     const formData = new FormData()
     formData.append('file', file)
@@ -769,8 +775,16 @@ export const brandingService = {
     })
   },
   deleteLoginBackground: () => api.delete('/branding/login-background'),
-  updateFooter: (data: { footer_text?: string; footer_version?: string }) =>
-    api.put<ApiEnvelope<{ footer_text: string; footer_version: string }>>('/branding/footer', data),
+  uploadLogo: (file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post('/branding/logo', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+  },
+  deleteLogo: () => api.delete('/branding/logo'),
+  updateFooter: (data: { system_name?: string; footer_text?: string; footer_version?: string }) =>
+    api.put<ApiEnvelope<{ system_name: string; footer_text: string; footer_version: string }>>('/branding/footer', data),
 }
 
 // Organizations

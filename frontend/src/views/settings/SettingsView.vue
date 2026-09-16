@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { PageHeader, AuditLogPanel } from '@/components/shared'
 import LanguageSwitcher from '@/components/LanguageSwitcher.vue'
 import { toast } from 'vue-sonner'
-import { Settings, Bell, Loader2, Globe, Phone, Upload, Play, Pause, Music } from 'lucide-vue-next'
+import { Settings, Bell, Loader2, Globe, Phone, Upload, Play, Pause, Music, Image as ImageIcon } from 'lucide-vue-next'
 import { usersService, organizationService, brandingService } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 
@@ -76,6 +76,13 @@ const isUploadingLoginBackground = ref(false)
 const isRemovingLoginBackground = ref(false)
 const loginBackgroundInput = ref<HTMLInputElement | null>(null)
 
+const logoUrl = ref<string | null>(null)
+const isUploadingLogo = ref(false)
+const isRemovingLogo = ref(false)
+const logoInput = ref<HTMLInputElement | null>(null)
+const systemName = ref('')
+const isSavingSystemName = ref(false)
+
 const footerSettings = ref({ footer_text: '', footer_version: '' })
 const isSavingFooter = ref(false)
 
@@ -108,6 +115,9 @@ onMounted(async () => {
       const data = response.data.data || response.data
       const url = data?.login_background_url ?? null
       loginBackgroundUrl.value = url ? withBasePath(url) : null
+      const logo = data?.logo_url ?? null
+      logoUrl.value = logo ? withBasePath(logo) : null
+      systemName.value = data?.system_name ?? ''
       footerSettings.value = {
         footer_text: data?.footer_text ?? '',
         footer_version: data?.footer_version ?? '',
@@ -300,6 +310,53 @@ async function saveFooter() {
   }
 }
 
+async function uploadLogo(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input?.files?.[0]
+  if (!file) return
+
+  isUploadingLogo.value = true
+  try {
+    const response = await brandingService.uploadLogo(file)
+    const data = response.data.data || response.data
+    logoUrl.value = data.logo_url ? withBasePath(data.logo_url) : null
+    toast.success(t('settings.logoUploaded'))
+    refreshActivityLog(generalLogKey)
+  } catch (error) {
+    toast.error(t('settings.logoUploadFailed'))
+  } finally {
+    isUploadingLogo.value = false
+    input.value = ''
+  }
+}
+
+async function removeLogo() {
+  isRemovingLogo.value = true
+  try {
+    await brandingService.deleteLogo()
+    logoUrl.value = null
+    toast.success(t('settings.logoRemoved'))
+    refreshActivityLog(generalLogKey)
+  } catch (error) {
+    toast.error(t('settings.logoRemoveFailed'))
+  } finally {
+    isRemovingLogo.value = false
+  }
+}
+
+async function saveSystemName() {
+  isSavingSystemName.value = true
+  try {
+    await brandingService.updateFooter({ system_name: systemName.value })
+    toast.success(t('settings.logoSaved'))
+    refreshActivityLog(generalLogKey)
+  } catch (error) {
+    toast.error(t('settings.logoSaveFailed'))
+  } finally {
+    isSavingSystemName.value = false
+  }
+}
+
 function togglePlayAudio(type: 'hold_music' | 'ringback') {
   const isHold = type === 'hold_music'
   const filename = isHold ? callingSettings.value.hold_music_file : callingSettings.value.ringback_file
@@ -453,6 +510,56 @@ function togglePlayAudio(type: 'hold_music' | 'ringback') {
                     {{ $t('common.remove') }}
                   </Button>
                   <span class="text-xs text-white/30 light:text-gray-400">.jpg, .png, .webp (max 5MB)</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- System Logo & Name Card (Gated on isSuperAdmin, same system-wide-singleton reasoning as Login Background) -->
+            <div v-if="isSuperAdmin" class="mt-6 rounded-xl border border-white/[0.08] bg-white/[0.02] light:bg-white light:border-gray-200">
+              <div class="p-6 pb-3">
+                <h3 class="text-lg font-semibold text-white light:text-gray-900">{{ $t('settings.systemLogo') }}</h3>
+                <p class="text-sm text-white/40 light:text-gray-500">{{ $t('settings.systemLogoDesc') }}</p>
+              </div>
+              <div class="p-6 pt-3 space-y-4">
+                <div class="flex items-center gap-3">
+                  <div v-if="logoUrl" class="rounded-lg overflow-hidden border border-white/[0.08] light:border-gray-200 h-16 w-16 shrink-0 bg-white/[0.02]">
+                    <img :src="logoUrl" :alt="$t('settings.systemLogo')" class="h-full w-full object-cover" />
+                  </div>
+                  <div v-else class="rounded-lg border border-dashed border-white/[0.15] light:border-gray-300 h-16 w-16 shrink-0 flex items-center justify-center">
+                    <ImageIcon class="h-6 w-6 text-white/30 light:text-gray-400" />
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <input ref="logoInput" type="file" accept="image/png" class="hidden" @change="uploadLogo" />
+                    <Button variant="outline" size="sm" class="bg-white/[0.04] border-white/[0.1] text-white/70 hover:bg-white/[0.08] hover:text-white light:bg-white light:border-gray-200 light:text-gray-700 light:hover:bg-gray-50" @click="logoInput?.click()" :disabled="isUploadingLogo">
+                      <Loader2 v-if="isUploadingLogo" class="mr-2 h-4 w-4 animate-spin" />
+                      <Upload v-else class="mr-2 h-4 w-4" />
+                      {{ $t('settings.uploadImage') }}
+                    </Button>
+                    <Button
+                      v-if="logoUrl"
+                      variant="ghost"
+                      size="sm"
+                      class="text-white/50 hover:text-white light:text-gray-500 light:hover:text-gray-900"
+                      @click="removeLogo"
+                      :disabled="isRemovingLogo"
+                    >
+                      <Loader2 v-if="isRemovingLogo" class="mr-2 h-4 w-4 animate-spin" />
+                      {{ $t('common.remove') }}
+                    </Button>
+                  </div>
+                </div>
+                <p class="text-xs text-white/30 light:text-gray-400">.png (max 5MB)</p>
+                <Separator class="bg-white/[0.08] light:bg-gray-200" />
+                <div class="space-y-2 max-w-sm">
+                  <Label for="system_name" class="text-white/70 light:text-gray-700">{{ $t('settings.systemName') }}</Label>
+                  <Input id="system_name" v-model="systemName" :placeholder="$t('settings.systemNamePlaceholder')" />
+                  <p class="text-xs text-white/40 light:text-gray-500">{{ $t('settings.systemNameDesc') }}</p>
+                </div>
+                <div class="flex justify-end">
+                  <Button variant="outline" size="sm" class="bg-white/[0.04] border-white/[0.1] text-white/70 hover:bg-white/[0.08] hover:text-white light:bg-white light:border-gray-200 light:text-gray-700 light:hover:bg-gray-50" @click="saveSystemName" :disabled="isSavingSystemName">
+                    <Loader2 v-if="isSavingSystemName" class="mr-2 h-4 w-4 animate-spin" />
+                    {{ $t('settings.save') }}
+                  </Button>
                 </div>
               </div>
             </div>

@@ -593,3 +593,123 @@ func TestDeleteLoginBackground_NoOpWhenAlreadyEmpty(t *testing.T) {
 	require.NoError(t, app.DeleteLoginBackground(req))
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req), "deleting an already-empty config must succeed, not error")
 }
+
+// --- Logo (shares uploadBrandingImage/deleteBrandingImage/serveBrandingImage
+// with login background -- see TestUploadLoginBackground_*/TestDeleteLoginBackground_*
+// above for coverage of that shared path; these tests cover what's actually
+// different about the logo slot: it's PNG-only, and its own routes/columns. ---
+
+func TestUploadLogo_RejectsNonPngContentType(t *testing.T) {
+	app := newTestApp(t)
+	dir := t.TempDir()
+	app.Config.Storage.LocalPath = dir
+	require.NoError(t, database.EnsureBrandingSettingsRow(app.DB))
+
+	org := testutil.CreateTestOrganization(t, app.DB)
+	adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID), testutil.WithSuperAdmin())
+
+	req := newMultipartUploadRequest(t, "file", "logo.jpg", jpegMagicBytes())
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	require.NoError(t, app.UploadLogo(req))
+	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
+
+	var row models.BrandingSettings
+	require.NoError(t, app.DB.Where("id = ?", models.BrandingSettingsSingletonID).First(&row).Error)
+	assert.Empty(t, row.LogoPath, "a rejected upload must not touch the row")
+}
+
+func TestUploadLogo_SavesFileAndServesIt(t *testing.T) {
+	app := newTestApp(t)
+	dir := t.TempDir()
+	app.Config.Storage.LocalPath = dir
+	require.NoError(t, database.EnsureBrandingSettingsRow(app.DB))
+
+	org := testutil.CreateTestOrganization(t, app.DB)
+	adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID), testutil.WithSuperAdmin())
+
+	req := newMultipartUploadRequest(t, "file", "logo.png", pngMagicBytes())
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	require.NoError(t, app.UploadLogo(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+	assert.Contains(t, string(testutil.GetResponseBody(req)), `"logo_url":"/api/branding/logo?v=`)
+
+	var row models.BrandingSettings
+	require.NoError(t, app.DB.Where("id = ?", models.BrandingSettingsSingletonID).First(&row).Error)
+	assert.Equal(t, "image/png", row.LogoContentType)
+	assert.Equal(t, filepath.Join("branding", "logo.png"), row.LogoPath)
+	assert.FileExists(t, filepath.Join(dir, "branding", "logo.png"))
+
+	serveReq := testutil.NewGETRequest(t)
+	require.NoError(t, app.ServeLogo(serveReq))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(serveReq))
+	assert.Equal(t, pngMagicBytes(), testutil.GetResponseBody(serveReq))
+}
+
+func TestDeleteLogo_ClearsConfigAndRemovesFile(t *testing.T) {
+	app := newTestApp(t)
+	dir := t.TempDir()
+	app.Config.Storage.LocalPath = dir
+	require.NoError(t, database.EnsureBrandingSettingsRow(app.DB))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "branding"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "branding", "logo.png"), pngMagicBytes(), 0644))
+	require.NoError(t, app.DB.Model(&models.BrandingSettings{}).
+		Where("id = ?", models.BrandingSettingsSingletonID).
+		Updates(map[string]any{"logo_path": filepath.Join("branding", "logo.png"), "logo_content_type": "image/png"}).Error)
+
+	org := testutil.CreateTestOrganization(t, app.DB)
+	adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID), testutil.WithSuperAdmin())
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	require.NoError(t, app.DeleteLogo(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var row models.BrandingSettings
+	require.NoError(t, app.DB.Where("id = ?", models.BrandingSettingsSingletonID).First(&row).Error)
+	assert.Empty(t, row.LogoPath)
+	assert.Empty(t, row.LogoContentType)
+	assert.NoFileExists(t, filepath.Join(dir, "branding", "logo.png"))
+}
+
+func TestGetPublicBranding_ReturnsLogoAndSystemNameWhenConfigured(t *testing.T) {
+	app := newTestApp(t)
+	require.NoError(t, database.EnsureBrandingSettingsRow(app.DB))
+	require.NoError(t, app.DB.Model(&models.BrandingSettings{}).
+		Where("id = ?", models.BrandingSettingsSingletonID).
+		Updates(map[string]any{
+			"logo_path": "branding/logo.png", "logo_content_type": "image/png",
+			"system_name": "Atacadão dos Pisos",
+		}).Error)
+
+	req := testutil.NewGETRequest(t)
+	require.NoError(t, app.GetPublicBranding(req))
+	body := string(testutil.GetResponseBody(req))
+	assert.Contains(t, body, "/api/branding/logo?v=")
+	assert.Contains(t, body, `"system_name":"Atacadão dos Pisos"`)
+}
+
+func TestUpdateBrandingFooter_SystemNameOnlyLeavesFooterFieldsUntouched(t *testing.T) {
+	app := newTestApp(t)
+	require.NoError(t, database.EnsureBrandingSettingsRow(app.DB))
+	require.NoError(t, app.DB.Model(&models.BrandingSettings{}).
+		Where("id = ?", models.BrandingSettingsSingletonID).
+		Updates(map[string]any{"footer_text": "Original", "system_name": "Old Name"}).Error)
+
+	org := testutil.CreateTestOrganization(t, app.DB)
+	admin := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&admin.ID), testutil.WithSuperAdmin())
+
+	req := testutil.NewJSONRequest(t, map[string]any{"system_name": "New Name"})
+	req.RequestCtx.Request.Header.SetMethod("PUT")
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	require.NoError(t, app.UpdateBrandingFooter(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var row models.BrandingSettings
+	require.NoError(t, app.DB.Where("id = ?", models.BrandingSettingsSingletonID).First(&row).Error)
+	assert.Equal(t, "New Name", row.SystemName)
+	assert.Equal(t, "Original", row.FooterText, "omitted field must be untouched")
+}

@@ -3,7 +3,8 @@ import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
-import { api, brandingService } from '@/services/api'
+import { api } from '@/services/api'
+import { useBranding } from '@/composables/useBranding'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -21,14 +22,12 @@ interface SSOProvider {
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
+const { loginBackgroundUrl, logoUrl, systemName, footerText, footerVersion, loadBranding } = useBranding()
 
 const email = ref('')
 const password = ref('')
 const isLoading = ref(false)
 const ssoProviders = ref<SSOProvider[]>([])
-const loginBackgroundUrl = ref<string | null>(null)
-const footerText = ref<string | null>(null)
-const footerVersion = ref<string | null>(null)
 const currentYear = new Date().getFullYear()
 
 // SSO provider icons (using simple SVG paths)
@@ -67,23 +66,7 @@ onMounted(async () => {
         ssoProviders.value = []
       }
     })(),
-    (async () => {
-      try {
-        const response = await brandingService.getPublic()
-        const data = response.data?.data ?? response.data
-        const url = data?.login_background_url
-        const basePath = ((window as any).__BASE_PATH__ ?? '').replace(/\/$/, '')
-        loginBackgroundUrl.value = url ? `${basePath}${url}` : null
-        footerText.value = data?.footer_text ?? null
-        footerVersion.value = data?.footer_version ?? null
-      } catch {
-        // A tela de login nunca pode travar por causa dessa config opcional
-        // -- qualquer falha aqui (rede, 500, JSON malformado) vira "sem imagem"/rodapé.
-        loginBackgroundUrl.value = null
-        footerText.value = null
-        footerVersion.value = null
-      }
-    })()
+    loadBranding()
   ])
 })
 
@@ -125,10 +108,11 @@ const initiateSSO = (provider: string) => {
     >
       <div v-if="loginBackgroundUrl" class="absolute inset-0 bg-black/40" />
       <div class="relative flex items-center gap-3">
-        <div class="h-10 w-10 rounded-xl bg-white/10 backdrop-blur flex items-center justify-center">
-          <MessageSquare class="h-6 w-6 text-white" />
+        <div class="h-10 w-10 rounded-xl bg-white/10 backdrop-blur flex items-center justify-center overflow-hidden">
+          <img v-if="logoUrl" :src="logoUrl" alt="" class="h-full w-full object-cover" />
+          <MessageSquare v-else class="h-6 w-6 text-white" />
         </div>
-        <span class="text-white font-semibold text-lg">Whatomate</span>
+        <span class="text-white font-semibold text-lg">{{ systemName || 'Whatomate' }}</span>
       </div>
       <div class="relative">
         <p class="text-3xl font-bold text-white leading-tight whitespace-pre-line">
@@ -138,15 +122,18 @@ const initiateSSO = (provider: string) => {
     </div>
 
     <!-- Painel de formulário -->
-    <div class="flex-1 flex items-center justify-center p-4">
+    <div class="flex-1 flex flex-col items-center justify-center p-4">
       <div class="w-full max-w-md rounded-2xl border border-white/[0.08] bg-white/[0.02] backdrop-blur light:bg-white light:border-gray-200 light:shadow-xl">
         <div class="p-8 space-y-1 text-center">
           <div class="flex justify-center mb-4 lg:hidden">
-            <div class="h-12 w-12 rounded-xl bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center shadow-lg shadow-emerald-500/20">
-              <MessageSquare class="h-7 w-7 text-white" />
+            <div class="h-12 w-12 rounded-xl bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center shadow-lg shadow-emerald-500/20 overflow-hidden">
+              <img v-if="logoUrl" :src="logoUrl" alt="" class="h-full w-full object-cover" />
+              <MessageSquare v-else class="h-7 w-7 text-white" />
             </div>
           </div>
-          <h2 class="text-2xl font-bold text-white light:text-gray-900">{{ $t('auth.welcomeTitle') }}</h2>
+          <h2 class="text-2xl font-bold text-white light:text-gray-900">
+            {{ systemName ? `${$t('auth.welcomeTitle')} — ${systemName}` : $t('auth.welcomeTitle') }}
+          </h2>
           <p class="text-white/50 light:text-gray-500">
             {{ $t('auth.welcomeSubtitle') }}
           </p>
@@ -216,16 +203,16 @@ const initiateSSO = (provider: string) => {
           </p>
         </div>
       </div>
+
+      <footer
+        v-if="footerText || footerVersion"
+        class="mt-4 text-center text-xs text-white/30 light:text-gray-400"
+      >
+        <span v-if="footerText">© {{ currentYear }} {{ footerText }}</span>
+        <span v-if="footerText && footerVersion"> · </span>
+        <span v-if="footerVersion">v{{ footerVersion }}</span>
+      </footer>
     </div>
   </div>
-
-  <footer
-    v-if="footerText || footerVersion"
-    class="py-3 text-center text-xs text-white/30 light:text-gray-400"
-  >
-    <span v-if="footerText">© {{ currentYear }} {{ footerText }}</span>
-    <span v-if="footerText && footerVersion"> · </span>
-    <span v-if="footerVersion">v{{ footerVersion }}</span>
-  </footer>
   </div>
 </template>
