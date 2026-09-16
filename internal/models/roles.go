@@ -254,12 +254,17 @@ func DefaultPermissions() []Permission {
 		// Audit Logs
 		{Resource: ResourceAuditLogs, Action: ActionRead, Description: "View audit logs"},
 
-		// CRM — ocorrências. Não há permissão de exclusão porque não existe
-		// endpoint de exclusão de ocorrência. `occurrences:read` também cobre
-		// a LEITURA das etapas: o quadro não renderiza sem elas, então isso é
-		// usar o CRM, não administrá-lo.
+		// CRM — ocorrências. `occurrences:read` também cobre a LEITURA das
+		// etapas: o quadro não renderiza sem elas, então isso é usar o CRM,
+		// não administrá-lo.
 		{Resource: ResourceOccurrences, Action: ActionRead, Description: "View occurrences and pipeline stages"},
 		{Resource: ResourceOccurrences, Action: ActionWrite, Description: "Create and edit occurrences"},
+		// Exclusão permanente de protocolo. Não entra na lista de permissões
+		// padrão de nenhum papel: o handler exige super admin explicitamente
+		// (bypassa a checagem de permissão normal), então conceder isso a um
+		// papel customizado não teria efeito — existe só para aparecer no
+		// catálogo/tela de Roles, consistente com todo outro recurso.
+		{Resource: ResourceOccurrences, Action: ActionDelete, Description: "Permanently delete occurrences (super admin only)"},
 
 		// CRM — administração do funil, separada de settings.general para que
 		// configurar etapas não exija as configurações gerais da organização.

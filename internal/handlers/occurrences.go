@@ -814,6 +814,51 @@ func (a *App) UpdateOccurrence(r *fastglue.Request) error {
 	return r.SendEnvelope(resp)
 }
 
+// DeleteOccurrence permanently removes a protocol and its timeline. Unlike
+// every other Delete* handler in this codebase, this is a hard delete
+// (Unscoped) rather than a soft one: the customer's protocol number must
+// never resurface via an "undelete", and a soft-deleted row would still
+// hold the unique (org, protocol_number) index, quietly blocking that
+// number's own history from ever being queried cleanly again. Restricted to
+// super admins regardless of custom-role permissions, mirroring
+// UploadLoginBackground's reasoning for the same kind of irreversible,
+// org-spanning-in-effect action.
+func (a *App) DeleteOccurrence(r *fastglue.Request) error {
+	orgID, userID, err := a.requireAuth(r, models.ResourceOccurrences, models.ActionDelete)
+	if err != nil {
+		return nil
+	}
+	if !a.IsSuperAdmin(userID) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Only super admins can permanently delete occurrences", nil, "")
+	}
+
+	occ, err := a.loadAuthorizedOccurrence(r, orgID, userID, true)
+	if err != nil {
+		return nil
+	}
+
+	snapshot := map[string]any{
+		"protocol_number": occ.ProtocolNumber,
+		"title":           occ.Title,
+		"contact_id":      occ.ContactID,
+	}
+
+	txErr := a.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Unscoped().Where("occurrence_id = ?", occ.ID).Delete(&models.OccurrenceEvent{}).Error; err != nil {
+			return err
+		}
+		return tx.Unscoped().Delete(&models.Occurrence{}, "id = ?", occ.ID).Error
+	})
+	if txErr != nil {
+		a.Log.Error("Failed to delete occurrence", "error", txErr)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to delete occurrence", nil, "")
+	}
+
+	a.logAudit(orgID, userID, "occurrence", occ.ID, models.AuditActionDeleted, snapshot, nil)
+
+	return r.SendEnvelope(map[string]bool{"deleted": true})
+}
+
 // ChangeOccurrenceStage moves a case and records the transition. Entering a
 // closing stage stamps closed_at; leaving one clears it — that is how reopening
 // works, without a separate endpoint.

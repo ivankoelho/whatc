@@ -27,6 +27,9 @@ const password = ref('')
 const isLoading = ref(false)
 const ssoProviders = ref<SSOProvider[]>([])
 const loginBackgroundUrl = ref<string | null>(null)
+const footerText = ref<string | null>(null)
+const footerVersion = ref<string | null>(null)
+const currentYear = new Date().getFullYear()
 
 // SSO provider icons (using simple SVG paths)
 const providerIcons: Record<string, string> = {
@@ -67,13 +70,18 @@ onMounted(async () => {
     (async () => {
       try {
         const response = await brandingService.getPublic()
-        const url = response.data?.data?.login_background_url ?? response.data?.login_background_url
+        const data = response.data?.data ?? response.data
+        const url = data?.login_background_url
         const basePath = ((window as any).__BASE_PATH__ ?? '').replace(/\/$/, '')
         loginBackgroundUrl.value = url ? `${basePath}${url}` : null
+        footerText.value = data?.footer_text ?? null
+        footerVersion.value = data?.footer_version ?? null
       } catch {
         // A tela de login nunca pode travar por causa dessa config opcional
-        // -- qualquer falha aqui (rede, 500, JSON malformado) vira "sem imagem".
+        // -- qualquer falha aqui (rede, 500, JSON malformado) vira "sem imagem"/rodapé.
         loginBackgroundUrl.value = null
+        footerText.value = null
+        footerVersion.value = null
       }
     })()
   ])
@@ -108,7 +116,8 @@ const initiateSSO = (provider: string) => {
 </script>
 
 <template>
-  <div class="min-h-screen flex bg-[#0a0a0b] light:bg-gray-50">
+  <div class="min-h-screen flex flex-col bg-[#0a0a0b] light:bg-gray-50">
+    <div class="flex-1 flex">
     <!-- Painel de marca -->
     <div
       class="hidden lg:flex lg:w-1/2 relative flex-col justify-between p-12 bg-gradient-to-br from-emerald-600 to-green-800"
@@ -208,5 +217,15 @@ const initiateSSO = (provider: string) => {
         </div>
       </div>
     </div>
+  </div>
+
+  <footer
+    v-if="footerText || footerVersion"
+    class="py-3 text-center text-xs text-white/30 light:text-gray-400"
+  >
+    <span v-if="footerText">© {{ currentYear }} {{ footerText }}</span>
+    <span v-if="footerText && footerVersion"> · </span>
+    <span v-if="footerVersion">v{{ footerVersion }}</span>
+  </footer>
   </div>
 </template>

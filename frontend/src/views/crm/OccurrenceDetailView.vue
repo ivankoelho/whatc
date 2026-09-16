@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import DetailPageLayout from '@/components/shared/DetailPageLayout.vue'
-import { IconButton } from '@/components/shared'
+import { IconButton, DeleteConfirmDialog } from '@/components/shared'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { occurrencesService, type Occurrence, type OccurrenceEvent } from '@/services/api'
 import { useOccurrencesStore } from '@/stores/occurrences'
 import { useUsersStore } from '@/stores/users'
+import { useAuthStore } from '@/stores/auth'
 import { wsService } from '@/services/websocket'
 import { formatDateTime } from '@/lib/utils'
 import { getErrorMessage } from '@/lib/api-utils'
@@ -26,12 +27,15 @@ import {
   UserPlus,
   CheckCircle2,
   Copy,
+  Trash2,
 } from 'lucide-vue-next'
 
 const route = useRoute()
+const router = useRouter()
 const { t } = useI18n()
 const store = useOccurrencesStore()
 const usersStore = useUsersStore()
+const authStore = useAuthStore()
 
 // Sentinel for "no assignee" — the Select component can't carry an empty
 // string as an item value, but that's exactly what the backend needs to see
@@ -46,6 +50,8 @@ const isSendingProtocol = ref(false)
 const isAddingNote = ref(false)
 const newNoteContent = ref('')
 const isUpdatingAssignee = ref(false)
+const isDeleteDialogOpen = ref(false)
+const isDeleting = ref(false)
 
 const eventIcons: Record<string, any> = {
   opened: PlusCircle,
@@ -143,6 +149,21 @@ async function handleAssigneeChange(value: string) {
   }
 }
 
+async function confirmDelete() {
+  if (!occurrence.value) return
+  isDeleting.value = true
+  try {
+    await occurrencesService.delete(occurrence.value.id)
+    toast.success(t('occurrences.deleteProtocolSuccess'))
+    router.push('/crm/occurrences')
+  } catch (e) {
+    toast.error(getErrorMessage(e, t('occurrences.deleteProtocolFailed')))
+  } finally {
+    isDeleting.value = false
+    isDeleteDialogOpen.value = false
+  }
+}
+
 function copyProtocol() {
   if (!occurrence.value) return
   navigator.clipboard.writeText(occurrence.value.protocol_number)
@@ -227,6 +248,13 @@ onUnmounted(() => {
             <Send v-else class="h-4 w-4 mr-2" />
             {{ $t('chat.sendProtocol') }}
           </Button>
+          <IconButton
+            v-if="authStore.user?.is_super_admin"
+            :icon="Trash2"
+            :label="$t('occurrences.deleteProtocol')"
+            class="h-9 w-9 text-destructive hover:text-destructive"
+            @click="isDeleteDialogOpen = true"
+          />
         </div>
       </template>
 
@@ -328,5 +356,15 @@ onUnmounted(() => {
         </Card>
       </template>
     </DetailPageLayout>
+
+    <DeleteConfirmDialog
+      v-model:open="isDeleteDialogOpen"
+      :title="$t('occurrences.deleteProtocolTitle')"
+      :item-name="occurrence?.protocol_number"
+      :is-submitting="isDeleting"
+      @confirm="confirmDelete"
+    >
+      <p class="text-sm text-muted-foreground">{{ $t('occurrences.deleteProtocolWarning') }}</p>
+    </DeleteConfirmDialog>
   </div>
 </template>
