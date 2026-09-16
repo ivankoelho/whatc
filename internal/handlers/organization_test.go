@@ -78,7 +78,9 @@ func TestApp_GetOrganizationSettings_Defaults(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, false, resp.Data.Settings.MaskPhoneNumbers)
-	assert.Equal(t, "UTC", resp.Data.Settings.Timezone)
+	// America/Bahia, not UTC: matches orgLocation's own fallback (helpers.go)
+	// for a deployment with no per-org timezone chosen yet.
+	assert.Equal(t, "America/Bahia", resp.Data.Settings.Timezone)
 	assert.Equal(t, "YYYY-MM-DD", resp.Data.Settings.DateFormat)
 }
 

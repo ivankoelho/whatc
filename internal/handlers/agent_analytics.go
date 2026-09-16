@@ -73,7 +73,7 @@ func (a *App) GetAgentAnalytics(r *fastglue.Request) error {
 
 	if fromStr != "" && toStr != "" {
 		var errMsg string
-		periodStart, periodEnd, errMsg = parseDateRange(fromStr, toStr)
+		periodStart, periodEnd, errMsg = parseDateRange(fromStr, toStr, a.orgLocation(orgID))
 		if errMsg != "" {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, errMsg, nil, "")
 		}
@@ -150,7 +150,7 @@ func (a *App) GetAgentDetails(r *fastglue.Request) error {
 
 	if fromStr != "" && toStr != "" {
 		var errMsg string
-		periodStart, periodEnd, errMsg = parseDateRange(fromStr, toStr)
+		periodStart, periodEnd, errMsg = parseDateRange(fromStr, toStr, a.orgLocation(orgID))
 		if errMsg != "" {
 			// Fall back to current month on parse error
 			periodStart = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
@@ -196,7 +196,7 @@ func (a *App) GetAgentComparison(r *fastglue.Request) error {
 
 	if fromStr != "" && toStr != "" {
 		var errMsg string
-		periodStart, periodEnd, errMsg = parseDateRange(fromStr, toStr)
+		periodStart, periodEnd, errMsg = parseDateRange(fromStr, toStr, a.orgLocation(orgID))
 		if errMsg != "" {
 			// Fall back to current month on parse error
 			periodStart = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)

@@ -76,8 +76,11 @@ func (a *App) GetOrganizationSettings(r *fastglue.Request) error {
 
 	// Parse settings from JSONB
 	settings := OrganizationSettings{
-		MaskPhoneNumbers:    false,
-		Timezone:            "UTC",
+		MaskPhoneNumbers: false,
+		// Matches orgLocation's own fallback (helpers.go) — an org that
+		// hasn't picked a timezone shows the value it's actually getting,
+		// not a UTC label that would misdescribe the parsing it receives.
+		Timezone:            "America/Bahia",
 		DateFormat:          "YYYY-MM-DD",
 		CallingEnabled:      false,
 		MaxCallDuration:     callingConfigDefault(a.Config.Calling.MaxCallDuration, 3600),
@@ -338,6 +341,26 @@ func (a *App) ShouldMaskPhoneNumbers(orgID any) bool {
 		}
 	}
 	return false
+}
+
+// orgLocation resolves the timezone a bare "YYYY-MM-DD" query param (period
+// filters on the dashboard/analytics, purchase_date, etc.) is parsed in for
+// this organization: whatever it picked under Configurações → Geral → Fuso
+// horário padrão (org.Settings["timezone"]), falling back to the deployment
+// default (appLocation, helpers.go) when unset or unrecognized. "UTC" — the
+// settings API's own zero-value default — resolves via time.LoadLocation
+// like any other IANA name, so an organization that explicitly wants UTC
+// gets it; only an empty/invalid value falls back.
+func (a *App) orgLocation(orgID uuid.UUID) *time.Location {
+	var org models.Organization
+	if err := a.DB.Select("settings").Where("id = ?", orgID).First(&org).Error; err == nil && org.Settings != nil {
+		if tz, ok := org.Settings["timezone"].(string); ok && tz != "" {
+			if loc, err := time.LoadLocation(tz); err == nil {
+				return loc
+			}
+		}
+	}
+	return appLocation
 }
 
 // OrganizationResponse represents an organization in API responses

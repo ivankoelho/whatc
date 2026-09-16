@@ -23,7 +23,8 @@ import {
   PhoneForwarded,
   ScrollText,
   ClipboardList,
-  Building2
+  Building2,
+  Timer
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
@@ -154,6 +155,7 @@ export const navigationSections: NavSection[] = [
           { name: 'nav.customActions', path: '/settings/custom-actions', icon: Zap, permission: 'custom_actions' },
           { name: 'nav.occurrenceStages', path: '/settings/occurrence-stages', icon: ClipboardList, permission: 'occurrences.stages' },
           { name: 'nav.units', path: '/settings/units', icon: Building2, permission: 'units' },
+          { name: 'nav.slaPolicies', path: '/settings/occurrence-sla-policies', icon: Timer, permission: 'occurrences.sla_policies' },
           { name: 'nav.sso', path: '/settings/sso', icon: ShieldCheck, permission: 'settings.sso' },
           { name: 'nav.auditLogs', path: '/settings/audit-logs', icon: ScrollText, permission: 'audit_logs' }
         ]

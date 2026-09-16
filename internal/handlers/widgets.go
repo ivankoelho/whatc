@@ -818,20 +818,23 @@ func (a *App) GetAllWidgetsData(r *fastglue.Request) error {
 // executeWidgetQuery executes the query for a widget and returns the data
 func (a *App) executeWidgetQuery(orgID uuid.UUID, widget models.Widget, fromStr, toStr string) (WidgetDataResponse, error) {
 	now := time.Now()
+	loc := a.orgLocation(orgID)
 
 	var periodStart, periodEnd time.Time
 
 	if fromStr != "" && toStr != "" {
 		var errMsg string
-		periodStart, periodEnd, errMsg = parseDateRange(fromStr, toStr)
+		periodStart, periodEnd, errMsg = parseDateRange(fromStr, toStr, loc)
 		if errMsg != "" {
 			// Fall back to current month on parse error
-			periodStart = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+			nowInLoc := now.In(loc)
+			periodStart = time.Date(nowInLoc.Year(), nowInLoc.Month(), 1, 0, 0, 0, 0, loc)
 			periodEnd = now
 		}
 	} else {
 		// Default to current month
-		periodStart = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+		nowInLoc := now.In(loc)
+		periodStart = time.Date(nowInLoc.Year(), nowInLoc.Month(), 1, 0, 0, 0, 0, loc)
 		periodEnd = now
 	}
 

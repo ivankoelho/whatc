@@ -37,7 +37,7 @@ const isLoading = ref(true)
 // General Settings
 const generalSettings = ref({
   organization_name: 'My Organization',
-  default_timezone: 'UTC',
+  default_timezone: 'America/Bahia',
   date_format: 'YYYY-MM-DD',
   mask_phone_numbers: false,
   meta_app_id: '',
@@ -348,6 +348,10 @@ function togglePlayAudio(type: 'hold_music' | 'ringback') {
                         <SelectValue :placeholder="$t('settings.selectTimezone')" />
                       </SelectTrigger>
                       <SelectContent class="bg-[#141414] border-white/[0.08] light:bg-white light:border-gray-200">
+                        <SelectItem value="America/Bahia" class="text-white/70 focus:bg-white/[0.08] focus:text-white light:text-gray-700 light:focus:bg-gray-100">Bahia (Brasília, UTC-3)</SelectItem>
+                        <SelectItem value="America/Manaus" class="text-white/70 focus:bg-white/[0.08] focus:text-white light:text-gray-700 light:focus:bg-gray-100">Manaus (UTC-4)</SelectItem>
+                        <SelectItem value="America/Rio_Branco" class="text-white/70 focus:bg-white/[0.08] focus:text-white light:text-gray-700 light:focus:bg-gray-100">Rio Branco (UTC-5)</SelectItem>
+                        <SelectItem value="America/Noronha" class="text-white/70 focus:bg-white/[0.08] focus:text-white light:text-gray-700 light:focus:bg-gray-100">Fernando de Noronha (UTC-2)</SelectItem>
                         <SelectItem value="UTC" class="text-white/70 focus:bg-white/[0.08] focus:text-white light:text-gray-700 light:focus:bg-gray-100">UTC</SelectItem>
                         <SelectItem value="America/New_York" class="text-white/70 focus:bg-white/[0.08] focus:text-white light:text-gray-700 light:focus:bg-gray-100">Eastern Time</SelectItem>
                         <SelectItem value="America/Los_Angeles" class="text-white/70 focus:bg-white/[0.08] focus:text-white light:text-gray-700 light:focus:bg-gray-100">Pacific Time</SelectItem>

@@ -91,10 +91,10 @@ func (a *App) ListCampaigns(r *fastglue.Request) error {
 	if whatsappAccount != "" {
 		baseQuery = baseQuery.Where("whats_app_account = ?", whatsappAccount)
 	}
-	if from, ok := parseDateParam(r, "from"); ok {
+	if from, ok := parseDateParam(r, "from", a.orgLocation(orgID)); ok {
 		baseQuery = baseQuery.Where("created_at >= ?", from)
 	}
-	if to, ok := parseDateParam(r, "to"); ok {
+	if to, ok := parseDateParam(r, "to", a.orgLocation(orgID)); ok {
 		baseQuery = baseQuery.Where("created_at <= ?", endOfDay(to))
 	}
 

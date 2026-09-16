@@ -1437,4 +1437,16 @@ export const occurrenceCategoriesService = {
   list: () => api.get<ApiEnvelope<{ categories: OccurrenceCategory[] }>>('/occurrence-categories'),
 }
 
+export interface OccurrenceSLAPolicy {
+  priority: 'low' | 'normal' | 'high' | 'urgent'
+  response_minutes: number
+  resolution_minutes: number
+}
+
+export const occurrenceSLAPoliciesService = {
+  list: () => api.get<ApiEnvelope<{ policies: OccurrenceSLAPolicy[] }>>('/occurrence-sla-policies'),
+  upsert: (priority: string, data: { response_minutes: number; resolution_minutes: number }) =>
+    api.put<ApiEnvelope<OccurrenceSLAPolicy>>(`/occurrence-sla-policies/${priority}`, data),
+}
+
 export default api

@@ -238,7 +238,7 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 
 	var purchaseDate *time.Time
 	if req.PurchaseDate != "" {
-		pd, err := time.ParseInLocation("2006-01-02", req.PurchaseDate, appLocation)
+		pd, err := time.ParseInLocation("2006-01-02", req.PurchaseDate, a.orgLocation(orgID))
 		if err != nil {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "purchase_date must be YYYY-MM-DD", nil, "")
 		}
@@ -377,17 +377,19 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 	// Derive the title when the agent didn't type one: "Categoria — Produto",
 	// or "Categoria — Atendimento SAC" without a product, per the SAC MVP
 	// spec (§8) — the product asked not to ask for a title when it can be
-	// derived from fields already on the form.
+	// derived from fields already on the form. Without a category either,
+	// there's nothing meaningful to prefix — just the product (or the
+	// generic fallback alone), rather than a literal "Ocorrência —" filler.
 	if occ.Title == "" {
-		categoryName := "Ocorrência"
-		if category != nil {
-			categoryName = category.Name
-		}
 		product := occ.ProductDescription
 		if product == "" {
 			product = "Atendimento SAC"
 		}
-		occ.Title = categoryName + " — " + product
+		if category != nil {
+			occ.Title = category.Name + " — " + product
+		} else {
+			occ.Title = product
+		}
 	}
 
 	if err := a.insertOccurrenceWithProtocol(&occ); err != nil {
