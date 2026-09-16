@@ -555,6 +555,9 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/branding/login-background", app.ServeLoginBackground)
 	g.POST("/api/branding/login-background", app.UploadLoginBackground)
 	g.DELETE("/api/branding/login-background", app.DeleteLoginBackground)
+	g.GET("/api/branding/logo", app.ServeLogo)
+	g.POST("/api/branding/logo", app.UploadLogo)
+	g.DELETE("/api/branding/logo", app.DeleteLogo)
 
 	// Webhook routes (public - for Meta)
 	g.GET("/api/webhook", app.WebhookVerify)
@@ -578,10 +581,11 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 			path == "/api/branding" {
 			return r
 		}
-		// /api/branding/login-background is public for GET (the login page
-		// loads it before any auth) but the POST upload below requires auth —
-		// only skip the middleware for the read, not the write.
-		if path == "/api/branding/login-background" && string(r.RequestCtx.Method()) == "GET" {
+		// /api/branding/login-background and /api/branding/logo are public for
+		// GET (the login page loads them before any auth) but the POST/DELETE
+		// below require auth — only skip the middleware for the read.
+		if (path == "/api/branding/login-background" || path == "/api/branding/logo") &&
+			string(r.RequestCtx.Method()) == "GET" {
 			return r
 		}
 		// Skip auth for SSO routes (they handle their own auth via state tokens)

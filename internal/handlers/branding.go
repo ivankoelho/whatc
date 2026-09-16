@@ -16,21 +16,39 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// GetPublicBranding returns the login page's background image URL, or null
-// when none is configured. Public — the login page renders before anyone is
+// brandingPublicNullFields is the shape GetPublicBranding always returns,
+// even on a load failure — every field present, defaulting to null, so the
+// frontend never has to distinguish "not configured" from "not returned".
+func brandingPublicNullFields() map[string]any {
+	return map[string]any{
+		"login_background_url": nil,
+		"logo_url":             nil,
+		"system_name":          nil,
+		"footer_text":          nil,
+		"footer_version":       nil,
+	}
+}
+
+// GetPublicBranding returns the login page's configurable branding, or null
+// fields when none is set. Public — the login page renders before anyone is
 // authenticated, so this cannot require auth. The response is deliberately
-// minimal: only login_background_url, never created_at/updated_at/id or any
-// other internal field.
+// minimal: never created_at/updated_at/id or any other internal field.
 func (a *App) GetPublicBranding(r *fastglue.Request) error {
 	var row models.BrandingSettings
 	if err := a.DB.Where("id = ?", models.BrandingSettingsSingletonID).First(&row).Error; err != nil {
 		a.Log.Error("Failed to load branding settings", "error", err)
-		return r.SendEnvelope(map[string]any{"login_background_url": nil, "footer_text": nil, "footer_version": nil})
+		return r.SendEnvelope(brandingPublicNullFields())
 	}
 
-	resp := map[string]any{"login_background_url": nil, "footer_text": nil, "footer_version": nil}
+	resp := brandingPublicNullFields()
 	if row.LoginBackgroundPath != "" {
 		resp["login_background_url"] = fmt.Sprintf("/api/branding/login-background?v=%d", row.UpdatedAt.Unix())
+	}
+	if row.LogoPath != "" {
+		resp["logo_url"] = fmt.Sprintf("/api/branding/logo?v=%d", row.UpdatedAt.Unix())
+	}
+	if row.SystemName != "" {
+		resp["system_name"] = row.SystemName
 	}
 	if row.FooterText != "" {
 		resp["footer_text"] = row.FooterText
@@ -41,11 +59,15 @@ func (a *App) GetPublicBranding(r *fastglue.Request) error {
 	return r.SendEnvelope(resp)
 }
 
-// UpdateBrandingFooter sets the login page's footer text (copyright/rights
-// notice) and version string. Text-only, so unlike UploadLoginBackground it
+// UpdateBrandingFooter sets the login page's system name, footer text
+// (copyright/rights notice) and version string — every free-text branding
+// field on the singleton. Text-only, so unlike UploadLoginBackground it
 // needs none of that handler's file-I/O locking -- a single UPDATE is
-// already atomic.
+// already atomic. Kept as one endpoint (not split by which settings card
+// each field appears on in the UI) since they're all the same shape of
+// change on the same row.
 type UpdateBrandingFooterRequest struct {
+	SystemName    *string `json:"system_name"`
 	FooterText    *string `json:"footer_text"`
 	FooterVersion *string `json:"footer_version"`
 }
@@ -72,9 +94,13 @@ func (a *App) UpdateBrandingFooter(r *fastglue.Request) error {
 		a.Log.Error("Failed to load branding settings", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to load branding settings", nil, "")
 	}
-	old := map[string]any{"footer_text": row.FooterText, "footer_version": row.FooterVersion}
+	old := map[string]any{"system_name": row.SystemName, "footer_text": row.FooterText, "footer_version": row.FooterVersion}
 
 	updates := map[string]any{}
+	if req.SystemName != nil {
+		row.SystemName = *req.SystemName
+		updates["system_name"] = *req.SystemName
+	}
 	if req.FooterText != nil {
 		row.FooterText = *req.FooterText
 		updates["footer_text"] = *req.FooterText
@@ -94,18 +120,57 @@ func (a *App) UpdateBrandingFooter(r *fastglue.Request) error {
 	audit.LogAudit(a.DB, orgID, userID, audit.GetUserName(a.DB, userID),
 		models.ResourceSettingsGeneral, orgID, models.AuditActionUpdated, old, updates)
 
-	return r.SendEnvelope(map[string]any{"footer_text": row.FooterText, "footer_version": row.FooterVersion})
+	return r.SendEnvelope(map[string]any{
+		"system_name": row.SystemName, "footer_text": row.FooterText, "footer_version": row.FooterVersion,
+	})
 }
 
-// ServeLoginBackground serves the configured background image file. Public,
-// same path-traversal/symlink protection as ServeMedia (media.go).
-func (a *App) ServeLoginBackground(r *fastglue.Request) error {
+// brandingImageSlot names one image field on the branding_settings
+// singleton (login background, logo). UploadBrandingImage/
+// DeleteBrandingImage/ServeBrandingImage below share the atomic-write/
+// lock/serve logic across every slot instead of duplicating it per field.
+type brandingImageSlot struct {
+	// key is the JSON response prefix ("<key>_url") and the audit field name.
+	key string
+	// slug is both the storage filename stem and the route path segment
+	// (e.g. "/api/branding/<slug>"), so the two never drift apart.
+	slug           string
+	notFoundMsg    string
+	allowedTypes   map[string]bool
+	getPath        func(*models.BrandingSettings) string
+	getContentType func(*models.BrandingSettings) string
+}
+
+var loginBackgroundSlot = brandingImageSlot{
+	key: "login_background", slug: "login-background",
+	notFoundMsg:    "No background image configured",
+	allowedTypes:   brandingAllowedContentTypes,
+	getPath:        func(r *models.BrandingSettings) string { return r.LoginBackgroundPath },
+	getContentType: func(r *models.BrandingSettings) string { return r.LoginBackgroundContentType },
+}
+
+// logoSlot is PNG-only, unlike the login background — a logo commonly needs
+// a transparent background, which JPEG can't provide.
+var logoSlot = brandingImageSlot{
+	key: "logo", slug: "logo",
+	notFoundMsg:    "No logo configured",
+	allowedTypes:   map[string]bool{"image/png": true},
+	getPath:        func(r *models.BrandingSettings) string { return r.LogoPath },
+	getContentType: func(r *models.BrandingSettings) string { return r.LogoContentType },
+}
+
+func (s brandingImageSlot) pathColumn() string    { return s.key + "_path" }
+func (s brandingImageSlot) contentColumn() string { return s.key + "_content_type" }
+
+// serveBrandingImage serves a configured branding image file. Public, same
+// path-traversal/symlink protection as ServeMedia (media.go).
+func (a *App) serveBrandingImage(r *fastglue.Request, slot brandingImageSlot) error {
 	var row models.BrandingSettings
-	if err := a.DB.Where("id = ?", models.BrandingSettingsSingletonID).First(&row).Error; err != nil || row.LoginBackgroundPath == "" {
-		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "No background image configured", nil, "")
+	if err := a.DB.Where("id = ?", models.BrandingSettingsSingletonID).First(&row).Error; err != nil || slot.getPath(&row) == "" {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, slot.notFoundMsg, nil, "")
 	}
 
-	fullPath, err := a.resolveSafeStoragePath(row.LoginBackgroundPath)
+	fullPath, err := a.resolveSafeStoragePath(slot.getPath(&row))
 	if err != nil {
 		switch {
 		case errors.Is(err, errStorageConfig):
@@ -124,7 +189,7 @@ func (a *App) ServeLoginBackground(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to read file", nil, "")
 	}
 
-	contentType := row.LoginBackgroundContentType
+	contentType := slot.getContentType(&row)
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
@@ -132,6 +197,16 @@ func (a *App) ServeLoginBackground(r *fastglue.Request) error {
 	r.RequestCtx.Response.Header.Set("Cache-Control", "public, max-age=3600")
 	r.RequestCtx.SetBody(data)
 	return nil
+}
+
+// ServeLoginBackground serves the configured login background image file.
+func (a *App) ServeLoginBackground(r *fastglue.Request) error {
+	return a.serveBrandingImage(r, loginBackgroundSlot)
+}
+
+// ServeLogo serves the configured system logo file.
+func (a *App) ServeLogo(r *fastglue.Request) error {
+	return a.serveBrandingImage(r, logoSlot)
 }
 
 // brandingAllowedContentTypes are the image types this endpoint accepts —
@@ -148,7 +223,7 @@ var brandingAllowedContentTypes = map[string]bool{
 // ringback upload UI advertises the same limit).
 const brandingMaxUploadSize = 5 << 20
 
-// UploadLoginBackground replaces the login page's background image.
+// uploadBrandingImage replaces one of the singleton's configurable images.
 //
 // Five things this deliberately gets right, in order:
 //  1. Real content-type detection (http.DetectContentType on the actual
@@ -163,7 +238,7 @@ const brandingMaxUploadSize = 5 << 20
 //     sequence — not just the final UPDATE. A second concurrent upload
 //     blocks until the first fully finishes and sees fresh state.
 //  5. Size-bounded before any disk write (5MB).
-func (a *App) UploadLoginBackground(r *fastglue.Request) error {
+func (a *App) uploadBrandingImage(r *fastglue.Request, slot brandingImageSlot) error {
 	orgID, userID, err := a.requireAuth(r, models.ResourceSettingsGeneral, models.ActionWrite)
 	if err != nil {
 		return nil
@@ -200,7 +275,7 @@ func (a *App) UploadLoginBackground(r *fastglue.Request) error {
 	// Real content-type detection — the point #3 the design review insisted
 	// on: never trust what the client's multipart header claims.
 	sniffed := http.DetectContentType(data)
-	if !brandingAllowedContentTypes[sniffed] {
+	if !slot.allowedTypes[sniffed] {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Unsupported file type: "+sniffed, nil, "")
 	}
 
@@ -210,7 +285,7 @@ func (a *App) UploadLoginBackground(r *fastglue.Request) error {
 	}
 
 	ext := getExtensionFromMimeType(sniffed)
-	newRelPath := filepath.Join("branding", "login-background"+ext)
+	newRelPath := filepath.Join("branding", slot.slug+ext)
 	basePath := a.getMediaStoragePath()
 	finalPath := filepath.Join(basePath, newRelPath)
 	tmpPath := finalPath + ".tmp"
@@ -233,7 +308,7 @@ func (a *App) UploadLoginBackground(r *fastglue.Request) error {
 		a.Log.Error("Failed to lock branding settings row", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save branding settings", nil, "")
 	}
-	oldRelPath := row.LoginBackgroundPath
+	oldRelPath := slot.getPath(&row)
 
 	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
 		tx.Rollback()
@@ -249,8 +324,8 @@ func (a *App) UploadLoginBackground(r *fastglue.Request) error {
 	}
 
 	if err := tx.Model(&row).Updates(map[string]any{
-		"login_background_path":         newRelPath,
-		"login_background_content_type": sniffed,
+		slot.pathColumn():    newRelPath,
+		slot.contentColumn(): sniffed,
 	}).Error; err != nil {
 		tx.Rollback()
 		a.Log.Error("Failed to update branding settings", "error", err)
@@ -279,32 +354,43 @@ func (a *App) UploadLoginBackground(r *fastglue.Request) error {
 	// AuditLogPanel of whichever org they happened to be viewing -- the true
 	// affected scope is global, not that one org.
 	// "uploaded_at" is present only in the new snapshot, so ComputeChanges
-	// always sees a diff on it -- even when old/new login_background_path are
-	// identical (replacing a JPEG with a different JPEG keeps the same
-	// deterministic per-MIME-type path). Without this, a same-format
-	// replacement produces a zero-change diff and LogAudit's own
-	// len(changes)==0 guard silently drops the entry, the most common upload
-	// case going unaudited.
+	// always sees a diff on it -- even when old/new path are identical
+	// (replacing a JPEG with a different JPEG keeps the same deterministic
+	// per-MIME-type path). Without this, a same-format replacement produces
+	// a zero-change diff and LogAudit's own len(changes)==0 guard silently
+	// drops the entry, the most common upload case going unaudited.
 	audit.LogAudit(a.DB, orgID, userID, audit.GetUserName(a.DB, userID),
 		models.ResourceSettingsGeneral, orgID, models.AuditActionUpdated,
-		map[string]any{"login_background_path": oldRelPath},
-		map[string]any{"login_background_path": newRelPath, "uploaded_at": time.Now().UTC()})
+		map[string]any{slot.pathColumn(): oldRelPath},
+		map[string]any{slot.pathColumn(): newRelPath, "uploaded_at": time.Now().UTC()})
 
 	return r.SendEnvelope(map[string]any{
-		"login_background_url": fmt.Sprintf("/api/branding/login-background?v=%d", time.Now().Unix()),
+		slot.key + "_url": fmt.Sprintf("/api/branding/%s?v=%d", slot.slug, time.Now().Unix()),
 	})
 }
 
-// DeleteLoginBackground clears the configured background image, reverting
-// the login page to its default gradient. Same lock-before-file-I/O shape as
-// UploadLoginBackground — a delete racing an upload (or another delete) must
-// never leave the database and disk pointing at inconsistent state.
-func (a *App) DeleteLoginBackground(r *fastglue.Request) error {
+// UploadLoginBackground replaces the login page's background image.
+func (a *App) UploadLoginBackground(r *fastglue.Request) error {
+	return a.uploadBrandingImage(r, loginBackgroundSlot)
+}
+
+// UploadLogo replaces the system logo shown in the app sidebar and the
+// login page's brand panel.
+func (a *App) UploadLogo(r *fastglue.Request) error {
+	return a.uploadBrandingImage(r, logoSlot)
+}
+
+// deleteBrandingImage clears one of the singleton's configured images,
+// reverting to that slot's default appearance. Same lock-before-file-I/O
+// shape as uploadBrandingImage — a delete racing an upload (or another
+// delete) must never leave the database and disk pointing at inconsistent
+// state.
+func (a *App) deleteBrandingImage(r *fastglue.Request, slot brandingImageSlot) error {
 	orgID, userID, err := a.requireAuth(r, models.ResourceSettingsGeneral, models.ActionWrite)
 	if err != nil {
 		return nil
 	}
-	// Same system-wide-singleton reasoning as UploadLoginBackground.
+	// Same system-wide-singleton reasoning as uploadBrandingImage.
 	if !a.IsSuperAdmin(userID) {
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Only super admins can change system branding", nil, "")
 	}
@@ -325,11 +411,11 @@ func (a *App) DeleteLoginBackground(r *fastglue.Request) error {
 		a.Log.Error("Failed to lock branding settings row", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update branding settings", nil, "")
 	}
-	oldRelPath := row.LoginBackgroundPath
+	oldRelPath := slot.getPath(&row)
 
 	if err := tx.Model(&row).Updates(map[string]any{
-		"login_background_path":         "",
-		"login_background_content_type": "",
+		slot.pathColumn():    "",
+		slot.contentColumn(): "",
 	}).Error; err != nil {
 		tx.Rollback()
 		a.Log.Error("Failed to clear branding settings", "error", err)
@@ -347,11 +433,22 @@ func (a *App) DeleteLoginBackground(r *fastglue.Request) error {
 		}
 	}
 
-	// Same pragmatic org attribution as UploadLoginBackground -- see comment there.
+	// Same pragmatic org attribution as uploadBrandingImage -- see comment there.
 	audit.LogAudit(a.DB, orgID, userID, audit.GetUserName(a.DB, userID),
 		models.ResourceSettingsGeneral, orgID, models.AuditActionUpdated,
-		map[string]any{"login_background_path": oldRelPath},
-		map[string]any{"login_background_path": ""})
+		map[string]any{slot.pathColumn(): oldRelPath},
+		map[string]any{slot.pathColumn(): ""})
 
 	return r.SendEnvelope(map[string]any{"deleted": true})
+}
+
+// DeleteLoginBackground clears the configured background image, reverting
+// the login page to its default gradient.
+func (a *App) DeleteLoginBackground(r *fastglue.Request) error {
+	return a.deleteBrandingImage(r, loginBackgroundSlot)
+}
+
+// DeleteLogo clears the configured system logo, reverting to the default icon.
+func (a *App) DeleteLogo(r *fastglue.Request) error {
+	return a.deleteBrandingImage(r, logoSlot)
 }

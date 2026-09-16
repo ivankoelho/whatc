@@ -14,6 +14,7 @@ import {
 } from 'lucide-vue-next'
 import { wsService } from '@/services/websocket'
 import { authService } from '@/services/api'
+import { useBranding } from '@/composables/useBranding'
 import OrganizationSwitcher from './OrganizationSwitcher.vue'
 import UserMenu from './UserMenu.vue'
 import ActiveCallPanel from '@/components/calling/ActiveCallPanel.vue'
@@ -25,11 +26,13 @@ useI18n() // Enable $t() in template
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
+const { logoUrl, systemName, loadBranding } = useBranding()
 const isCollapsed = ref(true)
 const isMobileMenuOpen = ref(false)
 
 // Refresh user data and connect WebSocket on mount
 onMounted(() => {
+  loadBranding()
   if (authStore.isAuthenticated) {
     // Fetch fresh permissions in background (non-destructive — interceptor handles 401)
     authStore.refreshUserData()
@@ -110,8 +113,8 @@ const handleLogout = async () => {
     <!-- Mobile header -->
     <header class="fixed top-0 left-0 right-0 z-50 flex h-12 items-center justify-between border-b border-white/[0.08] light:border-gray-200 bg-[#0a0a0b]/95 light:bg-white/95 backdrop-blur-sm px-3 md:hidden">
       <RouterLink to="/" class="flex items-center gap-2">
-        <img src="/logo-atacadao.png" alt="WhatsApp ATC" class="h-7 w-7 rounded-lg object-cover shadow-lg shadow-black/20">
-        <span class="font-semibold text-sm text-white light:text-gray-900">WhatsApp ATC</span>
+        <img :src="logoUrl || '/logo-atacadao.png'" alt="" class="h-7 w-7 rounded-lg object-cover shadow-lg shadow-black/20">
+        <span class="font-semibold text-sm text-white light:text-gray-900">{{ systemName || 'WhatsApp ATC' }}</span>
       </RouterLink>
       <Button
         variant="ghost"
@@ -148,12 +151,12 @@ const handleLogout = async () => {
       <!-- Logo (hidden on mobile, shown in header instead) -->
       <div class="hidden md:flex h-12 items-center justify-between px-3 border-b border-white/[0.08] light:border-gray-200">
         <RouterLink to="/" class="flex items-center gap-2">
-          <img src="/logo-atacadao.png" alt="WhatsApp ATC" class="h-7 w-7 rounded-lg object-cover shadow-lg shadow-black/20 shrink-0">
+          <img :src="logoUrl || '/logo-atacadao.png'" alt="" class="h-7 w-7 rounded-lg object-cover shadow-lg shadow-black/20 shrink-0">
           <span
             v-if="!isCollapsed"
             class="font-semibold text-sm text-white light:text-gray-900"
           >
-            WhatsApp ATC
+            {{ systemName || 'WhatsApp ATC' }}
           </span>
         </RouterLink>
         <Button
