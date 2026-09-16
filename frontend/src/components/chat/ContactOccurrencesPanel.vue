@@ -95,6 +95,7 @@ watch(() => props.contactId, load)
           :contact-name="contactName"
           :source-transfer-id="sourceTransferId"
           @created="onCreated"
+          @cancel="isDialogOpen = false"
         />
       </DialogContent>
     </Dialog>

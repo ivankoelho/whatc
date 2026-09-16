@@ -76,6 +76,9 @@ const isUploadingLoginBackground = ref(false)
 const isRemovingLoginBackground = ref(false)
 const loginBackgroundInput = ref<HTMLInputElement | null>(null)
 
+const footerSettings = ref({ footer_text: '', footer_version: '' })
+const isSavingFooter = ref(false)
+
 // Bump these keys to force the AuditLogPanel to remount and refetch after a save.
 // The backend writes audit entries asynchronously in a goroutine, so we delay
 // the remount slightly to give the write time to hit the DB before refetching.
@@ -105,6 +108,10 @@ onMounted(async () => {
       const data = response.data.data || response.data
       const url = data?.login_background_url ?? null
       loginBackgroundUrl.value = url ? withBasePath(url) : null
+      footerSettings.value = {
+        footer_text: data?.footer_text ?? '',
+        footer_version: data?.footer_version ?? '',
+      }
     } catch {
       loginBackgroundUrl.value = null
     }
@@ -280,6 +287,19 @@ async function removeLoginBackground() {
   }
 }
 
+async function saveFooter() {
+  isSavingFooter.value = true
+  try {
+    await brandingService.updateFooter(footerSettings.value)
+    toast.success(t('settings.loginFooterSaved'))
+    refreshActivityLog(generalLogKey)
+  } catch (error) {
+    toast.error(t('settings.loginFooterSaveFailed'))
+  } finally {
+    isSavingFooter.value = false
+  }
+}
+
 function togglePlayAudio(type: 'hold_music' | 'ringback') {
   const isHold = type === 'hold_music'
   const filename = isHold ? callingSettings.value.hold_music_file : callingSettings.value.ringback_file
@@ -433,6 +453,32 @@ function togglePlayAudio(type: 'hold_music' | 'ringback') {
                     {{ $t('common.remove') }}
                   </Button>
                   <span class="text-xs text-white/30 light:text-gray-400">.jpg, .png, .webp (max 5MB)</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Login Footer Card (Gated on isSuperAdmin, same system-wide-singleton reasoning as Login Background) -->
+            <div v-if="isSuperAdmin" class="mt-6 rounded-xl border border-white/[0.08] bg-white/[0.02] light:bg-white light:border-gray-200">
+              <div class="p-6 pb-3">
+                <h3 class="text-lg font-semibold text-white light:text-gray-900">{{ $t('settings.loginFooter') }}</h3>
+                <p class="text-sm text-white/40 light:text-gray-500">{{ $t('settings.loginFooterDesc') }}</p>
+              </div>
+              <div class="p-6 pt-3 space-y-4">
+                <div class="grid grid-cols-2 gap-4">
+                  <div class="space-y-2">
+                    <Label for="footer_text" class="text-white/70 light:text-gray-700">{{ $t('settings.footerText') }}</Label>
+                    <Input id="footer_text" v-model="footerSettings.footer_text" :placeholder="$t('settings.footerTextPlaceholder')" />
+                  </div>
+                  <div class="space-y-2">
+                    <Label for="footer_version" class="text-white/70 light:text-gray-700">{{ $t('settings.footerVersion') }}</Label>
+                    <Input id="footer_version" v-model="footerSettings.footer_version" :placeholder="$t('settings.footerVersionPlaceholder')" />
+                  </div>
+                </div>
+                <div class="flex justify-end">
+                  <Button variant="outline" size="sm" class="bg-white/[0.04] border-white/[0.1] text-white/70 hover:bg-white/[0.08] hover:text-white light:bg-white light:border-gray-200 light:text-gray-700 light:hover:bg-gray-50" @click="saveFooter" :disabled="isSavingFooter">
+                    <Loader2 v-if="isSavingFooter" class="mr-2 h-4 w-4 animate-spin" />
+                    {{ $t('settings.save') }}
+                  </Button>
                 </div>
               </div>
             </div>

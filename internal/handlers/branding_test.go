@@ -59,6 +59,95 @@ func TestGetPublicBranding_RequiresNoAuthentication(t *testing.T) {
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
 }
 
+func TestGetPublicBranding_ReturnsFooterWhenConfigured(t *testing.T) {
+	app := newTestApp(t)
+	require.NoError(t, database.EnsureBrandingSettingsRow(app.DB))
+	require.NoError(t, app.DB.Model(&models.BrandingSettings{}).
+		Where("id = ?", models.BrandingSettingsSingletonID).
+		Updates(map[string]any{"footer_text": "Whatomate", "footer_version": "1.2.3"}).Error)
+
+	req := testutil.NewGETRequest(t)
+	require.NoError(t, app.GetPublicBranding(req))
+	body := string(testutil.GetResponseBody(req))
+	assert.Contains(t, body, `"footer_text":"Whatomate"`)
+	assert.Contains(t, body, `"footer_version":"1.2.3"`)
+}
+
+// Same system-wide-singleton reasoning as the login background uploads: an
+// org admin with settings.general:write must still be rejected, because this
+// isn't scoped to their org.
+func TestUpdateBrandingFooter_RejectedForOrgAdminNotSuperAdmin(t *testing.T) {
+	app := newTestApp(t)
+	require.NoError(t, database.EnsureBrandingSettingsRow(app.DB))
+
+	// branding_settings is a global singleton shared by every test in this
+	// binary run, so capture its state before acting rather than assuming
+	// empty -- another test may have already set footer_text.
+	var before models.BrandingSettings
+	require.NoError(t, app.DB.Where("id = ?", models.BrandingSettingsSingletonID).First(&before).Error)
+
+	org := testutil.CreateTestOrganization(t, app.DB)
+	admin := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&admin.ID))
+
+	req := testutil.NewJSONRequest(t, map[string]any{"footer_text": "Hijacked"})
+	req.RequestCtx.Request.Header.SetMethod("PUT")
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	require.NoError(t, app.UpdateBrandingFooter(req))
+	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(req))
+
+	var after models.BrandingSettings
+	require.NoError(t, app.DB.Where("id = ?", models.BrandingSettingsSingletonID).First(&after).Error)
+	assert.Equal(t, before.FooterText, after.FooterText, "rejected update must not touch the row")
+}
+
+func TestUpdateBrandingFooter_SuperAdminUpdatesBothFields(t *testing.T) {
+	app := newTestApp(t)
+	require.NoError(t, database.EnsureBrandingSettingsRow(app.DB))
+
+	org := testutil.CreateTestOrganization(t, app.DB)
+	admin := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&admin.ID), testutil.WithSuperAdmin())
+
+	req := testutil.NewJSONRequest(t, map[string]any{"footer_text": "Whatomate. All rights reserved.", "footer_version": "2.0.0"})
+	req.RequestCtx.Request.Header.SetMethod("PUT")
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	require.NoError(t, app.UpdateBrandingFooter(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var row models.BrandingSettings
+	require.NoError(t, app.DB.Where("id = ?", models.BrandingSettingsSingletonID).First(&row).Error)
+	assert.Equal(t, "Whatomate. All rights reserved.", row.FooterText)
+	assert.Equal(t, "2.0.0", row.FooterVersion)
+}
+
+// A request that only sends footer_version (JSON omits footer_text
+// entirely, so it decodes to a nil pointer, not an empty string) must leave
+// footer_text untouched -- mirrors UpdateOccurrence's *string "absent vs
+// empty" convention.
+func TestUpdateBrandingFooter_PartialUpdateLeavesOtherFieldUntouched(t *testing.T) {
+	app := newTestApp(t)
+	require.NoError(t, database.EnsureBrandingSettingsRow(app.DB))
+	require.NoError(t, app.DB.Model(&models.BrandingSettings{}).
+		Where("id = ?", models.BrandingSettingsSingletonID).
+		Updates(map[string]any{"footer_text": "Original", "footer_version": "1.0.0"}).Error)
+
+	org := testutil.CreateTestOrganization(t, app.DB)
+	admin := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&admin.ID), testutil.WithSuperAdmin())
+
+	req := testutil.NewJSONRequest(t, map[string]any{"footer_version": "1.0.1"})
+	req.RequestCtx.Request.Header.SetMethod("PUT")
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	require.NoError(t, app.UpdateBrandingFooter(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var row models.BrandingSettings
+	require.NoError(t, app.DB.Where("id = ?", models.BrandingSettingsSingletonID).First(&row).Error)
+	assert.Equal(t, "Original", row.FooterText, "omitted field must be untouched")
+	assert.Equal(t, "1.0.1", row.FooterVersion)
+}
+
 func TestServeLoginBackground_404WhenNotConfigured(t *testing.T) {
 	app := newTestApp(t)
 	require.NoError(t, database.EnsureBrandingSettingsRow(app.DB))

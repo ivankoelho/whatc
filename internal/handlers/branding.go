@@ -25,15 +25,76 @@ func (a *App) GetPublicBranding(r *fastglue.Request) error {
 	var row models.BrandingSettings
 	if err := a.DB.Where("id = ?", models.BrandingSettingsSingletonID).First(&row).Error; err != nil {
 		a.Log.Error("Failed to load branding settings", "error", err)
-		return r.SendEnvelope(map[string]any{"login_background_url": nil})
+		return r.SendEnvelope(map[string]any{"login_background_url": nil, "footer_text": nil, "footer_version": nil})
 	}
 
-	if row.LoginBackgroundPath == "" {
-		return r.SendEnvelope(map[string]any{"login_background_url": nil})
+	resp := map[string]any{"login_background_url": nil, "footer_text": nil, "footer_version": nil}
+	if row.LoginBackgroundPath != "" {
+		resp["login_background_url"] = fmt.Sprintf("/api/branding/login-background?v=%d", row.UpdatedAt.Unix())
+	}
+	if row.FooterText != "" {
+		resp["footer_text"] = row.FooterText
+	}
+	if row.FooterVersion != "" {
+		resp["footer_version"] = row.FooterVersion
+	}
+	return r.SendEnvelope(resp)
+}
+
+// UpdateBrandingFooter sets the login page's footer text (copyright/rights
+// notice) and version string. Text-only, so unlike UploadLoginBackground it
+// needs none of that handler's file-I/O locking -- a single UPDATE is
+// already atomic.
+type UpdateBrandingFooterRequest struct {
+	FooterText    *string `json:"footer_text"`
+	FooterVersion *string `json:"footer_version"`
+}
+
+func (a *App) UpdateBrandingFooter(r *fastglue.Request) error {
+	orgID, userID, err := a.requireAuth(r, models.ResourceSettingsGeneral, models.ActionWrite)
+	if err != nil {
+		return nil
+	}
+	// Same system-wide-singleton reasoning as UploadLoginBackground: this
+	// isn't scoped to the caller's org, so the general settings.write
+	// permission alone isn't enough to prove they may change it for everyone.
+	if !a.IsSuperAdmin(userID) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Only super admins can change system branding", nil, "")
 	}
 
-	url := fmt.Sprintf("/api/branding/login-background?v=%d", row.UpdatedAt.Unix())
-	return r.SendEnvelope(map[string]any{"login_background_url": url})
+	var req UpdateBrandingFooterRequest
+	if err := a.decodeRequest(r, &req); err != nil {
+		return nil
+	}
+
+	var row models.BrandingSettings
+	if err := a.DB.Where("id = ?", models.BrandingSettingsSingletonID).First(&row).Error; err != nil {
+		a.Log.Error("Failed to load branding settings", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to load branding settings", nil, "")
+	}
+	old := map[string]any{"footer_text": row.FooterText, "footer_version": row.FooterVersion}
+
+	updates := map[string]any{}
+	if req.FooterText != nil {
+		row.FooterText = *req.FooterText
+		updates["footer_text"] = *req.FooterText
+	}
+	if req.FooterVersion != nil {
+		row.FooterVersion = *req.FooterVersion
+		updates["footer_version"] = *req.FooterVersion
+	}
+	if len(updates) > 0 {
+		if err := a.DB.Model(&models.BrandingSettings{}).
+			Where("id = ?", models.BrandingSettingsSingletonID).Updates(updates).Error; err != nil {
+			a.Log.Error("Failed to update branding footer", "error", err)
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save branding settings", nil, "")
+		}
+	}
+
+	audit.LogAudit(a.DB, orgID, userID, audit.GetUserName(a.DB, userID),
+		models.ResourceSettingsGeneral, orgID, models.AuditActionUpdated, old, updates)
+
+	return r.SendEnvelope(map[string]any{"footer_text": row.FooterText, "footer_version": row.FooterVersion})
 }
 
 // ServeLoginBackground serves the configured background image file. Public,

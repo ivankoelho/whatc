@@ -17,6 +17,12 @@ type BrandingSettings struct {
 	BaseModel
 	LoginBackgroundPath        string `gorm:"size:500" json:"login_background_path,omitempty"`
 	LoginBackgroundContentType string `gorm:"size:100" json:"login_background_content_type,omitempty"`
+
+	// Login page footer: copyright/rights notice and the system version
+	// string, both free text set by a super admin — this codebase has no
+	// build-time version stamping, so the version is whatever they type.
+	FooterText    string `gorm:"size:255" json:"footer_text,omitempty"`
+	FooterVersion string `gorm:"size:50" json:"footer_version,omitempty"`
 }
 
 func (BrandingSettings) TableName() string { return "branding_settings" }

@@ -35,7 +35,7 @@ const props = defineProps<{
   sourceTransferId?: string
 }>()
 
-const emit = defineEmits<{ created: [occurrenceId: string] }>()
+const emit = defineEmits<{ created: [occurrenceId: string]; cancel: [] }>()
 
 const { t } = useI18n()
 const router = useRouter()
@@ -121,6 +121,14 @@ onMounted(async () => {
 // --- Submissão ---
 const submitting = ref(false)
 const result = ref<{ protocolId: string; protocolNumber: string; title: string; sent: boolean } | null>(null)
+
+// Standalone tab (OccurrencesView) has no dialog to close, so Cancel just
+// clears the form there; the dialog wrapper (ContactOccurrencesPanel) closes
+// itself on this event instead of guessing from context.
+function cancelForm() {
+  resetForm()
+  emit('cancel')
+}
 
 function resetForm() {
   phone.value = props.contactPhone || ''
@@ -368,7 +376,7 @@ function goToProtocol() {
         </CardContent>
 
         <CardContent class="flex justify-end gap-2 pt-0">
-          <Button variant="outline" @click="resetForm" :disabled="submitting">{{ t('common.cancel') }}</Button>
+          <Button variant="outline" @click="cancelForm" :disabled="submitting">{{ t('common.cancel') }}</Button>
           <Button @click="submit" :disabled="submitting">
             <Loader2 v-if="submitting" class="h-4 w-4 mr-2 animate-spin" />
             {{ submitting ? t('occurrences.registeringProtocol') : t('occurrences.registerProtocol') }}

@@ -551,6 +551,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	// Branding do sistema (config única, não por organização) — os dois GETs
 	// são públicos porque a tela de login carrega antes de qualquer auth.
 	g.GET("/api/branding", app.GetPublicBranding)
+	g.PUT("/api/branding/footer", app.UpdateBrandingFooter)
 	g.GET("/api/branding/login-background", app.ServeLoginBackground)
 	g.POST("/api/branding/login-background", app.UploadLoginBackground)
 	g.DELETE("/api/branding/login-background", app.DeleteLoginBackground)
@@ -738,6 +739,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/contacts/{id}/occurrences", app.ListContactOccurrences)
 	g.GET("/api/occurrences/{id}", app.GetOccurrence)
 	g.PUT("/api/occurrences/{id}", app.UpdateOccurrence)
+	g.DELETE("/api/occurrences/{id}", app.DeleteOccurrence)
 	g.PUT("/api/occurrences/{id}/stage", app.ChangeOccurrenceStage)
 	g.GET("/api/occurrences/{id}/events", app.ListOccurrenceEvents)
 	g.POST("/api/occurrences/{id}/events", app.CreateOccurrenceEvent)

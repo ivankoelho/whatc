@@ -760,7 +760,7 @@ export const organizationService = {
 
 // Branding (system-wide, not per-organization — see docs/superpowers/specs/2026-09-15-login-branding-design.md)
 export const brandingService = {
-  getPublic: () => api.get('/branding'),
+  getPublic: () => api.get<ApiEnvelope<{ login_background_url: string | null; footer_text: string | null; footer_version: string | null }>>('/branding'),
   uploadLoginBackground: (file: File) => {
     const formData = new FormData()
     formData.append('file', file)
@@ -768,7 +768,9 @@ export const brandingService = {
       headers: { 'Content-Type': 'multipart/form-data' }
     })
   },
-  deleteLoginBackground: () => api.delete('/branding/login-background')
+  deleteLoginBackground: () => api.delete('/branding/login-background'),
+  updateFooter: (data: { footer_text?: string; footer_version?: string }) =>
+    api.put<ApiEnvelope<{ footer_text: string; footer_version: string }>>('/branding/footer', data),
 }
 
 // Organizations
@@ -1411,6 +1413,8 @@ export const occurrencesService = {
     api.post<ApiEnvelope<OccurrenceEvent>>(`/occurrences/${id}/events`, { content }),
   sendProtocol: (id: string) =>
     api.post<ApiEnvelope<{ sent: boolean; protocol_number: string }>>(`/occurrences/${id}/send-protocol`),
+  // Permanent hard delete, restricted to super admins server-side.
+  delete: (id: string) => api.delete<ApiEnvelope<{ deleted: boolean }>>(`/occurrences/${id}`),
   listForContact: (contactId: string) =>
     api.get<ApiEnvelope<{ occurrences: Occurrence[] }>>(`/contacts/${contactId}/occurrences`),
 

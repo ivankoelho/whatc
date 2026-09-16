@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
+	"gorm.io/gorm"
 )
 
 // authedJSON builds a request with a JSON body, the given method, auth context
@@ -328,4 +329,64 @@ func TestOccurrences_UpdateDescriptionAbsentVsEmpty(t *testing.T) {
 	var afterFilled models.Occurrence
 	require.NoError(t, app.DB.First(&afterFilled, "id = ?", occ.ID).Error)
 	assert.Equal(t, "Nova descrição", afterFilled.Description)
+}
+
+func setupOccurrenceForDelete(t *testing.T, app *handlers.App) (org *models.Organization, occ models.Occurrence) {
+	t.Helper()
+	org = testutil.CreateTestOrganization(t, app.DB)
+	adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	owner := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	stage, err := app.InitialStageForTest(org.ID)
+	require.NoError(t, err)
+
+	occ = models.Occurrence{
+		OrganizationID: org.ID, ContactID: contact.ID, Title: "Para excluir",
+		StageID: stage.ID, OpenedByUserID: owner.ID,
+	}
+	require.NoError(t, app.CreateOccurrenceForTest(&occ))
+	require.NoError(t, app.DB.Create(&models.OccurrenceEvent{
+		OrganizationID: org.ID, OccurrenceID: occ.ID, Type: models.OccurrenceEventNote, Content: "nota",
+	}).Error)
+	return org, occ
+}
+
+// A regular admin (occurrences:write, even occurrences:delete if granted)
+// must still be rejected — DeleteOccurrence hard-gates on IsSuperAdmin
+// regardless of the permission catalog, same as UploadLoginBackground.
+func TestDeleteOccurrence_RejectedForNonSuperAdmin(t *testing.T) {
+	app := newTestApp(t)
+	org, occ := setupOccurrenceForDelete(t, app)
+	adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	admin := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+
+	req := authedGET(t, app, org.ID, admin.ID, occ.ID)
+	require.NoError(t, app.DeleteOccurrence(req))
+	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(req))
+
+	var stillThere models.Occurrence
+	assert.NoError(t, app.DB.First(&stillThere, "id = ?", occ.ID).Error, "occurrence must survive a rejected delete")
+}
+
+// A super admin's delete is a real hard delete: the row and its events are
+// gone even from an Unscoped query, not just soft-deleted.
+func TestDeleteOccurrence_SuperAdminHardDeletes(t *testing.T) {
+	app := newTestApp(t)
+	org, occ := setupOccurrenceForDelete(t, app)
+	superAdminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	superAdmin := testutil.CreateTestUser(t, app.DB, org.ID,
+		testutil.WithRoleID(&superAdminRole.ID), testutil.WithSuperAdmin())
+
+	req := authedGET(t, app, org.ID, superAdmin.ID, occ.ID)
+	require.NoError(t, app.DeleteOccurrence(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var gone models.Occurrence
+	err := app.DB.Unscoped().First(&gone, "id = ?", occ.ID).Error
+	assert.ErrorIs(t, err, gorm.ErrRecordNotFound, "occurrence must be hard-deleted, not soft-deleted")
+
+	var eventCount int64
+	require.NoError(t, app.DB.Unscoped().Model(&models.OccurrenceEvent{}).
+		Where("occurrence_id = ?", occ.ID).Count(&eventCount).Error)
+	assert.Zero(t, eventCount, "timeline events must be hard-deleted along with the occurrence")
 }
