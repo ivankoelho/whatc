@@ -69,12 +69,14 @@ jobs:
           # --format testname streams a PASS/FAIL line per test as it
           # completes, so a hanging test is easy to spot — the last
           # printed test is the one before the hang.
-          # -timeout 10m caps the whole run so a hung test fails the job
+          # -timeout 20m caps the whole run so a hung test fails the job
           # in a reasonable window instead of waiting for go's default.
+          # internal/handlers alone (1900+ tests) now takes ~12-13m under
+          # -race, so 10m was clipping healthy runs, not just hangs.
           gotestsum \
             --format testname \
             --hide-summary=skipped \
-            -- -race -p 1 -timeout 10m -coverprofile=coverage.out $(go list ./... | grep -v /test/)
+            -- -race -p 1 -timeout 20m -coverprofile=coverage.out $(go list ./... | grep -v /test/)
 
       - name: Display coverage
         run: go tool cover -func=coverage.out | grep "total:"

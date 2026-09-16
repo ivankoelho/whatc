@@ -99,8 +99,7 @@ test.describe('Language Switching', () => {
       await page.waitForLoadState('networkidle')
 
       // Open user menu popover (in sidebar)
-      const userMenuButton = page.locator('aside').getByRole('button').filter({ hasText: /@/ }).first()
-      await userMenuButton.click()
+      await page.getByTestId('user-menu-trigger').click()
 
       // The popover is portaled by Radix outside aside
       const popoverContent = page.locator('[data-state="open"][data-side]')
@@ -112,8 +111,7 @@ test.describe('Language Switching', () => {
       await page.waitForLoadState('networkidle')
 
       // Open user menu
-      const userMenuButton = page.locator('aside').getByRole('button').filter({ hasText: /@/ }).first()
-      await userMenuButton.click()
+      await page.getByTestId('user-menu-trigger').click()
 
       // The language switcher is in the popover that appears in the sidebar area
       // Find the combobox within the popover content

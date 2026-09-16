@@ -159,6 +159,7 @@ const handleLogout = async () => {
         <Button
           variant="ghost"
           size="icon"
+          data-testid="sidebar-toggle"
           class="h-7 w-7 text-white/50 hover:text-white hover:bg-white/[0.08] light:text-gray-400 light:hover:text-gray-900 light:hover:bg-gray-100"
           :aria-label="isCollapsed ? $t('nav.expandSidebar') : $t('nav.collapseSidebar')"
           :aria-expanded="!isCollapsed"

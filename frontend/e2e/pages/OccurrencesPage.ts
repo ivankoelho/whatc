@@ -11,7 +11,6 @@ export class OccurrencesPage extends BasePage {
   // Chat panel
   readonly openPanelButton: Locator
   readonly panel: Locator
-  readonly titleInput: Locator
 
   // Detail view
   readonly stageSelect: Locator
@@ -35,7 +34,6 @@ export class OccurrencesPage extends BasePage {
     super(page)
     this.openPanelButton = page.locator('#occurrences-button')
     this.panel = page.locator('#occurrences-panel')
-    this.titleInput = this.panel.getByPlaceholder('Title')
 
     // The detail view has exactly two comboboxes, in DOM order: the stage
     // selector (header actions slot, rendered first by DetailPageLayout)
@@ -146,18 +144,24 @@ export class OccurrencesPage extends BasePage {
     }
   }
 
-  /** Opens the panel, fills the title and submits. "New occurrence" labels
-   * both the header toggle and the form's submit button, so .first()/.last()
-   * disambiguate by DOM order rather than text. */
+  /** Opens the panel and the "open protocol" dialog it launches
+   * (OpenProtocolForm.vue), and submits it. The dialog is opened from a
+   * known contact, so the client/sale sections are pre-resolved and only
+   * Product + Description need filling. The backend titles the occurrence
+   * from Product when no category is picked (see CreateOccurrence), so
+   * filling Product with `title` keeps this method's contract the same as
+   * before the dialog-based rewrite. */
   async createOccurrence(title: string) {
     await this.openPanel()
-    await this.panel.getByRole('button', { name: 'New occurrence' }).first().click()
-    await this.titleInput.fill(title)
-    await this.panel.getByRole('button', { name: 'New occurrence' }).last().click()
-    // The form closes only after the create request resolves. Wait for that
-    // here so a second call right after this one finds a clean, closed form
-    // instead of racing the toggle button against the still-open one.
-    await this.titleInput.waitFor({ state: 'hidden' })
+    await this.panel.getByRole('button', { name: 'New occurrence' }).click()
+    const dialog = this.page.getByRole('dialog')
+    await dialog.getByPlaceholder('E.g.: Oak Laminate Flooring').fill(title)
+    await dialog.getByPlaceholder('Describe what the customer reported...').fill('Automated e2e test note.')
+    await dialog.getByRole('button', { name: 'Register protocol' }).click()
+    // The dialog closes only after the create request resolves. Wait for
+    // that here so a second call right after this one finds a clean,
+    // closed dialog instead of racing the toggle button against this one.
+    await dialog.waitFor({ state: 'hidden' })
   }
 
   getOccurrenceCard(text: string | RegExp): Locator {

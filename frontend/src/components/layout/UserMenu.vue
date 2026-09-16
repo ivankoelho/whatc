@@ -168,6 +168,7 @@ const handleLogout = () => {
       <PopoverTrigger as-child>
         <Button
           variant="ghost"
+          data-testid="user-menu-trigger"
           :class="[
             'flex items-center justify-start w-full h-auto px-2 py-1.5 gap-2 hover:bg-white/[0.04] light:hover:bg-gray-100',
             collapsed && 'md:justify-center'

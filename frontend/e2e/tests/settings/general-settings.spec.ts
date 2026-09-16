@@ -59,7 +59,9 @@ test.describe('General Tab', () => {
 
   test('should show available timezones', async ({ page }) => {
     await settingsPage.timezoneSelect.click()
-    await expect(page.locator('[role="option"]').filter({ hasText: 'UTC' })).toBeVisible()
+    // Exact match: the Brazil options (Bahia, Manaus, ...) also contain "UTC"
+    // in their label (e.g. "UTC-3"), so a substring filter matches 5 options.
+    await expect(page.getByRole('option', { name: 'UTC', exact: true })).toBeVisible()
     await expect(page.locator('[role="option"]').filter({ hasText: 'Eastern' })).toBeVisible()
     // Close dropdown
     await page.keyboard.press('Escape')
