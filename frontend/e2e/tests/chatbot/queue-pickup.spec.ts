@@ -462,7 +462,14 @@ test.describe('Pickup respects assign_to_same_agent', () => {
       await localApi.login(SUPER_ADMIN.email, SUPER_ADMIN.password)
       const phone = scope.phone()
       const contact = await localApi.createContact(phone, scope.name(slug))
-      await execSQL(`UPDATE contacts SET whats_app_account = '${accountName}' WHERE id = '${contact.id}'`)
+      // CreateContact assigns the creator (SUPER_ADMIN here) so the agent who
+      // opens it can see it under strict conversation visibility — correct
+      // for a real "add contact" click, but this suite is simulating a
+      // contact that arrived unassigned via an inbound WhatsApp message and
+      // is waiting in the queue. Clear it back to unassigned so the
+      // AssignToSameAgent pickup assertions below (which only fire when
+      // contact.assigned_user_id is nil) exercise the real queue scenario.
+      await execSQL(`UPDATE contacts SET whats_app_account = '${accountName}', assigned_user_id = NULL WHERE id = '${contact.id}'`)
       const transferId = await seedQueuedTransfer(orgId, contact.id, phone, scope.name(slug), accountName)
       // The reseed closure re-inserts a queue row for the same contact if a
       // parallel worker's beforeEach blew it away before the page loaded.
