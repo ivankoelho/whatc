@@ -192,6 +192,9 @@ function startContactsResize(e: MouseEvent) {
 const selectedAccount = ref<string | null>(null)
 const contactAccounts = ref<string[]>([])
 const orgAccounts = ref<any[]>([])
+const isBusinessCallingEnabled = computed(() =>
+  orgAccounts.value.find(account => account.name === selectedAccount.value)?.business_calling_enabled === true
+)
 
 // File upload state
 const fileInputRef = ref<HTMLInputElement | null>(null)
@@ -2067,7 +2070,7 @@ async function sendMediaMessage() {
           </div>
           <div class="flex items-center gap-1">
             <CallButton
-              v-if="contactsStore.currentContact?.phone_number && selectedAccount"
+              v-if="contactsStore.currentContact?.phone_number && selectedAccount && isBusinessCallingEnabled"
               :contact-id="contactsStore.currentContact.id"
               :contact-phone="contactsStore.currentContact.phone_number"
               :contact-name="contactsStore.currentContact.name || contactsStore.currentContact.phone_number"
