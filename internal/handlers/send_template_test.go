@@ -785,6 +785,9 @@ func TestApp_SendTemplateMessage(t *testing.T) {
 		require.NoError(t, app.DB.Where("organization_id = ? AND phone_number = ?", org.ID, normalized).First(&newContact).Error)
 		assert.Equal(t, account.Name, newContact.WhatsAppAccount)
 		assert.Equal(t, normalized, newContact.PhoneNumber, "a new contact is stored in the digits-only canonical form")
+		require.NotNil(t, newContact.AssignedUserID, "owned by whoever sent the first message, same as CreateContact -- "+
+			"otherwise it's invisible to its own creator once the compensating active transfer closes")
+		assert.Equal(t, user.ID, *newContact.AssignedUserID)
 
 		var count int64
 		app.DB.Model(&models.Contact{}).Where("organization_id = ? AND phone_number IN (?, ?)", org.ID, normalized, phone).Count(&count)

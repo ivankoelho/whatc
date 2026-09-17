@@ -867,11 +867,17 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 	}
 
 	if isNewContact {
+		// Owned by whoever sent the first message, same reasoning as
+		// CreateContact (contacts.go) -- without this the contact has no
+		// assignee and (under strict conversation visibility, with no
+		// active transfer yet) is invisible to the very agent who just
+		// started this conversation.
 		c := models.Contact{
 			BaseModel:       models.BaseModel{ID: uuid.New()},
 			OrganizationID:  orgID,
 			PhoneNumber:     contactutil.NormalizePhone(req.PhoneNumber),
 			WhatsAppAccount: account.Name,
+			AssignedUserID:  &userID,
 		}
 		if err := a.DB.Create(&c).Error; err != nil {
 			a.Log.Error("Failed to create contact", "error", err, "phone", req.PhoneNumber)
