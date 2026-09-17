@@ -3,7 +3,7 @@
 - **Data:** 2026-09-17
 - **Status:** Aprovada — pronta para plano de implementação
 - **Autor/revisão:** Ivan Coelho (product) · design colaborativo
-- **Escopo:** Primeira entrega de um módulo novo, "Central de Vendas", separado de Ocorrências/SAC. Cobre o funil de oportunidades ligado ao atendimento WhatsApp e o dashboard de vendas. A conciliação automática com o ERP XProcess/X2 é a Entrega 2, tratada aqui apenas como requisito de preparação — ver §10.
+- **Escopo:** Primeira entrega de um módulo novo, "Central de Vendas", separado de Ocorrências/SAC. Cobre o funil de oportunidades ligado ao atendimento WhatsApp e o dashboard de vendas. A conciliação automática com o ERP XProcess/X2 é a Entrega 2, tratada aqui apenas como requisito de preparação — ver §11.
 
 ## 1. Contexto
 
@@ -18,10 +18,14 @@ Este documento cobre **só a Entrega 1**: o domínio do funil, o gatilho de cria
 **Objetivos (Entrega 1)**
 - Entidade `SalesOpportunity`, criada automaticamente quando o cliente seleciona "Realizar pedido" no fluxo do bot.
 - Três fases fixas (Potencial → Abrir Orçamento → Direcionada) com transição manual pelo agente, e dois estados finais (Convertida / Perdida), mais um quarto estado (Cancelada) reservado para a Entrega 2.
+- Máquina de estados validada no backend (§5.1): sem transições reversas ou a partir de estado terminal, mesmo que alguém contorne o frontend.
+- Motivo da perda obrigatório (`loss_reason`, lista fechada) + observação livre opcional (`loss_notes`).
+- Permissões checadas no backend (§7): agente vê/edita só as próprias; manager enxerga toda a organização; admin configura tudo.
+- Criação idempotente e segura sob concorrência: nunca duas oportunidades abertas para o mesmo contato, mesmo com requisições simultâneas.
 - Histórico completo de mudança de fase/status (`SalesOpportunityEvent`), nunca apagado.
 - SLA de 7 dias em "Direcionada", reaproveitando o processador de SLA que já existe para Ocorrências.
 - Campo novo no usuário (`xprocess_seller_code`) para a futura correspondência com o X2.
-- Dashboard "Minha Operação" (carteira do agente) e visão gerencial agregada, via o motor de widgets genérico já existente.
+- Dashboard "Minha Operação" (carteira do agente) e visão gerencial agregada, via o motor de widgets genérico já existente, com a fórmula de conversão fixada em §8.
 
 **Não-objetivos (explicitamente fora desta entrega)**
 - Qualquer chamada ao XProcess/X2. Nenhum job, nenhum cliente HTTP, nenhuma tabela de conciliação — só os campos e o desenho que tornam isso possível depois sem migração destrutiva.
@@ -60,17 +64,19 @@ Duas tabelas novas, uma coluna nova em `users`. Nenhuma alteração em tabelas e
 |---|---|---|
 | `id` | uuid | |
 | `organization_id` | uuid, indexado | |
-| `opportunity_number` | string(20), único por org | `OPP-YYYYMMDD-NNNNNN` |
+| `opportunity_number` | string(20), único por (org, dia) | `OPP-YYYYMMDD-NNNNNN` — sequencial por organização **e por dia**; organizações diferentes podem ter o mesmo número no mesmo dia (o índice único é `(organization_id, opportunity_number)`, não global) |
 | `contact_id` | uuid, indexado | |
 | `source_transfer_id` | uuid, nulo | Atendimento de origem — traceability only, mesmo papel que `Occurrence.SourceTransferID` |
 | `assigned_user_id` | uuid, nulo, indexado | Carteira; fixado na criação, não segue reatribuição do contato depois |
 | `stage` | string(20) | `potencial` \| `abrir_orcamento` \| `direcionada` |
-| `status` | string(20) | `aberta` \| `convertida` \| `perdida` \| `cancelada` |
+| `status` | string(20) | `aberta` \| `convertida` \| `perdida` \| `cancelada` — transições validadas no backend, ver §5.1 |
 | `interest` | text, nulo | O que o cliente quer, texto livre |
 | `estimated_value` | numeric, nulo | |
 | `estimated_quantity` | int, nulo | |
-| `direcionamento` | string(20), nulo | `visita` \| `whatsapp` — obrigatório antes de sair de "Abrir Orçamento" |
+| `direcionamento` | string(20), nulo | `visita` \| `whatsapp` — editável a qualquer momento enquanto `status=aberta`, independente da fase atual; obrigatório antes de **entrar** em "Direcionada" (ver §5) |
 | `conversion_source` | string(20), nulo | `manual` \| `xprocess` (preenchido só ao converter) |
+| `loss_reason` | string(30), nulo | `cliente_desistiu` \| `preco` \| `prazo` \| `indisponibilidade` \| `comprou_concorrente` \| `sem_retorno` \| `problema_comercial` \| `outro` — obrigatório para marcar como perdida |
+| `loss_notes` | text, nulo | Observação livre opcional sobre a perda |
 | `opened_at` | timestamp | |
 | `stage_changed_at` | timestamp | Entrada na fase atual — base do cálculo de SLA |
 | `converted_at` | timestamp, nulo | |
@@ -78,13 +84,15 @@ Duas tabelas novas, uma coluna nova em `users`. Nenhuma alteração em tabelas e
 | `cancelled_at` | timestamp, nulo | Preenchido só na Entrega 2 |
 | `deleted_at` | timestamp, nulo | Soft-delete padrão; sem endpoint de exclusão física |
 
+Índice parcial único: `(organization_id, contact_id) WHERE status = 'aberta'` — garante no banco, não só na aplicação, que um contato nunca tem duas oportunidades abertas ao mesmo tempo (ver §5.2, concorrência).
+
 ### `sales_opportunity_events`
 | Campo | Tipo | Observação |
 |---|---|---|
 | `id` | uuid | |
 | `organization_id` | uuid, indexado | |
 | `sales_opportunity_id` | uuid, indexado | |
-| `type` | string(20) | `opened` \| `stage_changed` \| `converted` \| `lost` \| `cancelled` |
+| `type` | string(20) | `opened` \| `stage_changed` \| `direcionamento_changed` \| `converted` \| `lost` \| `cancelled` \| `retriggered` |
 | `from_stage` | string(20), nulo | Só em `stage_changed` |
 | `to_stage` | string(20), nulo | Só em `stage_changed` |
 | `source` | string(20) | `manual` \| `xprocess` \| `system` |
@@ -98,58 +106,98 @@ Duas tabelas novas, uma coluna nova em `users`. Nenhuma alteração em tabelas e
 
 ## 5. Regras de transição
 
-- **Criação (→ Potencial):** automática, ao selecionar um botão do bot marcado com `create_opportunity: true`, se o contato não tiver oportunidade aberta. Grava `SalesOpportunityEvent{type: opened, source: system}`. No editor de fluxo (`ChatNodeProperties.vue`), cada botão do node "Botões" ganha um checkbox novo e opcional ("Iniciar oportunidade de venda"), no mesmo lugar onde o `team_id` por botão já é configurado hoje — sem tela nova, só um campo a mais no painel que já existe.
+- **Criação (→ Potencial, status `aberta`):** automática, ao selecionar um botão do bot marcado com `create_opportunity: true`, se o contato não tiver oportunidade aberta. Grava `SalesOpportunityEvent{type: opened, source: system}`. No editor de fluxo (`ChatNodeProperties.vue`), cada botão do node "Botões" ganha um checkbox novo e opcional ("Iniciar oportunidade de venda"), no mesmo lugar onde o `team_id` por botão já é configurado hoje — sem tela nova, só um campo a mais no painel que já existe.
 - **Potencial → Abrir Orçamento:** manual, arrastar no quadro (mesma UX do quadro de Ocorrências).
 - **Abrir Orçamento → Direcionada:** manual; exige `direcionamento` preenchido. Ao entrar, grava `stage_changed_at = now()` (base do SLA de 7 dias).
-- **Direcionada → Convertida / Perdida:** botões explícitos ("Marcar como convertida"/"Marcar como perdida"), não drag-and-drop — ação deliberada, não um destino a mais no quadro. Grava `conversion_source=manual` e o evento correspondente.
+- **`direcionamento`:** editável a qualquer momento enquanto `status=aberta`, em qualquer fase — não é uma ação de transição, é um campo comum do formulário. Só a transição **para** "Direcionada" tem o gate de obrigatoriedade. Toda alteração grava `SalesOpportunityEvent{type: direcionamento_changed}`.
+- **Direcionada → Convertida / Perdida:** botões explícitos ("Marcar como convertida"/"Marcar como perdida"), não drag-and-drop — ação deliberada, não um destino a mais no quadro. Grava `conversion_source=manual` e o evento correspondente. Marcar como perdida **exige** `loss_reason`; `loss_notes` é opcional.
 - **Convertida → Cancelada (Entrega 2):** só a reconciliação automática faz essa transição; grava um evento novo, nunca reescreve o evento de conversão.
 - Toda transição de fase ou status grava um `SalesOpportunityEvent`, sem exceção.
+
+### 5.1 Máquina de estados (validada no backend)
+
+`status` só anda pelas arestas abaixo — qualquer outra transição é rejeitada com 400, **no handler**, não só escondida no frontend:
+
+```
+aberta ──► convertida   (manual nesta entrega; xprocess na Entrega 2)
+aberta ──► perdida      (exige loss_reason)
+convertida ──► cancelada   (só Entrega 2 — reconciliação automática)
+```
+
+`perdida` e `cancelada` são terminais: nenhuma aresta sai delas. Em particular, **não existe** `convertida → perdida`, `perdida → convertida`, nem qualquer transição a partir de `cancelada`. `stage` (potencial/abrir_orcamento/direcionada) só é relevante enquanto `status=aberta`; ao converter/perder, `stage` fica congelado no valor que tinha no momento (não existe "fase" de uma oportunidade fechada).
+
+### 5.2 Novo acionamento do gatilho com oportunidade já aberta
+
+Selecionar de novo um botão `create_opportunity: true` enquanto o contato já tem uma oportunidade `aberta`: **não** cria uma segunda, **não** altera `stage`, a oportunidade existente permanece exatamente como estava. Grava `SalesOpportunityEvent{type: retriggered, source: system}` na oportunidade existente, só para rastreabilidade (ex.: "cliente reentrou no menu de pedido 3 vezes") — sem efeito no funil.
+
+### 5.3 Idempotência e concorrência na criação
+
+Duas requisições simultâneas de criação para o mesmo contato devem resultar em **uma** oportunidade aberta, nunca duas. Mecanismo: o índice parcial único `(organization_id, contact_id) WHERE status='aberta'` (§4) faz o banco rejeitar a segunda inserção concorrente; o handler trata esse conflito exatamente como o caso "já existe uma aberta" do §5.2 — recarrega a existente, grava o evento `retriggered`, e devolve sucesso com a oportunidade já existente (o chamador nunca vê um erro de corrida, só o resultado idempotente).
 
 ## 6. SLA
 
 Ao entrar em "Direcionada", `stage_changed_at` é carimbado. O processador de SLA existente passa a checar, a cada ciclo: oportunidades com `stage=direcionada` e `stage_changed_at` há mais de 7 dias ficam marcadas como SLA vencido (mesmo campo/mecânica que `sla_breached` já usa em Ocorrências) — sem mover de fase, só um indicador visual no card/quadro e um widget dedicado ("Oportunidades com SLA vencido").
 
-## 7. Dashboard
+## 7. Permissões
+
+Novo recurso `sales_opportunities`, checado no backend em todo handler — o frontend só esconde botões/telas, nunca é a única barreira:
+
+| Papel | Permissões | Efeito |
+|---|---|---|
+| `agent` | `sales_opportunities:read`, `sales_opportunities:write` | Vê e edita só as próprias (`assigned_user_id = self`) — mesma regra de visibilidade que Ocorrências/Contatos já aplicam para quem não tem `view_all` |
+| `manager` | `sales_opportunities:read`, `sales_opportunities:write`, `sales_opportunities:view_all` | Enxerga o funil inteiro da organização, igual ao `conversations:view_all` que o papel manager já tem hoje — não é escopo por time (não existe hoje um conceito de "time de vendas" separado; se precisar depois, é extensão futura) |
+| `admin` | tudo (deriva de `allPermissions`, automático) | Inclui configurar `xprocess_seller_code` dos usuários e o checkbox `create_opportunity` no editor de fluxo |
+
+`sales_opportunities:write` não inclui sozinho o direito de ver oportunidades de outra pessoa — sem `view_all`, `PUT/POST` num id que não é seu (e não está na carteira) retorna 403, mesmo padrão de `loadAuthorizedOccurrence`.
+
+## 8. Dashboard
 
 Duas visões, ambas via o motor de widgets genérico com `sales_opportunities` como nova data source:
 
 **Minha Operação (por agente)** — replica as telas de referência:
 - Aba "Minha carteira": cards (Atendimentos, Em potencial, Convertidos, Perdidos, Conversão, 1ª resposta média, Sem direcionamento) + quadro Kanban das 3 fases, escopados a `assigned_user_id = usuário atual`.
-- Aba "Minhas vendas fechadas": histórico de conversões do próprio agente (nesta entrega, sempre `conversion_source=manual`), com valor total e volume.
+- Aba "Minhas vendas fechadas": histórico de conversões do próprio agente. **Rótulo/subtítulo explícito nesta entrega** ("Conversões registradas manualmente — ainda não conciliadas com o XProcess") deixando claro que são conversões manuais (`conversion_source=manual`), não vendas confirmadas pelo ERP; a Entrega 2 substitui/enriquece esses mesmos registros com os dados conciliados, sem mudar a tela.
 
 **Visão gerencial (agregada):** oportunidades abertas, por etapa, valor estimado do funil, convertidas, perdidas, taxa de conversão, tempo médio até conversão (calculado a partir de `sales_opportunity_events`), oportunidades paradas / SLA vencido, vendas por agente, vendas por período.
 
-## 8. API
+**Taxa de conversão** (mesma fórmula em todo lugar que aparecer, "Minha Operação" e visão gerencial):
+```
+taxa_conversao = convertidas / (convertidas + perdidas) * 100
+```
+Oportunidades ainda `aberta` **não entram no denominador** — só contam depois de um desfecho. (A Entrega 2 decide separadamente como `cancelada` entra nessa conta; não é definido agora.)
 
-**Novos endpoints:**
+## 9. API
+
+**Novos endpoints** (todos exigem `sales_opportunities:read`/`write` conforme o método; `view_all` decide se o alvo pode ser de outro usuário — ver §7):
 ```
 GET    /api/sales-opportunities              lista (filtros: stage, status, assigned_user_id, período)
 GET    /api/sales-opportunities/{id}
 PUT    /api/sales-opportunities/{id}/stage    avança fase (valida direcionamento antes de "direcionada")
-POST   /api/sales-opportunities/{id}/convert  marca convertida (conversion_source=manual)
-POST   /api/sales-opportunities/{id}/lose     marca perdida
+PUT    /api/sales-opportunities/{id}/direcionamento   altera direcionamento sem mudar fase (§5)
+POST   /api/sales-opportunities/{id}/convert  marca convertida (conversion_source=manual) — valida a máquina de estados (§5.1)
+POST   /api/sales-opportunities/{id}/lose     marca perdida (exige loss_reason) — valida a máquina de estados (§5.1)
 GET    /api/sales-opportunities/{id}/events   histórico
 ```
 
 **Alterados:**
 ```
-PUT  /api/users/{id}     + xprocess_seller_code (opcional)
+PUT  /api/users/{id}     + xprocess_seller_code (opcional, exige permissão de admin sobre usuários)
 ```
 
 Data source `sales_opportunities` no motor de widgets (`GET /api/widgets/data-sources` ganha essa entrada como efeito colateral de registrá-la).
 
-## 9. Frontend
+## 10. Frontend
 
 | Arquivo | Mudança |
 |---|---|
 | `services/api.ts` | `salesOpportunitiesService` novo (list/get/changeStage/convert/lose/listEvents); `User`/`UpdateUserRequest` ganham `xprocess_seller_code` |
-| `views/sales/SalesOperationView.vue` (novo) | "Minha Operação": abas "Minha carteira" (cards + quadro) e "Minhas vendas fechadas" (histórico + indicadores) |
-| `components/sales/SalesOpportunityBoard.vue` (novo) | Quadro Kanban das 3 fases, mesmo padrão de `OccurrenceBoard.vue`/`OccurrenceCard.vue` |
+| `views/sales/SalesOperationView.vue` (novo) | "Minha Operação": abas "Minha carteira" (cards + quadro) e "Minhas vendas fechadas" (histórico + indicadores, com o rótulo de "conversão manual" do §8) |
+| `components/sales/SalesOpportunityBoard.vue` (novo) | Quadro Kanban das 3 fases, mesmo padrão de `OccurrenceBoard.vue`/`OccurrenceCard.vue`; botões "Marcar como convertida"/"perdida" (perdida abre um diálogo pedindo `loss_reason` + `loss_notes` opcional, não um simples confirm) |
 | `views/sales/SalesDashboardView.vue` (novo, ou seção nova no dashboard existente) | Visão gerencial agregada — mesmo mecanismo de widgets já usado no `/dashboard` atual |
 | `components/chatbot/ChatNodeProperties.vue` | Checkbox novo por botão ("Iniciar oportunidade de venda") no node "Botões" |
 | `views/settings/UsersView.vue` (ou dialog equivalente) | Campo novo "Código de vendedor XProcess" no formulário de usuário |
 
-## 10. Preparação para a Entrega 2 (não implementado agora)
+## 11. Preparação para a Entrega 2 (não implementado agora)
 
 Registrado aqui para não ser perdido, sem afetar o schema desta entrega:
 
@@ -159,26 +207,34 @@ Registrado aqui para não ser perdido, sem afetar o schema desta entrega:
 - Reconciliação, não importação única: o job reconsulta pedidos já vinculados (D-1, D-2, D-3, D-7) para capturar `Separado → Fechado → Cancelado`, e uma oportunidade `convertida` pode virar `cancelada` sem perder o histórico.
 - Mapeamento de status X2 → Whatomate: `Separado` e `Fechado` = convertida (pagamento já confirmado em "Separado"); `Cancelado` = perdida (se nunca tinha convertido) ou cancelada (se já tinha).
 
-## 11. Verificação
+## 12. Verificação
 
 **Go**
 - Seleção de botão com `create_opportunity: true` cria oportunidade em `potencial`, com `SalesOpportunityEvent{type: opened}`.
-- Selecionar o mesmo botão de novo com uma oportunidade já aberta não duplica.
+- Selecionar o mesmo botão de novo com uma oportunidade já aberta não duplica, não muda `stage`, grava evento `retriggered`.
+- Duas requisições concorrentes de criação para o mesmo contato resultam em uma única oportunidade aberta (teste de corrida, mesmo padrão de `TestOccurrenceProtocol_UniqueUnderConcurrency`).
 - `assigned_user_id` no momento da criação reflete `Contact.AssignedUserID` naquele instante (inclusive nulo).
 - Reatribuir o contato depois não altera `assigned_user_id` da oportunidade já criada.
 - Transição para "direcionada" sem `direcionamento` preenchido → 400.
+- `direcionamento` pode ser alterado com a oportunidade em qualquer fase, sem mudar `stage`.
+- Máquina de estados (§5.1): `convertida → perdida`, `perdida → convertida`, `perdida → cancelada`, e qualquer transição a partir de `cancelada` retornam 400. `aberta → convertida`, `aberta → perdida` funcionam.
+- `POST .../lose` sem `loss_reason` → 400; com `loss_reason` válido grava `lost_at`, evento `lost`.
+- `POST .../lose` com `loss_reason` fora da lista fechada → 400.
 - Toda transição de fase/status grava exatamente um `SalesOpportunityEvent` com `from_stage`/`to_stage`/`source`/`created_by_id` corretos.
 - `POST .../convert` grava `conversion_source=manual`, `converted_at`, evento `converted`.
-- `opportunity_number` não colide sob concorrência (mesmo teste de corrida que já existe para `OccurrenceProtocol`); reseta a sequência em um novo dia.
+- `opportunity_number` não colide sob concorrência (mesmo teste de corrida que já existe para `OccurrenceProtocol`); reseta a sequência em um novo dia; duas organizações podem ter o mesmo número no mesmo dia.
 - SLA: oportunidade em "direcionada" há mais de 7 dias aparece marcada; ao sair da fase, deixa de aparecer, mesmo sem ter completado 7 dias antes disso.
 - Exclusão física: endpoint não existe; soft-delete não remove o histórico de eventos.
+- Permissões: agente sem `view_all` recebe 403 ao tentar ler/editar oportunidade de outro; agente vê e edita as próprias; manager (com `view_all`) vê e edita qualquer uma da organização.
+- Cálculo de taxa de conversão exclui oportunidades `aberta` do denominador.
 
 **Playwright**
 - Cliente seleciona "Realizar pedido" (ou o botão de teste equivalente) → oportunidade aparece em "Minha carteira" do agente atribuído.
-- Arrastar pelas 3 fases no quadro; marcar convertida/perdida via botão explícito.
+- Arrastar pelas 3 fases no quadro; marcar convertida/perdida via botão explícito, exigindo motivo da perda.
 - Tentar avançar para "Direcionada" sem preencher direcionamento é bloqueado.
+- Tentar marcar como perdida sem selecionar motivo é bloqueado na UI (e o backend também rejeitaria se contornado).
 
-## 12. Riscos conhecidos
+## 13. Riscos conhecidos
 
 | Risco | Mitigação |
 |---|---|
