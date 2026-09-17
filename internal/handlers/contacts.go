@@ -1490,46 +1490,52 @@ func (a *App) CreateContact(r *fastglue.Request) error {
 	found, findErr := contactutil.FindContactUnscoped(a.DB, orgID, req.PhoneNumber)
 	if findErr == nil {
 		existingContact := *found
-		// Contact exists
 		if existingContact.DeletedAt.Valid {
 			// Restore soft-deleted contact
 			a.DB.Unscoped().Model(&existingContact).Update("deleted_at", nil)
 			existingContact.DeletedAt.Valid = false
-			// Update fields
-			updates := map[string]any{}
-			if req.ProfileName != "" {
-				updates["profile_name"] = req.ProfileName
-			}
-			if req.WhatsAppAccount != "" {
-				updates["whats_app_account"] = req.WhatsAppAccount
-			}
-			if req.CPFCNPJ != "" {
-				updates["cpf_cnpj"] = normalizeDocument(req.CPFCNPJ)
-			}
-			if req.Tags != nil {
-				tagsArray := make(models.JSONBArray, len(req.Tags))
-				for i, tag := range req.Tags {
-					tagsArray[i] = tag
-				}
-				updates["tags"] = tagsArray
-			}
-			if req.Metadata != nil {
-				updates["metadata"] = models.JSONB(req.Metadata)
-			}
-			// Same visibility reasoning as a fresh create: an unowned restored
-			// contact goes to whoever restored it, so they can see it under
-			// strict conversation visibility.
-			if existingContact.AssignedUserID == nil {
-				updates["assigned_user_id"] = userID
-			}
-			if len(updates) > 0 {
-				a.DB.Model(&existingContact).Updates(updates)
-			}
-			// Reload contact
-			a.DB.First(&existingContact, existingContact.ID)
-			return r.SendEnvelope(a.buildContactResponse(&existingContact, orgID))
+		} else if existingContact.AssignedUserID != nil {
+			// Genuinely someone else's contact -- nothing to claim.
+			return r.SendErrorEnvelope(fasthttp.StatusConflict, "Contact with this phone number already exists", nil, "")
 		}
-		return r.SendErrorEnvelope(fasthttp.StatusConflict, "Contact with this phone number already exists", nil, "")
+		// Reached for both a restored contact and an existing-but-unassigned
+		// one: FindContactUnscoped bypasses conversation-visibility scoping
+		// on purpose (dedup must see every spelling of a phone number,
+		// regardless of who can view it), but ListContacts' search does NOT.
+		// Under strict visibility, an agent searching for an unassigned
+		// contact that already exists gets no results, so from their side
+		// this really is "new" -- a flat 409 here would be a dead end they
+		// have no way to recover from (they can't see it to ask for it, and
+		// can't create it either). Claim it for them instead, same as the
+		// restore-soft-deleted case already did.
+		updates := map[string]any{}
+		if req.ProfileName != "" {
+			updates["profile_name"] = req.ProfileName
+		}
+		if req.WhatsAppAccount != "" {
+			updates["whats_app_account"] = req.WhatsAppAccount
+		}
+		if req.CPFCNPJ != "" {
+			updates["cpf_cnpj"] = normalizeDocument(req.CPFCNPJ)
+		}
+		if req.Tags != nil {
+			tagsArray := make(models.JSONBArray, len(req.Tags))
+			for i, tag := range req.Tags {
+				tagsArray[i] = tag
+			}
+			updates["tags"] = tagsArray
+		}
+		if req.Metadata != nil {
+			updates["metadata"] = models.JSONB(req.Metadata)
+		}
+		if existingContact.AssignedUserID == nil {
+			updates["assigned_user_id"] = userID
+		}
+		if len(updates) > 0 {
+			a.DB.Model(&existingContact).Updates(updates)
+		}
+		a.DB.First(&existingContact, existingContact.ID)
+		return r.SendEnvelope(a.buildContactResponse(&existingContact, orgID))
 	}
 
 	// Create new contact, owned by whoever created it. Without this the contact
