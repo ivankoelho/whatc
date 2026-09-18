@@ -217,8 +217,10 @@ func (a *App) ensureDefaultSACWidgets(orgID uuid.UUID) error {
 // consumed by querySalesOpportunities's field-driven WHERE-clause switch,
 // not by allowedFilterFields/allowedGroupByFields — none of these widgets
 // set Filters or GroupByField, so those two whitelists don't apply. Metric
-// "sum" on the value-of-funnel card always aggregates estimated_value
-// (hardcoded in querySalesOpportunities), so Field is unused for that one.
+// "sum" always aggregates the hardcoded estimated_value column, but Field
+// still matters for it: it's what picks the status filter via the same
+// switch (see the value-of-funnel card below, which uses Field: "open" so
+// the sum is scoped to aberta opportunities, matching its description).
 var salesOpportunityDashboardWidgets = []models.Widget{
 	{
 		Name: "Oportunidades abertas", Description: "Em potencial, orçamento ou direcionada",
@@ -240,7 +242,7 @@ var salesOpportunityDashboardWidgets = []models.Widget{
 	},
 	{
 		Name: "Valor estimado do funil", Description: "Soma de estimated_value das oportunidades abertas",
-		DataSource: "sales_opportunities", Metric: "sum", Field: "estimated_value",
+		DataSource: "sales_opportunities", Metric: "sum", Field: "open",
 		DisplayType: "number", Color: "purple", Size: "small", ShowChange: false,
 		IsShared: true, IsDefault: true,
 	},

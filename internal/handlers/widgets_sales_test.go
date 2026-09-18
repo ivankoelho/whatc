@@ -32,6 +32,41 @@ func TestQuerySalesOpportunities_CountOpen(t *testing.T) {
 	assert.Equal(t, float64(1), got)
 }
 
+// TestQuerySalesOpportunities_SumEstimatedValueScopedToOpen guards the
+// "Valor estimado do funil" widget (Metric: "sum", Field: "open"): the sum
+// must include only aberta opportunities' estimated_value, not
+// convertida/perdida ones, matching the widget's own description.
+func TestQuerySalesOpportunities_SumEstimatedValueScopedToOpen(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+
+	val := func(v float64) *float64 { return &v }
+	opps := []struct {
+		status models.SalesOpportunityStatus
+		value  float64
+	}{
+		{models.SalesOpportunityStatusAberta, 100},
+		{models.SalesOpportunityStatusAberta, 250},
+		{models.SalesOpportunityStatusConvertida, 1000},
+		{models.SalesOpportunityStatusPerdida, 500},
+	}
+	for i, o := range opps {
+		// One contact per opportunity: idx_sales_opp_org_contact_open is a
+		// partial unique index on (organization_id, contact_id) WHERE
+		// status = 'aberta', so two aberta opportunities can't share a contact.
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		require.NoError(t, app.DB.Create(&models.SalesOpportunity{
+			OrganizationID: org.ID, ContactID: contact.ID,
+			OpportunityNumber: "OPP-20260917-00001" + string(rune('1'+i)),
+			Stage:             models.SalesOpportunityStagePotencial, Status: o.status,
+			EstimatedValue: val(o.value), StageChangedAt: time.Now(),
+		}).Error)
+	}
+
+	got := app.QuerySalesOpportunitiesForTest(org.ID, "sum", "open", nil, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+	assert.Equal(t, float64(350), got, "only the two aberta opportunities (100+250) should count, not convertida/perdida")
+}
+
 func TestQuerySalesOpportunities_ConversionRateExcludesOpenFromDenominator(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
