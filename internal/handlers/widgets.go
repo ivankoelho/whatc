@@ -119,13 +119,18 @@ type DataPoint struct {
 
 // Available data sources and their filterable fields
 var widgetDataSources = map[string][]string{
-	"messages":            {"status", "direction", "message_type", "whatsapp_account"},
-	"contacts":            {"whatsapp_account", "is_read"},
-	"campaigns":           {"status", "message_status"},
-	"transfers":           {"status", "source"},
-	"sessions":            {"status"},
-	"occurrences":         {"priority", "stage_id", "category_id", "unit_id", "department_id", "sale_channel"},
-	"sales_opportunities": {"stage", "status", "assigned_user_id"},
+	"messages":    {"status", "direction", "message_type", "whatsapp_account"},
+	"contacts":    {"whatsapp_account", "is_read"},
+	"campaigns":   {"status", "message_status"},
+	"transfers":   {"status", "source"},
+	"sessions":    {"status"},
+	"occurrences": {"priority", "stage_id", "category_id", "unit_id", "department_id", "sale_channel"},
+	// assigned_user_id omitted: tableQuerySQL's sales_opportunities entry joins
+	// contacts, and contacts also has an assigned_user_id column, so an
+	// unqualified filter on it is ambiguous in that joined query. Add it back
+	// once buildFilterSQL/appendFilterSQL can qualify filter columns with a
+	// table alias.
+	"sales_opportunities": {"stage", "status"},
 }
 
 // Available metrics
@@ -1217,9 +1222,12 @@ var allowedFilterFields = map[string]map[string]bool{
 		"sale_channel":  true,
 	},
 	"sales_opportunities": {
-		"stage":            true,
-		"status":           true,
-		"assigned_user_id": true,
+		"stage":  true,
+		"status": true,
+		// assigned_user_id omitted: ambiguous against the contacts join in
+		// tableQuerySQL["sales_opportunities"] (both sales_opportunities and
+		// contacts have this column, and filter columns interpolate
+		// unqualified) until buildFilterSQL is made alias-aware.
 	},
 }
 
