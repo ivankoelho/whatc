@@ -38,10 +38,10 @@ function formatCurrency(value?: number): string {
       {{ formatCurrency(opportunity.estimated_value) }}
     </p>
     <div v-if="opportunity.stage === 'direcionada'" class="mt-2 flex gap-2">
-      <Button size="sm" variant="outline" class="flex-1 text-xs" @click.stop="$emit('convert', opportunity)">
+      <Button data-testid="sales-opportunity-convert-button" size="sm" variant="outline" class="flex-1 text-xs" @click.stop="$emit('convert', opportunity)">
         {{ $t('sales.markConverted') }}
       </Button>
-      <Button size="sm" variant="outline" class="flex-1 text-xs" @click.stop="$emit('lose', opportunity)">
+      <Button data-testid="sales-opportunity-lose-button" size="sm" variant="outline" class="flex-1 text-xs" @click.stop="$emit('lose', opportunity)">
         {{ $t('sales.markLost') }}
       </Button>
     </div>
