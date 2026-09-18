@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/shridarpatil/whatomate/internal/database"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -47,9 +48,10 @@ func SetupTestDB(t *testing.T) *gorm.DB {
 			return
 		}
 
-		// Ensure xprocess_seller_code column exists on users table (handles AutoMigrate limitations)
-		if err := testDB.Exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS xprocess_seller_code character varying(20)`).Error; err != nil {
-			testDBInitErr = fmt.Errorf("failed to add xprocess_seller_code column: %w", err)
+		// Create the additional indexes/constraints not covered by GORM tags
+		// (partial unique indexes, etc.) — same call production uses.
+		if err := database.CreateIndexes(testDB); err != nil {
+			testDBInitErr = fmt.Errorf("failed to create indexes: %w", err)
 			return
 		}
 

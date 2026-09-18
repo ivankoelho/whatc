@@ -15,11 +15,11 @@ func TestSalesOpportunityModel_CreateAndRead(t *testing.T) {
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
 
 	opp := models.SalesOpportunity{
-		OrganizationID:     org.ID,
-		OpportunityNumber:  "OPP-20260917-000001",
-		ContactID:          contact.ID,
-		Stage:              models.SalesOpportunityStagePotencial,
-		Status:             models.SalesOpportunityStatusAberta,
+		OrganizationID:    org.ID,
+		OpportunityNumber: "OPP-20260917-000001",
+		ContactID:         contact.ID,
+		Stage:             models.SalesOpportunityStagePotencial,
+		Status:            models.SalesOpportunityStatusAberta,
 	}
 	require.NoError(t, app.DB.Create(&opp).Error)
 
@@ -28,16 +28,44 @@ func TestSalesOpportunityModel_CreateAndRead(t *testing.T) {
 	require.Equal(t, models.SalesOpportunityStagePotencial, got.Stage)
 
 	event := models.SalesOpportunityEvent{
-		OrganizationID:      org.ID,
-		SalesOpportunityID:  opp.ID,
-		Type:                models.SalesOpportunityEventOpened,
-		Source:              models.SalesOpportunityEventSourceSystem,
+		OrganizationID:     org.ID,
+		SalesOpportunityID: opp.ID,
+		Type:               models.SalesOpportunityEventOpened,
+		Source:             models.SalesOpportunityEventSourceSystem,
 	}
 	require.NoError(t, app.DB.Create(&event).Error)
 
 	var gotEvent models.SalesOpportunityEvent
 	require.NoError(t, app.DB.First(&gotEvent, "id = ?", event.ID).Error)
 	require.Equal(t, models.SalesOpportunityEventOpened, gotEvent.Type)
+}
+
+func TestSalesOpportunityModel_OpportunityNumberUniquePerOrgNotGlobally(t *testing.T) {
+	app := newTestApp(t)
+	orgA := testutil.CreateTestOrganization(t, app.DB)
+	orgB := testutil.CreateTestOrganization(t, app.DB)
+	contactA := testutil.CreateTestContact(t, app.DB, orgA.ID)
+	contactB := testutil.CreateTestContact(t, app.DB, orgB.ID)
+
+	const number = "OPP-20260917-000001"
+
+	oppA := models.SalesOpportunity{
+		OrganizationID:    orgA.ID,
+		OpportunityNumber: number,
+		ContactID:         contactA.ID,
+		Stage:             models.SalesOpportunityStagePotencial,
+		Status:            models.SalesOpportunityStatusAberta,
+	}
+	require.NoError(t, app.DB.Create(&oppA).Error)
+
+	oppB := models.SalesOpportunity{
+		OrganizationID:    orgB.ID,
+		OpportunityNumber: number,
+		ContactID:         contactB.ID,
+		Stage:             models.SalesOpportunityStagePotencial,
+		Status:            models.SalesOpportunityStatusAberta,
+	}
+	require.NoError(t, app.DB.Create(&oppB).Error)
 }
 
 func TestUserModel_XProcessSellerCode(t *testing.T) {

@@ -67,13 +67,13 @@ var ValidSalesLossReasons = map[SalesLossReason]bool{
 type SalesOpportunityEventType string
 
 const (
-	SalesOpportunityEventOpened               SalesOpportunityEventType = "opened"
-	SalesOpportunityEventStageChanged         SalesOpportunityEventType = "stage_changed"
+	SalesOpportunityEventOpened                SalesOpportunityEventType = "opened"
+	SalesOpportunityEventStageChanged          SalesOpportunityEventType = "stage_changed"
 	SalesOpportunityEventDirecionamentoChanged SalesOpportunityEventType = "direcionamento_changed"
-	SalesOpportunityEventConverted            SalesOpportunityEventType = "converted"
-	SalesOpportunityEventLost                 SalesOpportunityEventType = "lost"
-	SalesOpportunityEventCancelled            SalesOpportunityEventType = "cancelled"
-	SalesOpportunityEventRetriggered          SalesOpportunityEventType = "retriggered"
+	SalesOpportunityEventConverted             SalesOpportunityEventType = "converted"
+	SalesOpportunityEventLost                  SalesOpportunityEventType = "lost"
+	SalesOpportunityEventCancelled             SalesOpportunityEventType = "cancelled"
+	SalesOpportunityEventRetriggered           SalesOpportunityEventType = "retriggered"
 )
 
 type SalesOpportunityEventSource string
@@ -89,7 +89,7 @@ const (
 // docs/superpowers/specs/2026-09-17-central-vendas-funil-entrega1-design.md §4.
 type SalesOpportunity struct {
 	BaseModel
-	OrganizationID uuid.UUID `gorm:"type:uuid;index;not null" json:"organization_id"`
+	OrganizationID uuid.UUID `gorm:"type:uuid;index;not null;uniqueIndex:idx_sales_opp_org_number" json:"organization_id"`
 
 	// Unique per (organization_id, opportunity_number), not globally — two
 	// orgs may repeat the same number on the same day (spec §4).
@@ -117,7 +117,7 @@ type SalesOpportunity struct {
 
 	ConversionSource *SalesConversionSource `gorm:"size:20" json:"conversion_source,omitempty"`
 	LossReason       *SalesLossReason       `gorm:"size:30" json:"loss_reason,omitempty"`
-	LossNotes        string                  `gorm:"type:text" json:"loss_notes,omitempty"`
+	LossNotes        string                 `gorm:"type:text" json:"loss_notes,omitempty"`
 
 	OpenedAt time.Time `gorm:"autoCreateTime" json:"opened_at"`
 	// Entry into the current stage — base of the 7-day SLA (spec §6).
@@ -138,13 +138,13 @@ func (SalesOpportunity) TableName() string { return "sales_opportunities" }
 
 type SalesOpportunityEvent struct {
 	BaseModel
-	OrganizationID      uuid.UUID                    `gorm:"type:uuid;index;not null" json:"organization_id"`
-	SalesOpportunityID  uuid.UUID                    `gorm:"type:uuid;index;not null" json:"sales_opportunity_id"`
-	Type                SalesOpportunityEventType     `gorm:"size:30;not null" json:"type"`
-	FromStage           *SalesOpportunityStage        `gorm:"size:20" json:"from_stage,omitempty"`
-	ToStage             *SalesOpportunityStage        `gorm:"size:20" json:"to_stage,omitempty"`
-	Source              SalesOpportunityEventSource   `gorm:"size:20;not null" json:"source"`
-	CreatedByID         *uuid.UUID                    `gorm:"type:uuid" json:"created_by_id,omitempty"` // nil = system
+	OrganizationID     uuid.UUID                   `gorm:"type:uuid;index;not null" json:"organization_id"`
+	SalesOpportunityID uuid.UUID                   `gorm:"type:uuid;index;not null" json:"sales_opportunity_id"`
+	Type               SalesOpportunityEventType   `gorm:"size:30;not null" json:"type"`
+	FromStage          *SalesOpportunityStage      `gorm:"size:20" json:"from_stage,omitempty"`
+	ToStage            *SalesOpportunityStage      `gorm:"size:20" json:"to_stage,omitempty"`
+	Source             SalesOpportunityEventSource `gorm:"size:20;not null" json:"source"`
+	CreatedByID        *uuid.UUID                  `gorm:"type:uuid" json:"created_by_id,omitempty"` // nil = system
 
 	CreatedBy *User `gorm:"foreignKey:CreatedByID" json:"created_by,omitempty"`
 }
