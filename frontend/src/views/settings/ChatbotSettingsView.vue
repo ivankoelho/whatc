@@ -132,6 +132,9 @@ const slaSettings = ref({
   sla_auto_close_message: '',
   sla_warning_message: '',
   sla_escalation_notify_ids: [] as string[],
+  // Independent of sla_enabled (chat's own SLA) — gates SLA breach-marking
+  // for Central de Vendas opportunities, see models.SLAConfig.SalesOpportunityEnabled.
+  sales_opportunity_sla_enabled: false,
   // Client inactivity settings
   client_reminder_enabled: false,
   client_reminder_minutes: 30,
@@ -237,6 +240,7 @@ onMounted(async () => {
         sla_auto_close_message: chatbotData.settings.sla_auto_close_message || '',
         sla_warning_message: chatbotData.settings.sla_warning_message || '',
         sla_escalation_notify_ids: chatbotData.settings.sla_escalation_notify_ids || [],
+        sales_opportunity_sla_enabled: chatbotData.settings.sales_opportunity_sla_enabled === true,
         client_reminder_enabled: clientReminderEnabledValue,
         client_reminder_minutes: chatbotData.settings.client_reminder_minutes || 30,
         client_reminder_message: chatbotData.settings.client_reminder_message || '',
@@ -360,6 +364,7 @@ async function saveSLASettings() {
       sla_auto_close_message: slaSettings.value.sla_auto_close_message,
       sla_warning_message: slaSettings.value.sla_warning_message,
       sla_escalation_notify_ids: slaSettings.value.sla_escalation_notify_ids,
+      sales_opportunity_sla_enabled: slaSettings.value.sales_opportunity_sla_enabled,
       client_reminder_enabled: slaSettings.value.client_reminder_enabled,
       client_reminder_minutes: slaSettings.value.client_reminder_minutes,
       client_reminder_message: slaSettings.value.client_reminder_message,
@@ -670,6 +675,20 @@ function removeEscalationUser(userId: string) {
                   <Switch
                     :checked="isSLAEnabled"
                     @update:checked="(val: boolean) => isSLAEnabled = val"
+                  />
+                </div>
+
+                <Separator />
+
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="font-medium">{{ $t('chatbotSettings.enableSalesOpportunitySla') }}</p>
+                    <p class="text-sm text-muted-foreground">{{ $t('chatbotSettings.enableSalesOpportunitySlaDesc') }}</p>
+                  </div>
+                  <Switch
+                    data-testid="sales-opportunity-sla-switch"
+                    :checked="slaSettings.sales_opportunity_sla_enabled"
+                    @update:checked="(val: boolean) => (slaSettings.sales_opportunity_sla_enabled = val)"
                   />
                 </div>
 

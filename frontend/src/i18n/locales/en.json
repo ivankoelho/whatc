@@ -1990,6 +1990,8 @@
     "slaSettingsDesc": "Configure Service Level Agreements for agent transfers",
     "enableSlaTracking": "Enable SLA Tracking",
     "enableSlaTrackingDesc": "Track response times and escalate overdue transfers",
+    "enableSalesOpportunitySla": "Enable Central de Vendas SLA",
+    "enableSalesOpportunitySlaDesc": "Mark opportunities stuck in \"Directed\" for more than 7 days as SLA breached",
     "responseTime": "Response Time (minutes)",
     "responseTimeHint": "Time for agent to pick up",
     "escalationTime": "Escalation Time (minutes)",

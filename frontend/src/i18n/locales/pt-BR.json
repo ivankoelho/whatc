@@ -1977,6 +1977,8 @@
     "slaSettingsDesc": "Configure os Acordos de Nível de Serviço para transferências de agentes",
     "enableSlaTracking": "Ativar acompanhamento de SLA",
     "enableSlaTrackingDesc": "Acompanhar tempos de resposta e escalar transferências atrasadas",
+    "enableSalesOpportunitySla": "Ativar SLA da Central de Vendas",
+    "enableSalesOpportunitySlaDesc": "Marcar oportunidades em \"Direcionada\" há mais de 7 dias como SLA vencido",
     "responseTime": "Tempo de resposta (minutos)",
     "responseTimeHint": "Tempo para o agente atender",
     "escalationTime": "Tempo de escalação (minutos)",
