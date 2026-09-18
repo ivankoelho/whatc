@@ -226,6 +226,15 @@ func (a *App) ChangeSalesOpportunityStage(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "direcionamento is required before entering direcionada", nil, "")
 	}
 
+	// Resending the stage the opportunity is already in is a no-op, not a
+	// transition: without this guard it would restamp stage_changed_at with
+	// now() (the SLA clock's base, spec §6) even though the opportunity never
+	// left the stage, and log a spurious "X → X" stage_changed event. Mirrors
+	// ChangeOccurrenceStage's identical guard in occurrences.go.
+	if newStage == opp.Stage {
+		return r.SendEnvelope(opp)
+	}
+
 	fromStage := opp.Stage
 	now := time.Now()
 	updates := map[string]any{"stage": newStage, "stage_changed_at": now}
@@ -274,6 +283,13 @@ func (a *App) ChangeSalesOpportunityDirecionamento(r *fastglue.Request) error {
 	direcionamento := models.SalesDirecionamento(req.Direcionamento)
 	if direcionamento != models.SalesDirecionamentoVisita && direcionamento != models.SalesDirecionamentoWhatsApp {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid direcionamento", nil, "")
+	}
+
+	// Resending the direcionamento it already has is a no-op: without this
+	// guard it would write another direcionamento_changed event every time,
+	// same class of issue as ChangeSalesOpportunityStage's stage guard above.
+	if opp.Direcionamento != nil && *opp.Direcionamento == direcionamento {
+		return r.SendEnvelope(opp)
 	}
 
 	if err := a.DB.Model(opp).Update("direcionamento", direcionamento).Error; err != nil {
