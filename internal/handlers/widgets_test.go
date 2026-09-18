@@ -148,6 +148,119 @@ func nonDefaultWidgets(widgets []handlers.WidgetResponse) []handlers.WidgetRespo
 	return out
 }
 
+// createTestSalesWidget creates a shared, sales_opportunities-sourced widget
+// the way ensureDefaultSalesOpportunityWidgets seeds them, for the
+// finding-B view_all gating tests below.
+func createTestSalesWidget(t *testing.T, app *handlers.App, orgID uuid.UUID) *models.Widget {
+	t.Helper()
+
+	widget := &models.Widget{
+		BaseModel:      models.BaseModel{ID: uuid.New()},
+		OrganizationID: orgID,
+		Name:           "Oportunidades abertas (test)",
+		DataSource:     "sales_opportunities",
+		Metric:         "count",
+		Field:          "open",
+		DisplayType:    "number",
+		Color:          "blue",
+		Size:           "small",
+		DisplayOrder:   1,
+		IsShared:       true,
+	}
+	require.NoError(t, app.DB.Create(widget).Error)
+	return widget
+}
+
+// TestApp_ListWidgets_HidesSalesOpportunityWidgetsWithoutViewAll covers
+// finding B: the 6 seeded sales widgets are is_shared=true, so without this
+// gate any analytics:read holder would see org-wide sales numbers on the
+// main /dashboard even though /sales/dashboard requires view_all.
+func TestApp_ListWidgets_HidesSalesOpportunityWidgetsWithoutViewAll(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "Analytics No ViewAll", []string{"analytics:read"})
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("list-no-viewall")), testutil.WithPassword("password"), testutil.WithRoleID(&role.ID))
+	salesWidget := createTestSalesWidget(t, app, org.ID)
+	otherWidget := createTestWidget(t, app, org.ID, nil, "Messages widget", true, false)
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	require.NoError(t, app.ListWidgets(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var resp struct {
+		Data struct {
+			Widgets []handlers.WidgetResponse `json:"widgets"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &resp))
+
+	var ids []uuid.UUID
+	for _, w := range resp.Data.Widgets {
+		ids = append(ids, w.ID)
+	}
+	assert.NotContains(t, ids, salesWidget.ID, "sales_opportunities widget must be hidden without view_all")
+	assert.Contains(t, ids, otherWidget.ID, "non-sales widgets must still be returned")
+}
+
+// TestApp_ListWidgets_ShowsSalesOpportunityWidgetsWithViewAll is the other
+// half of finding B: a caller who does have view_all keeps seeing the
+// shared sales widgets, so the gate isn't over-broad.
+func TestApp_ListWidgets_ShowsSalesOpportunityWidgetsWithViewAll(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "Analytics ViewAll", []string{"analytics:read", "sales_opportunities:view_all"})
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("list-viewall")), testutil.WithPassword("password"), testutil.WithRoleID(&role.ID))
+	salesWidget := createTestSalesWidget(t, app, org.ID)
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	require.NoError(t, app.ListWidgets(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var resp struct {
+		Data struct {
+			Widgets []handlers.WidgetResponse `json:"widgets"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &resp))
+
+	var ids []uuid.UUID
+	for _, w := range resp.Data.Widgets {
+		ids = append(ids, w.ID)
+	}
+	assert.Contains(t, ids, salesWidget.ID, "sales_opportunities widget must still show with view_all")
+}
+
+// TestApp_GetAllWidgetsData_HidesSalesOpportunityWidgetsWithoutViewAll is
+// finding B's other API surface: /api/widgets/data must not compute or
+// return data for sales_opportunities widgets to a caller without view_all.
+func TestApp_GetAllWidgetsData_HidesSalesOpportunityWidgetsWithoutViewAll(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "Analytics No ViewAll", []string{"analytics:read"})
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("data-no-viewall")), testutil.WithPassword("password"), testutil.WithRoleID(&role.ID))
+	salesWidget := createTestSalesWidget(t, app, org.ID)
+	otherWidget := createTestWidget(t, app, org.ID, nil, "Messages widget", true, false)
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	require.NoError(t, app.GetAllWidgetsData(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var resp struct {
+		Data struct {
+			Data map[string]handlers.WidgetDataResponse `json:"data"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &resp))
+
+	_, hasSales := resp.Data.Data[salesWidget.ID.String()]
+	assert.False(t, hasSales, "sales_opportunities widget data must be hidden without view_all")
+	_, hasOther := resp.Data.Data[otherWidget.ID.String()]
+	assert.True(t, hasOther, "non-sales widget data must still be returned")
+}
+
 func TestApp_ListWidgets_Unauthorized(t *testing.T) {
 	app := newTestApp(t)
 

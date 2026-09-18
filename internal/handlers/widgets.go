@@ -319,6 +319,7 @@ func (a *App) ListWidgets(r *fastglue.Request) error {
 		a.Log.Error("Failed to list widgets", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list widgets", nil, "")
 	}
+	widgets = a.filterSalesOpportunityWidgetsByViewAll(widgets, userID, orgID)
 
 	// Convert to response format
 	response := make([]WidgetResponse, len(widgets))
@@ -329,6 +330,27 @@ func (a *App) ListWidgets(r *fastglue.Request) error {
 	return r.SendEnvelope(map[string]any{
 		"widgets": response,
 	})
+}
+
+// filterSalesOpportunityWidgetsByViewAll drops sales_opportunities-sourced
+// widgets for callers without sales_opportunities:view_all. The 6 default
+// sales widgets are seeded is_shared=true so every org member with
+// analytics:read would otherwise see org-wide sales numbers on the main
+// /dashboard, bypassing the view_all gate that /sales/dashboard enforces at
+// the route level (finding B) — this closes the same gap in the API these
+// two list/data endpoints share.
+func (a *App) filterSalesOpportunityWidgetsByViewAll(widgets []models.Widget, userID, orgID uuid.UUID) []models.Widget {
+	if a.HasPermission(userID, models.ResourceSalesOpportunities, models.ActionViewAll, orgID) {
+		return widgets
+	}
+	filtered := widgets[:0]
+	for _, w := range widgets {
+		if w.DataSource == "sales_opportunities" {
+			continue
+		}
+		filtered = append(filtered, w)
+	}
+	return filtered
 }
 
 // GetWidget returns a single widget
@@ -891,6 +913,7 @@ func (a *App) GetAllWidgetsData(r *fastglue.Request) error {
 		a.Log.Error("Failed to list widgets", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list widgets", nil, "")
 	}
+	widgets = a.filterSalesOpportunityWidgetsByViewAll(widgets, userID, orgID)
 
 	// Execute queries for all widgets
 	results := make(map[string]WidgetDataResponse)
