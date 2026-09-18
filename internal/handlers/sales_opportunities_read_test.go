@@ -45,6 +45,8 @@ func TestListSalesOpportunities_AgentSeesOnlyOwn(t *testing.T) {
 	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &resp))
 	require.Len(t, resp.Data.Opportunities, 1)
 	assert.Equal(t, contactMine.ID, resp.Data.Opportunities[0].ContactID)
+	require.NotNil(t, resp.Data.Opportunities[0].Contact, "list response should preload Contact so the frontend can show a name instead of a UUID")
+	assert.Equal(t, contactMine.ProfileName, resp.Data.Opportunities[0].Contact.ProfileName)
 }
 
 func TestListSalesOpportunities_ManagerWithViewAllSeesEverything(t *testing.T) {
@@ -130,6 +132,13 @@ func TestGetSalesOpportunity_OwnerCanView(t *testing.T) {
 	req.RequestCtx.SetUserValue("id", opp.ID.String())
 	require.NoError(t, app.GetSalesOpportunity(req))
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var resp struct {
+		Data models.SalesOpportunity `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &resp))
+	require.NotNil(t, resp.Data.Contact, "get response should preload Contact so the frontend can show a name instead of a UUID")
+	assert.Equal(t, contact.ProfileName, resp.Data.Contact.ProfileName)
 }
 
 func TestListSalesOpportunityEvents_ReturnsOpenedEvent(t *testing.T) {

@@ -125,7 +125,7 @@ func (a *App) loadAuthorizedSalesOpportunity(r *fastglue.Request, orgID, userID 
 	if err != nil {
 		return nil, errEnvelopeSent
 	}
-	opp, err := findByIDAndOrg[models.SalesOpportunity](a.DB, r, id, orgID, "Sales opportunity")
+	opp, err := findByIDAndOrg[models.SalesOpportunity](a.DB.Preload("Contact"), r, id, orgID, "Sales opportunity")
 	if err != nil {
 		return nil, errEnvelopeSent
 	}
@@ -146,7 +146,7 @@ func (a *App) ListSalesOpportunities(r *fastglue.Request) error {
 	}
 
 	pg := parsePaginationWithDefaults(r, 30, 100)
-	query := a.DB.Model(&models.SalesOpportunity{}).Where("sales_opportunities.organization_id = ?", orgID)
+	query := a.DB.Model(&models.SalesOpportunity{}).Preload("Contact").Where("sales_opportunities.organization_id = ?", orgID)
 	query = a.visibleSalesOpportunities(query, userID, orgID)
 
 	if stage := string(r.RequestCtx.QueryArgs().Peek("stage")); stage != "" {
