@@ -94,6 +94,7 @@ const (
 	ResourceOccurrenceWhatHappened  = "occurrences.what_happened"
 	ResourceUnits                   = "units"
 	ResourceDepartments             = "departments"
+	ResourceSalesOpportunities      = "sales_opportunities"
 )
 
 // PermissionAction constants for available actions
@@ -295,6 +296,13 @@ func DefaultPermissions() []Permission {
 		{Resource: ResourceDepartments, Action: ActionRead, Description: "View departments"},
 		{Resource: ResourceDepartments, Action: ActionWrite, Description: "Create and edit departments"},
 		{Resource: ResourceDepartments, Action: ActionDelete, Description: "Delete departments"},
+
+		// Central de Vendas — funil de oportunidades (Entrega 1). view_all
+		// mirrors conversations:view_all's semantics (spec §7): sem ela, o
+		// papel só vê/edita as próprias oportunidades (assigned_user_id=self).
+		{Resource: ResourceSalesOpportunities, Action: ActionRead, Description: "View sales opportunities"},
+		{Resource: ResourceSalesOpportunities, Action: ActionWrite, Description: "Create and edit sales opportunities"},
+		{Resource: ResourceSalesOpportunities, Action: ActionViewAll, Description: "View and manage all sales opportunities, including those assigned to other agents"},
 	}
 }
 
@@ -357,6 +365,8 @@ func SystemRolePermissions() map[string][]string {
 		"ivr_flows:read", "ivr_flows:write", "ivr_flows:delete",
 		"call_transfers:read", "call_transfers:write",
 		"outgoing_calls:read", "outgoing_calls:write",
+		// Central de Vendas: o gestor enxerga o funil inteiro, igual a conversations:view_all
+		"sales_opportunities:read", "sales_opportunities:write", "sales_opportunities:view_all",
 	}
 
 	agentPermissions := []string{
@@ -383,6 +393,8 @@ func SystemRolePermissions() map[string][]string {
 		"call_transfers:read", "call_transfers:write",
 		// Outgoing Calls
 		"outgoing_calls:read", "outgoing_calls:write",
+		// Central de Vendas: o agente usa a própria carteira
+		"sales_opportunities:read", "sales_opportunities:write",
 	}
 
 	return map[string][]string{

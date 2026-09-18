@@ -26,7 +26,8 @@ import {
   Building2,
   Timer,
   Tag,
-  HelpCircle
+  HelpCircle,
+  TrendingUp
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
@@ -35,6 +36,10 @@ export interface NavItem {
   path: string
   icon: Component
   permission?: string
+  /** Action to check `permission` against — defaults to 'read'. Use
+   * 'view_all' for org-wide aggregate views that every holder of the base
+   * `read` permission should NOT see (spec §7 for sales_opportunities). */
+  permissionAction?: string
   childPermissions?: string[]
   children?: NavItem[]
 }
@@ -67,6 +72,22 @@ export const navigationSections: NavSection[] = [
         path: '/crm/occurrences',
         icon: ClipboardList,
         permission: 'occurrences'
+      },
+      {
+        name: 'nav.salesOperation',
+        path: '/sales/operation',
+        icon: TrendingUp,
+        permission: 'sales_opportunities'
+      },
+      {
+        name: 'nav.salesDashboard',
+        path: '/sales/dashboard',
+        icon: BarChart3,
+        permission: 'sales_opportunities',
+        // Finding 7: this view shows org-wide aggregates, which spec §7
+        // reserves for manager/admin (view_all) — agents only get read/write
+        // on their own opportunities. /sales/operation stays plain 'read'.
+        permissionAction: 'view_all'
       },
     ]
   },
