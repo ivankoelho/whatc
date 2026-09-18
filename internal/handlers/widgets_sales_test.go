@@ -101,3 +101,16 @@ func TestWidgetsSalesOpportunities_TableWidgetIgnoresAssignedUserIDFilter(t *tes
 	// Today it must be silently ignored: both opportunities come back.
 	assert.Len(t, rows, 2, "assigned_user_id filter must be dropped (not error, not applied) for sales_opportunities table widgets")
 }
+
+// TestWidgetsSalesOpportunities_AssignedUserIDStillGroupable guards against
+// the round-1 filter fix over-reaching: assigned_user_id was removed from
+// both allowedFilterFields and widgetDataSources for sales_opportunities,
+// but widgetDataSources also gates group_by_field in CreateWidget/UpdateWidget
+// and getGroupedData's query for sales_opportunities never joins contacts, so
+// grouping by assigned_user_id was never actually ambiguous. It must stay
+// accepted as a group-by field even though it's correctly rejected as a
+// filter field (see TestWidgetsSalesOpportunities_AssignedUserIDNotFilterable).
+func TestWidgetsSalesOpportunities_AssignedUserIDStillGroupable(t *testing.T) {
+	assert.True(t, handlers.IsGroupByFieldAllowedForTest("sales_opportunities", "assigned_user_id"),
+		"assigned_user_id must remain a valid group_by_field for sales_opportunities: getGroupedData's query path never joins contacts")
+}

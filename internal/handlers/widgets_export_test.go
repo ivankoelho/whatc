@@ -31,3 +31,10 @@ func (a *App) GetTableRowsForTest(orgID uuid.UUID, widget models.Widget, filters
 func IsFilterFieldAllowedForTest(dataSource, field string) bool {
 	return allowedFilterFields[dataSource][field]
 }
+
+// IsGroupByFieldAllowedForTest replicates the widgetDataSources lookup that
+// CreateWidget/UpdateWidget run against req.GroupByField, for tests in the
+// handlers_test package.
+func IsGroupByFieldAllowedForTest(dataSource, field string) bool {
+	return contains(widgetDataSources[dataSource], field)
+}

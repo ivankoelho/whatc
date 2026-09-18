@@ -125,12 +125,13 @@ var widgetDataSources = map[string][]string{
 	"transfers":   {"status", "source"},
 	"sessions":    {"status"},
 	"occurrences": {"priority", "stage_id", "category_id", "unit_id", "department_id", "sale_channel"},
-	// assigned_user_id omitted: tableQuerySQL's sales_opportunities entry joins
-	// contacts, and contacts also has an assigned_user_id column, so an
-	// unqualified filter on it is ambiguous in that joined query. Add it back
-	// once buildFilterSQL/appendFilterSQL can qualify filter columns with a
-	// table alias.
-	"sales_opportunities": {"stage", "status"},
+	// This list also drives group_by_field validation in CreateWidget/UpdateWidget
+	// and the frontend's Group By / Filter dropdowns. assigned_user_id is valid
+	// here (group-by/listing): getGroupedData's query for sales_opportunities
+	// never joins contacts, so it's unambiguous on that path. It is deliberately
+	// excluded from allowedFilterFields["sales_opportunities"] below instead —
+	// see the comment there for why the filter path is different.
+	"sales_opportunities": {"stage", "status", "assigned_user_id"},
 }
 
 // Available metrics
@@ -1224,10 +1225,13 @@ var allowedFilterFields = map[string]map[string]bool{
 	"sales_opportunities": {
 		"stage":  true,
 		"status": true,
-		// assigned_user_id omitted: ambiguous against the contacts join in
-		// tableQuerySQL["sales_opportunities"] (both sales_opportunities and
-		// contacts have this column, and filter columns interpolate
-		// unqualified) until buildFilterSQL is made alias-aware.
+		// assigned_user_id omitted HERE ONLY (the filter whitelist): ambiguous
+		// against the contacts join in tableQuerySQL["sales_opportunities"]
+		// (both sales_opportunities and contacts have this column, and filter
+		// columns interpolate unqualified) until buildFilterSQL is made
+		// alias-aware. It remains valid for group_by_field/listing purposes —
+		// see widgetDataSources["sales_opportunities"] above, whose query path
+		// (getGroupedData) never joins contacts.
 	},
 }
 
