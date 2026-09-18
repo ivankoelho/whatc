@@ -54,15 +54,15 @@ function filterItems(items: NavSection['items']) {
       if (item.childPermissions) {
         return item.childPermissions.some(p => authStore.hasPermission(p, 'read'))
       }
-      return !item.permission || authStore.hasPermission(item.permission, 'read')
+      return !item.permission || authStore.hasPermission(item.permission, item.permissionAction || 'read')
     })
     .map(item => {
       const filteredChildren = item.children?.filter(
-        child => !child.permission || authStore.hasPermission(child.permission, 'read')
+        child => !child.permission || authStore.hasPermission(child.permission, child.permissionAction || 'read')
       )
 
       let effectivePath = item.path
-      if (item.childPermissions && item.permission && !authStore.hasPermission(item.permission, 'read') && filteredChildren?.length) {
+      if (item.childPermissions && item.permission && !authStore.hasPermission(item.permission, item.permissionAction || 'read') && filteredChildren?.length) {
         effectivePath = filteredChildren[0].path
       }
 
