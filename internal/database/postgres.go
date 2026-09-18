@@ -124,6 +124,9 @@ func GetMigrationModels() []MigrationModel {
 		{"Occurrence", &models.Occurrence{}},
 		{"OccurrenceEvent", &models.OccurrenceEvent{}},
 		{"OccurrenceCounter", &models.OccurrenceCounter{}},
+		{"SalesOpportunity", &models.SalesOpportunity{}},
+		{"SalesOpportunityEvent", &models.SalesOpportunityEvent{}},
+		{"SalesOpportunityCounter", &models.SalesOpportunityCounter{}},
 
 		// Help Desk — unidade e departamento
 		{"Unit", &models.Unit{}},
@@ -319,6 +322,8 @@ func getIndexes() []string {
 		// IVR flows
 		`CREATE INDEX IF NOT EXISTS idx_ivr_flows_org_active ON ivr_flows(organization_id, whatsapp_account, is_active)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_ivr_flows_org_call_start ON ivr_flows(organization_id, whatsapp_account) WHERE is_call_start = true AND is_active = true AND deleted_at IS NULL`,
+		// Sales opportunities
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_opp_org_contact_open ON sales_opportunities (organization_id, contact_id) WHERE status = 'aberta' AND deleted_at IS NULL`,
 	}
 }
 
