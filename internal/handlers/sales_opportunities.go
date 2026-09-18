@@ -56,7 +56,15 @@ func (a *App) createOrRetriggerSalesOpportunity(contact *models.Contact, sourceT
 			return err
 		}
 		opp.OpportunityNumber = number
-		return tx.Create(&opp).Error
+		if err := tx.Create(&opp).Error; err != nil {
+			return err
+		}
+		return tx.Create(&models.SalesOpportunityEvent{
+			OrganizationID:     contact.OrganizationID,
+			SalesOpportunityID: opp.ID,
+			Type:               models.SalesOpportunityEventOpened,
+			Source:             models.SalesOpportunityEventSourceSystem,
+		}).Error
 	})
 
 	if txErr != nil {
@@ -80,15 +88,6 @@ func (a *App) createOrRetriggerSalesOpportunity(contact *models.Contact, sourceT
 			return &winner, nil
 		}
 		return nil, txErr
-	}
-
-	if err := a.DB.Create(&models.SalesOpportunityEvent{
-		OrganizationID:     contact.OrganizationID,
-		SalesOpportunityID: opp.ID,
-		Type:               models.SalesOpportunityEventOpened,
-		Source:             models.SalesOpportunityEventSourceSystem,
-	}).Error; err != nil {
-		return nil, err
 	}
 
 	return &opp, nil
