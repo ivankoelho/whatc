@@ -750,6 +750,8 @@
     "passwordPlaceholder": "Enter password",
     "keepExisting": "(leave blank to keep existing)",
     "selectRole": "Select role",
+    "xprocessSellerCode": "XProcess seller code",
+    "xprocessSellerCodePlaceholder": "e.g. V042",
     "accountActive": "Account Active",
     "superAdminLabel": "Super Admin",
     "superAdminDesc": "Super admins can access all organizations",

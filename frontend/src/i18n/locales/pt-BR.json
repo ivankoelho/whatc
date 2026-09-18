@@ -737,6 +737,8 @@
     "passwordPlaceholder": "Digite a senha",
     "keepExisting": "(deixe em branco para manter a atual)",
     "selectRole": "Selecionar função",
+    "xprocessSellerCode": "Código de vendedor XProcess",
+    "xprocessSellerCodePlaceholder": "ex.: V042",
     "accountActive": "Conta ativa",
     "superAdminLabel": "Super Admin",
     "superAdminDesc": "Super admins podem acessar todas as organizações",
