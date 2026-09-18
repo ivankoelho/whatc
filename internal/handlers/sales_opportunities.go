@@ -306,6 +306,90 @@ func (a *App) ChangeSalesOpportunityDirecionamento(r *fastglue.Request) error {
 	return r.SendEnvelope(opp)
 }
 
+// ConvertSalesOpportunity marks the opportunity converted. Manual only in
+// this delivery — conversion_source is always "manual" (spec §2, §9).
+// Validates the state machine (spec §5.1): only aberta -> convertida; stage
+// is left untouched, it freezes at whatever value it had on conversion.
+func (a *App) ConvertSalesOpportunity(r *fastglue.Request) error {
+	orgID, userID, err := a.requireAuth(r, models.ResourceSalesOpportunities, models.ActionWrite)
+	if err != nil {
+		return nil
+	}
+	opp, err := a.loadAuthorizedSalesOpportunity(r, orgID, userID)
+	if err != nil {
+		return nil
+	}
+	if opp.Status != models.SalesOpportunityStatusAberta {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Only open opportunities can be converted", nil, "")
+	}
+
+	now := time.Now()
+	source := models.SalesConversionSourceManual
+	if err := a.DB.Model(opp).Updates(map[string]any{
+		"status":            models.SalesOpportunityStatusConvertida,
+		"conversion_source": source, "converted_at": now,
+	}).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to convert opportunity", nil, "")
+	}
+	if err := a.DB.Create(&models.SalesOpportunityEvent{
+		OrganizationID: orgID, SalesOpportunityID: opp.ID, Type: models.SalesOpportunityEventConverted,
+		Source: models.SalesOpportunityEventSourceManual, CreatedByID: &userID,
+	}).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to record event", nil, "")
+	}
+
+	a.DB.First(opp, "id = ?", opp.ID)
+	return r.SendEnvelope(opp)
+}
+
+type loseSalesOpportunityRequest struct {
+	LossReason string `json:"loss_reason"`
+	LossNotes  string `json:"loss_notes"`
+}
+
+// LoseSalesOpportunity marks the opportunity lost. loss_reason is required
+// and must be one of the closed list (spec §4, §5.1). Validates the state
+// machine (spec §5.1): only aberta -> perdida; stage is left untouched.
+func (a *App) LoseSalesOpportunity(r *fastglue.Request) error {
+	orgID, userID, err := a.requireAuth(r, models.ResourceSalesOpportunities, models.ActionWrite)
+	if err != nil {
+		return nil
+	}
+	opp, err := a.loadAuthorizedSalesOpportunity(r, orgID, userID)
+	if err != nil {
+		return nil
+	}
+	if opp.Status != models.SalesOpportunityStatusAberta {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Only open opportunities can be marked lost", nil, "")
+	}
+
+	var req loseSalesOpportunityRequest
+	if err := a.decodeRequest(r, &req); err != nil {
+		return nil
+	}
+	reason := models.SalesLossReason(req.LossReason)
+	if !models.ValidSalesLossReasons[reason] {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "loss_reason is required and must be a valid reason", nil, "")
+	}
+
+	now := time.Now()
+	if err := a.DB.Model(opp).Updates(map[string]any{
+		"status":      models.SalesOpportunityStatusPerdida,
+		"loss_reason": reason, "loss_notes": req.LossNotes, "lost_at": now,
+	}).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to mark opportunity lost", nil, "")
+	}
+	if err := a.DB.Create(&models.SalesOpportunityEvent{
+		OrganizationID: orgID, SalesOpportunityID: opp.ID, Type: models.SalesOpportunityEventLost,
+		Source: models.SalesOpportunityEventSourceManual, CreatedByID: &userID,
+	}).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to record event", nil, "")
+	}
+
+	a.DB.First(opp, "id = ?", opp.ID)
+	return r.SendEnvelope(opp)
+}
+
 // ListSalesOpportunityEvents returns an opportunity's event timeline, oldest first.
 func (a *App) ListSalesOpportunityEvents(r *fastglue.Request) error {
 	orgID, userID, err := a.requireAuth(r, models.ResourceSalesOpportunities, models.ActionRead)

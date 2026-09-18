@@ -1,6 +1,8 @@
 package handlers_test
 
 import (
+	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,9 +15,17 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
+// testOpportunitySeq gives each newOpenOpportunity call a distinct
+// OpportunityNumber. A hardcoded number worked while every test created at
+// most one opportunity per org, but Task 8's state-machine gate test creates
+// several terminal-state opportunities in the same org and collided on
+// idx_sales_opp_org_number (unique per org+number) with a fixed value.
+var testOpportunitySeq int64
+
 func newOpenOpportunity(t *testing.T, app *handlers.App, orgID, agentID, contactID uuid.UUID) *models.SalesOpportunity {
+	seq := atomic.AddInt64(&testOpportunitySeq, 1)
 	opp := &models.SalesOpportunity{
-		OrganizationID: orgID, ContactID: contactID, OpportunityNumber: "OPP-20260917-000001",
+		OrganizationID: orgID, ContactID: contactID, OpportunityNumber: fmt.Sprintf("OPP-20260917-%06d", seq),
 		Stage: models.SalesOpportunityStagePotencial, Status: models.SalesOpportunityStatusAberta,
 		AssignedUserID: &agentID, StageChangedAt: time.Now(),
 	}
