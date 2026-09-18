@@ -3388,6 +3388,12 @@
     "lossNotesPlaceholder": "Additional details about the loss",
     "lossRecorded": "Loss recorded",
     "lossFailed": "Failed to record the loss",
+    "direcionamento": "Direction",
+    "direcionamentoPlaceholder": "Not set",
+    "direcionamentoVisita": "Visit",
+    "direcionamentoWhatsApp": "WhatsApp",
+    "direcionamentoChanged": "Direction updated",
+    "direcionamentoChangeFailed": "Failed to update the direction",
     "dashboardTitle": "Sales Dashboard",
     "dashboardSubtitle": "Managerial indicators for the sales funnel",
     "dashboardEmpty": "No indicators available yet"

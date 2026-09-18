@@ -3377,6 +3377,12 @@
     "lossNotesPlaceholder": "Detalhes adicionais sobre a perda",
     "lossRecorded": "Perda registrada",
     "lossFailed": "Falha ao registrar a perda",
+    "direcionamento": "Direcionamento",
+    "direcionamentoPlaceholder": "Não definido",
+    "direcionamentoVisita": "Visita",
+    "direcionamentoWhatsApp": "WhatsApp",
+    "direcionamentoChanged": "Direcionamento atualizado",
+    "direcionamentoChangeFailed": "Falha ao atualizar o direcionamento",
     "dashboardTitle": "Dashboard de Vendas",
     "dashboardSubtitle": "Indicadores gerenciais do funil de vendas",
     "dashboardEmpty": "Nenhum indicador disponível ainda"

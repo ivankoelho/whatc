@@ -17,6 +17,7 @@ const emit = defineEmits<{
   convert: [opportunity: SalesOpportunity]
   lose: [opportunity: SalesOpportunity]
   'stage-change': [opportunity: SalesOpportunity, stage: SalesOpportunityStage]
+  'direcionamento-change': [opportunity: SalesOpportunity]
 }>()
 
 const { t } = useI18n()
@@ -116,6 +117,13 @@ async function onColumnChange(toCol: ColumnState, evt: { added?: { element: Sale
   }
 }
 
+function onDirecionamentoChange(updated: SalesOpportunity) {
+  const col = columns.value.find(c => c.stage === updated.stage)
+  const idx = col?.items.findIndex(i => i.id === updated.id)
+  if (col && idx !== undefined && idx !== -1) col.items.splice(idx, 1, updated)
+  emit('direcionamento-change', updated)
+}
+
 onMounted(loadAll)
 
 defineExpose({ refresh: loadAll })
@@ -158,6 +166,7 @@ defineExpose({ refresh: loadAll })
                 :disabled="pending.has(element.id)"
                 @convert="emit('convert', $event)"
                 @lose="emit('lose', $event)"
+                @direcionamento-change="onDirecionamentoChange"
               />
             </template>
           </draggable>

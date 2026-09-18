@@ -117,6 +117,10 @@ function handleStageChange() {
   fetchWallet()
 }
 
+function handleDirecionamentoChange() {
+  fetchWallet()
+}
+
 onMounted(fetchWallet)
 </script>
 
@@ -215,6 +219,7 @@ onMounted(fetchWallet)
                 @convert="handleConvert"
                 @lose="handleLose"
                 @stage-change="handleStageChange"
+                @direcionamento-change="handleDirecionamentoChange"
               />
             </Card>
           </div>
