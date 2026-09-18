@@ -95,6 +95,44 @@ func (a *App) createOrRetriggerSalesOpportunity(contact *models.Contact, sourceT
 	return &opp, nil
 }
 
+// assignOpenSalesOpportunityToAgent mirrors, for a contact's open funnel
+// entry, the same AssignToSameAgent pickup mechanism that sets
+// contact.AssignedUserID: called right after that update at every real
+// pickup/assignment site (CreateAgentTransfer, AssignTransfer,
+// PickNextTransfer, saveAndFinalizeTransfer), so the agent who just
+// inherited the conversation also inherits any opportunity born from it —
+// otherwise an opportunity created with a nil AssignedUserID (queue-routed
+// chatbot buttons never set one) stays invisible forever (spec's own-scope
+// filter, finding A).
+//
+// db lets callers run this inside their own transaction (PickNextTransfer)
+// or against a.DB directly. Best-effort: errors are logged, never returned,
+// matching the create_opportunity side-effect posture in
+// chatbot_graph_runner.go. No SalesOpportunityEvent is written — assignment
+// isn't a funnel transition in the spec's closed event list, consistent
+// with contact.AssignedUserID changes also not producing one.
+func (a *App) assignOpenSalesOpportunityToAgent(db *gorm.DB, contact *models.Contact, agentID uuid.UUID) {
+	var opp models.SalesOpportunity
+	err := db.Where("organization_id = ? AND contact_id = ? AND status = ?",
+		contact.OrganizationID, contact.ID, models.SalesOpportunityStatusAberta).
+		First(&opp).Error
+	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			a.Log.Error("failed to look up open sales opportunity for agent assignment",
+				"contact_id", contact.ID, "error", err)
+		}
+		return
+	}
+	if opp.AssignedUserID != nil {
+		return
+	}
+	if err := db.Model(&models.SalesOpportunity{}).Where("id = ? AND assigned_user_id IS NULL", opp.ID).
+		Update("assigned_user_id", agentID).Error; err != nil {
+		a.Log.Error("failed to assign open sales opportunity to agent",
+			"opportunity_id", opp.ID, "agent_id", agentID, "error", err)
+	}
+}
+
 // isUniqueViolation reports whether err is a Postgres unique-constraint
 // violation (SQLSTATE 23505) — same detection as isUniqueNameViolation in
 // occurrence_stages.go, kept separate here since it isn't specific to one
