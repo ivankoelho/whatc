@@ -189,6 +189,107 @@ func (a *App) GetSalesOpportunity(r *fastglue.Request) error {
 	return r.SendEnvelope(opp)
 }
 
+type changeSalesOpportunityStageRequest struct {
+	Stage string `json:"stage"`
+}
+
+// ChangeSalesOpportunityStage advances potencial -> abrir_orcamento ->
+// direcionada. Entering "direcionada" requires direcionamento to already be
+// set (spec §5) and stamps stage_changed_at, the SLA clock's base (spec §6).
+// Leaving direcionada clears sla_breached back to false since the SLA clock
+// only runs while the opportunity sits in direcionada (Task 9 depends on
+// this reset).
+func (a *App) ChangeSalesOpportunityStage(r *fastglue.Request) error {
+	orgID, userID, err := a.requireAuth(r, models.ResourceSalesOpportunities, models.ActionWrite)
+	if err != nil {
+		return nil
+	}
+	opp, err := a.loadAuthorizedSalesOpportunity(r, orgID, userID)
+	if err != nil {
+		return nil
+	}
+	if opp.Status != models.SalesOpportunityStatusAberta {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Only open opportunities can change stage", nil, "")
+	}
+
+	var req changeSalesOpportunityStageRequest
+	if err := a.decodeRequest(r, &req); err != nil {
+		return nil
+	}
+	newStage := models.SalesOpportunityStage(req.Stage)
+	if newStage != models.SalesOpportunityStagePotencial &&
+		newStage != models.SalesOpportunityStageAbrirOrcamento &&
+		newStage != models.SalesOpportunityStageDirecionada {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid stage", nil, "")
+	}
+	if newStage == models.SalesOpportunityStageDirecionada && opp.Direcionamento == nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "direcionamento is required before entering direcionada", nil, "")
+	}
+
+	fromStage := opp.Stage
+	now := time.Now()
+	updates := map[string]any{"stage": newStage, "stage_changed_at": now}
+	if newStage != models.SalesOpportunityStageDirecionada {
+		updates["sla_breached"] = false
+	}
+	if err := a.DB.Model(opp).Updates(updates).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to change stage", nil, "")
+	}
+	if err := a.DB.Create(&models.SalesOpportunityEvent{
+		OrganizationID: orgID, SalesOpportunityID: opp.ID, Type: models.SalesOpportunityEventStageChanged,
+		FromStage: &fromStage, ToStage: &newStage, Source: models.SalesOpportunityEventSourceManual,
+		CreatedByID: &userID,
+	}).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to record event", nil, "")
+	}
+
+	a.DB.First(opp, "id = ?", opp.ID)
+	return r.SendEnvelope(opp)
+}
+
+type changeSalesOpportunityDirecionamentoRequest struct {
+	Direcionamento string `json:"direcionamento"`
+}
+
+// ChangeSalesOpportunityDirecionamento edits direcionamento as a plain form
+// field, not a stage transition — allowed in any stage while status=aberta
+// (spec §5).
+func (a *App) ChangeSalesOpportunityDirecionamento(r *fastglue.Request) error {
+	orgID, userID, err := a.requireAuth(r, models.ResourceSalesOpportunities, models.ActionWrite)
+	if err != nil {
+		return nil
+	}
+	opp, err := a.loadAuthorizedSalesOpportunity(r, orgID, userID)
+	if err != nil {
+		return nil
+	}
+	if opp.Status != models.SalesOpportunityStatusAberta {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Only open opportunities can change direcionamento", nil, "")
+	}
+
+	var req changeSalesOpportunityDirecionamentoRequest
+	if err := a.decodeRequest(r, &req); err != nil {
+		return nil
+	}
+	direcionamento := models.SalesDirecionamento(req.Direcionamento)
+	if direcionamento != models.SalesDirecionamentoVisita && direcionamento != models.SalesDirecionamentoWhatsApp {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid direcionamento", nil, "")
+	}
+
+	if err := a.DB.Model(opp).Update("direcionamento", direcionamento).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to change direcionamento", nil, "")
+	}
+	if err := a.DB.Create(&models.SalesOpportunityEvent{
+		OrganizationID: orgID, SalesOpportunityID: opp.ID, Type: models.SalesOpportunityEventDirecionamentoChanged,
+		Source: models.SalesOpportunityEventSourceManual, CreatedByID: &userID,
+	}).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to record event", nil, "")
+	}
+
+	a.DB.First(opp, "id = ?", opp.ID)
+	return r.SendEnvelope(opp)
+}
+
 // ListSalesOpportunityEvents returns an opportunity's event timeline, oldest first.
 func (a *App) ListSalesOpportunityEvents(r *fastglue.Request) error {
 	orgID, userID, err := a.requireAuth(r, models.ResourceSalesOpportunities, models.ActionRead)

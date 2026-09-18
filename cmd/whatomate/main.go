@@ -760,6 +760,8 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/sales-opportunities", app.ListSalesOpportunities)
 	g.GET("/api/sales-opportunities/{id}", app.GetSalesOpportunity)
 	g.GET("/api/sales-opportunities/{id}/events", app.ListSalesOpportunityEvents)
+	g.PUT("/api/sales-opportunities/{id}/stage", app.ChangeSalesOpportunityStage)
+	g.PUT("/api/sales-opportunities/{id}/direcionamento", app.ChangeSalesOpportunityDirecionamento)
 
 	// CRM — unidades
 	g.GET("/api/units", app.ListUnits)
