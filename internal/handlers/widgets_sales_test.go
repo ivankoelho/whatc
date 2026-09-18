@@ -90,6 +90,87 @@ func TestQuerySalesOpportunities_ConversionRateExcludesOpenFromDenominator(t *te
 	assert.InDelta(t, 66.67, rate, 0.01, "2 convertidas / (2 convertidas + 1 perdida) * 100, aberta fora do denominador")
 }
 
+// TestQuerySalesOpportunities_RateMetricMatchesSalesConversionRate proves
+// finding 5's fix: querySalesOpportunities("rate", ...) previously had no
+// case for "rate" and fell through to the final `return 0`. It must now
+// delegate to salesConversionRate and return the same value.
+func TestQuerySalesOpportunities_RateMetricMatchesSalesConversionRate(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+
+	statuses := []models.SalesOpportunityStatus{
+		models.SalesOpportunityStatusConvertida,
+		models.SalesOpportunityStatusConvertida,
+		models.SalesOpportunityStatusPerdida,
+	}
+	for i, s := range statuses {
+		require.NoError(t, app.DB.Create(&models.SalesOpportunity{
+			OrganizationID: org.ID, ContactID: contact.ID,
+			OpportunityNumber: "OPP-20260918-00002" + string(rune('1'+i)),
+			Stage:             models.SalesOpportunityStagePotencial, Status: s, StageChangedAt: time.Now(),
+		}).Error)
+	}
+
+	start, end := time.Now().Add(-time.Hour), time.Now().Add(time.Hour)
+	got := app.QuerySalesOpportunitiesForTest(org.ID, "rate", "converted", nil, start, end)
+	want := app.SalesConversionRateForTest(org.ID, start, end)
+	assert.InDelta(t, 66.67, got, 0.01)
+	assert.Equal(t, want, got)
+}
+
+// TestQuerySalesOpportunities_OpenAndSLABreachedIgnoreDateRange proves finding
+// 6's fix: "open" (count) and "sla_breached" (count) are current-state
+// snapshots and must NOT be scoped to opened_at — an opportunity opened well
+// before a narrow selected range must still be counted.
+func TestQuerySalesOpportunities_OpenAndSLABreachedIgnoreDateRange(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	contactOpen := testutil.CreateTestContact(t, app.DB, org.ID)
+	contactBreached := testutil.CreateTestContact(t, app.DB, org.ID)
+
+	oldOpenedAt := time.Now().Add(-30 * 24 * time.Hour)
+	require.NoError(t, app.DB.Create(&models.SalesOpportunity{
+		OrganizationID: org.ID, ContactID: contactOpen.ID, OpportunityNumber: "OPP-20260818-000001",
+		Stage: models.SalesOpportunityStagePotencial, Status: models.SalesOpportunityStatusAberta,
+		OpenedAt: oldOpenedAt, StageChangedAt: time.Now(),
+	}).Error)
+	require.NoError(t, app.DB.Create(&models.SalesOpportunity{
+		OrganizationID: org.ID, ContactID: contactBreached.ID, OpportunityNumber: "OPP-20260818-000002",
+		Stage: models.SalesOpportunityStageDirecionada, Status: models.SalesOpportunityStatusAberta,
+		OpenedAt: oldOpenedAt, StageChangedAt: time.Now(), SLABreached: true,
+	}).Error)
+
+	// A narrow "today" range that excludes both opportunities' opened_at.
+	start, end := time.Now().Add(-time.Hour), time.Now().Add(time.Hour)
+
+	openCount := app.QuerySalesOpportunitiesForTest(org.ID, "count", "open", nil, start, end)
+	assert.Equal(t, float64(2), openCount, "both open opportunities must count regardless of when they were opened")
+
+	breachedCount := app.QuerySalesOpportunitiesForTest(org.ID, "count", "sla_breached", nil, start, end)
+	assert.Equal(t, float64(1), breachedCount, "the breached opportunity must count regardless of when it was opened")
+}
+
+// TestQuerySalesOpportunities_ConvertedAndLostStayDateScoped proves the other
+// half of finding 6: "converted"/"lost" ARE period metrics and must keep
+// excluding opportunities opened outside the selected range.
+func TestQuerySalesOpportunities_ConvertedAndLostStayDateScoped(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+
+	oldOpenedAt := time.Now().Add(-30 * 24 * time.Hour)
+	require.NoError(t, app.DB.Create(&models.SalesOpportunity{
+		OrganizationID: org.ID, ContactID: contact.ID, OpportunityNumber: "OPP-20260818-000003",
+		Stage: models.SalesOpportunityStageDirecionada, Status: models.SalesOpportunityStatusConvertida,
+		OpenedAt: oldOpenedAt, StageChangedAt: time.Now(),
+	}).Error)
+
+	start, end := time.Now().Add(-time.Hour), time.Now().Add(time.Hour)
+	got := app.QuerySalesOpportunitiesForTest(org.ID, "count", "converted", nil, start, end)
+	assert.Equal(t, float64(0), got, "a conversion opened outside the selected range must not count")
+}
+
 // TestWidgetsSalesOpportunities_AssignedUserIDNotFilterable guards against
 // SQLSTATE 42702 "column reference is ambiguous": tableQuerySQL's
 // sales_opportunities entry joins contacts, and both sales_opportunities and

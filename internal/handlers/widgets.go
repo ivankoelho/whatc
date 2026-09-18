@@ -210,7 +210,7 @@ func (a *App) ensureDefaultSACWidgets(orgID uuid.UUID) error {
 	return a.DB.Create(&widgets).Error
 }
 
-// salesOpportunityDashboardWidgets are the 5 managerial funnel cards seeded
+// salesOpportunityDashboardWidgets are the 6 managerial funnel cards seeded
 // once per organization (see ensureDefaultSalesOpportunityWidgets), mirroring
 // occurrenceDashboardWidgets/ensureDefaultSACWidgets' seed-on-first-read
 // pattern. Every Field value here (open/converted/lost/sla_breached) is
@@ -221,6 +221,12 @@ func (a *App) ensureDefaultSACWidgets(orgID uuid.UUID) error {
 // still matters for it: it's what picks the status filter via the same
 // switch (see the value-of-funnel card below, which uses Field: "open" so
 // the sum is scoped to aberta opportunities, matching its description).
+// Metric "rate" (final review finding 5) bypasses the Field switch entirely
+// — it always calls salesConversionRate, which computes convertidas/(convertidas+perdidas)
+// itself — so its Field value is documentation only.
+// Only "open"/"sla_breached" (current-state snapshots) skip the
+// opened_at-in-range filter; "converted"/"lost"/"rate" stay period-scoped
+// (final review finding 6) — see querySalesOpportunities.
 var salesOpportunityDashboardWidgets = []models.Widget{
 	{
 		Name: "Oportunidades abertas", Description: "Em potencial, orçamento ou direcionada",
@@ -250,6 +256,12 @@ var salesOpportunityDashboardWidgets = []models.Widget{
 		Name: "Oportunidades com SLA vencido", Description: "Mais de 7 dias em Direcionada",
 		DataSource: "sales_opportunities", Metric: "count", Field: "sla_breached",
 		DisplayType: "number", Color: "orange", Size: "small", ShowChange: false,
+		IsShared: true, IsDefault: true,
+	},
+	{
+		Name: "Taxa de conversão", Description: "Convertidas / (Convertidas + Perdidas) no período",
+		DataSource: "sales_opportunities", Metric: "rate", Field: "converted",
+		DisplayType: "number", Color: "cyan", Size: "small", ShowChange: true,
 		IsShared: true, IsDefault: true,
 	},
 }
@@ -1154,13 +1166,25 @@ func (a *App) queryOccurrences(orgID uuid.UUID, metric, field string, filters []
 }
 
 // querySalesOpportunities computes the sales funnel dashboard metrics,
-// mirroring queryOccurrences's field-driven WHERE clause switch. Unlike
-// occurrences' "open"/"breached" snapshots, every field here is scoped to
-// [start, end] over opened_at — the funnel widgets are period reports, not
-// current-state snapshots.
+// mirroring queryOccurrences's field-driven WHERE clause switch.
+//
+// Unlike occurrences, this data source mixes two kinds of metric:
+//   - "converted"/"lost" (and "rate", derived from both) are period reports —
+//     they only count opportunities whose opened_at falls in [start, end].
+//   - "open"/"sla_breached" are current-state snapshots — an opportunity
+//     opened before the selected range is still open or still breached today,
+//     so they intentionally ignore the range (final review finding 6).
 func (a *App) querySalesOpportunities(orgID uuid.UUID, metric, field string, filters []FilterInput, start, end time.Time) float64 {
-	q := a.DB.Model(&models.SalesOpportunity{}).
-		Where("organization_id = ? AND opened_at >= ? AND opened_at <= ?", orgID, start, end)
+	// "rate" bypasses the field-driven query below entirely — salesConversionRate
+	// computes convertidas/(convertidas+perdidas) itself (final review finding 5).
+	if metric == "rate" {
+		return a.salesConversionRate(orgID, start, end)
+	}
+
+	q := a.DB.Model(&models.SalesOpportunity{}).Where("organization_id = ?", orgID)
+	if field == "converted" || field == "lost" {
+		q = q.Where("opened_at >= ? AND opened_at <= ?", start, end)
+	}
 	for _, f := range filters {
 		q = applyFilter("sales_opportunities", q, f)
 	}

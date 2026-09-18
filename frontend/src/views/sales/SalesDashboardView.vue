@@ -3,7 +3,7 @@
 // engine (GET /widgets + GET /widgets/data, same as DashboardView.vue)
 // filtered to data_source === 'sales_opportunities', and reuses the same
 // DateRangePicker/useDateRange composable as the main dashboard. Unlike
-// DashboardView.vue there is no widget CRUD/drag-resize here — the 5 cards
+// DashboardView.vue there is no widget CRUD/drag-resize here — the 6 cards
 // are seeded server-side by ensureDefaultSalesOpportunityWidgets and this
 // view only displays their computed values as simple stat cards (no
 // chart/table rendering), since every default widget's display_type is
@@ -45,8 +45,18 @@ const colorMap: Record<string, { bg: string; text: string; bar: string }> = {
 const getColor = (color: string) => colorMap[color] || colorMap.blue
 
 const formatValue = (widget: DashboardWidget, value: number): string => {
-  if (widget.metric === 'sum' && widget.field === 'estimated_value') {
+  // Finding 4: this used to also check `widget.field === 'estimated_value'`,
+  // but the funnel-value widget's Field was changed to "open" (to scope the
+  // sum to open opportunities — see querySalesOpportunities in widgets.go),
+  // so that condition stopped matching. "sum" is the only sum-metric widget
+  // on this data source (verified against salesOpportunityDashboardWidgets),
+  // so matching on metric alone is safe.
+  if (widget.metric === 'sum') {
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }).format(value)
+  }
+  // Finding 5: the conversion-rate widget (Metric: "rate").
+  if (widget.metric === 'rate') {
+    return value.toFixed(1) + '%'
   }
   if (value >= 1000000) return (value / 1000000).toFixed(1) + 'M'
   if (value >= 1000) return (value / 1000).toFixed(1) + 'K'
