@@ -84,6 +84,32 @@ func TestProcessSalesOpportunitySLA_UnderSevenDaysNotMarked(t *testing.T) {
 	assert.False(t, got.SLABreached)
 }
 
+func TestGetSLAEnabledSettingsCached_IncludesSalesOpportunityOnlyOrgs(t *testing.T) {
+	app := newSLATestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+
+	settings := models.ChatbotSettings{
+		OrganizationID: org.ID,
+		SLA:            models.SLAConfig{Enabled: false, SalesOpportunityEnabled: true},
+	}
+	require.NoError(t, app.DB.Create(&settings).Error)
+	// A prior test in this run may have already populated the shared Redis
+	// cache key without this org; invalidate so the read below is a real DB
+	// query against the extended WHERE clause, not stale cached data.
+	app.InvalidateSLASettingsCache()
+
+	loaded, err := app.getSLAEnabledSettingsCached()
+	require.NoError(t, err)
+
+	var found bool
+	for _, s := range loaded {
+		if s.OrganizationID == org.ID {
+			found = true
+		}
+	}
+	assert.True(t, found, "an org with only sales_opportunity_sla_enabled must still be loaded by the SLA processor loop")
+}
+
 func TestProcessSalesOpportunitySLA_DoesNotRewriteAlreadyBreached(t *testing.T) {
 	app := newSLATestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
