@@ -266,12 +266,18 @@ test.describe('Roles Management', () => {
     await page.goto('/settings')
     await page.waitForLoadState('networkidle')
 
-    // Click on Roles card/link
-    await page.locator('text=Roles').click()
+    // The sidebar starts collapsed (AppLayout.vue's isCollapsed defaults to
+    // true) -- submenu links like Roles aren't in the DOM at all until it's
+    // expanded, regardless of which section is active.
+    await page.locator('[data-testid="sidebar-toggle"]').click()
+
+    // Click the sidebar's Roles nav item. href-based, not text-based --
+    // the app defaults to pt-BR ("Funções"), so a literal "Roles" text
+    // locator never matches and just times out.
+    await page.locator('a[href="/settings/roles"]').first().click()
 
     // Should be on roles page
     await expect(page).toHaveURL(/\/settings\/roles/)
-    await expect(page.locator('h1:has-text("Roles")')).toBeVisible()
   })
 })
 

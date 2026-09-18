@@ -973,16 +973,19 @@ func TestAccountDefaultTeam_VisibilityReflectsHandlerUpdate(t *testing.T) {
 		"after the account's default team changes, visibility must follow (cache invalidated)")
 }
 
-// TestCreateContact_FormattedPhoneMatchesExisting guards the manual-create path:
-// a differently-formatted form of an existing number must resolve to the same
-// contact (409 conflict), not create a duplicate.
+// TestCreateContact_FormattedPhoneMatchesExisting guards the manual-create
+// path: a differently-formatted form of an existing, already-assigned number
+// must resolve to a 409 conflict, not create a duplicate.
 func TestCreateContact_FormattedPhoneMatchesExisting(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
 	admin := createAdminUser(t, app, org.ID)
+	other := createAdminUser(t, app, org.ID)
 
-	// Existing contact stored digits-only, as inbound webhooks store it.
-	testutil.CreateTestContactWith(t, app.DB, org.ID, testutil.WithPhoneNumber("5511955554444"))
+	// Existing contact stored digits-only, as inbound webhooks store it --
+	// already owned by someone, so there's nothing to claim.
+	existing := testutil.CreateTestContactWith(t, app.DB, org.ID, testutil.WithPhoneNumber("5511955554444"))
+	require.NoError(t, app.DB.Model(existing).Update("assigned_user_id", other.ID).Error)
 
 	req := testutil.NewJSONRequest(t, map[string]any{
 		"phone_number": "+55 (11) 95555-4444",
@@ -991,9 +994,44 @@ func TestCreateContact_FormattedPhoneMatchesExisting(t *testing.T) {
 	testutil.SetAuthContext(req, org.ID, admin.ID)
 	require.NoError(t, app.CreateContact(req))
 	assert.Equal(t, fasthttp.StatusConflict, testutil.GetResponseStatusCode(req),
-		"a formatted form of an existing number must conflict, not create a duplicate")
+		"a formatted form of an existing, already-owned number must conflict, not create a duplicate")
 
 	var count int64
 	app.DB.Model(&models.Contact{}).Where("organization_id = ?", org.ID).Count(&count)
 	assert.Equal(t, int64(1), count, "no duplicate contact created from a formatted number")
+}
+
+// TestCreateContact_ClaimsExistingUnassignedContact covers the dead end this
+// was fixed for: under strict visibility, ListContacts' search is scoped, so
+// an agent searching for an unassigned contact that already exists (e.g. an
+// inbound-created one nobody has picked up) sees no results and believes
+// it's new. The old flat 409 here left them stuck -- unable to see the
+// contact OR create it. "Creating" an unassigned contact must instead claim
+// it, the same way restoring a soft-deleted one already did.
+func TestCreateContact_ClaimsExistingUnassignedContact(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agent := createAdminUser(t, app, org.ID)
+
+	existing := testutil.CreateTestContactWith(t, app.DB, org.ID, testutil.WithPhoneNumber("5511955554444"))
+	require.Nil(t, existing.AssignedUserID)
+
+	req := testutil.NewJSONRequest(t, map[string]any{
+		"phone_number": "+55 (11) 95555-4444",
+		"profile_name": "Claimed",
+	})
+	testutil.SetAuthContext(req, org.ID, agent.ID)
+	require.NoError(t, app.CreateContact(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req),
+		"an unassigned existing contact must be claimed, not rejected as a conflict")
+
+	var reloaded models.Contact
+	require.NoError(t, app.DB.First(&reloaded, "id = ?", existing.ID).Error)
+	require.NotNil(t, reloaded.AssignedUserID)
+	assert.Equal(t, agent.ID, *reloaded.AssignedUserID)
+	assert.Equal(t, "Claimed", reloaded.ProfileName, "submitted fields are applied when claiming")
+
+	var count int64
+	app.DB.Model(&models.Contact{}).Where("organization_id = ?", org.ID).Count(&count)
+	assert.Equal(t, int64(1), count, "no duplicate contact created")
 }
