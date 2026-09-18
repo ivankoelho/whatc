@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/handlers"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/test/testutil"
@@ -110,7 +111,88 @@ func TestWidgetsSalesOpportunities_TableWidgetIgnoresAssignedUserIDFilter(t *tes
 // grouping by assigned_user_id was never actually ambiguous. It must stay
 // accepted as a group-by field even though it's correctly rejected as a
 // filter field (see TestWidgetsSalesOpportunities_AssignedUserIDNotFilterable).
+//
+// This exercises the real getGroupedData query path (not just the whitelist
+// lookup CreateWidget/UpdateWidget do) against opportunities assigned to two
+// different users, and asserts the returned per-user counts are correct.
 func TestWidgetsSalesOpportunities_AssignedUserIDStillGroupable(t *testing.T) {
 	assert.True(t, handlers.IsGroupByFieldAllowedForTest("sales_opportunities", "assigned_user_id"),
 		"assigned_user_id must remain a valid group_by_field for sales_opportunities: getGroupedData's query path never joins contacts")
+
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agentA := testutil.CreateTestUser(t, app.DB, org.ID)
+	agentB := testutil.CreateTestUser(t, app.DB, org.ID)
+
+	// Two opportunities for agentA, one for agentB. Distinct contacts: a
+	// partial unique index only allows one *open* sales_opportunity per
+	// (organization_id, contact_id).
+	seed := []struct {
+		agent uuid.UUID
+		num   string
+	}{
+		{agentA.ID, "OPP-20260918-000010"},
+		{agentA.ID, "OPP-20260918-000011"},
+		{agentB.ID, "OPP-20260918-000012"},
+	}
+	for _, s := range seed {
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		agent := s.agent
+		require.NoError(t, app.DB.Create(&models.SalesOpportunity{
+			OrganizationID: org.ID, ContactID: contact.ID, OpportunityNumber: s.num,
+			Stage: models.SalesOpportunityStagePotencial, Status: models.SalesOpportunityStatusAberta,
+			AssignedUserID: &agent, StageChangedAt: time.Now(),
+		}).Error)
+	}
+
+	widget := models.Widget{DataSource: "sales_opportunities", GroupByField: "assigned_user_id"}
+	points := app.GetGroupedDataForTest(org.ID, widget, nil, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+
+	counts := make(map[string]float64, len(points))
+	for _, p := range points {
+		counts[p.Label] = p.Value
+	}
+	assert.Equal(t, float64(2), counts[agentA.ID.String()], "agentA must have 2 opportunities grouped")
+	assert.Equal(t, float64(1), counts[agentB.ID.String()], "agentB must have 1 opportunity grouped")
+}
+
+// TestWidgetsSalesOpportunities_StageGroupable proves the round-3 fix:
+// "stage" is listed in widgetDataSources["sales_opportunities"] (so
+// CreateWidget/UpdateWidget accept it as a group_by_field), but
+// getGroupedData's own allowedGroupByFields whitelist previously lacked it,
+// so a "group by stage" widget was accepted then silently rendered empty.
+// This exercises the real getGroupedData query path against opportunities
+// seeded across two stages and asserts the returned per-stage counts.
+func TestWidgetsSalesOpportunities_StageGroupable(t *testing.T) {
+	assert.True(t, handlers.IsGroupByFieldAllowedForTest("sales_opportunities", "stage"),
+		"stage must be a valid group_by_field for sales_opportunities")
+
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+
+	seed := []struct {
+		stage models.SalesOpportunityStage
+		num   string
+	}{
+		{models.SalesOpportunityStagePotencial, "OPP-20260918-000020"},
+		{models.SalesOpportunityStagePotencial, "OPP-20260918-000021"},
+		{models.SalesOpportunityStageDirecionada, "OPP-20260918-000022"},
+	}
+	for _, s := range seed {
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		require.NoError(t, app.DB.Create(&models.SalesOpportunity{
+			OrganizationID: org.ID, ContactID: contact.ID, OpportunityNumber: s.num,
+			Stage: s.stage, Status: models.SalesOpportunityStatusAberta, StageChangedAt: time.Now(),
+		}).Error)
+	}
+
+	widget := models.Widget{DataSource: "sales_opportunities", GroupByField: "stage"}
+	points := app.GetGroupedDataForTest(org.ID, widget, nil, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+
+	counts := make(map[string]float64, len(points))
+	for _, p := range points {
+		counts[p.Label] = p.Value
+	}
+	assert.Equal(t, float64(2), counts[string(models.SalesOpportunityStagePotencial)], "potencial must have 2 opportunities grouped")
+	assert.Equal(t, float64(1), counts[string(models.SalesOpportunityStageDirecionada)], "direcionada must have 1 opportunity grouped")
 }

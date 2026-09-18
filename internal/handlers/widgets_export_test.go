@@ -38,3 +38,10 @@ func IsFilterFieldAllowedForTest(dataSource, field string) bool {
 func IsGroupByFieldAllowedForTest(dataSource, field string) bool {
 	return contains(widgetDataSources[dataSource], field)
 }
+
+// GetGroupedDataForTest exports getGroupedData for tests in the
+// handlers_test package, so group-by behavior can be verified against the
+// real query path instead of just the whitelist lookups above.
+func (a *App) GetGroupedDataForTest(orgID uuid.UUID, widget models.Widget, filters []FilterInput, start, end time.Time) []DataPoint {
+	return a.getGroupedData(orgID, widget, filters, start, end)
+}

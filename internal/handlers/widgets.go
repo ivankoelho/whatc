@@ -1301,6 +1301,12 @@ func (a *App) getGroupedData(orgID uuid.UUID, widget models.Widget, filters []Fi
 		"message_type": true, "assigned_user_id": true, "channel": true,
 		"is_active": true, "priority": true, "category": true,
 		"type": true, "action_type": true, "provider": true,
+		// stage: sales_opportunities only (see widgetDataSources above). The
+		// GROUP BY generated below is generic against resolveDataSourceTable's
+		// table for the current widget.DataSource, and no other data source
+		// lists "stage" in widgetDataSources, so this can't leak into another
+		// source's query.
+		"stage": true,
 	}
 	if !allowedGroupByFields[widget.GroupByField] {
 		a.Log.Error("Invalid GroupByField", "field", widget.GroupByField)
