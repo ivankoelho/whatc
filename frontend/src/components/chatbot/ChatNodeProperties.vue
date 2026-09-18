@@ -397,10 +397,11 @@ const typeLabel = computed<Record<string, string>>(() => ({
           </div>
           <div class="flex items-center gap-2 pt-1">
             <Checkbox
-              :model-value="btn.create_opportunity === true"
-              @update:model-value="(v: any) => updateButton(Number(idx), 'create_opportunity', v === true)"
+              :id="'create-opportunity-' + idx"
+              :checked="btn.create_opportunity === true"
+              @update:checked="(v) => updateButton(Number(idx), 'create_opportunity', v === true)"
             />
-            <Label class="text-xs font-normal cursor-pointer" @click="updateButton(Number(idx), 'create_opportunity', !(btn.create_opportunity === true))">
+            <Label :for="'create-opportunity-' + idx" class="text-xs font-normal cursor-pointer">
               {{ t('chatbot.properties.startsSalesOpportunity') }}
             </Label>
           </div>
