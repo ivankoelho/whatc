@@ -263,6 +263,7 @@
     "chat": "Conversas",
     "crm": "CRM",
     "salesOperation": "Minha Operação",
+    "salesDashboard": "Dashboard de Vendas",
     "contacts": "Contatos",
     "analytics": "Análises",
     "settings": "Configurações",
@@ -3375,6 +3376,9 @@
     "lossNotes": "Observações (opcional)",
     "lossNotesPlaceholder": "Detalhes adicionais sobre a perda",
     "lossRecorded": "Perda registrada",
-    "lossFailed": "Falha ao registrar a perda"
+    "lossFailed": "Falha ao registrar a perda",
+    "dashboardTitle": "Dashboard de Vendas",
+    "dashboardSubtitle": "Indicadores gerenciais do funil de vendas",
+    "dashboardEmpty": "Nenhum indicador disponível ainda"
   }
 }

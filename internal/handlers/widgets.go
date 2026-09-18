@@ -210,6 +210,73 @@ func (a *App) ensureDefaultSACWidgets(orgID uuid.UUID) error {
 	return a.DB.Create(&widgets).Error
 }
 
+// salesOpportunityDashboardWidgets are the 5 managerial funnel cards seeded
+// once per organization (see ensureDefaultSalesOpportunityWidgets), mirroring
+// occurrenceDashboardWidgets/ensureDefaultSACWidgets' seed-on-first-read
+// pattern. Every Field value here (open/converted/lost/sla_breached) is
+// consumed by querySalesOpportunities's field-driven WHERE-clause switch,
+// not by allowedFilterFields/allowedGroupByFields — none of these widgets
+// set Filters or GroupByField, so those two whitelists don't apply. Metric
+// "sum" on the value-of-funnel card always aggregates estimated_value
+// (hardcoded in querySalesOpportunities), so Field is unused for that one.
+var salesOpportunityDashboardWidgets = []models.Widget{
+	{
+		Name: "Oportunidades abertas", Description: "Em potencial, orçamento ou direcionada",
+		DataSource: "sales_opportunities", Metric: "count", Field: "open",
+		DisplayType: "number", Color: "blue", Size: "small", ShowChange: false,
+		IsShared: true, IsDefault: true,
+	},
+	{
+		Name: "Convertidas", Description: "Marcadas como convertidas no período",
+		DataSource: "sales_opportunities", Metric: "count", Field: "converted",
+		DisplayType: "number", Color: "green", Size: "small", ShowChange: true,
+		IsShared: true, IsDefault: true,
+	},
+	{
+		Name: "Perdidas", Description: "Marcadas como perdidas no período",
+		DataSource: "sales_opportunities", Metric: "count", Field: "lost",
+		DisplayType: "number", Color: "red", Size: "small", ShowChange: true,
+		IsShared: true, IsDefault: true,
+	},
+	{
+		Name: "Valor estimado do funil", Description: "Soma de estimated_value das oportunidades abertas",
+		DataSource: "sales_opportunities", Metric: "sum", Field: "estimated_value",
+		DisplayType: "number", Color: "purple", Size: "small", ShowChange: false,
+		IsShared: true, IsDefault: true,
+	},
+	{
+		Name: "Oportunidades com SLA vencido", Description: "Mais de 7 dias em Direcionada",
+		DataSource: "sales_opportunities", Metric: "count", Field: "sla_breached",
+		DisplayType: "number", Color: "orange", Size: "small", ShowChange: false,
+		IsShared: true, IsDefault: true,
+	},
+}
+
+// ensureDefaultSalesOpportunityWidgets seeds the managerial dashboard's
+// default cards for an organization the first time its widgets are read, if
+// none exist yet. Same idempotent "seed on first read" pattern as
+// ensureDefaultSACWidgets above (including the same narrow, accepted
+// double-seed race on an org's very first ever widget fetch).
+func (a *App) ensureDefaultSalesOpportunityWidgets(orgID uuid.UUID) error {
+	var count int64
+	if err := a.DB.Model(&models.Widget{}).
+		Where("organization_id = ? AND data_source = ? AND is_default = true", orgID, "sales_opportunities").
+		Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+
+	widgets := make([]models.Widget, len(salesOpportunityDashboardWidgets))
+	for i, w := range salesOpportunityDashboardWidgets {
+		w.OrganizationID = orgID
+		w.DisplayOrder = i
+		widgets[i] = w
+	}
+	return a.DB.Create(&widgets).Error
+}
+
 // ListWidgets returns all widgets for the user (their own + shared)
 func (a *App) ListWidgets(r *fastglue.Request) error {
 	orgID, userID, err := a.getOrgAndUserID(r)
@@ -224,6 +291,9 @@ func (a *App) ListWidgets(r *fastglue.Request) error {
 
 	if err := a.ensureDefaultSACWidgets(orgID); err != nil {
 		a.Log.Error("Failed to seed default SAC widgets", "error", err)
+	}
+	if err := a.ensureDefaultSalesOpportunityWidgets(orgID); err != nil {
+		a.Log.Error("Failed to seed default sales opportunity widgets", "error", err)
 	}
 
 	// Get user's own widgets + shared widgets from org
@@ -789,6 +859,9 @@ func (a *App) GetAllWidgetsData(r *fastglue.Request) error {
 
 	if err := a.ensureDefaultSACWidgets(orgID); err != nil {
 		a.Log.Error("Failed to seed default SAC widgets", "error", err)
+	}
+	if err := a.ensureDefaultSalesOpportunityWidgets(orgID); err != nil {
+		a.Log.Error("Failed to seed default sales opportunity widgets", "error", err)
 	}
 
 	// Parse date range from query params

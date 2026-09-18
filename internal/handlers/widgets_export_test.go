@@ -45,3 +45,10 @@ func IsGroupByFieldAllowedForTest(dataSource, field string) bool {
 func (a *App) GetGroupedDataForTest(orgID uuid.UUID, widget models.Widget, filters []FilterInput, start, end time.Time) []DataPoint {
 	return a.getGroupedData(orgID, widget, filters, start, end)
 }
+
+// EnsureDefaultSalesOpportunityWidgetsForTest exports
+// ensureDefaultSalesOpportunityWidgets for tests in the handlers_test
+// package.
+func (a *App) EnsureDefaultSalesOpportunityWidgetsForTest(orgID uuid.UUID) error {
+	return a.ensureDefaultSalesOpportunityWidgets(orgID)
+}

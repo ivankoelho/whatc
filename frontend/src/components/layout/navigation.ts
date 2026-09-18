@@ -75,6 +75,12 @@ export const navigationSections: NavSection[] = [
         icon: TrendingUp,
         permission: 'sales_opportunities'
       },
+      {
+        name: 'nav.salesDashboard',
+        path: '/sales/dashboard',
+        icon: BarChart3,
+        permission: 'sales_opportunities'
+      },
     ]
   },
   {

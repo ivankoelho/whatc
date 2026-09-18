@@ -165,6 +165,12 @@ const router = createRouter({
           meta: { permission: 'sales_opportunities' }
         },
         {
+          path: 'sales/dashboard',
+          name: 'sales-dashboard',
+          component: () => import('@/views/sales/SalesDashboardView.vue'),
+          meta: { permission: 'sales_opportunities' }
+        },
+        {
           path: 'analytics/agents',
           name: 'agent-analytics',
           component: () => import('@/views/analytics/AgentAnalyticsView.vue'),
@@ -392,6 +398,7 @@ const navigationOrder = [
   { path: '/chat', permission: 'chat' },
   { path: '/crm/occurrences', permission: 'occurrences' },
   { path: '/sales/operation', permission: 'sales_opportunities' },
+  { path: '/sales/dashboard', permission: 'sales_opportunities' },
   { path: '/chatbot', permission: 'settings.chatbot', childPaths: [
     { path: '/chatbot', permission: 'settings.chatbot' },
     { path: '/chatbot/keywords', permission: 'chatbot.keywords' },
