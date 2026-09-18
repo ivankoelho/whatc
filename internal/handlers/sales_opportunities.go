@@ -328,6 +328,7 @@ func (a *App) ConvertSalesOpportunity(r *fastglue.Request) error {
 	if err := a.DB.Model(opp).Updates(map[string]any{
 		"status":            models.SalesOpportunityStatusConvertida,
 		"conversion_source": source, "converted_at": now,
+		"sla_breached": false,
 	}).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to convert opportunity", nil, "")
 	}
@@ -376,6 +377,7 @@ func (a *App) LoseSalesOpportunity(r *fastglue.Request) error {
 	if err := a.DB.Model(opp).Updates(map[string]any{
 		"status":      models.SalesOpportunityStatusPerdida,
 		"loss_reason": reason, "loss_notes": req.LossNotes, "lost_at": now,
+		"sla_breached": false,
 	}).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to mark opportunity lost", nil, "")
 	}

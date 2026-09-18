@@ -119,6 +119,12 @@ func (p *SLAProcessor) processOrganizationSLA(settings models.ChatbotSettings, n
 	if settings.SLA.OccurrenceEnabled {
 		p.processOccurrenceSLA(orgID, now)
 	}
+
+	// Sales opportunity SLA — its own gate, independent of chat's SLA.Enabled
+	// and OccurrenceEnabled, same reasoning as those two above.
+	if settings.SLA.SalesOpportunityEnabled {
+		p.processSalesOpportunitySLA(orgID, now)
+	}
 }
 
 // autoCloseExpiredTransfers closes transfers that have exceeded their expiry time
@@ -748,5 +754,19 @@ func (p *SLAProcessor) processOccurrenceSLA(orgID uuid.UUID, now time.Time) {
 			orgID, now, false).
 		Updates(map[string]any{"sla_breached": true, "sla_breached_at": now}).Error; err != nil {
 		p.app.Log.Error("Failed to mark occurrence resolution SLA breach", "error", err, "organization_id", orgID)
+	}
+}
+
+// processSalesOpportunitySLA marks sla_breached=true/sla_breached_at=now for
+// opportunities that have sat in "direcionada" for more than 7 days (spec
+// §6). Only marks — no auto-close, no escalation, same non-objective as
+// processOccurrenceSLA.
+func (p *SLAProcessor) processSalesOpportunitySLA(orgID uuid.UUID, now time.Time) {
+	deadline := now.Add(-7 * 24 * time.Hour)
+	if err := p.app.DB.Model(&models.SalesOpportunity{}).
+		Where("organization_id = ? AND stage = ? AND status = ? AND stage_changed_at < ? AND sla_breached = ?",
+			orgID, models.SalesOpportunityStageDirecionada, models.SalesOpportunityStatusAberta, deadline, false).
+		Updates(map[string]any{"sla_breached": true, "sla_breached_at": now}).Error; err != nil {
+		p.app.Log.Error("Failed to mark sales opportunity SLA breach", "error", err, "organization_id", orgID)
 	}
 }
