@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, request as playwrightRequest } from '@playwright/test'
 import { randomInt } from 'node:crypto'
 import { Client } from 'pg'
 import { loginAsAdmin, ApiHelper } from '../../helpers'
@@ -58,6 +58,20 @@ async function seedOpportunity(params: {
   return { id: rows[0]!.id as string, opportunityNumber }
 }
 
+// Fresh request context: the beforeAll-bound `api` can't be reused inside
+// test bodies (Playwright disposes the `request` fixture as soon as
+// beforeAll returns). Mirrors queue-pickup.spec.ts's seedContactAndQueue.
+async function createContactFresh(phone: string, name: string): Promise<{ id: string }> {
+  const ctx = await playwrightRequest.newContext()
+  const localApi = new ApiHelper(ctx)
+  try {
+    await localApi.loginAsAdmin()
+    return await localApi.createContact(phone, name)
+  } finally {
+    await ctx.dispose()
+  }
+}
+
 // Navigates to /sales/operation and waits for the opportunities list GET to
 // resolve, mirroring queue-pickup.spec.ts's gotoTransfersAndWaitLoad —
 // networkidle alone races against the board's lazy-loaded data fetch.
@@ -108,7 +122,7 @@ test.describe('Central de Vendas', () => {
   })
 
   test('dragging into Direcionada without direcionamento is blocked', async ({ page }) => {
-    const contact = await api.createContact(scope.phone(), scope.name('drag-block'))
+    const contact = await createContactFresh(scope.phone(), scope.name('drag-block'))
     const { opportunityNumber } = await seedOpportunity({
       orgId,
       contactId: contact.id,
@@ -141,7 +155,7 @@ test.describe('Central de Vendas', () => {
   })
 
   test('marking lost requires a loss reason', async ({ page }) => {
-    const contact = await api.createContact(scope.phone(), scope.name('loss-reason'))
+    const contact = await createContactFresh(scope.phone(), scope.name('loss-reason'))
     const { opportunityNumber } = await seedOpportunity({
       orgId,
       contactId: contact.id,
