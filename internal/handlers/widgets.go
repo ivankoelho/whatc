@@ -119,12 +119,13 @@ type DataPoint struct {
 
 // Available data sources and their filterable fields
 var widgetDataSources = map[string][]string{
-	"messages":    {"status", "direction", "message_type", "whatsapp_account"},
-	"contacts":    {"whatsapp_account", "is_read"},
-	"campaigns":   {"status", "message_status"},
-	"transfers":   {"status", "source"},
-	"sessions":    {"status"},
-	"occurrences": {"priority", "stage_id", "category_id", "unit_id", "department_id", "sale_channel"},
+	"messages":            {"status", "direction", "message_type", "whatsapp_account"},
+	"contacts":            {"whatsapp_account", "is_read"},
+	"campaigns":           {"status", "message_status"},
+	"transfers":           {"status", "source"},
+	"sessions":            {"status"},
+	"occurrences":         {"priority", "stage_id", "category_id", "unit_id", "department_id", "sale_channel"},
+	"sales_opportunities": {"stage", "status", "assigned_user_id"},
 }
 
 // Available metrics
@@ -901,6 +902,10 @@ func (a *App) executeWidgetQuery(orgID uuid.UUID, widget models.Widget, fromStr,
 	case "occurrences":
 		currentValue = a.queryOccurrences(orgID, widget.Metric, widget.Field, filters, periodStart, periodEnd)
 		previousValue = a.queryOccurrences(orgID, widget.Metric, widget.Field, filters, previousPeriodStart, previousPeriodEnd)
+
+	case "sales_opportunities":
+		currentValue = a.querySalesOpportunities(orgID, widget.Metric, widget.Field, filters, periodStart, periodEnd)
+		previousValue = a.querySalesOpportunities(orgID, widget.Metric, widget.Field, filters, previousPeriodStart, previousPeriodEnd)
 	}
 
 	response.Value = currentValue
@@ -1067,6 +1072,61 @@ func (a *App) queryOccurrences(orgID uuid.UUID, metric, field string, filters []
 	return float64(count)
 }
 
+// querySalesOpportunities computes the sales funnel dashboard metrics,
+// mirroring queryOccurrences's field-driven WHERE clause switch. Unlike
+// occurrences' "open"/"breached" snapshots, every field here is scoped to
+// [start, end] over opened_at — the funnel widgets are period reports, not
+// current-state snapshots.
+func (a *App) querySalesOpportunities(orgID uuid.UUID, metric, field string, filters []FilterInput, start, end time.Time) float64 {
+	q := a.DB.Model(&models.SalesOpportunity{}).
+		Where("organization_id = ? AND opened_at >= ? AND opened_at <= ?", orgID, start, end)
+	for _, f := range filters {
+		q = applyFilter("sales_opportunities", q, f)
+	}
+
+	switch field {
+	case "open":
+		q = q.Where("status = ?", models.SalesOpportunityStatusAberta)
+	case "converted":
+		q = q.Where("status = ?", models.SalesOpportunityStatusConvertida)
+	case "lost":
+		q = q.Where("status = ?", models.SalesOpportunityStatusPerdida)
+	case "sla_breached":
+		q = q.Where("sla_breached = ?", true)
+	}
+
+	switch metric {
+	case "count":
+		var count int64
+		q.Count(&count)
+		return float64(count)
+	case "sum":
+		var total float64
+		q.Select("COALESCE(SUM(estimated_value), 0)").Scan(&total)
+		return total
+	case "avg":
+		var avg float64
+		q.Select("COALESCE(AVG(estimated_value), 0)").Scan(&avg)
+		return avg
+	}
+	return 0
+}
+
+// salesConversionRate implements the fixed conversion-rate formula used
+// across the sales funnel spec: convertidas / (convertidas + perdidas) * 100
+// — aberta opportunities are excluded from the denominator on purpose.
+func (a *App) salesConversionRate(orgID uuid.UUID, start, end time.Time) float64 {
+	var converted, lost int64
+	base := a.DB.Model(&models.SalesOpportunity{}).
+		Where("organization_id = ? AND opened_at >= ? AND opened_at <= ?", orgID, start, end)
+	base.Session(&gorm.Session{}).Where("status = ?", models.SalesOpportunityStatusConvertida).Count(&converted)
+	base.Session(&gorm.Session{}).Where("status = ?", models.SalesOpportunityStatusPerdida).Count(&lost)
+	if converted+lost == 0 {
+		return 0
+	}
+	return float64(converted) / float64(converted+lost) * 100
+}
+
 func (a *App) getChartData(orgID uuid.UUID, widget models.Widget, filters []FilterInput, start, end time.Time) []ChartPoint {
 	chartData := make([]ChartPoint, 0)
 
@@ -1156,6 +1216,11 @@ var allowedFilterFields = map[string]map[string]bool{
 		"department_id": true,
 		"sale_channel":  true,
 	},
+	"sales_opportunities": {
+		"stage":            true,
+		"status":           true,
+		"assigned_user_id": true,
+	},
 }
 
 // allowedAggregateFields enumerates the columns each data source is
@@ -1182,6 +1247,8 @@ func resolveDataSourceTable(dataSource string) (tableName, dateField string, ok 
 		return "chatbot_sessions", "created_at", true
 	case "occurrences":
 		return "occurrences", "opened_at", true
+	case "sales_opportunities":
+		return "sales_opportunities", "opened_at", true
 	default:
 		return "", "", false
 	}
@@ -1536,6 +1603,17 @@ var tableQuerySQL = map[string]struct{ base, orderBy string }{
 			LEFT JOIN occurrence_stages s ON s.id = o.stage_id
 			WHERE o.organization_id = ? AND o.opened_at >= ? AND o.opened_at <= ? AND o.deleted_at IS NULL`,
 		orderBy: " ORDER BY o.opened_at DESC LIMIT 10",
+	},
+	"sales_opportunities": {
+		// Same soft-delete caveat as occurrences above: raw SQL bypasses
+		// GORM's scope, so so.deleted_at IS NULL is explicit here.
+		base: `SELECT so.id, COALESCE(c.profile_name, c.phone_number) as label,
+			so.opportunity_number || ' · ' || so.stage as sub_label,
+			so.status, '' as direction, so.opened_at as created_at
+			FROM sales_opportunities so
+			LEFT JOIN contacts c ON c.id = so.contact_id
+			WHERE so.organization_id = ? AND so.opened_at >= ? AND so.opened_at <= ? AND so.deleted_at IS NULL`,
+		orderBy: " ORDER BY so.opened_at DESC LIMIT 10",
 	},
 }
 
