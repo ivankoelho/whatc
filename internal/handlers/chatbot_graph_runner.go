@@ -296,6 +296,18 @@ func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 						ctx.contact.TeamID = &parsed
 					}
 				}
+
+				// create_opportunity: true opens a sales funnel entry for
+				// this contact (spec §5). Idempotent — a contact that
+				// already has one open just gets a "retriggered" event, no
+				// duplicate, no stage change (spec §5.2). Log-and-continue:
+				// a failure here must never block the bot from advancing.
+				if create, _ := b["create_opportunity"].(bool); create {
+					if _, err := a.createOrRetriggerSalesOpportunity(ctx.contact, nil); err != nil {
+						a.Log.Error("buttons node failed to create sales opportunity",
+							"node", node.ID, "contact", ctx.contact.ID, "error", err)
+					}
+				}
 				break
 			}
 		}
