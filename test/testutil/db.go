@@ -47,6 +47,12 @@ func SetupTestDB(t *testing.T) *gorm.DB {
 			return
 		}
 
+		// Ensure xprocess_seller_code column exists on users table (handles AutoMigrate limitations)
+		if err := testDB.Exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS xprocess_seller_code character varying(20)`).Error; err != nil {
+			testDBInitErr = fmt.Errorf("failed to add xprocess_seller_code column: %w", err)
+			return
+		}
+
 		// Clean up any existing data before tests start
 		cleanupTables(testDB)
 	})
@@ -133,6 +139,10 @@ func runMigrations(db *gorm.DB) error {
 		&models.Occurrence{},
 		&models.OccurrenceEvent{},
 		&models.OccurrenceCounter{},
+		// Sales opportunity — funil de vendas
+		&models.SalesOpportunity{},
+		&models.SalesOpportunityEvent{},
+		&models.SalesOpportunityCounter{},
 		// Help Desk — unidade e departamento
 		&models.Unit{},
 		&models.Department{},
@@ -186,6 +196,10 @@ func cleanupTables(db *gorm.DB) {
 		"occurrences",
 		"occurrence_categories",
 		"occurrence_stages",
+		// Sales opportunity — funil de vendas
+		"sales_opportunity_counters",
+		"sales_opportunity_events",
+		"sales_opportunities",
 		// Help Desk — unidade e departamento
 		"departments",
 		"units",
@@ -249,6 +263,9 @@ func TruncateTables(db *gorm.DB) {
 		"occurrences",
 		"occurrence_categories",
 		"occurrence_stages",
+		"sales_opportunity_counters",
+		"sales_opportunity_events",
+		"sales_opportunities",
 		"departments",
 		"units",
 		"conversation_notes",
