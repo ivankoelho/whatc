@@ -762,6 +762,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/sales-opportunities/{id}/events", app.ListSalesOpportunityEvents)
 	g.PUT("/api/sales-opportunities/{id}/stage", app.ChangeSalesOpportunityStage)
 	g.PUT("/api/sales-opportunities/{id}/direcionamento", app.ChangeSalesOpportunityDirecionamento)
+	g.PUT("/api/sales-opportunities/{id}/details", app.UpdateSalesOpportunityDetails)
 	g.POST("/api/sales-opportunities/{id}/convert", app.ConvertSalesOpportunity)
 	g.POST("/api/sales-opportunities/{id}/lose", app.LoseSalesOpportunity)
 

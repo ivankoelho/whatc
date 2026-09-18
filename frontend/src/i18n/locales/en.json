@@ -3396,6 +3396,9 @@
     "direcionamentoWhatsApp": "WhatsApp",
     "direcionamentoChanged": "Direction updated",
     "direcionamentoChangeFailed": "Failed to update the direction",
+    "estimatedValueInvalid": "Enter a valid numeric value",
+    "estimatedValueChanged": "Estimated value updated",
+    "estimatedValueChangeFailed": "Failed to update the estimated value",
     "dashboardTitle": "Sales Dashboard",
     "dashboardSubtitle": "Managerial indicators for the sales funnel",
     "dashboardEmpty": "No indicators available yet"

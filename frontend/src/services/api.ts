@@ -1499,6 +1499,8 @@ export const salesOpportunitiesService = {
     api.put<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/stage`, { stage }),
   changeDirecionamento: (id: string, direcionamento: SalesDirecionamento) =>
     api.put<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/direcionamento`, { direcionamento }),
+  updateDetails: (id: string, details: { interest?: string; estimated_value?: number; estimated_quantity?: number }) =>
+    api.put<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/details`, details),
   convert: (id: string) => api.post<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/convert`),
   lose: (id: string, lossReason: SalesLossReason, lossNotes?: string) =>
     api.post<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/lose`, { loss_reason: lossReason, loss_notes: lossNotes }),

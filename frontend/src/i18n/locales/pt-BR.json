@@ -3385,6 +3385,9 @@
     "direcionamentoWhatsApp": "WhatsApp",
     "direcionamentoChanged": "Direcionamento atualizado",
     "direcionamentoChangeFailed": "Falha ao atualizar o direcionamento",
+    "estimatedValueInvalid": "Informe um valor numérico válido",
+    "estimatedValueChanged": "Valor estimado atualizado",
+    "estimatedValueChangeFailed": "Falha ao atualizar o valor estimado",
     "dashboardTitle": "Dashboard de Vendas",
     "dashboardSubtitle": "Indicadores gerenciais do funil de vendas",
     "dashboardEmpty": "Nenhum indicador disponível ainda"

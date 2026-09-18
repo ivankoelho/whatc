@@ -5,6 +5,7 @@ import { toast } from 'vue-sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Input } from '@/components/ui/input'
 import { salesOpportunitiesService } from '@/services/api'
 import type { SalesOpportunity, SalesDirecionamento } from '@/services/api'
 import { getErrorMessage } from '@/lib/api-utils'
@@ -15,6 +16,7 @@ const emit = defineEmits<{
   convert: [opportunity: SalesOpportunity]
   lose: [opportunity: SalesOpportunity]
   'direcionamento-change': [opportunity: SalesOpportunity]
+  'details-change': [opportunity: SalesOpportunity]
 }>()
 
 const { t } = useI18n()
@@ -50,6 +52,45 @@ function formatCurrency(value?: number): string {
   if (value == null) return '—'
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value)
 }
+
+// Click-to-edit for estimated_value — the one field with real downstream
+// impact (the "Valor estimado do funil" dashboard widget, finding 3).
+// interest/estimated_quantity share the write path (PUT .../details) but
+// aren't worth their own inline editors in this first cut.
+const editingValue = ref(false)
+const valueDraft = ref('')
+const savingValue = ref(false)
+
+function startEditValue() {
+  if (props.opportunity.status !== 'aberta') return
+  valueDraft.value = props.opportunity.estimated_value != null ? String(props.opportunity.estimated_value) : ''
+  editingValue.value = true
+}
+
+async function saveValue() {
+  editingValue.value = false
+  const raw = valueDraft.value.trim()
+  // Clearing the field back to empty isn't a supported "unset" here (the
+  // details endpoint only ever sets fields it's given, spec §4 has no
+  // requirement to unset) — treat it as a no-op cancel instead of erroring.
+  if (raw === '') return
+  const parsed = Number(raw)
+  if (Number.isNaN(parsed)) {
+    toast.error(t('sales.estimatedValueInvalid'))
+    return
+  }
+  if (parsed === props.opportunity.estimated_value) return
+  savingValue.value = true
+  try {
+    const { data } = await salesOpportunitiesService.updateDetails(props.opportunity.id, { estimated_value: parsed })
+    toast.success(t('sales.estimatedValueChanged'))
+    emit('details-change', data.data)
+  } catch (e) {
+    toast.error(getErrorMessage(e, t('sales.estimatedValueChangeFailed')))
+  } finally {
+    savingValue.value = false
+  }
+}
 </script>
 
 <template>
@@ -70,7 +111,27 @@ function formatCurrency(value?: number): string {
       <span class="text-white/30 light:text-gray-400">{{ $t('sales.contactLabel') }}:</span>
       {{ opportunity.contact?.profile_name || opportunity.contact_id }}
     </p>
-    <p class="text-sm mt-1 truncate text-white light:text-gray-900">
+    <div v-if="editingValue" class="mt-1" @click.stop @mousedown.stop>
+      <Input
+        v-model="valueDraft"
+        data-testid="sales-opportunity-value-input"
+        type="number"
+        step="0.01"
+        min="0"
+        class="h-7 text-xs"
+        autofocus
+        @keyup.enter="saveValue"
+        @keyup.escape="editingValue = false"
+        @blur="saveValue"
+      />
+    </div>
+    <p
+      v-else
+      data-testid="sales-opportunity-value"
+      class="text-sm mt-1 truncate text-white light:text-gray-900"
+      :class="{ 'cursor-text hover:underline': opportunity.status === 'aberta', 'opacity-50': savingValue }"
+      @click.stop="startEditValue"
+    >
       {{ formatCurrency(opportunity.estimated_value) }}
     </p>
     <div v-if="opportunity.status === 'aberta'" class="mt-2" @click.stop @mousedown.stop>

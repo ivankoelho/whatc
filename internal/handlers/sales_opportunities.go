@@ -306,6 +306,67 @@ func (a *App) ChangeSalesOpportunityDirecionamento(r *fastglue.Request) error {
 	return r.SendEnvelope(opp)
 }
 
+type updateSalesOpportunityDetailsRequest struct {
+	Interest          *string  `json:"interest"`
+	EstimatedValue    *float64 `json:"estimated_value"`
+	EstimatedQuantity *int     `json:"estimated_quantity"`
+}
+
+// UpdateSalesOpportunityDetails edits interest/estimated_value/estimated_quantity
+// — plain fields filled in by the agent (spec §4), not a funnel transition.
+// Unlike stage/direcionamento/convert/lose, this does NOT write a
+// SalesOpportunityEvent: the spec only requires an event for transitions and
+// direcionamento changes, not for editing these fields.
+func (a *App) UpdateSalesOpportunityDetails(r *fastglue.Request) error {
+	orgID, userID, err := a.requireAuth(r, models.ResourceSalesOpportunities, models.ActionWrite)
+	if err != nil {
+		return nil
+	}
+	opp, err := a.loadAuthorizedSalesOpportunity(r, orgID, userID)
+	if err != nil {
+		return nil
+	}
+	if opp.Status != models.SalesOpportunityStatusAberta {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Only open opportunities can be edited", nil, "")
+	}
+
+	var req updateSalesOpportunityDetailsRequest
+	if err := a.decodeRequest(r, &req); err != nil {
+		return nil
+	}
+
+	updates := map[string]any{}
+	if req.Interest != nil {
+		updates["interest"] = *req.Interest
+	}
+	if req.EstimatedValue != nil {
+		updates["estimated_value"] = *req.EstimatedValue
+	}
+	if req.EstimatedQuantity != nil {
+		updates["estimated_quantity"] = *req.EstimatedQuantity
+	}
+	if len(updates) == 0 {
+		return r.SendEnvelope(opp)
+	}
+
+	// Same TOCTOU guard as the other mutating handlers (finding 8): re-check
+	// status=aberta atomically in the WHERE clause instead of trusting the Go
+	// read above, so a concurrent convert/lose landing between that read and
+	// this write can't silently let a closed opportunity's fields change.
+	result := a.DB.Model(&models.SalesOpportunity{}).
+		Where("id = ? AND status = ?", opp.ID, models.SalesOpportunityStatusAberta).
+		Updates(updates)
+	if result.Error != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update opportunity", nil, "")
+	}
+	if result.RowsAffected == 0 {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Only open opportunities can be edited", nil, "")
+	}
+
+	a.DB.First(opp, "id = ?", opp.ID)
+	return r.SendEnvelope(opp)
+}
+
 // ConvertSalesOpportunity marks the opportunity converted. Manual only in
 // this delivery — conversion_source is always "manual" (spec §2, §9).
 // Validates the state machine (spec §5.1): only aberta -> convertida; stage

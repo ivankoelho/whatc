@@ -18,6 +18,7 @@ const emit = defineEmits<{
   lose: [opportunity: SalesOpportunity]
   'stage-change': [opportunity: SalesOpportunity, stage: SalesOpportunityStage]
   'direcionamento-change': [opportunity: SalesOpportunity]
+  'details-change': [opportunity: SalesOpportunity]
 }>()
 
 const { t } = useI18n()
@@ -124,6 +125,13 @@ function onDirecionamentoChange(updated: SalesOpportunity) {
   emit('direcionamento-change', updated)
 }
 
+function onDetailsChange(updated: SalesOpportunity) {
+  const col = columns.value.find(c => c.stage === updated.stage)
+  const idx = col?.items.findIndex(i => i.id === updated.id)
+  if (col && idx !== undefined && idx !== -1) col.items.splice(idx, 1, updated)
+  emit('details-change', updated)
+}
+
 onMounted(loadAll)
 
 defineExpose({ refresh: loadAll })
@@ -167,6 +175,7 @@ defineExpose({ refresh: loadAll })
                 @convert="emit('convert', $event)"
                 @lose="emit('lose', $event)"
                 @direcionamento-change="onDirecionamentoChange"
+                @details-change="onDetailsChange"
               />
             </template>
           </draggable>
