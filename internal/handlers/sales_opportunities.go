@@ -241,8 +241,18 @@ func (a *App) ChangeSalesOpportunityStage(r *fastglue.Request) error {
 	if newStage != models.SalesOpportunityStageDirecionada {
 		updates["sla_breached"] = false
 	}
-	if err := a.DB.Model(opp).Updates(updates).Error; err != nil {
+	// Finding 8 (TOCTOU): re-check status=aberta atomically in the WHERE
+	// clause instead of trusting the Go-level read above — a concurrent
+	// convert/lose landing between that read and this write must not let a
+	// closed opportunity's stage silently change.
+	result := a.DB.Model(&models.SalesOpportunity{}).
+		Where("id = ? AND status = ?", opp.ID, models.SalesOpportunityStatusAberta).
+		Updates(updates)
+	if result.Error != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to change stage", nil, "")
+	}
+	if result.RowsAffected == 0 {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Only open opportunities can change stage", nil, "")
 	}
 	if err := a.DB.Create(&models.SalesOpportunityEvent{
 		OrganizationID: orgID, SalesOpportunityID: opp.ID, Type: models.SalesOpportunityEventStageChanged,
@@ -292,8 +302,16 @@ func (a *App) ChangeSalesOpportunityDirecionamento(r *fastglue.Request) error {
 		return r.SendEnvelope(opp)
 	}
 
-	if err := a.DB.Model(opp).Update("direcionamento", direcionamento).Error; err != nil {
+	// Finding 8 (TOCTOU): re-check status=aberta atomically, same reasoning
+	// as ChangeSalesOpportunityStage above.
+	result := a.DB.Model(&models.SalesOpportunity{}).
+		Where("id = ? AND status = ?", opp.ID, models.SalesOpportunityStatusAberta).
+		Update("direcionamento", direcionamento)
+	if result.Error != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to change direcionamento", nil, "")
+	}
+	if result.RowsAffected == 0 {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Only open opportunities can change direcionamento", nil, "")
 	}
 	if err := a.DB.Create(&models.SalesOpportunityEvent{
 		OrganizationID: orgID, SalesOpportunityID: opp.ID, Type: models.SalesOpportunityEventDirecionamentoChanged,
@@ -386,12 +404,22 @@ func (a *App) ConvertSalesOpportunity(r *fastglue.Request) error {
 
 	now := time.Now()
 	source := models.SalesConversionSourceManual
-	if err := a.DB.Model(opp).Updates(map[string]any{
-		"status":            models.SalesOpportunityStatusConvertida,
-		"conversion_source": source, "converted_at": now,
-		"sla_breached": false,
-	}).Error; err != nil {
+	// Finding 8 (TOCTOU): re-check status=aberta atomically — this is the
+	// pair to LoseSalesOpportunity's own guard below; without it, two
+	// concurrent convert+lose (or convert+convert) requests on the same
+	// opportunity could both pass the Go-level check and both write.
+	result := a.DB.Model(&models.SalesOpportunity{}).
+		Where("id = ? AND status = ?", opp.ID, models.SalesOpportunityStatusAberta).
+		Updates(map[string]any{
+			"status":            models.SalesOpportunityStatusConvertida,
+			"conversion_source": source, "converted_at": now,
+			"sla_breached": false,
+		})
+	if result.Error != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to convert opportunity", nil, "")
+	}
+	if result.RowsAffected == 0 {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Only open opportunities can be converted", nil, "")
 	}
 	if err := a.DB.Create(&models.SalesOpportunityEvent{
 		OrganizationID: orgID, SalesOpportunityID: opp.ID, Type: models.SalesOpportunityEventConverted,
@@ -435,12 +463,20 @@ func (a *App) LoseSalesOpportunity(r *fastglue.Request) error {
 	}
 
 	now := time.Now()
-	if err := a.DB.Model(opp).Updates(map[string]any{
-		"status":      models.SalesOpportunityStatusPerdida,
-		"loss_reason": reason, "loss_notes": req.LossNotes, "lost_at": now,
-		"sla_breached": false,
-	}).Error; err != nil {
+	// Finding 8 (TOCTOU): re-check status=aberta atomically, same reasoning
+	// as ConvertSalesOpportunity above.
+	result := a.DB.Model(&models.SalesOpportunity{}).
+		Where("id = ? AND status = ?", opp.ID, models.SalesOpportunityStatusAberta).
+		Updates(map[string]any{
+			"status":      models.SalesOpportunityStatusPerdida,
+			"loss_reason": reason, "loss_notes": req.LossNotes, "lost_at": now,
+			"sla_breached": false,
+		})
+	if result.Error != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to mark opportunity lost", nil, "")
+	}
+	if result.RowsAffected == 0 {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Only open opportunities can be marked lost", nil, "")
 	}
 	if err := a.DB.Create(&models.SalesOpportunityEvent{
 		OrganizationID: orgID, SalesOpportunityID: opp.ID, Type: models.SalesOpportunityEventLost,

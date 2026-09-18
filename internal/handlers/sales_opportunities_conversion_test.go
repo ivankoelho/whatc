@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/shridarpatil/whatomate/internal/models"
@@ -155,6 +156,52 @@ func TestSalesOpportunityStateMachine_RejectsInvalidTransitions(t *testing.T) {
 	req6.RequestCtx.SetUserValue("id", perdida2.ID.String())
 	require.NoError(t, app.LoseSalesOpportunity(req6))
 	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req6))
+}
+
+// Final review finding 8 (TOCTOU): two concurrent ConvertSalesOpportunity
+// calls on the same open opportunity raced on a Go-level `opp.Status` read
+// followed by a bare `WHERE id = ?` update, so both could pass the guard and
+// both write. Mirrors TestCreateOrRetriggerSalesOpportunity_UniqueUnderConcurrency's
+// goroutines + WaitGroup pattern in sales_opportunities_creation_test.go.
+func TestConvertSalesOpportunity_ConcurrentConvertsYieldExactlyOneSuccess(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "agent", []string{"sales_opportunities:read", "sales_opportunities:write"})
+	agent := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	opp := newOpenOpportunity(t, app, org.ID, agent.ID, contact.ID)
+
+	const n = 10
+	var wg sync.WaitGroup
+	statuses := make([]int, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			req := testutil.NewJSONRequest(t, nil)
+			testutil.SetAuthContext(req, org.ID, agent.ID)
+			req.RequestCtx.SetUserValue("id", opp.ID.String())
+			_ = app.ConvertSalesOpportunity(req)
+			statuses[idx] = testutil.GetResponseStatusCode(req)
+		}(i)
+	}
+	wg.Wait()
+
+	successes := 0
+	for _, s := range statuses {
+		if s == fasthttp.StatusOK {
+			successes++
+		}
+	}
+	assert.Equal(t, 1, successes, "exactly one of the concurrent converts must succeed")
+
+	var got models.SalesOpportunity
+	require.NoError(t, app.DB.First(&got, "id = ?", opp.ID).Error)
+	assert.Equal(t, models.SalesOpportunityStatusConvertida, got.Status)
+
+	var events []models.SalesOpportunityEvent
+	require.NoError(t, app.DB.Where("sales_opportunity_id = ? AND type = ?", opp.ID, models.SalesOpportunityEventConverted).Find(&events).Error)
+	assert.Len(t, events, 1, "only the single winning convert may write a converted event")
 }
 
 // stage must freeze at whatever value it had when the opportunity terminates
