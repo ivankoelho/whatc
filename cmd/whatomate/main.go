@@ -190,6 +190,12 @@ func runServer(args []string) {
 			lo.Fatal("What-happened permission backfill failed", "error", err)
 		}
 
+		// Same window: sales_opportunities is a brand-new resource, needs its
+		// own guard rather than piggybacking on an existing one.
+		if err := database.BackfillSalesOpportunityPermissions(db, lo); err != nil {
+			lo.Fatal("Sales opportunity permissions backfill failed", "error", err)
+		}
+
 		// Data fix, not a schema migration: AutoMigrate adding occurrences.source
 		// with a DB default backfilled every existing row to 'whatsapp',
 		// including cases opened manually. Runs once, guarded by the column's
