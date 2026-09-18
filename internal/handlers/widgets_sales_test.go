@@ -71,6 +71,7 @@ func TestQuerySalesOpportunities_ConversionRateExcludesOpenFromDenominator(t *te
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	now := time.Now()
 
 	statuses := []models.SalesOpportunityStatus{
 		models.SalesOpportunityStatusAberta,
@@ -79,11 +80,18 @@ func TestQuerySalesOpportunities_ConversionRateExcludesOpenFromDenominator(t *te
 		models.SalesOpportunityStatusPerdida,
 	}
 	for i, s := range statuses {
-		require.NoError(t, app.DB.Create(&models.SalesOpportunity{
+		opp := &models.SalesOpportunity{
 			OrganizationID: org.ID, ContactID: contact.ID,
 			OpportunityNumber: "OPP-20260917-00000" + string(rune('1'+i)),
-			Stage:             models.SalesOpportunityStagePotencial, Status: s, StageChangedAt: time.Now(),
-		}).Error)
+			Stage:             models.SalesOpportunityStagePotencial, Status: s, StageChangedAt: now,
+		}
+		switch s {
+		case models.SalesOpportunityStatusConvertida:
+			opp.ConvertedAt = &now
+		case models.SalesOpportunityStatusPerdida:
+			opp.LostAt = &now
+		}
+		require.NoError(t, app.DB.Create(opp).Error)
 	}
 
 	rate := app.SalesConversionRateForTest(org.ID, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
@@ -98,6 +106,7 @@ func TestQuerySalesOpportunities_RateMetricMatchesSalesConversionRate(t *testing
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	now := time.Now()
 
 	statuses := []models.SalesOpportunityStatus{
 		models.SalesOpportunityStatusConvertida,
@@ -105,11 +114,18 @@ func TestQuerySalesOpportunities_RateMetricMatchesSalesConversionRate(t *testing
 		models.SalesOpportunityStatusPerdida,
 	}
 	for i, s := range statuses {
-		require.NoError(t, app.DB.Create(&models.SalesOpportunity{
+		opp := &models.SalesOpportunity{
 			OrganizationID: org.ID, ContactID: contact.ID,
 			OpportunityNumber: "OPP-20260918-00002" + string(rune('1'+i)),
-			Stage:             models.SalesOpportunityStagePotencial, Status: s, StageChangedAt: time.Now(),
-		}).Error)
+			Stage:             models.SalesOpportunityStagePotencial, Status: s, StageChangedAt: now,
+		}
+		switch s {
+		case models.SalesOpportunityStatusConvertida:
+			opp.ConvertedAt = &now
+		case models.SalesOpportunityStatusPerdida:
+			opp.LostAt = &now
+		}
+		require.NoError(t, app.DB.Create(opp).Error)
 	}
 
 	start, end := time.Now().Add(-time.Hour), time.Now().Add(time.Hour)
@@ -117,6 +133,51 @@ func TestQuerySalesOpportunities_RateMetricMatchesSalesConversionRate(t *testing
 	want := app.SalesConversionRateForTest(org.ID, start, end)
 	assert.InDelta(t, 66.67, got, 0.01)
 	assert.Equal(t, want, got)
+}
+
+// TestQuerySalesOpportunities_RateUsesClosureTimestampScoping proves finding
+// C's fix applies to the "rate" metric too: salesConversionRate's numerator
+// (convertidas) and denominator (convertidas + perdidas) must scope on
+// converted_at/lost_at, not opened_at, so the rate widget stays internally
+// consistent with what the "Convertidas"/"Perdidas" count cards now show.
+func TestQuerySalesOpportunities_RateUsesClosureTimestampScoping(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+
+	start, end := time.Now().Add(-time.Hour), time.Now().Add(time.Hour)
+	oldOpenedAt := time.Now().Add(-30 * 24 * time.Hour)
+	closedInRange := time.Now()
+	closedOutOfRange := time.Now().Add(-48 * time.Hour)
+
+	newContact := func() uuid.UUID { return testutil.CreateTestContact(t, app.DB, org.ID).ID }
+
+	// Opened long before the period, but converted inside it: must count in
+	// the numerator/denominator.
+	require.NoError(t, app.DB.Create(&models.SalesOpportunity{
+		OrganizationID: org.ID, ContactID: newContact(), OpportunityNumber: "OPP-20260818-000030",
+		Stage: models.SalesOpportunityStageDirecionada, Status: models.SalesOpportunityStatusConvertida,
+		OpenedAt: oldOpenedAt, StageChangedAt: time.Now(), ConvertedAt: &closedInRange,
+	}).Error)
+
+	// Opened inside the period, but converted outside it: must NOT count.
+	require.NoError(t, app.DB.Create(&models.SalesOpportunity{
+		OrganizationID: org.ID, ContactID: newContact(), OpportunityNumber: "OPP-20260918-000031",
+		Stage: models.SalesOpportunityStageDirecionada, Status: models.SalesOpportunityStatusConvertida,
+		OpenedAt: time.Now(), StageChangedAt: time.Now(), ConvertedAt: &closedOutOfRange,
+	}).Error)
+
+	// Opened long before the period, but lost inside it: must count in the
+	// denominator.
+	require.NoError(t, app.DB.Create(&models.SalesOpportunity{
+		OrganizationID: org.ID, ContactID: newContact(), OpportunityNumber: "OPP-20260818-000032",
+		Stage: models.SalesOpportunityStageDirecionada, Status: models.SalesOpportunityStatusPerdida,
+		OpenedAt: oldOpenedAt, StageChangedAt: time.Now(), LostAt: &closedInRange,
+	}).Error)
+
+	// Only 1 convertida (in range) + 1 perdida (in range) should count:
+	// 1 / (1 + 1) * 100 = 50.
+	got := app.QuerySalesOpportunitiesForTest(org.ID, "rate", "converted", nil, start, end)
+	assert.InDelta(t, 50.0, got, 0.01, "rate must use converted_at/lost_at scoping, matching the count cards")
 }
 
 // TestQuerySalesOpportunities_OpenAndSLABreachedIgnoreDateRange proves finding
@@ -151,24 +212,63 @@ func TestQuerySalesOpportunities_OpenAndSLABreachedIgnoreDateRange(t *testing.T)
 	assert.Equal(t, float64(1), breachedCount, "the breached opportunity must count regardless of when it was opened")
 }
 
-// TestQuerySalesOpportunities_ConvertedAndLostStayDateScoped proves the other
-// half of finding 6: "converted"/"lost" ARE period metrics and must keep
-// excluding opportunities opened outside the selected range.
+// TestQuerySalesOpportunities_ConvertedAndLostStayDateScoped proves finding
+// C's fix: "converted"/"lost" ARE period metrics, but they scope on their own
+// closure timestamp (converted_at/lost_at) — matching the widgets' own
+// "marcadas como convertidas/perdidas no período" descriptions — not on
+// opened_at. A long sales cycle opened well before the selected range must
+// still count if it closed during the range, and an opportunity opened
+// during the range must NOT count if it closed outside the range (or hasn't
+// closed at all).
 func TestQuerySalesOpportunities_ConvertedAndLostStayDateScoped(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	contact := testutil.CreateTestContact(t, app.DB, org.ID)
-
-	oldOpenedAt := time.Now().Add(-30 * 24 * time.Hour)
-	require.NoError(t, app.DB.Create(&models.SalesOpportunity{
-		OrganizationID: org.ID, ContactID: contact.ID, OpportunityNumber: "OPP-20260818-000003",
-		Stage: models.SalesOpportunityStageDirecionada, Status: models.SalesOpportunityStatusConvertida,
-		OpenedAt: oldOpenedAt, StageChangedAt: time.Now(),
-	}).Error)
 
 	start, end := time.Now().Add(-time.Hour), time.Now().Add(time.Hour)
-	got := app.QuerySalesOpportunitiesForTest(org.ID, "count", "converted", nil, start, end)
-	assert.Equal(t, float64(0), got, "a conversion opened outside the selected range must not count")
+	oldOpenedAt := time.Now().Add(-30 * 24 * time.Hour)
+	closedInRange := time.Now()
+	closedOutOfRange := time.Now().Add(-48 * time.Hour)
+
+	newContact := func() uuid.UUID { return testutil.CreateTestContact(t, app.DB, org.ID).ID }
+
+	// Opened outside the range, but converted inside it: must count.
+	require.NoError(t, app.DB.Create(&models.SalesOpportunity{
+		OrganizationID: org.ID, ContactID: newContact(), OpportunityNumber: "OPP-20260818-000003",
+		Stage: models.SalesOpportunityStageDirecionada, Status: models.SalesOpportunityStatusConvertida,
+		OpenedAt: oldOpenedAt, StageChangedAt: time.Now(), ConvertedAt: &closedInRange,
+	}).Error)
+
+	// Opened inside the range, but converted outside it: must NOT count.
+	require.NoError(t, app.DB.Create(&models.SalesOpportunity{
+		OrganizationID: org.ID, ContactID: newContact(), OpportunityNumber: "OPP-20260918-000004",
+		Stage: models.SalesOpportunityStageDirecionada, Status: models.SalesOpportunityStatusConvertida,
+		OpenedAt: time.Now(), StageChangedAt: time.Now(), ConvertedAt: &closedOutOfRange,
+	}).Error)
+
+	// Opened inside the range but still open (never closed): must NOT count.
+	require.NoError(t, app.DB.Create(&models.SalesOpportunity{
+		OrganizationID: org.ID, ContactID: newContact(), OpportunityNumber: "OPP-20260918-000005",
+		Stage: models.SalesOpportunityStagePotencial, Status: models.SalesOpportunityStatusAberta,
+		OpenedAt: time.Now(), StageChangedAt: time.Now(),
+	}).Error)
+
+	gotConverted := app.QuerySalesOpportunitiesForTest(org.ID, "count", "converted", nil, start, end)
+	assert.Equal(t, float64(1), gotConverted, "only the opportunity converted within the period counts, regardless of when it opened")
+
+	// Same closure-timestamp scoping, symmetrically, for "lost".
+	require.NoError(t, app.DB.Create(&models.SalesOpportunity{
+		OrganizationID: org.ID, ContactID: newContact(), OpportunityNumber: "OPP-20260818-000006",
+		Stage: models.SalesOpportunityStageDirecionada, Status: models.SalesOpportunityStatusPerdida,
+		OpenedAt: oldOpenedAt, StageChangedAt: time.Now(), LostAt: &closedInRange,
+	}).Error)
+	require.NoError(t, app.DB.Create(&models.SalesOpportunity{
+		OrganizationID: org.ID, ContactID: newContact(), OpportunityNumber: "OPP-20260918-000007",
+		Stage: models.SalesOpportunityStageDirecionada, Status: models.SalesOpportunityStatusPerdida,
+		OpenedAt: time.Now(), StageChangedAt: time.Now(), LostAt: &closedOutOfRange,
+	}).Error)
+
+	gotLost := app.QuerySalesOpportunitiesForTest(org.ID, "count", "lost", nil, start, end)
+	assert.Equal(t, float64(1), gotLost, "only the opportunity lost within the period counts, regardless of when it opened")
 }
 
 // TestWidgetsSalesOpportunities_AssignedUserIDNotFilterable guards against

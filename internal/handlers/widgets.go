@@ -225,8 +225,11 @@ func (a *App) ensureDefaultSACWidgets(orgID uuid.UUID) error {
 // — it always calls salesConversionRate, which computes convertidas/(convertidas+perdidas)
 // itself — so its Field value is documentation only.
 // Only "open"/"sla_breached" (current-state snapshots) skip the
-// opened_at-in-range filter; "converted"/"lost"/"rate" stay period-scoped
-// (final review finding 6) — see querySalesOpportunities.
+// date-in-range filter; "converted"/"lost"/"rate" stay period-scoped, but on
+// their own closure timestamp (converted_at/lost_at) rather than opened_at —
+// these are period reports of when opportunities closed, not of when the
+// still-open-today opportunities happened to be opened (final review
+// finding C) — see querySalesOpportunities.
 var salesOpportunityDashboardWidgets = []models.Widget{
 	{
 		Name: "Oportunidades abertas", Description: "Em potencial, orçamento ou direcionada",
@@ -1193,7 +1196,11 @@ func (a *App) queryOccurrences(orgID uuid.UUID, metric, field string, filters []
 //
 // Unlike occurrences, this data source mixes two kinds of metric:
 //   - "converted"/"lost" (and "rate", derived from both) are period reports —
-//     they only count opportunities whose opened_at falls in [start, end].
+//     they count opportunities marked convertida/perdida during [start, end],
+//     i.e. whose converted_at/lost_at falls in the range, not opened_at: a
+//     sales cycle can span well beyond the selected window, and the widgets'
+//     own descriptions promise "no período" for the outcome, not the open
+//     date (final review finding C).
 //   - "open"/"sla_breached" are current-state snapshots — an opportunity
 //     opened before the selected range is still open or still breached today,
 //     so they intentionally ignore the range (final review finding 6).
@@ -1205,8 +1212,11 @@ func (a *App) querySalesOpportunities(orgID uuid.UUID, metric, field string, fil
 	}
 
 	q := a.DB.Model(&models.SalesOpportunity{}).Where("organization_id = ?", orgID)
-	if field == "converted" || field == "lost" {
-		q = q.Where("opened_at >= ? AND opened_at <= ?", start, end)
+	switch field {
+	case "converted":
+		q = q.Where("converted_at >= ? AND converted_at <= ?", start, end)
+	case "lost":
+		q = q.Where("lost_at >= ? AND lost_at <= ?", start, end)
 	}
 	for _, f := range filters {
 		q = applyFilter("sales_opportunities", q, f)
@@ -1243,12 +1253,21 @@ func (a *App) querySalesOpportunities(orgID uuid.UUID, metric, field string, fil
 // salesConversionRate implements the fixed conversion-rate formula used
 // across the sales funnel spec: convertidas / (convertidas + perdidas) * 100
 // — aberta opportunities are excluded from the denominator on purpose.
+//
+// The numerator and denominator counts are scoped on each status's own
+// closure timestamp (converted_at/lost_at), matching the individual
+// "Convertidas"/"Perdidas" cards in querySalesOpportunities (final review
+// finding C) — not opened_at, which would undercount opportunities whose
+// sales cycle spans outside the selected period.
 func (a *App) salesConversionRate(orgID uuid.UUID, start, end time.Time) float64 {
 	var converted, lost int64
-	base := a.DB.Model(&models.SalesOpportunity{}).
-		Where("organization_id = ? AND opened_at >= ? AND opened_at <= ?", orgID, start, end)
-	base.Session(&gorm.Session{}).Where("status = ?", models.SalesOpportunityStatusConvertida).Count(&converted)
-	base.Session(&gorm.Session{}).Where("status = ?", models.SalesOpportunityStatusPerdida).Count(&lost)
+	base := a.DB.Model(&models.SalesOpportunity{}).Where("organization_id = ?", orgID)
+	base.Session(&gorm.Session{}).
+		Where("status = ? AND converted_at >= ? AND converted_at <= ?", models.SalesOpportunityStatusConvertida, start, end).
+		Count(&converted)
+	base.Session(&gorm.Session{}).
+		Where("status = ? AND lost_at >= ? AND lost_at <= ?", models.SalesOpportunityStatusPerdida, start, end).
+		Count(&lost)
 	if converted+lost == 0 {
 		return 0
 	}
