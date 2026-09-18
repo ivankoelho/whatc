@@ -160,7 +160,7 @@ export const usersService = {
   get: (id: string) => api.get(`/users/${id}`),
   create: (data: { email: string; password: string; full_name: string; role_id?: string }) =>
     api.post('/users', data),
-  update: (id: string, data: { email?: string; password?: string; full_name?: string; role_id?: string; is_active?: boolean }) =>
+  update: (id: string, data: { email?: string; password?: string; full_name?: string; role_id?: string; is_active?: boolean; xprocess_seller_code?: string }) =>
     api.put(`/users/${id}`, data),
   delete: (id: string) => api.delete(`/users/${id}`),
   me: () => api.get('/me'),
@@ -1437,6 +1437,73 @@ export const occurrencesService = {
   updateStage: (id: string, data: Partial<OccurrenceStage>) =>
     api.put<ApiEnvelope<OccurrenceStage>>(`/occurrence-stages/${id}`, data),
   deleteStage: (id: string) => api.delete<ApiEnvelope<{ deleted: boolean }>>(`/occurrence-stages/${id}`),
+}
+
+// Sales opportunities (Central de Vendas funnel) — see
+// internal/models/sales_opportunity.go and internal/handlers/sales_opportunities.go.
+// Mirrors the Occurrence types/service above: organization_id is tenant-scoping
+// only and intentionally left off, same as Occurrence/OccurrenceEvent.
+export type SalesOpportunityStage = 'potencial' | 'abrir_orcamento' | 'direcionada'
+export type SalesOpportunityStatus = 'aberta' | 'convertida' | 'perdida' | 'cancelada'
+export type SalesDirecionamento = 'visita' | 'whatsapp'
+export type SalesConversionSource = 'manual' | 'xprocess'
+export type SalesLossReason =
+  | 'cliente_desistiu' | 'preco' | 'prazo' | 'indisponibilidade'
+  | 'comprou_concorrente' | 'sem_retorno' | 'problema_comercial' | 'outro'
+
+export interface SalesOpportunity {
+  id: string
+  opportunity_number: string
+  contact_id: string
+  source_transfer_id?: string
+  assigned_user_id?: string
+  stage: SalesOpportunityStage
+  status: SalesOpportunityStatus
+  interest?: string
+  estimated_value?: number
+  estimated_quantity?: number
+  direcionamento?: SalesDirecionamento
+  conversion_source?: SalesConversionSource
+  loss_reason?: SalesLossReason
+  loss_notes?: string
+  opened_at: string
+  stage_changed_at: string
+  converted_at?: string
+  lost_at?: string
+  cancelled_at?: string
+  sla_breached: boolean
+  sla_breached_at?: string
+  // Populated only where the handler preloads the association — neither
+  // list nor get does today, so these are typically undefined.
+  contact?: { id: string; profile_name?: string; phone_number?: string }
+  assigned_user?: { id: string; full_name: string }
+}
+
+export interface SalesOpportunityEvent {
+  id: string
+  sales_opportunity_id: string
+  type: 'opened' | 'stage_changed' | 'direcionamento_changed' | 'converted' | 'lost' | 'cancelled' | 'retriggered'
+  from_stage?: SalesOpportunityStage
+  to_stage?: SalesOpportunityStage
+  source: 'manual' | 'xprocess' | 'system'
+  created_by_id?: string
+  created_by?: { id: string; full_name: string }
+  created_at: string
+}
+
+export const salesOpportunitiesService = {
+  list: (params?: Record<string, string>) =>
+    api.get<ApiEnvelope<{ opportunities: SalesOpportunity[]; total: number; has_more: boolean }>>('/sales-opportunities', { params }),
+  get: (id: string) => api.get<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}`),
+  changeStage: (id: string, stage: SalesOpportunityStage) =>
+    api.put<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/stage`, { stage }),
+  changeDirecionamento: (id: string, direcionamento: SalesDirecionamento) =>
+    api.put<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/direcionamento`, { direcionamento }),
+  convert: (id: string) => api.post<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/convert`),
+  lose: (id: string, lossReason: SalesLossReason, lossNotes?: string) =>
+    api.post<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/lose`, { loss_reason: lossReason, loss_notes: lossNotes }),
+  listEvents: (id: string) =>
+    api.get<ApiEnvelope<{ events: SalesOpportunityEvent[] }>>(`/sales-opportunities/${id}/events`),
 }
 
 // Units / Departments / Occurrence categories — Fase 3 of the Ocorrências
