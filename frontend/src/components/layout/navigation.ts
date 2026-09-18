@@ -26,7 +26,8 @@ import {
   Building2,
   Timer,
   Tag,
-  HelpCircle
+  HelpCircle,
+  TrendingUp
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
@@ -67,6 +68,12 @@ export const navigationSections: NavSection[] = [
         path: '/crm/occurrences',
         icon: ClipboardList,
         permission: 'occurrences'
+      },
+      {
+        name: 'nav.salesOperation',
+        path: '/sales/operation',
+        icon: TrendingUp,
+        permission: 'sales_opportunities'
       },
     ]
   },
