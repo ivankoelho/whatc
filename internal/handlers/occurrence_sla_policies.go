@@ -57,6 +57,34 @@ func (a *App) getSLAPolicy(orgID uuid.UUID, priority models.OccurrencePriority) 
 	return &policy, err
 }
 
+// resolveOccurrenceSLAMinutes returns the response/resolution minutes to use
+// for a new or re-prioritised occurrence: the linked OccurrenceProcess's own
+// values when it has them, falling back to the priority-based
+// OccurrenceSLAPolicy otherwise. This is the single place both CreateOccurrence
+// and UpdateOccurrence call, so the override rule exists exactly once.
+func (a *App) resolveOccurrenceSLAMinutes(orgID uuid.UUID, priority models.OccurrencePriority, processID *uuid.UUID) (responseMinutes, resolutionMinutes int, err error) {
+	policy, err := a.getSLAPolicy(orgID, priority)
+	if err != nil {
+		return 0, 0, err
+	}
+	responseMinutes, resolutionMinutes = policy.ResponseMinutes, policy.ResolutionMinutes
+
+	if processID == nil {
+		return responseMinutes, resolutionMinutes, nil
+	}
+	var process models.OccurrenceProcess
+	if err := a.DB.Where("id = ? AND organization_id = ?", *processID, orgID).First(&process).Error; err != nil {
+		return responseMinutes, resolutionMinutes, nil // unresolvable process id: fall back silently, same as an absent one
+	}
+	if process.ResponseMinutes != nil {
+		responseMinutes = *process.ResponseMinutes
+	}
+	if process.ResolutionMinutes != nil {
+		resolutionMinutes = *process.ResolutionMinutes
+	}
+	return responseMinutes, resolutionMinutes, nil
+}
+
 // ListOccurrenceSLAPolicies returns the org's four priority policies, seeding
 // defaults on first use. Gated on occurrences:read, same reasoning as ListUnits.
 func (a *App) ListOccurrenceSLAPolicies(r *fastglue.Request) error {
