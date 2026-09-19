@@ -176,6 +176,16 @@ func TestResolveProcessMessageVariables_EmptyValuesKeepPlaceholder(t *testing.T)
 	assert.Equal(t, "[Nome] [Atendente] 202600123 [NF] [Prazo] [Loja]", out)
 }
 
+func TestResolveProcessMessageVariables_WhitespaceOnlyValuesKeepPlaceholder(t *testing.T) {
+	occ := &models.Occurrence{
+		ProtocolNumber: "202600123",
+		InvoiceNumber:  "  ",
+		Contact:        &models.Contact{ProfileName: " \t"},
+	}
+	out := handlers.ResolveProcessMessageVariablesForTest("[Nome] [NF] [Atendente] [Protocolo]", occ, "  ")
+	assert.Equal(t, "[Nome] [NF] [Atendente] 202600123", out)
+}
+
 func TestResolveProcessMessageVariables_MixOfPresentAndEmptyValues(t *testing.T) {
 	deadline := time.Now().Add(3*24*time.Hour + time.Hour)
 	occ := &models.Occurrence{
@@ -231,11 +241,13 @@ func TestPreviewOccurrenceProcessMessage_InactiveTemplateFallsBack(t *testing.T)
 	body := string(testutil.GetResponseBody(req))
 	assert.Contains(t, body, "Guarde este número para consultas futuras", "registration falls back to legacy text")
 	assert.Contains(t, body, `"has_template":true`)
+	assert.Contains(t, body, `"is_fallback":true`)
 
 	req = previewReq(t, org.ID, user.ID, process.ID.String(), "documents", occ.ID.String())
 	require.NoError(t, app.PreviewOccurrenceProcessMessage(req))
 	body = string(testutil.GetResponseBody(req))
 	assert.Contains(t, body, `"has_template":false`)
+	assert.Contains(t, body, `"is_fallback":false`)
 	assert.Contains(t, body, `"content":""`)
 }
 
@@ -280,6 +292,7 @@ func TestPreviewOccurrenceProcessMessage_UsesTheOccurrenceFromTheQueryParam_NotT
 
 	body := string(testutil.GetResponseBody(req))
 	assert.Contains(t, body, `"has_template":true`)
+	assert.Contains(t, body, `"is_fallback":false`)
 	assert.Contains(t, body, occ.ProtocolNumber, "the real seeded template must have been found and its variables substituted")
 	assert.NotContains(t, body, "[Protocolo]")
 }
@@ -369,6 +382,7 @@ func TestPreviewOccurrenceProcessMessage_RegistrationFallsBackToLegacyProtocolTe
 	body := string(testutil.GetResponseBody(req))
 	assert.Contains(t, body, occ.ProtocolNumber, "registration must always fall back to the legacy protocol text, matching current production behaviour")
 	assert.Contains(t, body, `"has_template":true`)
+	assert.Contains(t, body, `"is_fallback":true`)
 }
 
 func TestLogOccurrenceProcessMessageUse_CreatesTimelineEvent(t *testing.T) {
