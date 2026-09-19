@@ -382,6 +382,10 @@ func TestDeleteOccurrenceProcess_SoftDeletesAndAudits(t *testing.T) {
 	org, user := processAdmin(t, app)
 	p := models.OccurrenceProcess{OrganizationID: org.ID, Name: "Descartável", IsActive: true}
 	require.NoError(t, app.DB.Create(&p).Error)
+	msg := models.OccurrenceProcessMessage{
+		OrganizationID: org.ID, ProcessID: p.ID, Stage: models.OccurrenceProcessMessageRegistration, Content: "x", IsActive: true,
+	}
+	require.NoError(t, app.DB.Create(&msg).Error)
 
 	req := testutil.NewGETRequest(t)
 	testutil.SetAuthContext(req, org.ID, user.ID)
@@ -395,6 +399,12 @@ func TestDeleteOccurrenceProcess_SoftDeletesAndAudits(t *testing.T) {
 	var raw int64
 	app.DB.Unscoped().Model(&models.OccurrenceProcess{}).Where("id = ? AND deleted_at IS NOT NULL", p.ID).Count(&raw)
 	assert.EqualValues(t, 1, raw, "row must be soft-deleted, not removed")
+
+	var liveMsgs, deletedMsgs int64
+	app.DB.Model(&models.OccurrenceProcessMessage{}).Where("process_id = ?", p.ID).Count(&liveMsgs)
+	app.DB.Unscoped().Model(&models.OccurrenceProcessMessage{}).Where("process_id = ? AND deleted_at IS NOT NULL", p.ID).Count(&deletedMsgs)
+	assert.Zero(t, liveMsgs, "process messages must not be orphaned live")
+	assert.EqualValues(t, 1, deletedMsgs, "process messages must be soft-deleted with the process")
 
 	require.Eventually(t, func() bool { return auditCount(app, org.ID, models.AuditActionDeleted) == 1 },
 		time.Second, 10*time.Millisecond)
@@ -436,4 +446,108 @@ func TestIsActiveProcessConflict_MapsIndexViolationOnly(t *testing.T) {
 	assert.True(t, handlers.IsActiveProcessConflictForTest(dupErr))
 	assert.False(t, handlers.IsActiveProcessConflictForTest(errors.New("boom")))
 	assert.False(t, handlers.IsActiveProcessConflictForTest(nil))
+}
+
+// The audit diff must see edits to JSONB list fields even when the list length
+// is unchanged and nothing else changed.
+func TestUpdateOccurrenceProcess_AuditsRequiredFieldsOnlyChange(t *testing.T) {
+	app := newTestApp(t)
+	org, user := processAdmin(t, app)
+	p := models.OccurrenceProcess{
+		OrganizationID: org.ID, Name: "P", IsActive: true,
+		RequiredFields:    models.JSONBArray{"invoice_number"},
+		EvidenceChecklist: models.JSONBArray{"Nota fiscal"},
+	}
+	require.NoError(t, app.DB.Create(&p).Error)
+
+	req := createProcessReq(t, org.ID, user.ID, map[string]any{
+		"name": "P", "is_active": true,
+		"required_fields":    []string{"product_description"},
+		"evidence_checklist": []string{"Nota fiscal"},
+	})
+	testutil.SetPathParam(req, "id", p.ID.String())
+	require.NoError(t, app.UpdateOccurrenceProcess(req))
+	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	require.Eventually(t, func() bool { return auditCount(app, org.ID, models.AuditActionUpdated) == 1 },
+		time.Second, 10*time.Millisecond, "a required_fields-only edit must still be audited")
+	var entry models.AuditLog
+	require.NoError(t, app.DB.Where("organization_id = ? AND action = ?", org.ID, models.AuditActionUpdated).First(&entry).Error)
+	var found bool
+	for _, c := range entry.Changes {
+		m, ok := c.(map[string]any)
+		if ok && m["field"] == "required_fields" {
+			found = true
+			assert.NotEqual(t, m["old_value"], m["new_value"])
+		}
+	}
+	assert.True(t, found, "changes must include a required_fields entry, got %v", entry.Changes)
+}
+
+func TestUpdateOccurrenceProcess_ExplicitNullClearsOptionalFields(t *testing.T) {
+	app := newTestApp(t)
+	org, user := processAdmin(t, app)
+	cat := models.OccurrenceCategory{OrganizationID: org.ID, Name: "Cat", IsActive: true}
+	require.NoError(t, app.DB.Create(&cat).Error)
+	dept := models.Department{OrganizationID: org.ID, Name: "Logística", Active: true}
+	require.NoError(t, app.DB.Create(&dept).Error)
+	resp, res := 60, 120
+	p := models.OccurrenceProcess{
+		OrganizationID: org.ID, Name: "P", IsActive: true,
+		CategoryID: &cat.ID, DepartmentID: &dept.ID, ResponseMinutes: &resp, ResolutionMinutes: &res,
+	}
+	require.NoError(t, app.DB.Create(&p).Error)
+
+	req := createProcessReq(t, org.ID, user.ID, map[string]any{
+		"name": "P", "category_id": nil, "department_id": nil, "response_minutes": nil, "resolution_minutes": nil,
+	})
+	testutil.SetPathParam(req, "id", p.ID.String())
+	require.NoError(t, app.UpdateOccurrenceProcess(req))
+	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var stored models.OccurrenceProcess
+	require.NoError(t, app.DB.First(&stored, "id = ?", p.ID).Error)
+	assert.Nil(t, stored.CategoryID)
+	assert.Nil(t, stored.DepartmentID)
+	assert.Nil(t, stored.ResponseMinutes)
+	assert.Nil(t, stored.ResolutionMinutes)
+}
+
+func TestOccurrenceProcess_RejectsForeignOrgAndSoftDeletedRefs(t *testing.T) {
+	app := newTestApp(t)
+	org, user := processAdmin(t, app)
+	other := testutil.CreateTestOrganization(t, app.DB)
+
+	foreignCat := models.OccurrenceCategory{OrganizationID: other.ID, Name: "Cat", IsActive: true}
+	require.NoError(t, app.DB.Create(&foreignCat).Error)
+	foreignReason, err := app.FindOrCreateWhatHappenedForTest(other.ID, "Produto com Avaria")
+	require.NoError(t, err)
+	foreignDept := models.Department{OrganizationID: other.ID, Name: "Outro", Active: true}
+	require.NoError(t, app.DB.Create(&foreignDept).Error)
+
+	deletedCat := models.OccurrenceCategory{OrganizationID: org.ID, Name: "Removida", IsActive: true}
+	require.NoError(t, app.DB.Create(&deletedCat).Error)
+	require.NoError(t, app.DB.Delete(&deletedCat).Error)
+
+	existing := models.OccurrenceProcess{OrganizationID: org.ID, Name: "E", IsActive: true}
+	require.NoError(t, app.DB.Create(&existing).Error)
+
+	for field, id := range map[string]string{
+		"category_id":      foreignCat.ID.String(),
+		"what_happened_id": foreignReason.ID.String(),
+		"department_id":    foreignDept.ID.String(),
+	} {
+		create := createProcessReq(t, org.ID, user.ID, map[string]any{"name": "X", field: id})
+		require.NoError(t, app.CreateOccurrenceProcess(create))
+		assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(create), "create must reject foreign %s", field)
+
+		update := createProcessReq(t, org.ID, user.ID, map[string]any{"name": "X", field: id})
+		testutil.SetPathParam(update, "id", existing.ID.String())
+		require.NoError(t, app.UpdateOccurrenceProcess(update))
+		assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(update), "update must reject foreign %s", field)
+	}
+
+	create := createProcessReq(t, org.ID, user.ID, map[string]any{"name": "X", "category_id": deletedCat.ID.String()})
+	require.NoError(t, app.CreateOccurrenceProcess(create))
+	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(create), "soft-deleted category must be rejected")
 }

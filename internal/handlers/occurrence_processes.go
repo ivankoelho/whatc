@@ -341,7 +341,7 @@ func (a *App) parseOptionalOrgUUID(raw *string, orgID uuid.UUID, table string) (
 		return nil, err
 	}
 	var count int64
-	if err := a.DB.Table(table).Where("id = ? AND organization_id = ?", id, orgID).Count(&count).Error; err != nil {
+	if err := a.DB.Table(table).Where("id = ? AND organization_id = ? AND deleted_at IS NULL", id, orgID).Count(&count).Error; err != nil {
 		return nil, err
 	}
 	if count == 0 {
@@ -536,18 +536,19 @@ func (a *App) UpdateOccurrenceProcess(r *fastglue.Request) error {
 		a.Log.Error("Failed to update occurrence process", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update process", nil, "")
 	}
-	// Updates(map) leaves the struct stale; reload so the audit diff and the
-	// response carry the new values.
-	if err := a.DB.First(process, "id = ?", processID).Error; err != nil {
+	// Reload into a fresh struct so the audit diff and response carry the new
+	// values and share no slice memory with `before`.
+	var updated models.OccurrenceProcess
+	if err := a.DB.First(&updated, "id = ?", processID).Error; err != nil {
 		a.Log.Error("Failed to reload occurrence process", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update process", nil, "")
 	}
 
 	userName := audit.GetUserName(a.DB, userID)
-	audit.LogAudit(a.DB, orgID, userID, userName, models.ResourceOccurrenceProcesses, process.ID,
-		models.AuditActionUpdated, before, *process)
+	audit.LogAudit(a.DB, orgID, userID, userName, models.ResourceOccurrenceProcesses, updated.ID,
+		models.AuditActionUpdated, before, updated)
 
-	return r.SendEnvelope(process)
+	return r.SendEnvelope(updated)
 }
 
 // DeleteOccurrenceProcess removes a process, refusing when an occurrence
@@ -574,7 +575,14 @@ func (a *App) DeleteOccurrenceProcess(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusConflict, "Process is in use by existing occurrences", nil, "")
 	}
 
-	if err := a.DB.Delete(process).Error; err != nil {
+	// Soft-delete the process's messages with it so none are left live and orphaned.
+	if err := a.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("process_id = ?", processID).Delete(&models.OccurrenceProcessMessage{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(process).Error
+	}); err != nil {
+		a.Log.Error("Failed to delete occurrence process", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to delete process", nil, "")
 	}
 
