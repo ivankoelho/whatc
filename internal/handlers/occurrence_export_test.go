@@ -31,3 +31,15 @@ func (a *App) EnsureDefaultSLAPoliciesForTest(orgID uuid.UUID) error {
 func (a *App) GetSLAPolicyForTest(orgID uuid.UUID, priority models.OccurrencePriority) (*models.OccurrenceSLAPolicy, error) {
 	return a.getSLAPolicy(orgID, priority)
 }
+
+func (a *App) EnsureDefaultOccurrenceProcessesForTest(orgID uuid.UUID) error {
+	return a.ensureDefaultOccurrenceProcesses(orgID)
+}
+
+func (a *App) EnsureDefaultWhatHappenedForTest(orgID uuid.UUID) error {
+	return a.ensureDefaultWhatHappened(orgID)
+}
+
+func (a *App) FindOrCreateWhatHappenedForTest(orgID uuid.UUID, name string) (*models.OccurrenceWhatHappened, error) {
+	return a.findOrCreateWhatHappened(orgID, name)
+}

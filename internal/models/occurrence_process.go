@@ -66,7 +66,9 @@ type OccurrenceProcess struct {
 
 	DepartmentID *uuid.UUID `gorm:"type:uuid;index" json:"department_id,omitempty"`
 
-	IsActive bool `gorm:"default:true" json:"is_active"`
+	// No DB default: a `default:true` tag makes GORM overwrite an explicit false
+	// with true on Create. Every creator sets IsActive explicitly.
+	IsActive bool `gorm:"not null" json:"is_active"`
 	Position int  `gorm:"not null;default:0" json:"position"`
 
 	Category     *OccurrenceCategory     `gorm:"foreignKey:CategoryID" json:"category,omitempty"`
@@ -85,7 +87,7 @@ type OccurrenceProcessMessage struct {
 	ProcessID      uuid.UUID                     `gorm:"type:uuid;index;not null;uniqueIndex:idx_occ_process_msg_stage,where:deleted_at IS NULL" json:"process_id"`
 	Stage          OccurrenceProcessMessageStage `gorm:"size:20;not null;uniqueIndex:idx_occ_process_msg_stage,where:deleted_at IS NULL" json:"stage"`
 	Content        string                        `gorm:"type:text;not null" json:"content"`
-	IsActive       bool                          `gorm:"default:true" json:"is_active"`
+	IsActive       bool                          `gorm:"not null" json:"is_active"`
 }
 
 func (OccurrenceProcessMessage) TableName() string { return "occurrence_process_messages" }
