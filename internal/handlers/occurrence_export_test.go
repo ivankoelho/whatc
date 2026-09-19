@@ -47,3 +47,7 @@ func (a *App) FindOrCreateWhatHappenedForTest(orgID uuid.UUID, name string) (*mo
 func IsActiveProcessConflictForTest(err error) bool {
 	return isActiveProcessConflict(err)
 }
+
+func ResolveProcessMessageVariablesForTest(content string, occ *models.Occurrence, agentName string) string {
+	return resolveProcessMessageVariables(content, occ, agentName)
+}
