@@ -780,6 +780,17 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.PUT("/api/occurrence-what-happened/{id}", app.UpdateOccurrenceWhatHappened)
 	g.DELETE("/api/occurrence-what-happened/{id}", app.DeleteOccurrenceWhatHappened)
 
+	// CRM — processos/motivos e mensagens sugeridas por etapa
+	g.GET("/api/occurrence-processes", app.ListOccurrenceProcesses)
+	g.POST("/api/occurrence-processes", app.CreateOccurrenceProcess)
+	g.GET("/api/occurrence-processes/resolve", app.ResolveOccurrenceProcess)
+	g.PUT("/api/occurrence-processes/{id}", app.UpdateOccurrenceProcess)
+	g.DELETE("/api/occurrence-processes/{id}", app.DeleteOccurrenceProcess)
+	g.GET("/api/occurrence-processes/{id}/messages", app.ListOccurrenceProcessMessages)
+	g.PUT("/api/occurrence-processes/{id}/messages/{stage}", app.UpsertOccurrenceProcessMessage)
+	g.GET("/api/occurrence-processes/{id}/messages/{stage}/preview", app.PreviewOccurrenceProcessMessage)
+	g.POST("/api/occurrences/{id}/process-messages/use", app.LogOccurrenceProcessMessageUse)
+
 	// CRM — políticas de SLA
 	g.GET("/api/occurrence-sla-policies", app.ListOccurrenceSLAPolicies)
 	g.PUT("/api/occurrence-sla-policies/{priority}", app.UpsertOccurrenceSLAPolicy)
