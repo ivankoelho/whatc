@@ -25,6 +25,12 @@ func (a *App) ResolveOccurrenceProcess(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
+	// Agents (occurrences:read only) can't reach ListOccurrenceProcesses, the
+	// other seeding caller, so seed here or a fresh org resolves to null forever.
+	if err := a.ensureDefaultOccurrenceProcesses(orgID); err != nil {
+		a.Log.Error("Failed to seed default occurrence processes", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to resolve process", nil, "")
+	}
 
 	raw := r.RequestCtx.QueryArgs().Peek("what_happened_id")
 	if len(raw) == 0 {
@@ -216,8 +222,8 @@ func fallbackProcessMessage(stage string, occ *models.Occurrence) (content strin
 // Deliberately does NOT call loadAuthorizedOccurrence: that helper reads the
 // occurrence id from the {id} path param, but on this route {id} is the
 // PROCESS id — the occurrence id is the occurrence_id query param. This loads
-// the occurrence explicitly (org-scoped), re-applies the canViewConversation
-// check, and requires the occurrence to be linked to the previewed process.
+// the occurrence explicitly (org-scoped), re-applies the same gate (assignee
+// exception OR canViewConversation), and requires the occurrence to be linked to the previewed process.
 func (a *App) PreviewOccurrenceProcessMessage(r *fastglue.Request) error {
 	orgID, userID, err := a.requireAuth(r, models.ResourceOccurrences, models.ActionRead)
 	if err != nil {
@@ -245,7 +251,9 @@ func (a *App) PreviewOccurrenceProcessMessage(r *fastglue.Request) error {
 	if occ.Contact == nil { // soft-deleted contact: Preload leaves it nil
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
 	}
-	if !a.canViewConversation(userID, orgID, occ.Contact) {
+	// The assignee exception, mirroring loadAuthorizedOccurrence.
+	isAssignee := occ.AssignedUserID != nil && *occ.AssignedUserID == userID
+	if !isAssignee && !a.canViewConversation(userID, orgID, occ.Contact) {
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You do not have access to this occurrence", nil, "")
 	}
 	if occ.ProcessID == nil || *occ.ProcessID != processID {

@@ -229,8 +229,14 @@ func (a *App) ensureDefaultOccurrenceProcesses(orgID uuid.UUID) error {
 	a.Log.Warn("Seeding default occurrence processes — Category/WhatHappened mapping and SLA minutes are a first-cut interpretation of the validated process map, pending product-owner validation",
 		"organization_id", orgID)
 
-	// Category/reason rows are idempotent by name, so resolve them before the
-	// transaction rather than holding the advisory lock across those lookups.
+	// Category/reason rows are find-or-create by name and resolved BEFORE the
+	// transaction (not under the advisory lock). There is no unique index on
+	// (organization, name), so concurrent first reads can each create a
+	// duplicate row for the three NEW reasons — cosmetic only: the winning
+	// transaction points each process at one valid row. Same limitation as
+	// ensureDefaultWhatHappened/ensureDefaultCategories. If the seed
+	// transaction below later fails, these rows survive and the retry reuses
+	// them by name.
 	categoryIDs := make([]uuid.UUID, len(defaultOccurrenceProcesses))
 	whatHappenedIDs := make([]uuid.UUID, len(defaultOccurrenceProcesses))
 	for i, seed := range defaultOccurrenceProcesses {

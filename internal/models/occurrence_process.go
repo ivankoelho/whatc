@@ -57,9 +57,9 @@ type OccurrenceProcess struct {
 	// EvidenceChecklist is a read-only informational list ("documentos a
 	// solicitar ao cliente") — not real attachment/upload fields. A
 	// document/evidence system is explicitly out of scope for this phase.
-	EvidenceChecklist JSONBArray `gorm:"type:jsonb;default:'[]'" json:"evidence_checklist"`
+	EvidenceChecklist JSONBArray `gorm:"type:jsonb;not null;default:'[]'" json:"evidence_checklist"`
 
-	RequiredFields JSONBArray `gorm:"type:jsonb;default:'[]'" json:"required_fields"`
+	RequiredFields JSONBArray `gorm:"type:jsonb;not null;default:'[]'" json:"required_fields"`
 
 	ResponseMinutes   *int `json:"response_minutes,omitempty"`
 	ResolutionMinutes *int `json:"resolution_minutes,omitempty"`

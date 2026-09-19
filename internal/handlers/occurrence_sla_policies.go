@@ -1,10 +1,13 @@
 package handlers
 
 import (
+	"errors"
+
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
@@ -74,7 +77,12 @@ func (a *App) resolveOccurrenceSLAMinutes(orgID uuid.UUID, priority models.Occur
 	}
 	var process models.OccurrenceProcess
 	if err := a.DB.Where("id = ? AND organization_id = ?", *processID, orgID).First(&process).Error; err != nil {
-		return responseMinutes, resolutionMinutes, nil // unresolvable process id: fall back silently, same as an absent one
+		// A missing process falls back silently, same as an absent id; any other
+		// error is a real failure worth a log line before falling back.
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			a.Log.Warn("Failed to load occurrence process for SLA override", "error", err, "process_id", *processID)
+		}
+		return responseMinutes, resolutionMinutes, nil
 	}
 	if process.ResponseMinutes != nil {
 		responseMinutes = *process.ResponseMinutes

@@ -451,3 +451,51 @@ func TestListOccurrenceProcessMessages_RequiresReadAndReturnsSeededMessages(t *t
 	require.NoError(t, app.ListOccurrenceProcessMessages(req))
 	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(req))
 }
+
+func TestResolveOccurrenceProcess_AgentRoleSeedsOnFirstCall(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agentRole := testutil.CreateAgentRole(t, app.DB, org.ID) // occurrences:read only, no occurrences.processes:*
+	agent := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	require.NoError(t, app.EnsureDefaultWhatHappenedForTest(org.ID))
+
+	var avaria models.OccurrenceWhatHappened
+	require.NoError(t, app.DB.Where("organization_id = ? AND name = ?", org.ID, "Produto com Avaria").First(&avaria).Error)
+
+	// Fresh org: nothing has called ListOccurrenceProcesses (the agent can't).
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, agent.ID)
+	testutil.SetQueryParam(req, "what_happened_id", avaria.ID.String())
+	require.NoError(t, app.ResolveOccurrenceProcess(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+	body := string(testutil.GetResponseBody(req))
+	assert.Contains(t, body, avariaProcessName, "an agent must resolve the seeded process on the very first call")
+	assert.NotContains(t, body, `"process":null`)
+}
+
+func TestPreviewOccurrenceProcessMessage_AssigneeAllowedOutsideConversationScope(t *testing.T) {
+	app := newTestApp(t)
+	org, owner := seededAdmin(t, app)
+	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "preview-assignee",
+		[]string{"chat:read", "chat:write", "occurrences:read", "occurrences:write"})
+	assignee := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
+	outsider := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
+	enableStrictVisibility(t, app, org.ID)
+
+	process := processByName(t, app, org.ID, avariaProcessName)
+	occ := occurrenceForProcess(t, app, org, owner, &process.ID)
+	// The contact belongs to the owner, so neither user can view the conversation...
+	require.NoError(t, app.DB.Model(&models.Contact{}).Where("id = ?", occ.ContactID).
+		Update("assigned_user_id", owner.ID).Error)
+	// ...but the occurrence itself is assigned to `assignee`.
+	require.NoError(t, app.DB.Model(&models.Occurrence{}).Where("id = ?", occ.ID).
+		Update("assigned_user_id", assignee.ID).Error)
+
+	req := previewReq(t, org.ID, assignee.ID, process.ID.String(), "registration", occ.ID.String())
+	require.NoError(t, app.PreviewOccurrenceProcessMessage(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req), "the occurrence's assignee keeps access, like loadAuthorizedOccurrence")
+
+	req = previewReq(t, org.ID, outsider.ID, process.ID.String(), "registration", occ.ID.String())
+	require.NoError(t, app.PreviewOccurrenceProcessMessage(req))
+	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(req), "a non-assignee outsider is still refused")
+}

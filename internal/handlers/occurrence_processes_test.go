@@ -551,3 +551,62 @@ func TestOccurrenceProcess_RejectsForeignOrgAndSoftDeletedRefs(t *testing.T) {
 	require.NoError(t, app.CreateOccurrenceProcess(create))
 	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(create), "soft-deleted category must be rejected")
 }
+
+// PR2's frontend calls .includes/.length on these, so null would crash it.
+func TestOccurrenceProcess_OmittedJSONBArraysAreEmptyNotNull(t *testing.T) {
+	app := newTestApp(t)
+	org, user := processAdmin(t, app)
+	require.NoError(t, app.EnsureDefaultWhatHappenedForTest(org.ID))
+	var reason models.OccurrenceWhatHappened
+	require.NoError(t, app.DB.Where("organization_id = ? AND name = ?", org.ID, "Duvida sobre o Produto").First(&reason).Error)
+
+	const wantEmpty1, wantEmpty2 = `"required_fields":[]`, `"evidence_checklist":[]`
+	assertEmpty := func(name, body string) {
+		t.Helper()
+		assert.Contains(t, body, wantEmpty1, name)
+		assert.Contains(t, body, wantEmpty2, name)
+	}
+
+	// Create via the handler with both arrays omitted.
+	req := createProcessReq(t, org.ID, user.ID, map[string]any{
+		"name": "Sem listas", "is_active": true, "what_happened_id": reason.ID.String(),
+	})
+	require.NoError(t, app.CreateOccurrenceProcess(req))
+	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+	assertEmpty("create response", string(testutil.GetResponseBody(req)))
+
+	// DB row: jsonb '[]', not SQL NULL.
+	var stored struct{ Evidence, Required string }
+	require.NoError(t, app.DB.Raw(`SELECT evidence_checklist::text AS evidence, required_fields::text AS required
+		FROM occurrence_processes WHERE organization_id = ? AND name = ?`, org.ID, "Sem listas").Scan(&stored).Error)
+	assert.Equal(t, "[]", stored.Evidence)
+	assert.Equal(t, "[]", stored.Required)
+
+	// A struct created with nil slices (the GORM default path) is also '[]'.
+	nilProc := models.OccurrenceProcess{OrganizationID: org.ID, Name: "Nil direto", IsActive: false}
+	require.NoError(t, app.DB.Create(&nilProc).Error)
+	require.NoError(t, app.DB.Raw(`SELECT evidence_checklist::text AS evidence, required_fields::text AS required
+		FROM occurrence_processes WHERE id = ?`, nilProc.ID).Scan(&stored).Error)
+	assert.Equal(t, "[]", stored.Evidence)
+	assert.Equal(t, "[]", stored.Required)
+
+	// The column itself refuses an explicit NULL.
+	err := app.DB.Exec(`UPDATE occurrence_processes SET required_fields = NULL WHERE id = ?`, nilProc.ID).Error
+	assert.Error(t, err, "required_fields must be NOT NULL")
+	err = app.DB.Exec(`UPDATE occurrence_processes SET evidence_checklist = NULL WHERE id = ?`, nilProc.ID).Error
+	assert.Error(t, err, "evidence_checklist must be NOT NULL")
+
+	// List response.
+	list := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(list, org.ID, user.ID)
+	require.NoError(t, app.ListOccurrenceProcesses(list))
+	assertEmpty("list response", string(testutil.GetResponseBody(list)))
+
+	// Resolve response.
+	res := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(res, org.ID, user.ID)
+	testutil.SetQueryParam(res, "what_happened_id", reason.ID.String())
+	require.NoError(t, app.ResolveOccurrenceProcess(res))
+	assert.Contains(t, string(testutil.GetResponseBody(res)), "Sem listas")
+	assertEmpty("resolve response", string(testutil.GetResponseBody(res)))
+}

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/shridarpatil/whatomate/internal/database"
+	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/test/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -326,4 +327,28 @@ func TestBackfillOccurrenceProcessesPermission_GrantsFromCategories(t *testing.T
 	// Idempotente.
 	require.NoError(t, database.BackfillOccurrenceProcessesPermission(db, testLog()))
 	assert.Equal(t, len(keys), len(roleKeys(t, db, role.ID)))
+}
+
+// A pre-existing org's built-in SYSTEM roles have no special path: they only
+// gain occurrences.processes:* through this backfill, keyed off categories.
+func TestBackfillOccurrenceProcessesPermission_ReachesBuiltInSystemAdminRole(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	cleanAll(t, db)
+	require.NoError(t, database.SeedPermissionsAndRoles(db))
+
+	// Simulate the pre-feature admin role: every permission except processes.
+	var all []models.Permission
+	require.NoError(t, db.Where("resource <> ?", models.ResourceOccurrenceProcesses).Find(&all).Error)
+	require.NotEmpty(t, all)
+	org := testutil.CreateTestOrganization(t, db)
+	admin := testutil.CreateTestRoleExact(t, db, org.ID, "admin", true, false, all)
+	require.True(t, admin.IsSystem)
+	require.NotContains(t, roleKeys(t, db, admin.ID), "occurrences.processes:read")
+
+	require.NoError(t, database.BackfillOccurrenceProcessesPermission(db, testLog()))
+
+	keys := roleKeys(t, db, admin.ID)
+	for _, k := range []string{"occurrences.processes:read", "occurrences.processes:write", "occurrences.processes:delete"} {
+		assert.Contains(t, keys, k)
+	}
 }
