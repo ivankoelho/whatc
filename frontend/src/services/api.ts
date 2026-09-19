@@ -1529,7 +1529,7 @@ export const occurrenceProcessesService = {
   upsertMessage: (processId: string, stage: OccurrenceMessageStage, data: { content: string; is_active?: boolean }) =>
     api.put<ApiEnvelope<OccurrenceProcessMessage>>(`/occurrence-processes/${processId}/messages/${stage}`, data),
   previewMessage: (processId: string, stage: OccurrenceMessageStage, occurrenceId: string) =>
-    api.get<ApiEnvelope<{ content: string; has_template: boolean }>>(
+    api.get<ApiEnvelope<{ content: string; has_template: boolean; is_fallback: boolean }>>(
       `/occurrence-processes/${processId}/messages/${stage}/preview`,
       { params: { occurrence_id: occurrenceId } },
     ),

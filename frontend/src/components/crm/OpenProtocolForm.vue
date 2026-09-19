@@ -36,6 +36,8 @@ const props = defineProps<{
   contactPhone?: string
   contactName?: string
   sourceTransferId?: string
+  // Show a Close button on the result screen (dialog wrapper only; it handles `cancel`).
+  closable?: boolean
 }>()
 
 const emit = defineEmits<{ created: [occurrenceId: string]; cancel: [] }>()
@@ -105,21 +107,47 @@ const categories = ref<OccurrenceCategory[]>([])
 const whatHappenedOptions = ref<OccurrenceWhatHappened[]>([])
 const resolvedProcess = ref<OccurrenceProcess | null>(null)
 
+// True while the process for the selected reason is loading; submitting then
+// would silently drop the process (process_id is read at submit time).
+const resolvingProcess = ref(false)
+// Category last filled in by a process suggestion (not by the agent). Only a
+// category still equal to this may be replaced/cleared when the reason changes.
+const autoCategoryId = ref('')
+
+function clearAutoCategory() {
+  if (autoCategoryId.value && categoryId.value === autoCategoryId.value) categoryId.value = ''
+  autoCategoryId.value = ''
+}
+
 watch(whatHappenedId, async (id) => {
   resolvedProcess.value = null
-  if (!id) return
+  if (!id) {
+    resolvingProcess.value = false
+    clearAutoCategory()
+    return
+  }
+  resolvingProcess.value = true
   try {
     const res = await occurrenceProcessesService.resolve(id)
     // A newer selection may have landed while this request was in flight.
     if (whatHappenedId.value !== id) return
     resolvedProcess.value = res.data.data.process
-    // Suggest the category only when the agent hasn't picked one: manual choice wins.
-    if (resolvedProcess.value?.category_id && !categoryId.value) {
-      categoryId.value = resolvedProcess.value.category_id
+    const suggested = resolvedProcess.value?.category_id
+    if (!suggested) {
+      clearAutoCategory()
+    } else if (!categoryId.value || categoryId.value === autoCategoryId.value) {
+      // Manual choice wins: only an empty or previously auto-filled category is replaced.
+      categoryId.value = suggested
+      autoCategoryId.value = suggested
     }
   } catch {
     // Resolution is a convenience; failure must not block the form.
-    if (whatHappenedId.value === id) resolvedProcess.value = null
+    if (whatHappenedId.value === id) {
+      resolvedProcess.value = null
+      clearAutoCategory()
+    }
+  } finally {
+    if (whatHappenedId.value === id) resolvingProcess.value = false
   }
 })
 
@@ -146,6 +174,8 @@ const submitting = ref(false)
 const result = ref<{ protocolId: string; protocolNumber: string; title: string; sent: boolean | null } | null>(null)
 const suggestedMessage = ref('')
 const hasSuggestedTemplate = ref(false)
+// The suggested text is the built-in protocol text, not a process template.
+const suggestedIsFallback = ref(false)
 const sendingMessage = ref(false)
 // Live: recomputed as the agent edits, so the notice clears once every token is filled in.
 const unresolvedTokens = computed(() => unresolvedPlaceholders(suggestedMessage.value))
@@ -172,18 +202,21 @@ function resetForm() {
   unitId.value = ''
   productDescription.value = ''
   categoryId.value = ''
+  autoCategoryId.value = ''
   whatHappenedId.value = ''
+  resolvingProcess.value = false
   resolvedProcess.value = null
   priority.value = 'normal'
   description.value = ''
   internalNote.value = ''
   suggestedMessage.value = ''
   hasSuggestedTemplate.value = false
+  suggestedIsFallback.value = false
   result.value = null
 }
 
 async function submit() {
-  if (submitting.value) return // trava contra duplo clique / duplo protocolo
+  if (submitting.value || resolvingProcess.value) return // trava contra duplo clique / duplo protocolo / processo ainda carregando
 
   if (!phone.value.trim()) {
     toast.error(t('occurrences.validationPhoneRequired'))
@@ -247,6 +280,7 @@ async function submit() {
     const preview = await store.previewRegistrationMessage(occurrence.id, resolvedProcess.value?.id)
     suggestedMessage.value = preview.content
     hasSuggestedTemplate.value = preview.hasTemplate
+    suggestedIsFallback.value = preview.isFallback
     result.value = {
       protocolId: occurrence.id,
       protocolNumber: occurrence.protocol_number,
@@ -283,8 +317,9 @@ async function sendSuggestedMessage() {
     // A reset mid-send leaves nothing to update.
     if (!result.value) return
     result.value = { ...current, sent }
-    // Only a real, non-blank template counts as "process message used"; logging is best-effort.
-    if (sent && resolvedProcess.value && hasSuggestedTemplate.value && text.trim()) {
+    // Only a real, non-blank process template counts as "process message used" (not the
+    // built-in fallback text); logging is best-effort.
+    if (sent && resolvedProcess.value && hasSuggestedTemplate.value && !suggestedIsFallback.value && text.trim()) {
       try {
         await occurrenceProcessesService.logMessageUse(protocolId, 'registration', resolvedProcess.value.name)
       } catch {
@@ -320,7 +355,7 @@ function goToProtocol() {
         <!-- Review before sending. After a closed 24h window (sent === false) keep the text copyable for a template. -->
         <div v-if="result.sent !== true" class="space-y-2 text-left">
           <Label>{{ t('occurrences.suggestedMessageLabel') }}</Label>
-          <Textarea v-model="suggestedMessage" :rows="8" :disabled="sendingMessage" />
+          <Textarea v-model="suggestedMessage" :rows="8" :maxlength="4096" :disabled="sendingMessage" />
           <p v-if="result.sent === null && unresolvedTokens.length" class="text-xs text-amber-600" role="status">
             {{ t('occurrences.unresolvedPlaceholdersNotice', { tokens: unresolvedTokens.join(', ') }) }}
           </p>
@@ -337,6 +372,7 @@ function goToProtocol() {
         </div>
         <div class="flex justify-center gap-2 pt-2">
           <Button variant="outline" :disabled="sendingMessage" @click="resetForm">{{ t('occurrences.openAnotherProtocol') }}</Button>
+          <Button v-if="closable" variant="outline" :disabled="sendingMessage" @click="emit('cancel')">{{ t('common.close') }}</Button>
           <Button :disabled="sendingMessage" @click="goToProtocol">{{ t('occurrences.viewProtocol') }}</Button>
         </div>
       </CardContent>
@@ -489,7 +525,7 @@ function goToProtocol() {
 
         <CardContent class="flex justify-end gap-2 pt-0">
           <Button variant="outline" @click="cancelForm" :disabled="submitting">{{ t('common.cancel') }}</Button>
-          <Button @click="submit" :disabled="submitting">
+          <Button @click="submit" :disabled="submitting || resolvingProcess">
             <Loader2 v-if="submitting" class="h-4 w-4 mr-2 animate-spin" />
             {{ submitting ? t('occurrences.registeringProtocol') : t('occurrences.registerProtocol') }}
           </Button>

@@ -1,5 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { toast } from 'vue-sonner'
+import { i18n } from '@/i18n'
 import { occurrencesService, occurrenceProcessesService, type Occurrence, type OccurrenceStage, type OccurrenceEvent } from '@/services/api'
 
 export const useOccurrencesStore = defineStore('occurrences', () => {
@@ -75,12 +77,15 @@ export const useOccurrencesStore = defineStore('occurrences', () => {
 
   // Suggested registration text for the agent to review; never sent by this call.
   async function previewRegistrationMessage(occurrenceId: string, processId?: string) {
-    if (!processId) return { content: '', hasTemplate: false }
+    if (!processId) return { content: '', hasTemplate: false, isFallback: false }
     try {
       const res = await occurrenceProcessesService.previewMessage(processId, 'registration', occurrenceId)
-      return { content: res.data.data.content, hasTemplate: res.data.data.has_template }
+      const { content, has_template, is_fallback } = res.data.data
+      return { content, hasTemplate: has_template, isFallback: is_fallback }
     } catch {
-      return { content: '', hasTemplate: false }
+      // The protocol already exists; the agent can still write a message or send the default text.
+      toast.error(i18n.global.t('occurrences.previewMessageFailed'))
+      return { content: '', hasTemplate: false, isFallback: false }
     }
   }
 
@@ -89,7 +94,7 @@ export const useOccurrencesStore = defineStore('occurrences', () => {
   // An empty message makes the backend send the legacy protocol text.
   async function sendRegistrationMessage(occurrenceId: string, message: string): Promise<boolean> {
     try {
-      await occurrencesService.sendProtocol(occurrenceId, message || undefined)
+      await occurrencesService.sendProtocol(occurrenceId, message.trim() || undefined)
       return true
     } catch (e: any) {
       if (e?.response?.status === 422) return false
