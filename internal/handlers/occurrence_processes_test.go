@@ -1,8 +1,10 @@
 package handlers_test
 
 import (
+	"sync"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/test/testutil"
 	"github.com/stretchr/testify/assert"
@@ -46,6 +48,16 @@ func TestOccurrenceProcesses_SeedsFiveRealProcessesOnFirstRead(t *testing.T) {
 	var whatHappened models.OccurrenceWhatHappened
 	require.NoError(t, app.DB.First(&whatHappened, "id = ?", *avaria.WhatHappenedID).Error)
 	assert.Equal(t, "Produto com Avaria", whatHappened.Name, "must reuse the existing seeded reason, not create a duplicate")
+
+	for _, name := range []string{"Devolução Após 24h", "Alteração de Pedido em Separação", "Desistência do Pedido"} {
+		var n int64
+		app.DB.Model(&models.OccurrenceWhatHappened{}).Where("organization_id = ? AND name = ?", org.ID, name).Count(&n)
+		assert.EqualValues(t, 1, n, "new reason %q must be created", name)
+	}
+
+	var orphans int64
+	app.DB.Model(&models.OccurrenceProcessMessage{}).Where("process_id = ?", uuid.Nil).Count(&orphans)
+	assert.Zero(t, orphans, "no message may reference the nil process")
 }
 
 func TestOccurrenceProcesses_SeedIsIdempotent(t *testing.T) {
@@ -58,6 +70,51 @@ func TestOccurrenceProcesses_SeedIsIdempotent(t *testing.T) {
 	var count int64
 	app.DB.Model(&models.OccurrenceProcess{}).Where("organization_id = ?", org.ID).Count(&count)
 	assert.EqualValues(t, 5, count)
+
+	countRows := func(model any) int64 {
+		var n int64
+		app.DB.Model(model).Where("organization_id = ?", org.ID).Count(&n)
+		return n
+	}
+	assert.EqualValues(t, 6, countRows(&models.OccurrenceProcessMessage{}), "5 registration + 1 documents (Avaria)")
+
+	cats, reasons := countRows(&models.OccurrenceCategory{}), countRows(&models.OccurrenceWhatHappened{})
+	require.NoError(t, app.EnsureDefaultOccurrenceProcessesForTest(org.ID))
+	assert.Equal(t, cats, countRows(&models.OccurrenceCategory{}), "re-run must not create duplicate categories")
+	assert.Equal(t, reasons, countRows(&models.OccurrenceWhatHappened{}), "re-run must not create duplicate reasons")
+}
+
+// Concurrent first reads must seed exactly once: no orphan messages pointing
+// at the nil process, no partial data.
+func TestOccurrenceProcesses_ConcurrentSeedIsAtomic(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+
+	const n = 8
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	errs := make([]error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			<-start
+			errs[idx] = app.EnsureDefaultOccurrenceProcessesForTest(org.ID)
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	for i, err := range errs {
+		require.NoError(t, err, "seed %d failed", i)
+	}
+
+	var procs, msgs, orphans int64
+	app.DB.Model(&models.OccurrenceProcess{}).Where("organization_id = ?", org.ID).Count(&procs)
+	app.DB.Model(&models.OccurrenceProcessMessage{}).Where("organization_id = ?", org.ID).Count(&msgs)
+	app.DB.Model(&models.OccurrenceProcessMessage{}).Where("process_id = ?", uuid.Nil).Count(&orphans)
+	assert.EqualValues(t, 5, procs)
+	assert.EqualValues(t, 6, msgs)
+	assert.Zero(t, orphans, "no message may reference the nil process")
 }
 
 func TestFindOrCreateWhatHappened_ReusesExistingByName(t *testing.T) {
@@ -72,6 +129,12 @@ func TestFindOrCreateWhatHappened_ReusesExistingByName(t *testing.T) {
 	app.DB.Model(&models.OccurrenceWhatHappened{}).Where("organization_id = ? AND name = ?", org.ID, "Produto com Avaria").Count(&count)
 	assert.EqualValues(t, 1, count, "must not create a duplicate row for a name that already exists")
 	assert.Equal(t, "Produto com Avaria", found.Name)
+
+	created, err := app.FindOrCreateWhatHappenedForTest(org.ID, "Motivo Novo")
+	require.NoError(t, err)
+	assert.NotEqual(t, uuid.Nil, created.ID)
+	app.DB.Model(&models.OccurrenceWhatHappened{}).Where("organization_id = ? AND name = ?", org.ID, "Motivo Novo").Count(&count)
+	assert.EqualValues(t, 1, count, "a name that is not present must be created")
 }
 
 // GORM replaces a zero-value field carrying a `default:` tag with that default,
@@ -110,7 +173,7 @@ func TestOccurrenceProcess_PartialUniqueIndexOneActivePerReason(t *testing.T) {
 	require.NoError(t, app.DB.Create(&first).Error)
 
 	dupActive := models.OccurrenceProcess{OrganizationID: org.ID, Name: "B", WhatHappenedID: &reason, IsActive: true}
-	assert.Error(t, app.DB.Create(&dupActive).Error, "second ACTIVE process for the same reason must be rejected")
+	assert.ErrorContains(t, app.DB.Create(&dupActive).Error, "idx_occ_process_what_happened", "second ACTIVE process for the same reason must be rejected")
 
 	inactive := models.OccurrenceProcess{OrganizationID: org.ID, Name: "C", WhatHappenedID: &reason, IsActive: false}
 	assert.NoError(t, app.DB.Create(&inactive).Error, "an INACTIVE process for the same reason is allowed")

@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"errors"
+
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
-	"gorm.io/gorm/clause"
+	"gorm.io/gorm"
 )
 
 func intPtr(v int) *int { return &v }
@@ -160,13 +162,18 @@ func (a *App) findOrCreateWhatHappened(orgID uuid.UUID, name string) (*models.Oc
 	if err == nil {
 		return &existing, nil
 	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
 
 	var maxPosition int
-	a.DB.Model(&models.OccurrenceWhatHappened{}).Where("organization_id = ?", orgID).
-		Select("COALESCE(MAX(position), -1)").Scan(&maxPosition)
+	if err := a.DB.Model(&models.OccurrenceWhatHappened{}).Where("organization_id = ?", orgID).
+		Select("COALESCE(MAX(position), -1)").Scan(&maxPosition).Error; err != nil {
+		return nil, err
+	}
 
 	row := models.OccurrenceWhatHappened{OrganizationID: orgID, Name: name, Position: maxPosition + 1, IsActive: true}
-	if err := a.DB.Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error; err != nil {
+	if err := a.DB.Create(&row).Error; err != nil {
 		return nil, err
 	}
 	return &row, nil
@@ -182,13 +189,18 @@ func (a *App) findOrCreateCategory(orgID uuid.UUID, name string) (*models.Occurr
 	if err == nil {
 		return &existing, nil
 	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
 
 	var maxPosition int
-	a.DB.Model(&models.OccurrenceCategory{}).Where("organization_id = ?", orgID).
-		Select("COALESCE(MAX(position), -1)").Scan(&maxPosition)
+	if err := a.DB.Model(&models.OccurrenceCategory{}).Where("organization_id = ?", orgID).
+		Select("COALESCE(MAX(position), -1)").Scan(&maxPosition).Error; err != nil {
+		return nil, err
+	}
 
 	row := models.OccurrenceCategory{OrganizationID: orgID, Name: name, Position: maxPosition + 1, IsActive: true}
-	if err := a.DB.Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error; err != nil {
+	if err := a.DB.Create(&row).Error; err != nil {
 		return nil, err
 	}
 	return &row, nil
@@ -213,6 +225,10 @@ func (a *App) ensureDefaultOccurrenceProcesses(orgID uuid.UUID) error {
 	a.Log.Warn("Seeding default occurrence processes — Category/WhatHappened mapping and SLA minutes are a first-cut interpretation of the validated process map, pending product-owner validation",
 		"organization_id", orgID)
 
+	// Category/reason rows are idempotent by name, so resolve them before the
+	// transaction rather than holding the advisory lock across those lookups.
+	categoryIDs := make([]uuid.UUID, len(defaultOccurrenceProcesses))
+	whatHappenedIDs := make([]uuid.UUID, len(defaultOccurrenceProcesses))
 	for i, seed := range defaultOccurrenceProcesses {
 		category, err := a.findOrCreateCategory(orgID, seed.category)
 		if err != nil {
@@ -222,45 +238,65 @@ func (a *App) ensureDefaultOccurrenceProcesses(orgID uuid.UUID) error {
 		if err != nil {
 			return err
 		}
-
-		required := make(models.JSONBArray, len(seed.required))
-		for j, r := range seed.required {
-			required[j] = r
-		}
-		evidence := make(models.JSONBArray, len(seed.evidence))
-		for j, e := range seed.evidence {
-			evidence[j] = e
-		}
-
-		process := models.OccurrenceProcess{
-			OrganizationID:    orgID,
-			Name:              seed.name,
-			CategoryID:        &category.ID,
-			WhatHappenedID:    &whatHappened.ID,
-			Guidance:          seed.guidance,
-			Restrictions:      seed.restrictions,
-			EvidenceChecklist: evidence,
-			RequiredFields:    required,
-			ResponseMinutes:   seed.responseMinutes,
-			ResolutionMinutes: seed.resolutionMinutes,
-			IsActive:          true,
-			Position:          i,
-		}
-		if err := a.DB.Clauses(clause.OnConflict{DoNothing: true}).Create(&process).Error; err != nil {
-			return err
-		}
-
-		messages := []models.OccurrenceProcessMessage{
-			{OrganizationID: orgID, ProcessID: process.ID, Stage: models.OccurrenceProcessMessageRegistration, Content: seed.registrationMessage, IsActive: true},
-		}
-		if seed.documentsMessage != "" {
-			messages = append(messages, models.OccurrenceProcessMessage{
-				OrganizationID: orgID, ProcessID: process.ID, Stage: models.OccurrenceProcessMessageDocuments, Content: seed.documentsMessage, IsActive: true,
-			})
-		}
-		if err := a.DB.Clauses(clause.OnConflict{DoNothing: true}).Create(&messages).Error; err != nil {
-			return err
-		}
+		categoryIDs[i], whatHappenedIDs[i] = category.ID, whatHappened.ID
 	}
-	return nil
+
+	// One transaction: any failure rolls the whole seed back (no partial org),
+	// and the per-org advisory lock serializes concurrent first reads so the
+	// loser sees the winner's rows and returns without inserting anything.
+	return a.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtext(?))", "occurrence_processes_seed:"+orgID.String()).Error; err != nil {
+			return err
+		}
+		var count int64
+		if err := tx.Model(&models.OccurrenceProcess{}).
+			Where("organization_id = ?", orgID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			return nil
+		}
+
+		for i, seed := range defaultOccurrenceProcesses {
+			required := make(models.JSONBArray, len(seed.required))
+			for j, r := range seed.required {
+				required[j] = r
+			}
+			evidence := make(models.JSONBArray, len(seed.evidence))
+			for j, e := range seed.evidence {
+				evidence[j] = e
+			}
+
+			process := models.OccurrenceProcess{
+				OrganizationID:    orgID,
+				Name:              seed.name,
+				CategoryID:        &categoryIDs[i],
+				WhatHappenedID:    &whatHappenedIDs[i],
+				Guidance:          seed.guidance,
+				Restrictions:      seed.restrictions,
+				EvidenceChecklist: evidence,
+				RequiredFields:    required,
+				ResponseMinutes:   seed.responseMinutes,
+				ResolutionMinutes: seed.resolutionMinutes,
+				IsActive:          true,
+				Position:          i,
+			}
+			if err := tx.Create(&process).Error; err != nil {
+				return err
+			}
+
+			messages := []models.OccurrenceProcessMessage{
+				{OrganizationID: orgID, ProcessID: process.ID, Stage: models.OccurrenceProcessMessageRegistration, Content: seed.registrationMessage, IsActive: true},
+			}
+			if seed.documentsMessage != "" {
+				messages = append(messages, models.OccurrenceProcessMessage{
+					OrganizationID: orgID, ProcessID: process.ID, Stage: models.OccurrenceProcessMessageDocuments, Content: seed.documentsMessage, IsActive: true,
+				})
+			}
+			if err := tx.Create(&messages).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
