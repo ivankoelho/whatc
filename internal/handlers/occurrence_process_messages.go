@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"errors"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -10,6 +12,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
+	"gorm.io/gorm"
 )
 
 // ResolveOccurrenceProcess returns the active OccurrenceProcess configured for
@@ -36,8 +39,12 @@ func (a *App) ResolveOccurrenceProcess(r *fastglue.Request) error {
 	err = a.DB.Where("organization_id = ? AND what_happened_id = ? AND is_active = true", orgID, id).
 		Preload("Category").Preload("WhatHappened").Preload("Department").
 		First(&process).Error
-	if err != nil {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return r.SendEnvelope(map[string]any{"process": nil})
+	}
+	if err != nil {
+		a.Log.Error("Failed to resolve occurrence process", "error", err, "what_happened", id)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to resolve process", nil, "")
 	}
 	return r.SendEnvelope(map[string]any{"process": process})
 }
@@ -142,6 +149,25 @@ func (a *App) UpsertOccurrenceProcessMessage(r *fastglue.Request) error {
 	return r.SendEnvelope(updated)
 }
 
+// formatProcessDeadline renders the customer-facing [Prazo] text: overdue ->
+// "o mais breve possível"; >=24h -> whole days (rounded down); otherwise hours
+// rounded up (minimum 1).
+func formatProcessDeadline(remaining time.Duration) string {
+	if remaining <= 0 {
+		return "o mais breve possível"
+	}
+	if remaining >= 24*time.Hour {
+		if days := int(remaining / (24 * time.Hour)); days > 1 {
+			return strconv.Itoa(days) + " dias"
+		}
+		return "1 dia"
+	}
+	if hours := int(math.Ceil(remaining.Hours())); hours > 1 {
+		return strconv.Itoa(hours) + " horas"
+	}
+	return "1 hora"
+}
+
 // resolveProcessMessageVariables substitutes the bracket variables the
 // validated process map uses in its message text. Nothing else in the codebase
 // resolves `[Bracket]` placeholders (internal/templateutil handles WABA's
@@ -157,12 +183,7 @@ func resolveProcessMessageVariables(content string, occ *models.Occurrence, agen
 	}
 	deadline := ""
 	if occ.SLA.ResponseDeadline != nil {
-		remaining := time.Until(*occ.SLA.ResponseDeadline)
-		if days := int(remaining.Hours() / 24); days > 0 {
-			deadline = strconv.Itoa(days) + " dias"
-		} else {
-			deadline = strconv.Itoa(max(int(remaining.Hours()), 1)) + " horas"
-		}
+		deadline = formatProcessDeadline(time.Until(*occ.SLA.ResponseDeadline))
 	}
 
 	return strings.NewReplacer(
@@ -221,6 +242,9 @@ func (a *App) PreviewOccurrenceProcessMessage(r *fastglue.Request) error {
 		Preload("Contact").Preload("Unit").First(&occ).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Occurrence not found", nil, "")
 	}
+	if occ.Contact == nil { // soft-deleted contact: Preload leaves it nil
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
+	}
 	if !a.canViewConversation(userID, orgID, occ.Contact) {
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You do not have access to this occurrence", nil, "")
 	}
@@ -246,7 +270,9 @@ func (a *App) PreviewOccurrenceProcessMessage(r *fastglue.Request) error {
 // LogOccurrenceProcessMessageUseRequest is the body for logging that a
 // suggested message was used.
 type LogOccurrenceProcessMessageUseRequest struct {
-	Stage       string `json:"stage"`
+	Stage string `json:"stage"`
+	// ProcessName is accepted for older callers but ignored: the timeline entry
+	// derives the process name from the occurrence, never from the client.
 	ProcessName string `json:"process_name"`
 }
 
@@ -272,8 +298,11 @@ func (a *App) LogOccurrenceProcessMessageUse(r *fastglue.Request) error {
 	}
 
 	content := "Mensagem de " + req.Stage + " utilizada."
-	if req.ProcessName != "" {
-		content = "Mensagem de " + req.Stage + " utilizada — processo: " + req.ProcessName + "."
+	if occ.ProcessID != nil {
+		var process models.OccurrenceProcess
+		if a.DB.Where("id = ? AND organization_id = ?", *occ.ProcessID, orgID).First(&process).Error == nil {
+			content = "Mensagem de " + req.Stage + " utilizada — processo: " + process.Name + "."
+		}
 	}
 
 	if err := a.DB.Create(&models.OccurrenceEvent{

@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"time"
+
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
 )
@@ -50,4 +52,8 @@ func IsActiveProcessConflictForTest(err error) bool {
 
 func ResolveProcessMessageVariablesForTest(content string, occ *models.Occurrence, agentName string) string {
 	return resolveProcessMessageVariables(content, occ, agentName)
+}
+
+func FormatProcessDeadlineForTest(remaining time.Duration) string {
+	return formatProcessDeadline(remaining)
 }

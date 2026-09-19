@@ -138,6 +138,115 @@ func TestResolveProcessMessageVariables_PrazoAndLoja(t *testing.T) {
 	assert.Equal(t, "Loja Centro: 3 dias", out)
 }
 
+func TestFormatProcessDeadline(t *testing.T) {
+	cases := []struct {
+		name string
+		in   time.Duration
+		want string
+	}{
+		{"zero", 0, "o mais breve possível"},
+		{"negative", -5 * time.Hour, "o mais breve possível"},
+		{"30min", 30 * time.Minute, "1 hora"},
+		{"90min", 90 * time.Minute, "2 horas"},
+		{"23h", 23 * time.Hour, "23 horas"},
+		{"24h", 24 * time.Hour, "1 dia"},
+		{"25h", 25 * time.Hour, "1 dia"},
+		{"49h", 49 * time.Hour, "2 dias"},
+		{"5d", 5 * 24 * time.Hour, "5 dias"},
+	}
+	for _, c := range cases {
+		assert.Equal(t, c.want, handlers.FormatProcessDeadlineForTest(c.in), c.name)
+	}
+}
+
+func TestResolveProcessMessageVariables_NilAndOverdueDeadline(t *testing.T) {
+	assert.Equal(t, "prazo: .", handlers.ResolveProcessMessageVariablesForTest("prazo: [Prazo].", &models.Occurrence{}, ""))
+
+	past := time.Now().Add(-2 * time.Hour)
+	occ := &models.Occurrence{}
+	occ.SLA.ResponseDeadline = &past
+	assert.Equal(t, "em o mais breve possível", handlers.ResolveProcessMessageVariablesForTest("em [Prazo]", occ, ""))
+}
+
+func TestResolveProcessMessageVariables_DoesNotDoubleSubstitute(t *testing.T) {
+	occ := &models.Occurrence{ProtocolNumber: "123", Contact: &models.Contact{ProfileName: "[Protocolo]"}}
+	out := handlers.ResolveProcessMessageVariablesForTest("Olá [Nome], protocolo [Protocolo]", occ, "")
+	assert.Equal(t, "Olá [Protocolo], protocolo 123", out)
+}
+
+func TestPreviewOccurrenceProcessMessage_SoftDeletedContactReturns404(t *testing.T) {
+	app := newTestApp(t)
+	org, user := seededAdmin(t, app)
+	process := processByName(t, app, org.ID, avariaProcessName)
+	occ := occurrenceForProcess(t, app, org, user, &process.ID)
+	require.NoError(t, app.DB.Delete(&models.Contact{}, "id = ?", occ.ContactID).Error)
+
+	req := previewReq(t, org.ID, user.ID, process.ID.String(), "registration", occ.ID.String())
+	require.NoError(t, app.PreviewOccurrenceProcessMessage(req))
+	assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req))
+}
+
+func TestPreviewOccurrenceProcessMessage_CrossOrgOccurrenceReturns404(t *testing.T) {
+	app := newTestApp(t)
+	org, user := seededAdmin(t, app)
+	otherOrg, otherUser := seededAdmin(t, app)
+	otherProcess := processByName(t, app, otherOrg.ID, avariaProcessName)
+	otherOcc := occurrenceForProcess(t, app, otherOrg, otherUser, &otherProcess.ID)
+	process := processByName(t, app, org.ID, avariaProcessName)
+
+	req := previewReq(t, org.ID, user.ID, process.ID.String(), "registration", otherOcc.ID.String())
+	require.NoError(t, app.PreviewOccurrenceProcessMessage(req))
+	assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req))
+}
+
+func TestPreviewOccurrenceProcessMessage_InactiveTemplateFallsBack(t *testing.T) {
+	app := newTestApp(t)
+	org, user := seededAdmin(t, app)
+	process := processByName(t, app, org.ID, avariaProcessName)
+	occ := occurrenceForProcess(t, app, org, user, &process.ID)
+	require.NoError(t, app.DB.Model(&models.OccurrenceProcessMessage{}).
+		Where("process_id = ?", process.ID).Update("is_active", false).Error)
+
+	req := previewReq(t, org.ID, user.ID, process.ID.String(), "registration", occ.ID.String())
+	require.NoError(t, app.PreviewOccurrenceProcessMessage(req))
+	body := string(testutil.GetResponseBody(req))
+	assert.Contains(t, body, "Guarde este número para consultas futuras", "registration falls back to legacy text")
+	assert.Contains(t, body, `"has_template":true`)
+
+	req = previewReq(t, org.ID, user.ID, process.ID.String(), "documents", occ.ID.String())
+	require.NoError(t, app.PreviewOccurrenceProcessMessage(req))
+	body = string(testutil.GetResponseBody(req))
+	assert.Contains(t, body, `"has_template":false`)
+	assert.Contains(t, body, `"content":""`)
+}
+
+func TestLogOccurrenceProcessMessageUse_ProcessNameComesFromOccurrenceNotClient(t *testing.T) {
+	app := newTestApp(t)
+	org, user := seededAdmin(t, app)
+	process := processByName(t, app, org.ID, avariaProcessName)
+	withProcess := occurrenceForProcess(t, app, org, user, &process.ID)
+	without := occurrenceForProcess(t, app, org, user, nil)
+
+	eventContent := func(occ models.Occurrence) string {
+		req := testutil.NewJSONRequest(t, map[string]any{"stage": "registration", "process_name": "SPOOFED"})
+		testutil.SetAuthContext(req, org.ID, user.ID)
+		testutil.SetPathParam(req, "id", occ.ID.String())
+		require.NoError(t, app.LogOccurrenceProcessMessageUse(req))
+		require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+		var ev models.OccurrenceEvent
+		require.NoError(t, app.DB.Where("occurrence_id = ? AND type = ?", occ.ID, models.OccurrenceEventProcessMessageUsed).First(&ev).Error)
+		return ev.Content
+	}
+
+	got := eventContent(withProcess)
+	assert.Contains(t, got, avariaProcessName)
+	assert.NotContains(t, got, "SPOOFED")
+
+	got = eventContent(without)
+	assert.NotContains(t, got, "SPOOFED")
+	assert.NotContains(t, got, "processo:")
+}
+
 func TestPreviewOccurrenceProcessMessage_UsesTheOccurrenceFromTheQueryParam_NotThePathParam(t *testing.T) {
 	// Regression test: the route's {id} is the PROCESS id, never an occurrence id.
 	app := newTestApp(t)
