@@ -204,7 +204,7 @@ func resolveProcessMessageVariables(content string, occ *models.Occurrence, agen
 		{"[Prazo]", deadline},
 		{"[Loja]", unit},
 	} {
-		if v[1] != "" {
+		if strings.TrimSpace(v[1]) != "" {
 			pairs = append(pairs, v[0], v[1])
 		}
 	}
@@ -278,13 +278,16 @@ func (a *App) PreviewOccurrenceProcessMessage(r *fastglue.Request) error {
 
 	var content string
 	hasTemplate := found
+	isFallback := false
 	if found {
 		content = resolveProcessMessageVariables(template.Content, &occ, audit.GetUserName(a.DB, userID))
 	} else {
 		content, hasTemplate = fallbackProcessMessage(stageRaw, &occ)
+		isFallback = hasTemplate
 	}
 
-	return r.SendEnvelope(map[string]any{"content": content, "has_template": hasTemplate})
+	// is_fallback marks the built-in text, as opposed to a real process template.
+	return r.SendEnvelope(map[string]any{"content": content, "has_template": hasTemplate, "is_fallback": isFallback})
 }
 
 // LogOccurrenceProcessMessageUseRequest is the body for logging that a
