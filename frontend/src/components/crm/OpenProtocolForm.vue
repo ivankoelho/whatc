@@ -142,7 +142,11 @@ onMounted(async () => {
 
 // --- Submissão ---
 const submitting = ref(false)
-const result = ref<{ protocolId: string; protocolNumber: string; title: string; sent: boolean } | null>(null)
+// sent: null = registration message not attempted yet (agent is reviewing it).
+const result = ref<{ protocolId: string; protocolNumber: string; title: string; sent: boolean | null } | null>(null)
+const suggestedMessage = ref('')
+const hasSuggestedTemplate = ref(false)
+const sendingMessage = ref(false)
 
 // Standalone tab (OccurrencesView) has no dialog to close, so Cancel just
 // clears the form there; the dialog wrapper (ContactOccurrencesPanel) closes
@@ -171,6 +175,8 @@ function resetForm() {
   priority.value = 'normal'
   description.value = ''
   internalNote.value = ''
+  suggestedMessage.value = ''
+  hasSuggestedTemplate.value = false
   result.value = null
 }
 
@@ -236,19 +242,53 @@ async function submit() {
       source_transfer_id: props.sourceTransferId,
     })
 
-    const sent = await store.trySendProtocol(occurrence.id)
-
+    const preview = await store.previewRegistrationMessage(occurrence.id, resolvedProcess.value?.id)
+    suggestedMessage.value = preview.content
+    hasSuggestedTemplate.value = preview.hasTemplate
     result.value = {
       protocolId: occurrence.id,
       protocolNumber: occurrence.protocol_number,
       title: occurrence.title,
-      sent,
+      sent: null,
     }
     emit('created', occurrence.id)
   } catch (e) {
     toast.error(getErrorMessage(e, t('chat.occurrenceCreateFailed')))
   } finally {
     submitting.value = false
+  }
+}
+
+async function copySuggestedMessage() {
+  try {
+    await navigator.clipboard.writeText(suggestedMessage.value)
+    toast.success(t('occurrences.messageCopied'))
+  } catch {
+    toast.error(t('occurrences.messageCopyFailed'))
+  }
+}
+
+// The agent always reviews the text first; an empty box makes the backend send
+// the legacy protocol text (process-less protocols behave as before).
+async function sendSuggestedMessage() {
+  if (!result.value || sendingMessage.value) return
+  const { protocolId } = result.value
+  sendingMessage.value = true
+  try {
+    const sent = await store.sendRegistrationMessage(protocolId, suggestedMessage.value)
+    result.value = { ...result.value, sent }
+    // Only a real template counts as "process message used"; logging is best-effort.
+    if (sent && resolvedProcess.value && hasSuggestedTemplate.value) {
+      try {
+        await occurrenceProcessesService.logMessageUse(protocolId, 'registration', resolvedProcess.value.name)
+      } catch {
+        // The message already went out; a failed audit event must not look like a send failure.
+      }
+    }
+  } catch (e) {
+    toast.error(getErrorMessage(e, t('chat.occurrenceCreateFailed')))
+  } finally {
+    sendingMessage.value = false
   }
 }
 
@@ -268,9 +308,24 @@ function goToProtocol() {
           <p class="font-mono text-sm text-muted-foreground mt-1">{{ result.protocolNumber }}</p>
           <p class="text-sm mt-1">{{ result.title }}</p>
         </div>
-        <p :class="['text-sm', result.sent ? 'text-emerald-600' : 'text-amber-600']">
+        <p v-if="result.sent !== null" :class="['text-sm', result.sent ? 'text-emerald-600' : 'text-amber-600']">
           {{ result.sent ? t('occurrences.protocolSentToCustomer') : t('occurrences.protocolNotSentToCustomer') }}
         </p>
+        <!-- Review before sending. After a closed 24h window (sent === false) keep the text copyable for a template. -->
+        <div v-if="result.sent !== true" class="space-y-2 text-left">
+          <Label>{{ t('occurrences.suggestedMessageLabel') }}</Label>
+          <Textarea v-model="suggestedMessage" :rows="8" :disabled="sendingMessage" />
+          <p v-if="result.sent === null && !hasSuggestedTemplate" class="text-xs text-muted-foreground">
+            {{ t('occurrences.noSuggestedMessage') }}
+          </p>
+          <div class="flex justify-end gap-2">
+            <Button variant="outline" :disabled="!suggestedMessage.trim()" @click="copySuggestedMessage">{{ t('occurrences.copyMessage') }}</Button>
+            <Button v-if="result.sent === null" :disabled="sendingMessage" @click="sendSuggestedMessage">
+              <Loader2 v-if="sendingMessage" class="h-4 w-4 mr-2 animate-spin" />
+              {{ t('occurrences.sendMessage') }}
+            </Button>
+          </div>
+        </div>
         <div class="flex justify-center gap-2 pt-2">
           <Button variant="outline" @click="resetForm">{{ t('occurrences.openAnotherProtocol') }}</Button>
           <Button @click="goToProtocol">{{ t('occurrences.viewProtocol') }}</Button>
