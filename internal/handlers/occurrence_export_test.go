@@ -43,3 +43,7 @@ func (a *App) EnsureDefaultWhatHappenedForTest(orgID uuid.UUID) error {
 func (a *App) FindOrCreateWhatHappenedForTest(orgID uuid.UUID, name string) (*models.OccurrenceWhatHappened, error) {
 	return a.findOrCreateWhatHappened(orgID, name)
 }
+
+func IsActiveProcessConflictForTest(err error) bool {
+	return isActiveProcessConflict(err)
+}

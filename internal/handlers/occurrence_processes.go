@@ -4,7 +4,11 @@ import (
 	"errors"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/shridarpatil/whatomate/internal/audit"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/valyala/fasthttp"
+	"github.com/zerodha/fastglue"
 	"gorm.io/gorm"
 )
 
@@ -299,4 +303,284 @@ func (a *App) ensureDefaultOccurrenceProcesses(orgID uuid.UUID) error {
 		}
 		return nil
 	})
+}
+
+// OccurrenceProcessRequest is the create/update body for a process.
+type OccurrenceProcessRequest struct {
+	Name              string   `json:"name"`
+	Description       string   `json:"description"`
+	CategoryID        *string  `json:"category_id"`
+	WhatHappenedID    *string  `json:"what_happened_id"`
+	Guidance          string   `json:"guidance"`
+	Restrictions      string   `json:"restrictions"`
+	EvidenceChecklist []string `json:"evidence_checklist"`
+	RequiredFields    []string `json:"required_fields"`
+	ResponseMinutes   *int     `json:"response_minutes"`
+	ResolutionMinutes *int     `json:"resolution_minutes"`
+	DepartmentID      *string  `json:"department_id"`
+	Position          int      `json:"position"`
+	IsActive          *bool    `json:"is_active"`
+}
+
+func toJSONBArray(values []string) models.JSONBArray {
+	arr := make(models.JSONBArray, len(values))
+	for i, v := range values {
+		arr[i] = v
+	}
+	return arr
+}
+
+// parseOptionalOrgUUID validates an optional foreign-key id against a table
+// that embeds organization_id, refusing an id that doesn't belong to orgID.
+func (a *App) parseOptionalOrgUUID(raw *string, orgID uuid.UUID, table string) (*uuid.UUID, error) {
+	if raw == nil || *raw == "" {
+		return nil, nil
+	}
+	id, err := uuid.Parse(*raw)
+	if err != nil {
+		return nil, err
+	}
+	var count int64
+	if err := a.DB.Table(table).Where("id = ? AND organization_id = ?", id, orgID).Count(&count).Error; err != nil {
+		return nil, err
+	}
+	if count == 0 {
+		return nil, errors.New(table + " not found in this organization")
+	}
+	return &id, nil
+}
+
+// processRefs are a request's validated optional foreign keys.
+type processRefs struct {
+	category, whatHappened, department *uuid.UUID
+}
+
+// parseProcessRefs validates the request's category/reason/department ids
+// against orgID. On failure it returns the 400 message to send.
+func (a *App) parseProcessRefs(req *OccurrenceProcessRequest, orgID uuid.UUID) (processRefs, string) {
+	var refs processRefs
+	var err error
+	if refs.category, err = a.parseOptionalOrgUUID(req.CategoryID, orgID, "occurrence_categories"); err != nil {
+		return refs, "Invalid category_id"
+	}
+	if refs.whatHappened, err = a.parseOptionalOrgUUID(req.WhatHappenedID, orgID, "occurrence_what_happened"); err != nil {
+		return refs, "Invalid what_happened_id"
+	}
+	if refs.department, err = a.parseOptionalOrgUUID(req.DepartmentID, orgID, "departments"); err != nil {
+		return refs, "Invalid department_id"
+	}
+	return refs, ""
+}
+
+// errActiveProcessExistsForReason is returned by assertNoActiveProcessForReason.
+var errActiveProcessExistsForReason = errors.New("an active process already exists for this reason")
+
+// isActiveProcessConflict reports whether err is the unique-index violation
+// on idx_occ_process_what_happened (SQLSTATE 23505) — the DB backstop that
+// catches two concurrent writers both passing assertNoActiveProcessForReason.
+func isActiveProcessConflict(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "idx_occ_process_what_happened"
+}
+
+// assertNoActiveProcessForReason enforces "exactly one active process per
+// (organization, WhatHappenedID)" at the application layer, ahead of the
+// partial unique index that backstops it against races. ResolveOccurrenceProcess
+// resolves a reason to a process with a plain .First() and needs this
+// invariant to actually hold, not just be documented.
+func (a *App) assertNoActiveProcessForReason(orgID uuid.UUID, whatHappenedID *uuid.UUID, excludeProcessID *uuid.UUID) error {
+	if whatHappenedID == nil {
+		return nil
+	}
+	query := a.DB.Model(&models.OccurrenceProcess{}).
+		Where("organization_id = ? AND what_happened_id = ? AND is_active = true", orgID, *whatHappenedID)
+	if excludeProcessID != nil {
+		query = query.Where("id <> ?", *excludeProcessID)
+	}
+	var count int64
+	if err := query.Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return errActiveProcessExistsForReason
+	}
+	return nil
+}
+
+// ListOccurrenceProcesses returns the org's processes, seeding the five real
+// defaults on first read.
+func (a *App) ListOccurrenceProcesses(r *fastglue.Request) error {
+	orgID, _, err := a.requireAuth(r, models.ResourceOccurrenceProcesses, models.ActionRead)
+	if err != nil {
+		return nil
+	}
+	if err := a.ensureDefaultOccurrenceProcesses(orgID); err != nil {
+		a.Log.Error("Failed to seed default occurrence processes", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to load processes", nil, "")
+	}
+
+	var processes []models.OccurrenceProcess
+	if err := a.DB.Where("organization_id = ?", orgID).
+		Preload("Category").Preload("WhatHappened").Preload("Department").
+		Order("position ASC").Find(&processes).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to load processes", nil, "")
+	}
+	return r.SendEnvelope(map[string]any{"processes": processes})
+}
+
+// CreateOccurrenceProcess adds a process/motivo.
+func (a *App) CreateOccurrenceProcess(r *fastglue.Request) error {
+	orgID, userID, err := a.requireAuth(r, models.ResourceOccurrenceProcesses, models.ActionWrite)
+	if err != nil {
+		return nil
+	}
+
+	var req OccurrenceProcessRequest
+	if err := a.decodeRequest(r, &req); err != nil {
+		return nil
+	}
+	if req.Name == "" {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "name is required", nil, "")
+	}
+	refs, badRef := a.parseProcessRefs(&req, orgID)
+	if badRef != "" {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, badRef, nil, "")
+	}
+
+	isActive := true
+	if req.IsActive != nil {
+		isActive = *req.IsActive
+	}
+	if isActive {
+		if err := a.assertNoActiveProcessForReason(orgID, refs.whatHappened, nil); err != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusConflict, err.Error(), nil, "")
+		}
+	}
+
+	process := models.OccurrenceProcess{
+		OrganizationID: orgID, Name: req.Name, Description: req.Description,
+		CategoryID: refs.category, WhatHappenedID: refs.whatHappened, DepartmentID: refs.department,
+		Guidance: req.Guidance, Restrictions: req.Restrictions,
+		EvidenceChecklist: toJSONBArray(req.EvidenceChecklist),
+		RequiredFields:    toJSONBArray(req.RequiredFields),
+		ResponseMinutes:   req.ResponseMinutes, ResolutionMinutes: req.ResolutionMinutes,
+		Position: req.Position, IsActive: isActive,
+	}
+	if err := a.DB.Create(&process).Error; err != nil {
+		if isActiveProcessConflict(err) {
+			return r.SendErrorEnvelope(fasthttp.StatusConflict, errActiveProcessExistsForReason.Error(), nil, "")
+		}
+		a.Log.Error("Failed to create occurrence process", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create process", nil, "")
+	}
+
+	userName := audit.GetUserName(a.DB, userID)
+	audit.LogAudit(a.DB, orgID, userID, userName, models.ResourceOccurrenceProcesses, process.ID,
+		models.AuditActionCreated, nil, process)
+
+	return r.SendEnvelope(process)
+}
+
+// UpdateOccurrenceProcess edits a process/motivo.
+func (a *App) UpdateOccurrenceProcess(r *fastglue.Request) error {
+	orgID, userID, err := a.requireAuth(r, models.ResourceOccurrenceProcesses, models.ActionWrite)
+	if err != nil {
+		return nil
+	}
+	processID, err := parsePathUUID(r, "id", "process")
+	if err != nil {
+		return nil
+	}
+	process, err := findByIDAndOrg[models.OccurrenceProcess](a.DB, r, processID, orgID, "Process")
+	if err != nil {
+		return nil
+	}
+	before := *process
+
+	var req OccurrenceProcessRequest
+	if err := a.decodeRequest(r, &req); err != nil {
+		return nil
+	}
+	if req.Name == "" {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "name is required", nil, "")
+	}
+	refs, badRef := a.parseProcessRefs(&req, orgID)
+	if badRef != "" {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, badRef, nil, "")
+	}
+
+	isActive := process.IsActive
+	if req.IsActive != nil {
+		isActive = *req.IsActive
+	}
+	if isActive {
+		if err := a.assertNoActiveProcessForReason(orgID, refs.whatHappened, &processID); err != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusConflict, err.Error(), nil, "")
+		}
+	}
+
+	// A map (not a struct) so false/nil values are actually written.
+	updates := map[string]any{
+		"name": req.Name, "description": req.Description,
+		"category_id": refs.category, "what_happened_id": refs.whatHappened, "department_id": refs.department,
+		"guidance": req.Guidance, "restrictions": req.Restrictions,
+		"evidence_checklist": toJSONBArray(req.EvidenceChecklist),
+		"required_fields":    toJSONBArray(req.RequiredFields),
+		"response_minutes":   req.ResponseMinutes, "resolution_minutes": req.ResolutionMinutes,
+		"position": req.Position, "is_active": isActive,
+	}
+	if err := a.DB.Model(process).Updates(updates).Error; err != nil {
+		if isActiveProcessConflict(err) {
+			return r.SendErrorEnvelope(fasthttp.StatusConflict, errActiveProcessExistsForReason.Error(), nil, "")
+		}
+		a.Log.Error("Failed to update occurrence process", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update process", nil, "")
+	}
+	// Updates(map) leaves the struct stale; reload so the audit diff and the
+	// response carry the new values.
+	if err := a.DB.First(process, "id = ?", processID).Error; err != nil {
+		a.Log.Error("Failed to reload occurrence process", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update process", nil, "")
+	}
+
+	userName := audit.GetUserName(a.DB, userID)
+	audit.LogAudit(a.DB, orgID, userID, userName, models.ResourceOccurrenceProcesses, process.ID,
+		models.AuditActionUpdated, before, *process)
+
+	return r.SendEnvelope(process)
+}
+
+// DeleteOccurrenceProcess removes a process, refusing when an occurrence
+// still references it — same guard shape as DeleteOccurrenceCategory.
+func (a *App) DeleteOccurrenceProcess(r *fastglue.Request) error {
+	orgID, userID, err := a.requireAuth(r, models.ResourceOccurrenceProcesses, models.ActionDelete)
+	if err != nil {
+		return nil
+	}
+	processID, err := parsePathUUID(r, "id", "process")
+	if err != nil {
+		return nil
+	}
+	process, err := findByIDAndOrg[models.OccurrenceProcess](a.DB, r, processID, orgID, "Process")
+	if err != nil {
+		return nil
+	}
+
+	var occCount int64
+	if err := a.DB.Model(&models.Occurrence{}).Where("process_id = ?", processID).Count(&occCount).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to delete process", nil, "")
+	}
+	if occCount > 0 {
+		return r.SendErrorEnvelope(fasthttp.StatusConflict, "Process is in use by existing occurrences", nil, "")
+	}
+
+	if err := a.DB.Delete(process).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to delete process", nil, "")
+	}
+
+	userName := audit.GetUserName(a.DB, userID)
+	audit.LogAudit(a.DB, orgID, userID, userName, models.ResourceOccurrenceProcesses, processID,
+		models.AuditActionDeleted, process, nil)
+
+	return r.SendEnvelope(map[string]any{"deleted": true})
 }

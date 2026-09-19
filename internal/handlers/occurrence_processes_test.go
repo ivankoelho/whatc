@@ -1,14 +1,19 @@
 package handlers_test
 
 import (
+	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/handlers"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/test/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/valyala/fasthttp"
+	"github.com/zerodha/fastglue"
 )
 
 func TestOccurrenceProcesses_SeedsFiveRealProcessesOnFirstRead(t *testing.T) {
@@ -177,4 +182,258 @@ func TestOccurrenceProcess_PartialUniqueIndexOneActivePerReason(t *testing.T) {
 
 	inactive := models.OccurrenceProcess{OrganizationID: org.ID, Name: "C", WhatHappenedID: &reason, IsActive: false}
 	assert.NoError(t, app.DB.Create(&inactive).Error, "an INACTIVE process for the same reason is allowed")
+}
+
+// --- CRUD handlers ---
+
+func processAdmin(t *testing.T, app *handlers.App) (*models.Organization, *models.User) {
+	t.Helper()
+	org := testutil.CreateTestOrganization(t, app.DB)
+	admin := testutil.CreateAdminRole(t, app.DB, org.ID)
+	return org, testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&admin.ID))
+}
+
+func createProcessReq(t *testing.T, orgID, userID uuid.UUID, body map[string]any) *fastglue.Request {
+	t.Helper()
+	req := testutil.NewJSONRequest(t, body)
+	testutil.SetAuthContext(req, orgID, userID)
+	return req
+}
+
+func auditCount(app *handlers.App, orgID uuid.UUID, action models.AuditAction) int64 {
+	var n int64
+	app.DB.Model(&models.AuditLog{}).
+		Where("organization_id = ? AND resource_type = ? AND action = ?", orgID, models.ResourceOccurrenceProcesses, action).
+		Count(&n)
+	return n
+}
+
+func TestCreateOccurrenceProcess_RequiresWritePermission(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+
+	req := createProcessReq(t, org.ID, user.ID, map[string]any{"name": "Novo Processo"})
+	require.NoError(t, app.CreateOccurrenceProcess(req))
+	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(req))
+}
+
+func TestUpdateAndDeleteOccurrenceProcess_RequirePermission(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	p := models.OccurrenceProcess{OrganizationID: org.ID, Name: "P", IsActive: true}
+	require.NoError(t, app.DB.Create(&p).Error)
+
+	upd := createProcessReq(t, org.ID, user.ID, map[string]any{"name": "X"})
+	testutil.SetPathParam(upd, "id", p.ID.String())
+	require.NoError(t, app.UpdateOccurrenceProcess(upd))
+	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(upd))
+
+	del := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(del, org.ID, user.ID)
+	testutil.SetPathParam(del, "id", p.ID.String())
+	require.NoError(t, app.DeleteOccurrenceProcess(del))
+	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(del))
+}
+
+func TestCreateOccurrenceProcess_WritesAuditLog(t *testing.T) {
+	app := newTestApp(t)
+	org, user := processAdmin(t, app)
+
+	req := createProcessReq(t, org.ID, user.ID, map[string]any{"name": "Processo Manual", "is_active": true})
+	require.NoError(t, app.CreateOccurrenceProcess(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	require.Eventually(t, func() bool { return auditCount(app, org.ID, models.AuditActionCreated) == 1 },
+		time.Second, 10*time.Millisecond)
+}
+
+func TestCreateOccurrenceProcess_RejectsSecondActiveProcessForSameWhatHappened(t *testing.T) {
+	app := newTestApp(t)
+	org, user := processAdmin(t, app)
+	reason, err := app.FindOrCreateWhatHappenedForTest(org.ID, "Produto com Avaria")
+	require.NoError(t, err)
+
+	first := createProcessReq(t, org.ID, user.ID, map[string]any{"name": "Processo A", "what_happened_id": reason.ID.String(), "is_active": true})
+	require.NoError(t, app.CreateOccurrenceProcess(first))
+	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(first))
+
+	second := createProcessReq(t, org.ID, user.ID, map[string]any{"name": "Processo B", "what_happened_id": reason.ID.String(), "is_active": true})
+	require.NoError(t, app.CreateOccurrenceProcess(second))
+	assert.Equal(t, fasthttp.StatusConflict, testutil.GetResponseStatusCode(second),
+		"only one ACTIVE process may exist per reason — ResolveOccurrenceProcess's .First() depends on this")
+}
+
+func TestCreateOccurrenceProcess_AllowsSecondInactiveProcessForSameWhatHappened(t *testing.T) {
+	app := newTestApp(t)
+	org, user := processAdmin(t, app)
+	reason, err := app.FindOrCreateWhatHappenedForTest(org.ID, "Produto com Avaria")
+	require.NoError(t, err)
+
+	first := createProcessReq(t, org.ID, user.ID, map[string]any{"name": "Processo A", "what_happened_id": reason.ID.String(), "is_active": true})
+	require.NoError(t, app.CreateOccurrenceProcess(first))
+	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(first))
+
+	second := createProcessReq(t, org.ID, user.ID, map[string]any{"name": "Processo B (rascunho)", "what_happened_id": reason.ID.String(), "is_active": false})
+	require.NoError(t, app.CreateOccurrenceProcess(second))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(second), "an inactive draft must not collide with the active one")
+
+	var stored models.OccurrenceProcess
+	require.NoError(t, app.DB.Where("organization_id = ? AND name = ?", org.ID, "Processo B (rascunho)").First(&stored).Error)
+	assert.False(t, stored.IsActive)
+}
+
+func TestCreateOccurrenceProcess_RejectsForeignOrgReason(t *testing.T) {
+	app := newTestApp(t)
+	org, user := processAdmin(t, app)
+	otherOrg := testutil.CreateTestOrganization(t, app.DB)
+	foreign, err := app.FindOrCreateWhatHappenedForTest(otherOrg.ID, "Produto com Avaria")
+	require.NoError(t, err)
+
+	req := createProcessReq(t, org.ID, user.ID, map[string]any{"name": "X", "what_happened_id": foreign.ID.String()})
+	require.NoError(t, app.CreateOccurrenceProcess(req))
+	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
+}
+
+func TestUpdateOccurrenceProcess_UpdatesAndAudits(t *testing.T) {
+	app := newTestApp(t)
+	org, user := processAdmin(t, app)
+	p := models.OccurrenceProcess{OrganizationID: org.ID, Name: "Antigo", IsActive: true, Guidance: "g"}
+	require.NoError(t, app.DB.Create(&p).Error)
+
+	req := createProcessReq(t, org.ID, user.ID, map[string]any{"name": "Novo", "is_active": false, "guidance": ""})
+	testutil.SetPathParam(req, "id", p.ID.String())
+	require.NoError(t, app.UpdateOccurrenceProcess(req))
+	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var resp models.OccurrenceProcess
+	testutil.ParseEnvelopeResponse(t, req, &resp)
+	assert.Equal(t, "Novo", resp.Name, "response must show the new values")
+	assert.False(t, resp.IsActive)
+
+	var stored models.OccurrenceProcess
+	require.NoError(t, app.DB.First(&stored, "id = ?", p.ID).Error)
+	assert.Equal(t, "Novo", stored.Name)
+	assert.False(t, stored.IsActive, "false must be written, not skipped")
+	assert.Empty(t, stored.Guidance)
+
+	require.Eventually(t, func() bool { return auditCount(app, org.ID, models.AuditActionUpdated) == 1 },
+		time.Second, 10*time.Millisecond)
+	var entry models.AuditLog
+	require.NoError(t, app.DB.Where("organization_id = ? AND action = ?", org.ID, models.AuditActionUpdated).First(&entry).Error)
+	assert.NotEmpty(t, entry.Changes, "audit diff must show before/after")
+}
+
+func TestUpdateOccurrenceProcess_RejectsActivatingSecondProcessForReason(t *testing.T) {
+	app := newTestApp(t)
+	org, user := processAdmin(t, app)
+	reason, err := app.FindOrCreateWhatHappenedForTest(org.ID, "Produto com Avaria")
+	require.NoError(t, err)
+	active := models.OccurrenceProcess{OrganizationID: org.ID, Name: "A", WhatHappenedID: &reason.ID, IsActive: true}
+	draft := models.OccurrenceProcess{OrganizationID: org.ID, Name: "B", WhatHappenedID: &reason.ID, IsActive: false}
+	require.NoError(t, app.DB.Create(&active).Error)
+	require.NoError(t, app.DB.Create(&draft).Error)
+
+	req := createProcessReq(t, org.ID, user.ID, map[string]any{"name": "B", "what_happened_id": reason.ID.String(), "is_active": true})
+	testutil.SetPathParam(req, "id", draft.ID.String())
+	require.NoError(t, app.UpdateOccurrenceProcess(req))
+	assert.Equal(t, fasthttp.StatusConflict, testutil.GetResponseStatusCode(req))
+
+	// A process may keep its own reason: the active one updates itself fine.
+	self := createProcessReq(t, org.ID, user.ID, map[string]any{"name": "A renomeado", "what_happened_id": reason.ID.String(), "is_active": true})
+	testutil.SetPathParam(self, "id", active.ID.String())
+	require.NoError(t, app.UpdateOccurrenceProcess(self))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(self))
+}
+
+func TestListOccurrenceProcesses_SeedsOnFirstRead(t *testing.T) {
+	app := newTestApp(t)
+	org, user := processAdmin(t, app)
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	require.NoError(t, app.ListOccurrenceProcesses(req))
+	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var resp struct {
+		Processes []models.OccurrenceProcess `json:"processes"`
+	}
+	testutil.ParseEnvelopeResponse(t, req, &resp)
+	assert.Len(t, resp.Processes, 5)
+}
+
+func TestListOccurrenceProcesses_RequiresReadPermission(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agentRole := testutil.CreateAgentRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	require.NoError(t, app.ListOccurrenceProcesses(req))
+	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(req))
+}
+
+func TestDeleteOccurrenceProcess_SoftDeletesAndAudits(t *testing.T) {
+	app := newTestApp(t)
+	org, user := processAdmin(t, app)
+	p := models.OccurrenceProcess{OrganizationID: org.ID, Name: "Descartável", IsActive: true}
+	require.NoError(t, app.DB.Create(&p).Error)
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	testutil.SetPathParam(req, "id", p.ID.String())
+	require.NoError(t, app.DeleteOccurrenceProcess(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var visible int64
+	app.DB.Model(&models.OccurrenceProcess{}).Where("id = ?", p.ID).Count(&visible)
+	assert.Zero(t, visible)
+	var raw int64
+	app.DB.Unscoped().Model(&models.OccurrenceProcess{}).Where("id = ? AND deleted_at IS NOT NULL", p.ID).Count(&raw)
+	assert.EqualValues(t, 1, raw, "row must be soft-deleted, not removed")
+
+	require.Eventually(t, func() bool { return auditCount(app, org.ID, models.AuditActionDeleted) == 1 },
+		time.Second, 10*time.Millisecond)
+}
+
+func TestDeleteOccurrenceProcess_RefusesWhenOccurrenceUsesIt(t *testing.T) {
+	app := newTestApp(t)
+	org, user := processAdmin(t, app)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+
+	process := models.OccurrenceProcess{OrganizationID: org.ID, Name: "Em Uso", IsActive: true}
+	require.NoError(t, app.DB.Create(&process).Error)
+	stage, err := app.InitialStageForTest(org.ID)
+	require.NoError(t, err)
+	occ := models.Occurrence{
+		OrganizationID: org.ID, ContactID: contact.ID, Title: "x", StageID: stage.ID,
+		OpenedByUserID: user.ID, ProcessID: &process.ID,
+	}
+	require.NoError(t, app.CreateOccurrenceForTest(&occ))
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	testutil.SetPathParam(req, "id", process.ID.String())
+	require.NoError(t, app.DeleteOccurrenceProcess(req))
+	assert.Equal(t, fasthttp.StatusConflict, testutil.GetResponseStatusCode(req))
+}
+
+// The pre-check can lose a race; the partial unique index is the backstop and
+// must surface as the same 409, never a 500.
+func TestIsActiveProcessConflict_MapsIndexViolationOnly(t *testing.T) {
+	app := newTestApp(t)
+	org, _ := processAdmin(t, app)
+	reason, err := app.FindOrCreateWhatHappenedForTest(org.ID, "Produto com Avaria")
+	require.NoError(t, err)
+	require.NoError(t, app.DB.Create(&models.OccurrenceProcess{OrganizationID: org.ID, Name: "A", WhatHappenedID: &reason.ID, IsActive: true}).Error)
+
+	dupErr := app.DB.Create(&models.OccurrenceProcess{OrganizationID: org.ID, Name: "B", WhatHappenedID: &reason.ID, IsActive: true}).Error
+	require.Error(t, dupErr)
+	assert.True(t, handlers.IsActiveProcessConflictForTest(dupErr))
+	assert.False(t, handlers.IsActiveProcessConflictForTest(errors.New("boom")))
+	assert.False(t, handlers.IsActiveProcessConflictForTest(nil))
 }
