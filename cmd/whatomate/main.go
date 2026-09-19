@@ -190,6 +190,13 @@ func runServer(args []string) {
 			lo.Fatal("What-happened permission backfill failed", "error", err)
 		}
 
+		// Same window: occurrences.processes is a new resource added after the
+		// what-happened backfill above, so it needs its own guard rather than
+		// piggybacking on that one's already-migrated check.
+		if err := database.BackfillOccurrenceProcessesPermission(db, lo); err != nil {
+			lo.Fatal("Occurrence processes permission backfill failed", "error", err)
+		}
+
 		// Data fix, not a schema migration: AutoMigrate adding occurrences.source
 		// with a DB default backfilled every existing row to 'whatsapp',
 		// including cases opened manually. Runs once, guarded by the column's
@@ -772,6 +779,17 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/occurrence-what-happened", app.CreateOccurrenceWhatHappened)
 	g.PUT("/api/occurrence-what-happened/{id}", app.UpdateOccurrenceWhatHappened)
 	g.DELETE("/api/occurrence-what-happened/{id}", app.DeleteOccurrenceWhatHappened)
+
+	// CRM — processos/motivos e mensagens sugeridas por etapa
+	g.GET("/api/occurrence-processes", app.ListOccurrenceProcesses)
+	g.POST("/api/occurrence-processes", app.CreateOccurrenceProcess)
+	g.GET("/api/occurrence-processes/resolve", app.ResolveOccurrenceProcess)
+	g.PUT("/api/occurrence-processes/{id}", app.UpdateOccurrenceProcess)
+	g.DELETE("/api/occurrence-processes/{id}", app.DeleteOccurrenceProcess)
+	g.GET("/api/occurrence-processes/{id}/messages", app.ListOccurrenceProcessMessages)
+	g.PUT("/api/occurrence-processes/{id}/messages/{stage}", app.UpsertOccurrenceProcessMessage)
+	g.GET("/api/occurrence-processes/{id}/messages/{stage}/preview", app.PreviewOccurrenceProcessMessage)
+	g.POST("/api/occurrences/{id}/process-messages/use", app.LogOccurrenceProcessMessageUse)
 
 	// CRM — políticas de SLA
 	g.GET("/api/occurrence-sla-policies", app.ListOccurrenceSLAPolicies)

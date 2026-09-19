@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"time"
+
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
 )
@@ -30,4 +32,28 @@ func (a *App) EnsureDefaultSLAPoliciesForTest(orgID uuid.UUID) error {
 
 func (a *App) GetSLAPolicyForTest(orgID uuid.UUID, priority models.OccurrencePriority) (*models.OccurrenceSLAPolicy, error) {
 	return a.getSLAPolicy(orgID, priority)
+}
+
+func (a *App) EnsureDefaultOccurrenceProcessesForTest(orgID uuid.UUID) error {
+	return a.ensureDefaultOccurrenceProcesses(orgID)
+}
+
+func (a *App) EnsureDefaultWhatHappenedForTest(orgID uuid.UUID) error {
+	return a.ensureDefaultWhatHappened(orgID)
+}
+
+func (a *App) FindOrCreateWhatHappenedForTest(orgID uuid.UUID, name string) (*models.OccurrenceWhatHappened, error) {
+	return a.findOrCreateWhatHappened(orgID, name)
+}
+
+func IsActiveProcessConflictForTest(err error) bool {
+	return isActiveProcessConflict(err)
+}
+
+func ResolveProcessMessageVariablesForTest(content string, occ *models.Occurrence, agentName string) string {
+	return resolveProcessMessageVariables(content, occ, agentName)
+}
+
+func FormatProcessDeadlineForTest(remaining time.Duration) string {
+	return formatProcessDeadline(remaining)
 }
