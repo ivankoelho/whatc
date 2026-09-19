@@ -192,14 +192,26 @@ func resolveProcessMessageVariables(content string, occ *models.Occurrence, agen
 		deadline = formatProcessDeadline(time.Until(*occ.SLA.ResponseDeadline))
 	}
 
-	return strings.NewReplacer(
-		"[Nome]", name,
-		"[Atendente]", agentName,
-		"[Protocolo]", occ.ProtocolNumber,
-		"[NF]", occ.InvoiceNumber,
-		"[Prazo]", deadline,
-		"[Loja]", unit,
-	).Replace(content)
+	// An empty value is skipped so its placeholder stays literal in the text:
+	// the agent reviewing the suggested message must see what is missing rather
+	// than send "prazo previsto de .".
+	var pairs []string
+	for _, v := range [][2]string{
+		{"[Nome]", name},
+		{"[Atendente]", agentName},
+		{"[Protocolo]", occ.ProtocolNumber},
+		{"[NF]", occ.InvoiceNumber},
+		{"[Prazo]", deadline},
+		{"[Loja]", unit},
+	} {
+		if v[1] != "" {
+			pairs = append(pairs, v[0], v[1])
+		}
+	}
+	if len(pairs) == 0 {
+		return content
+	}
+	return strings.NewReplacer(pairs...).Replace(content)
 }
 
 // fallbackProcessMessage is the explicit, stage-aware fallback. "registration"

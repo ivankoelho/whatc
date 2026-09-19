@@ -160,12 +160,31 @@ func TestFormatProcessDeadline(t *testing.T) {
 }
 
 func TestResolveProcessMessageVariables_NilAndOverdueDeadline(t *testing.T) {
-	assert.Equal(t, "prazo: .", handlers.ResolveProcessMessageVariablesForTest("prazo: [Prazo].", &models.Occurrence{}, ""))
+	assert.Equal(t, "prazo: [Prazo].", handlers.ResolveProcessMessageVariablesForTest("prazo: [Prazo].", &models.Occurrence{}, ""))
 
 	past := time.Now().Add(-2 * time.Hour)
 	occ := &models.Occurrence{}
 	occ.SLA.ResponseDeadline = &past
 	assert.Equal(t, "em o mais breve possível", handlers.ResolveProcessMessageVariablesForTest("em [Prazo]", occ, ""))
+}
+
+// A missing value must stay visible as its literal placeholder so the agent
+// notices it while reviewing, instead of sending "prazo previsto de .".
+func TestResolveProcessMessageVariables_EmptyValuesKeepPlaceholder(t *testing.T) {
+	occ := &models.Occurrence{ProtocolNumber: "202600123"} // no contact, unit, invoice or deadline
+	out := handlers.ResolveProcessMessageVariablesForTest("[Nome] [Atendente] [Protocolo] [NF] [Prazo] [Loja]", occ, "")
+	assert.Equal(t, "[Nome] [Atendente] 202600123 [NF] [Prazo] [Loja]", out)
+}
+
+func TestResolveProcessMessageVariables_MixOfPresentAndEmptyValues(t *testing.T) {
+	deadline := time.Now().Add(3*24*time.Hour + time.Hour)
+	occ := &models.Occurrence{
+		ProtocolNumber: "202600123",
+		Contact:        &models.Contact{ProfileName: "João"},
+	}
+	occ.SLA.ResponseDeadline = &deadline
+	out := handlers.ResolveProcessMessageVariablesForTest("[Nome], NF [NF], loja [Loja], prazo [Prazo], por [Atendente] (#[Protocolo])", occ, "Maria")
+	assert.Equal(t, "João, NF [NF], loja [Loja], prazo 3 dias, por Maria (#202600123)", out)
 }
 
 func TestResolveProcessMessageVariables_DoesNotDoubleSubstitute(t *testing.T) {
