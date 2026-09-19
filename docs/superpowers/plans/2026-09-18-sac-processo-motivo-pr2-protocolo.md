@@ -165,7 +165,7 @@ export const occurrenceProcessesService = {
 
 - [ ] **Step 5: Verify**
 
-Run: `cd frontend && npx vitest run src/lib/occurrence-process.spec.ts` (PASS), then the repo's type-check script (see `frontend/package.json` `scripts`; likely `vue-tsc`). Expected: zero new errors.
+Run: `cd frontend && npx vitest run src/lib/occurrence-process.spec.ts` (PASS), then `cd frontend && npm run typecheck`. Expected: zero new errors.
 
 - [ ] **Step 6: Commit**
 
@@ -366,7 +366,7 @@ In the `v-if="result"` block replace the sent/not-sent `<p>` with: when `result.
 
 - [ ] **Step 6: Full check and commit**
 
-Run: `cd frontend && npm run build && npx vitest run` — expected PASS, no new warnings.
+Run: `cd frontend && npm run typecheck && npm run test:unit && npm run i18n:keys && npm run build` — expected PASS, no new warnings.
 
 ```bash
 git add frontend/src/stores/occurrences.ts frontend/src/components/crm/OpenProtocolForm.vue frontend/src/locales
@@ -376,3 +376,20 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 ```
 
 Open the PR: `feat(sac): Processo/Motivo — abertura do protocolo`.
+
+---
+
+### Task 4: Never present a silently blank variable in the suggested message
+
+**Why:** PR1's variable resolver replaces a variable with an empty string when its value is missing (`[Prazo]` with no SLA deadline, `[NF]` with no invoice number, `[Loja]` with no unit, `[Nome]` with no profile name), so the agent could review and send "prazo previsto de ." without noticing. The agent must see what is missing.
+
+**Files:**
+- Modify (backend, small): `internal/handlers/occurrence_process_messages.go` (`resolveProcessMessageVariables`), `internal/handlers/occurrence_process_messages_test.go`
+- Modify: `frontend/src/lib/occurrence-process.ts`, `frontend/src/lib/occurrence-process.spec.ts`, `frontend/src/components/crm/OpenProtocolForm.vue`, `frontend/src/locales/*`
+
+- [ ] **Step 1 (backend, TDD): keep the placeholder visible when the value is empty.** Change `resolveProcessMessageVariables` so a variable whose resolved value is empty stays as its literal placeholder (`[Prazo]`, `[NF]`, `[Loja]`, `[Nome]`, `[Atendente]`, `[Protocolo]`) instead of becoming `""`. Implement by building the `strings.NewReplacer` pairs only for non-empty values. Update the existing tests that asserted the blank result (nil deadline → `[Prazo]` stays; empty invoice → `[NF]` stays), keep the substitution/no-double-substitution tests green, and add a test with a mix (some values present, some empty). Run `go test ./internal/handlers/ -run 'ProcessMessage|ResolveProcessMessageVariables|FormatProcessDeadline' -count=1 -v` (needs the TEST_DATABASE_URL / TEST_REDIS_URL env described in earlier tasks; `-p 1` for multi-package runs).
+- [ ] **Step 2 (frontend, TDD): helper.** In `frontend/src/lib/occurrence-process.ts` add `unresolvedPlaceholders(text: string): string[]` returning the distinct `[Word]` tokens still present, matching only the six known variables (`[Nome]`, `[Atendente]`, `[Protocolo]`, `[NF]`, `[Prazo]`, `[Loja]`) so ordinary bracketed text is not flagged. Tests: none, one, several distinct, repeated token counted once, unknown bracket text ignored, empty string.
+- [ ] **Step 3: form.** In `OpenProtocolForm.vue`, when `unresolvedPlaceholders(suggestedMessage)` is non-empty, show an amber notice under the textarea listing the tokens (`occurrences.unresolvedPlaceholdersNotice`, e.g. "Complete antes de enviar: {tokens}") and keep Enviar enabled (the agent may legitimately edit the text; do not block). The notice must update live as the agent edits.
+- [ ] **Step 4: i18n** key `unresolvedPlaceholdersNotice` in every locale file; `npm run i18n:keys` clean.
+- [ ] **Step 5: Browser verification.** Open a protocol from a process-backed reason without an invoice number: the suggested text shows `[NF]` literally and the amber notice lists it; typing an invoice number in the form does not retroactively change the text (the preview is fetched after creation), editing the textarea to remove the token clears the notice.
+- [ ] **Step 6: Commit** (backend and frontend as separate commits) — `fix(sac): keep unresolved message variables visible` and `feat(sac): warn about unresolved variables in the suggested message`.
