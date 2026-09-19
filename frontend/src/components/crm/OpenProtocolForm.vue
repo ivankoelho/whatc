@@ -23,7 +23,7 @@ import {
 import type { Contact } from '@/stores/contacts'
 import { useOccurrencesStore } from '@/stores/occurrences'
 import { debounce } from '@/lib/utils'
-import { isProcessFieldRequired, missingProcessFields } from '@/lib/occurrence-process'
+import { isProcessFieldRequired, missingProcessFields, unresolvedPlaceholders } from '@/lib/occurrence-process'
 import { getErrorMessage } from '@/lib/api-utils'
 import { toast } from 'vue-sonner'
 
@@ -147,6 +147,8 @@ const result = ref<{ protocolId: string; protocolNumber: string; title: string; 
 const suggestedMessage = ref('')
 const hasSuggestedTemplate = ref(false)
 const sendingMessage = ref(false)
+// Live: recomputed as the agent edits, so the notice clears once every token is filled in.
+const unresolvedTokens = computed(() => unresolvedPlaceholders(suggestedMessage.value))
 
 // Standalone tab (OccurrencesView) has no dialog to close, so Cancel just
 // clears the form there; the dialog wrapper (ContactOccurrencesPanel) closes
@@ -319,6 +321,9 @@ function goToProtocol() {
         <div v-if="result.sent !== true" class="space-y-2 text-left">
           <Label>{{ t('occurrences.suggestedMessageLabel') }}</Label>
           <Textarea v-model="suggestedMessage" :rows="8" :disabled="sendingMessage" />
+          <p v-if="result.sent === null && unresolvedTokens.length" class="text-xs text-amber-600" role="status">
+            {{ t('occurrences.unresolvedPlaceholdersNotice', { tokens: unresolvedTokens.join(', ') }) }}
+          </p>
           <p v-if="result.sent === null && !hasSuggestedTemplate" class="text-xs text-muted-foreground">
             {{ t('occurrences.noSuggestedMessage') }}
           </p>

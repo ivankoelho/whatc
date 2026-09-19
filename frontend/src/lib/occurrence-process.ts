@@ -11,3 +11,10 @@ export function missingProcessFields(
   if (!process) return []
   return process.required_fields.filter((key) => !(values[key] ?? '').trim())
 }
+
+// The six variables the backend substitutes; it leaves one literal when its value is missing.
+const PROCESS_VARIABLE = /\[(?:Nome|Atendente|Protocolo|NF|Prazo|Loja)\]/g
+
+export function unresolvedPlaceholders(text: string): string[] {
+  return [...new Set(text.match(PROCESS_VARIABLE) ?? [])]
+}
