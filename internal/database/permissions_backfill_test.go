@@ -302,3 +302,28 @@ func TestBackfillContactName_SkipsOrganisationAlreadyMigrated(t *testing.T) {
 	assert.Contains(t, roleKeys(t, db, pendenteRole.ID), "contacts.name:write",
 		"organizacao pendente deveria ser processada")
 }
+
+func TestBackfillOccurrenceProcessesPermission_GrantsFromCategories(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	cleanAll(t, db)
+	require.NoError(t, database.SeedPermissionsAndRoles(db))
+
+	org := testutil.CreateTestOrganization(t, db)
+	role := testutil.CreateTestRoleWithKeys(t, db, org.ID, "gestor-sac",
+		[]string{"occurrences.categories:read", "occurrences.categories:write"})
+	other := testutil.CreateTestRoleWithKeys(t, db, org.ID, "atendente",
+		[]string{"chat:read"})
+
+	require.NoError(t, database.BackfillOccurrenceProcessesPermission(db, testLog()))
+
+	keys := roleKeys(t, db, role.ID)
+	assert.Contains(t, keys, "occurrences.processes:read")
+	assert.Contains(t, keys, "occurrences.processes:write")
+	assert.NotContains(t, keys, "occurrences.processes:delete")
+	assert.Contains(t, keys, "occurrences.categories:write", "backfill e puramente aditivo")
+	assert.Equal(t, []string{"chat:read"}, roleKeys(t, db, other.ID))
+
+	// Idempotente.
+	require.NoError(t, database.BackfillOccurrenceProcessesPermission(db, testLog()))
+	assert.Equal(t, len(keys), len(roleKeys(t, db, role.ID)))
+}

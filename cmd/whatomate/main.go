@@ -190,6 +190,13 @@ func runServer(args []string) {
 			lo.Fatal("What-happened permission backfill failed", "error", err)
 		}
 
+		// Same window: occurrences.processes is a new resource added after the
+		// what-happened backfill above, so it needs its own guard rather than
+		// piggybacking on that one's already-migrated check.
+		if err := database.BackfillOccurrenceProcessesPermission(db, lo); err != nil {
+			lo.Fatal("Occurrence processes permission backfill failed", "error", err)
+		}
+
 		// Data fix, not a schema migration: AutoMigrate adding occurrences.source
 		// with a DB default backfilled every existing row to 'whatsapp',
 		// including cases opened manually. Runs once, guarded by the column's
