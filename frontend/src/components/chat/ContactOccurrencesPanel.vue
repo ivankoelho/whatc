@@ -94,6 +94,7 @@ watch(() => props.contactId, load)
           :contact-phone="contactPhone"
           :contact-name="contactName"
           :source-transfer-id="sourceTransferId"
+          closable
           @created="onCreated"
           @cancel="isDialogOpen = false"
         />

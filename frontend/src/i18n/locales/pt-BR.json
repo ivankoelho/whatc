@@ -2250,7 +2250,8 @@
     "messageCopied": "Mensagem copiada",
     "messageCopyFailed": "Não foi possível copiar a mensagem",
     "noSuggestedMessage": "Não há mensagem cadastrada para esta etapa. Escreva uma manualmente ou deixe em branco para enviar o texto padrão do protocolo.",
-    "unresolvedPlaceholdersNotice": "Complete antes de enviar: {tokens}",
+    "unresolvedPlaceholdersNotice": "Ainda não preenchido: {tokens}",
+    "previewMessageFailed": "Não foi possível carregar a mensagem sugerida. Você ainda pode escrever uma mensagem ou enviar o texto padrão.",
     "openAnotherProtocol": "Abrir outro protocolo",
     "viewProtocol": "Ver protocolo",
 

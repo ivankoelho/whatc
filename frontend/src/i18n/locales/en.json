@@ -2261,7 +2261,8 @@
     "messageCopied": "Message copied",
     "messageCopyFailed": "Could not copy the message",
     "noSuggestedMessage": "No message is registered for this step. Write one manually or leave it blank to send the default protocol text.",
-    "unresolvedPlaceholdersNotice": "Complete before sending: {tokens}",
+    "unresolvedPlaceholdersNotice": "Not filled in yet: {tokens}",
+    "previewMessageFailed": "Could not load the suggested message. You can still write a message or send the default text.",
     "openAnotherProtocol": "Open another protocol",
     "viewProtocol": "View protocol",
 
