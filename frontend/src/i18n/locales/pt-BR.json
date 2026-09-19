@@ -2244,6 +2244,12 @@
     "protocolCreatedTitle": "Protocolo criado com sucesso",
     "protocolSentToCustomer": "O protocolo foi enviado ao cliente pelo WhatsApp.",
     "protocolNotSentToCustomer": "O protocolo não pôde ser enviado automaticamente ao cliente neste momento.",
+    "suggestedMessageLabel": "Mensagem sugerida",
+    "copyMessage": "Copiar mensagem",
+    "sendMessage": "Enviar pelo WhatsApp",
+    "messageCopied": "Mensagem copiada",
+    "messageCopyFailed": "Não foi possível copiar a mensagem",
+    "noSuggestedMessage": "Não há mensagem cadastrada para esta etapa. Escreva uma manualmente ou deixe em branco para enviar o texto padrão do protocolo.",
     "openAnotherProtocol": "Abrir outro protocolo",
     "viewProtocol": "Ver protocolo",
 

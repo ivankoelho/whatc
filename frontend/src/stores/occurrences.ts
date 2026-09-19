@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { occurrencesService, type Occurrence, type OccurrenceStage, type OccurrenceEvent } from '@/services/api'
+import { occurrencesService, occurrenceProcessesService, type Occurrence, type OccurrenceStage, type OccurrenceEvent } from '@/services/api'
 
 export const useOccurrencesStore = defineStore('occurrences', () => {
   const occurrences = ref<Occurrence[]>([])
@@ -73,12 +73,23 @@ export const useOccurrencesStore = defineStore('occurrences', () => {
     return res.data.data
   }
 
-  // Tries to send the protocol right after creation. A 422 means the 24h
-  // service window is closed — that's an expected outcome the UI must show
-  // plainly (spec §16/§17), not an error to throw past the caller.
-  async function trySendProtocol(occurrenceId: string): Promise<boolean> {
+  // Suggested registration text for the agent to review; never sent by this call.
+  async function previewRegistrationMessage(occurrenceId: string, processId?: string) {
+    if (!processId) return { content: '', hasTemplate: false }
     try {
-      await occurrencesService.sendProtocol(occurrenceId)
+      const res = await occurrenceProcessesService.previewMessage(processId, 'registration', occurrenceId)
+      return { content: res.data.data.content, hasTemplate: res.data.data.has_template }
+    } catch {
+      return { content: '', hasTemplate: false }
+    }
+  }
+
+  // false = the 24h service window is closed (HTTP 422): an expected outcome the
+  // UI shows plainly (spec 16/17), not an error to throw past the caller.
+  // An empty message makes the backend send the legacy protocol text.
+  async function sendRegistrationMessage(occurrenceId: string, message: string): Promise<boolean> {
+    try {
+      await occurrencesService.sendProtocol(occurrenceId, message || undefined)
       return true
     } catch (e: any) {
       if (e?.response?.status === 422) return false
@@ -119,6 +130,7 @@ export const useOccurrencesStore = defineStore('occurrences', () => {
   return {
     occurrences, total, contactOccurrences, stages, events, isLoading,
     fetchStages, stageColor, fetchOccurrences, fetchColumn, fetchContactOccurrences, fetchEvents,
-    createOccurrence, changeStage, moveStage, addNote, sendProtocol, trySendProtocol, clear,
+    createOccurrence, changeStage, moveStage, addNote, sendProtocol,
+    previewRegistrationMessage, sendRegistrationMessage, clear,
   }
 })

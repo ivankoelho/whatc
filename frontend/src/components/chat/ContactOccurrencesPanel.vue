@@ -34,8 +34,8 @@ async function load() {
   }
 }
 
+// Keep the dialog open: the form now continues into the review-and-send step.
 function onCreated() {
-  isDialogOpen.value = false
   load()
 }
 
