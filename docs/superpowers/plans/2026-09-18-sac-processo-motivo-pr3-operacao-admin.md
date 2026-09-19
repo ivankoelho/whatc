@@ -23,6 +23,17 @@
 
 ---
 
+### Task 0 (added during execution): Reply box on the occurrence detail view
+
+**Why:** this plan assumed the detail view already had a reply box. It does not: `OccurrenceDetailView.vue` only has an internal-note textarea (`newNoteContent` / `submitNote`), and no frontend code calls `POST /api/occurrences/{id}/reply` (`ReplyToOccurrence`, the endpoint that also stamps the first-response SLA). Decision (product owner, 2026-09-19): build the minimal reply box in this PR; `ReplyToOccurrence` stays the ONLY sending mechanism.
+
+**Files:** `frontend/src/services/api.ts` (`occurrencesService.reply`), `frontend/src/views/crm/OccurrenceDetailView.vue`, the timeline rendering component(s) for event types, `frontend/src/i18n/locales/{en,pt-BR}.json`.
+
+- Add `occurrencesService.reply(id, content)` → `POST /occurrences/{id}/reply` `{content}` (response `{sent: true}`).
+- Add a "Responder ao cliente" section on the detail view, visually distinct from the internal note (a note is NOT sent to the customer — label both clearly): textarea + Enviar; disabled while sending or when blank; HTTP 422 (24h window closed) shows a plain message (reuse the `chat.sendProtocolWindowClosed` pattern the protocol button already uses) and keeps the text; other errors toast; on success clear the box and reload events. Same permission gate (`occurrences:write`) the note form uses.
+- Timeline: render `reply` events (content shown, label "Resposta ao cliente") and `process_message_used` events (label "Mensagem sugerida utilizada", content as detail) with the same icon/label mechanism the other event types use; an unknown type must not show a raw key. This absorbs Task 2 below.
+- Verification: browser, with a contact whose 24h window is closed (expect the 422 message and text preserved). A successful send needs an open window; cover with what exists.
+
 ### Task 1: Occurrence detail — stage message picker
 
 **Files:**
