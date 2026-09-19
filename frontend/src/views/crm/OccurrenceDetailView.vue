@@ -23,6 +23,8 @@ import {
   Loader2,
   PlusCircle,
   StickyNote,
+  Reply,
+  Lightbulb,
   ArrowRightLeft,
   UserPlus,
   CheckCircle2,
@@ -48,6 +50,12 @@ const isLoading = ref(true)
 const isNotFound = ref(false)
 const isSendingProtocol = ref(false)
 const isAddingNote = ref(false)
+// "Responder ao cliente": text SENT to the contact via WhatsApp (unlike newNoteContent,
+// which is internal). The stage-message picker prefills this ref.
+const replyContent = ref('')
+const isReplying = ref(false)
+const replyWindowClosed = ref(false)
+const canWrite = computed(() => authStore.hasPermission('occurrences', 'write'))
 const newNoteContent = ref('')
 const isUpdatingAssignee = ref(false)
 const isDeleteDialogOpen = ref(false)
@@ -60,6 +68,8 @@ const eventIcons: Record<string, any> = {
   assignment: UserPlus,
   protocol_sent: Send,
   closed: CheckCircle2,
+  reply: Reply,
+  process_message_used: Lightbulb,
 }
 
 const priorityLabels: Record<string, string> = {
@@ -76,6 +86,8 @@ const eventLabels: Record<string, string> = {
   assignment: 'occurrences.eventAssignment',
   protocol_sent: 'occurrences.eventProtocolSent',
   closed: 'occurrences.eventClosed',
+  reply: 'occurrences.eventReply',
+  process_message_used: 'occurrences.eventProcessMessageUsed',
 }
 
 const breadcrumbs = computed(() => [
@@ -184,6 +196,26 @@ async function sendProtocol() {
     }
   } finally {
     isSendingProtocol.value = false
+  }
+}
+
+async function submitReply() {
+  // isReplying also guards against a double click before the button re-renders as disabled.
+  if (!occurrence.value || isReplying.value || !replyContent.value.trim()) return
+  isReplying.value = true
+  replyWindowClosed.value = false
+  try {
+    const sent = await store.reply(occurrence.value.id, replyContent.value.trim())
+    if (!sent) {
+      replyWindowClosed.value = true // text stays in the box
+      return
+    }
+    replyContent.value = ''
+    toast.success(t('occurrences.replySent'))
+  } catch (e) {
+    toast.error(getErrorMessage(e, t('occurrences.replyFailed')))
+  } finally {
+    isReplying.value = false
   }
 }
 
@@ -332,7 +364,7 @@ onUnmounted(() => {
                 <div class="absolute left-1.5 top-1 w-3 h-3 rounded-full border-2 border-background bg-muted-foreground flex items-center justify-center" />
                 <div class="flex items-center gap-2 flex-wrap">
                   <component :is="eventIcons[event.type] || StickyNote" class="h-3.5 w-3.5 text-muted-foreground" />
-                  <span class="text-sm font-medium">{{ $t(eventLabels[event.type] || event.type) }}</span>
+                  <span class="text-sm font-medium">{{ $t(eventLabels[event.type] || 'occurrences.eventUnknown') }}</span>
                   <span v-if="event.created_by_name" class="text-xs text-muted-foreground">{{ event.created_by_name }}</span>
                   <span class="text-xs text-muted-foreground">{{ formatDateTime(event.created_at) }}</span>
                 </div>
@@ -340,8 +372,12 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <!-- Add note -->
+            <!-- Add note (internal) -->
             <div class="mt-6 space-y-2">
+              <div>
+                <p class="text-sm font-medium">{{ $t('occurrences.internalNoteTitle') }}</p>
+                <p class="text-xs text-muted-foreground">{{ $t('occurrences.internalNoteHint') }}</p>
+              </div>
               <Textarea
                 v-model="newNoteContent"
                 :placeholder="$t('occurrences.writeNote')"
@@ -352,6 +388,30 @@ onUnmounted(() => {
                 {{ $t('occurrences.addNote') }}
               </Button>
             </div>
+          </CardContent>
+        </Card>
+
+        <!-- Reply to customer (sent via WhatsApp) -->
+        <Card v-if="canWrite" class="border-primary/40">
+          <CardHeader class="pb-3">
+            <CardTitle class="text-sm font-medium">{{ $t('occurrences.replyTitle') }}</CardTitle>
+            <p class="text-xs text-muted-foreground">{{ $t('occurrences.replyHint') }}</p>
+          </CardHeader>
+          <CardContent class="space-y-2">
+            <Textarea
+              v-model="replyContent"
+              :placeholder="$t('occurrences.replyPlaceholder')"
+              :rows="4"
+              @update:model-value="replyWindowClosed = false"
+            />
+            <p v-if="replyWindowClosed" class="text-sm text-destructive" role="alert">
+              {{ $t('chat.sendProtocolWindowClosed') }}
+            </p>
+            <Button size="sm" :disabled="!replyContent.trim() || isReplying" @click="submitReply">
+              <Loader2 v-if="isReplying" class="h-4 w-4 mr-2 animate-spin" />
+              <Send v-else class="h-4 w-4 mr-2" />
+              {{ $t('occurrences.sendReply') }}
+            </Button>
           </CardContent>
         </Card>
       </template>

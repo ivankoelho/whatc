@@ -120,6 +120,19 @@ export const useOccurrencesStore = defineStore('occurrences', () => {
     await fetchEvents(occurrenceId)
   }
 
+  // false = the 24h service window is closed (HTTP 422), an expected outcome the
+  // caller shows plainly; any other failure is thrown.
+  async function reply(occurrenceId: string, content: string): Promise<boolean> {
+    try {
+      await occurrencesService.reply(occurrenceId, content)
+    } catch (e: any) {
+      if (e?.response?.status === 422) return false
+      throw e
+    }
+    await fetchEvents(occurrenceId)
+    return true
+  }
+
   async function sendProtocol(occurrenceId: string) {
     await occurrencesService.sendProtocol(occurrenceId)
     await fetchEvents(occurrenceId)
@@ -135,7 +148,7 @@ export const useOccurrencesStore = defineStore('occurrences', () => {
   return {
     occurrences, total, contactOccurrences, stages, events, isLoading,
     fetchStages, stageColor, fetchOccurrences, fetchColumn, fetchContactOccurrences, fetchEvents,
-    createOccurrence, changeStage, moveStage, addNote, sendProtocol,
+    createOccurrence, changeStage, moveStage, addNote, reply, sendProtocol,
     previewRegistrationMessage, sendRegistrationMessage, clear,
   }
 })
