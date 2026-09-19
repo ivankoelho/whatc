@@ -271,14 +271,18 @@ async function copySuggestedMessage() {
 // The agent always reviews the text first; an empty box makes the backend send
 // the legacy protocol text (process-less protocols behave as before).
 async function sendSuggestedMessage() {
-  if (!result.value || sendingMessage.value) return
-  const { protocolId } = result.value
+  const current = result.value
+  if (!current || sendingMessage.value) return
+  const { protocolId } = current
+  const text = suggestedMessage.value
   sendingMessage.value = true
   try {
-    const sent = await store.sendRegistrationMessage(protocolId, suggestedMessage.value)
-    result.value = { ...result.value, sent }
-    // Only a real template counts as "process message used"; logging is best-effort.
-    if (sent && resolvedProcess.value && hasSuggestedTemplate.value) {
+    const sent = await store.sendRegistrationMessage(protocolId, text)
+    // A reset mid-send leaves nothing to update.
+    if (!result.value) return
+    result.value = { ...current, sent }
+    // Only a real, non-blank template counts as "process message used"; logging is best-effort.
+    if (sent && resolvedProcess.value && hasSuggestedTemplate.value && text.trim()) {
       try {
         await occurrenceProcessesService.logMessageUse(protocolId, 'registration', resolvedProcess.value.name)
       } catch {
@@ -286,7 +290,7 @@ async function sendSuggestedMessage() {
       }
     }
   } catch (e) {
-    toast.error(getErrorMessage(e, t('chat.occurrenceCreateFailed')))
+    toast.error(getErrorMessage(e, t('occurrences.protocolSendFailed')))
   } finally {
     sendingMessage.value = false
   }
@@ -327,8 +331,8 @@ function goToProtocol() {
           </div>
         </div>
         <div class="flex justify-center gap-2 pt-2">
-          <Button variant="outline" @click="resetForm">{{ t('occurrences.openAnotherProtocol') }}</Button>
-          <Button @click="goToProtocol">{{ t('occurrences.viewProtocol') }}</Button>
+          <Button variant="outline" :disabled="sendingMessage" @click="resetForm">{{ t('occurrences.openAnotherProtocol') }}</Button>
+          <Button :disabled="sendingMessage" @click="goToProtocol">{{ t('occurrences.viewProtocol') }}</Button>
         </div>
       </CardContent>
     </template>
