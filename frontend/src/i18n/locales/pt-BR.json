@@ -2250,6 +2250,10 @@
     "validationPhoneRequired": "Informe o telefone do cliente",
     "validationNameRequired": "Informe o nome do cliente",
     "validationDescriptionRequired": "A descrição é obrigatória",
+    "validationProcessFieldsRequired": "Preencha os campos obrigatórios deste processo antes de abrir o protocolo.",
+    "processGuidanceTitle": "Orientação do processo",
+    "processEvidenceTitle": "Documentos a solicitar ao cliente",
+    "processRestrictionsTitle": "O que NÃO dizer ao cliente",
     "validationSaleChannelInvalid": "Selecione um canal da venda válido",
 
     "columnPhone": "Telefone",

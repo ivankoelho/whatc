@@ -2261,6 +2261,10 @@
     "validationPhoneRequired": "Enter the customer's phone number",
     "validationNameRequired": "Enter the customer's name",
     "validationDescriptionRequired": "Description is required",
+    "validationProcessFieldsRequired": "Fill in this process's required fields before opening the protocol.",
+    "processGuidanceTitle": "Process guidance",
+    "processEvidenceTitle": "Documents to request from the customer",
+    "processRestrictionsTitle": "What NOT to tell the customer",
     "validationSaleChannelInvalid": "Select a valid sale channel",
 
     "columnPhone": "Phone",

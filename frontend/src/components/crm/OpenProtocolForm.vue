@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -14,13 +14,16 @@ import {
   unitsService,
   occurrenceCategoriesService,
   occurrenceWhatHappenedService,
+  occurrenceProcessesService,
   type Unit,
   type OccurrenceCategory,
   type OccurrenceWhatHappened,
+  type OccurrenceProcess,
 } from '@/services/api'
 import type { Contact } from '@/stores/contacts'
 import { useOccurrencesStore } from '@/stores/occurrences'
 import { debounce } from '@/lib/utils'
+import { isProcessFieldRequired, missingProcessFields } from '@/lib/occurrence-process'
 import { getErrorMessage } from '@/lib/api-utils'
 import { toast } from 'vue-sonner'
 
@@ -100,6 +103,25 @@ const description = ref('')
 const internalNote = ref('')
 const categories = ref<OccurrenceCategory[]>([])
 const whatHappenedOptions = ref<OccurrenceWhatHappened[]>([])
+const resolvedProcess = ref<OccurrenceProcess | null>(null)
+
+watch(whatHappenedId, async (id) => {
+  resolvedProcess.value = null
+  if (!id) return
+  try {
+    const res = await occurrenceProcessesService.resolve(id)
+    // A newer selection may have landed while this request was in flight.
+    if (whatHappenedId.value !== id) return
+    resolvedProcess.value = res.data.data.process
+    // Suggest the category only when the agent hasn't picked one: manual choice wins.
+    if (resolvedProcess.value?.category_id && !categoryId.value) {
+      categoryId.value = resolvedProcess.value.category_id
+    }
+  } catch {
+    // Resolution is a convenience; failure must not block the form.
+    if (whatHappenedId.value === id) resolvedProcess.value = null
+  }
+})
 
 const saleChannels = ['loja_fisica', 'whatsapp', 'telefone', 'site'] as const
 
@@ -145,6 +167,7 @@ function resetForm() {
   productDescription.value = ''
   categoryId.value = ''
   whatHappenedId.value = ''
+  resolvedProcess.value = null
   priority.value = 'normal'
   description.value = ''
   internalNote.value = ''
@@ -164,6 +187,16 @@ async function submit() {
   }
   if (!description.value.trim()) {
     toast.error(t('occurrences.validationDescriptionRequired'))
+    return
+  }
+  const missing = missingProcessFields(resolvedProcess.value, {
+    invoice_number: invoiceNumber.value,
+    product_description: productDescription.value,
+    purchase_date: purchaseDate.value,
+    sale_channel: saleChannel.value,
+  })
+  if (missing.length > 0) {
+    toast.error(t('occurrences.validationProcessFieldsRequired'))
     return
   }
 
@@ -193,6 +226,7 @@ async function submit() {
       priority: priority.value,
       category_id: categoryId.value || undefined,
       what_happened_id: whatHappenedId.value || undefined,
+      process_id: resolvedProcess.value?.id || undefined,
       unit_id: unitId.value || undefined,
       sale_channel: saleChannel.value || undefined,
       invoice_number: invoiceNumber.value.trim() || undefined,
@@ -293,7 +327,7 @@ function goToProtocol() {
         </CardHeader>
         <CardContent class="grid grid-cols-2 gap-4">
           <div class="space-y-2">
-            <Label>{{ t('occurrences.saleChannelLabel') }}</Label>
+            <Label>{{ t('occurrences.saleChannelLabel') }} <span v-if="isProcessFieldRequired(resolvedProcess, 'sale_channel')" class="text-destructive">*</span></Label>
             <Select v-model="saleChannel">
               <SelectTrigger><SelectValue :placeholder="t('occurrences.saleChannelPlaceholder')" /></SelectTrigger>
               <SelectContent>
@@ -304,11 +338,11 @@ function goToProtocol() {
             </Select>
           </div>
           <div class="space-y-2">
-            <Label>{{ t('occurrences.invoiceNumberLabel') }}</Label>
+            <Label>{{ t('occurrences.invoiceNumberLabel') }} <span v-if="isProcessFieldRequired(resolvedProcess, 'invoice_number')" class="text-destructive">*</span></Label>
             <Input v-model="invoiceNumber" />
           </div>
           <div class="space-y-2">
-            <Label>{{ t('occurrences.purchaseDateLabel') }}</Label>
+            <Label>{{ t('occurrences.purchaseDateLabel') }} <span v-if="isProcessFieldRequired(resolvedProcess, 'purchase_date')" class="text-destructive">*</span></Label>
             <Input v-model="purchaseDate" type="date" />
           </div>
           <div class="space-y-2">
@@ -321,7 +355,7 @@ function goToProtocol() {
             </Select>
           </div>
           <div class="space-y-2 col-span-2">
-            <Label>{{ t('occurrences.productLabel') }}</Label>
+            <Label>{{ t('occurrences.productLabel') }} <span v-if="isProcessFieldRequired(resolvedProcess, 'product_description')" class="text-destructive">*</span></Label>
             <Input v-model="productDescription" :placeholder="t('occurrences.productPlaceholder')" />
           </div>
         </CardContent>
@@ -348,6 +382,20 @@ function goToProtocol() {
                   <SelectItem v-for="w in whatHappenedOptions" :key="w.id" :value="w.id">{{ w.name }}</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+            <div v-if="resolvedProcess" class="col-span-2 rounded-md border border-blue-500/30 bg-blue-500/5 p-3 space-y-2">
+              <p class="text-sm font-medium">{{ t('occurrences.processGuidanceTitle') }}: {{ resolvedProcess.name }}</p>
+              <p v-if="resolvedProcess.guidance" class="whitespace-pre-line text-xs text-muted-foreground">{{ resolvedProcess.guidance }}</p>
+              <template v-if="resolvedProcess.evidence_checklist?.length">
+                <p class="text-xs font-medium">{{ t('occurrences.processEvidenceTitle') }}</p>
+                <ul class="list-disc pl-5 text-xs text-muted-foreground">
+                  <li v-for="(item, i) in resolvedProcess.evidence_checklist" :key="i">{{ item }}</li>
+                </ul>
+              </template>
+              <div v-if="resolvedProcess.restrictions" class="rounded-md border border-destructive/30 bg-destructive/5 p-2 space-y-1">
+                <p class="text-xs font-medium text-destructive">{{ t('occurrences.processRestrictionsTitle') }}</p>
+                <p class="whitespace-pre-line text-xs text-muted-foreground">{{ resolvedProcess.restrictions }}</p>
+              </div>
             </div>
             <div class="space-y-2">
               <Label>{{ t('occurrences.priorityLabel') }}</Label>
