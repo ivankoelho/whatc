@@ -1347,6 +1347,8 @@ export interface Occurrence {
   category_name?: string
   what_happened_id?: string
   what_happened_name?: string
+  process_id?: string
+  process_name?: string
   sale_channel?: string
   invoice_number?: string
   purchase_date?: string
@@ -1405,6 +1407,7 @@ export const occurrencesService = {
     department_id?: string
     category_id?: string
     what_happened_id?: string
+    process_id?: string
     sale_channel?: string
     invoice_number?: string
     purchase_date?: string
@@ -1425,8 +1428,9 @@ export const occurrencesService = {
     api.get<ApiEnvelope<{ events: OccurrenceEvent[] }>>(`/occurrences/${id}/events`),
   addNote: (id: string, content: string) =>
     api.post<ApiEnvelope<OccurrenceEvent>>(`/occurrences/${id}/events`, { content }),
-  sendProtocol: (id: string) =>
-    api.post<ApiEnvelope<{ sent: boolean; protocol_number: string }>>(`/occurrences/${id}/send-protocol`),
+  sendProtocol: (id: string, message?: string) =>
+    api.post<ApiEnvelope<{ sent: boolean; protocol_number: string }>>(
+      `/occurrences/${id}/send-protocol`, message ? { message } : undefined),
   // Permanent hard delete, restricted to super admins server-side.
   delete: (id: string) => api.delete<ApiEnvelope<{ deleted: boolean }>>(`/occurrences/${id}`),
   listForContact: (contactId: string) =>
@@ -1479,6 +1483,60 @@ export const occurrenceWhatHappenedService = {
   update: (id: string, data: { name: string; position: number; is_active?: boolean }) =>
     api.put<ApiEnvelope<OccurrenceWhatHappened>>(`/occurrence-what-happened/${id}`, data),
   delete: (id: string) => api.delete<ApiEnvelope<{ deleted: boolean }>>(`/occurrence-what-happened/${id}`),
+}
+
+export interface OccurrenceProcess {
+  id: string
+  name: string
+  description: string
+  category_id?: string
+  category?: OccurrenceCategory
+  what_happened_id?: string
+  what_happened?: OccurrenceWhatHappened
+  guidance: string
+  restrictions: string
+  evidence_checklist: string[]
+  required_fields: string[]
+  response_minutes?: number
+  resolution_minutes?: number
+  department_id?: string
+  is_active: boolean
+  position: number
+}
+
+export type OccurrenceMessageStage = 'registration' | 'documents' | 'follow_up' | 'forwarding' | 'closing'
+
+export interface OccurrenceProcessMessage {
+  id: string
+  process_id: string
+  stage: OccurrenceMessageStage
+  content: string
+  is_active: boolean
+}
+
+export const occurrenceProcessesService = {
+  list: () => api.get<ApiEnvelope<{ processes: OccurrenceProcess[] }>>('/occurrence-processes'),
+  resolve: (whatHappenedId: string) =>
+    api.get<ApiEnvelope<{ process: OccurrenceProcess | null }>>('/occurrence-processes/resolve', {
+      params: { what_happened_id: whatHappenedId },
+    }),
+  create: (data: Partial<OccurrenceProcess>) => api.post<ApiEnvelope<OccurrenceProcess>>('/occurrence-processes', data),
+  update: (id: string, data: Partial<OccurrenceProcess>) =>
+    api.put<ApiEnvelope<OccurrenceProcess>>(`/occurrence-processes/${id}`, data),
+  delete: (id: string) => api.delete<ApiEnvelope<{ deleted: boolean }>>(`/occurrence-processes/${id}`),
+  listMessages: (processId: string) =>
+    api.get<ApiEnvelope<{ messages: OccurrenceProcessMessage[] }>>(`/occurrence-processes/${processId}/messages`),
+  upsertMessage: (processId: string, stage: OccurrenceMessageStage, data: { content: string; is_active?: boolean }) =>
+    api.put<ApiEnvelope<OccurrenceProcessMessage>>(`/occurrence-processes/${processId}/messages/${stage}`, data),
+  previewMessage: (processId: string, stage: OccurrenceMessageStage, occurrenceId: string) =>
+    api.get<ApiEnvelope<{ content: string; has_template: boolean }>>(
+      `/occurrence-processes/${processId}/messages/${stage}/preview`,
+      { params: { occurrence_id: occurrenceId } },
+    ),
+  logMessageUse: (occurrenceId: string, stage: OccurrenceMessageStage, processName?: string) =>
+    api.post<ApiEnvelope<{ logged: boolean }>>(`/occurrences/${occurrenceId}/process-messages/use`, {
+      stage, process_name: processName,
+    }),
 }
 
 export interface OccurrenceSLAPolicy {
