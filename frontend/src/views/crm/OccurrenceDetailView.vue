@@ -258,13 +258,13 @@ async function submitReply() {
         // A logging failure must not undo a reply that already went out.
       }
     }
+    lastSuggestedStage.value = null
     replyContent.value = ''
     toast.success(t('occurrences.replySent'))
   } catch (e) {
     toast.error(getErrorMessage(e, t('occurrences.replyFailed')))
   } finally {
     isReplying.value = false
-    lastSuggestedStage.value = null
   }
 }
 
