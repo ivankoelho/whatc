@@ -10,7 +10,13 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { occurrencesService, type Occurrence, type OccurrenceEvent } from '@/services/api'
+import {
+  occurrencesService,
+  occurrenceProcessesService,
+  type Occurrence,
+  type OccurrenceEvent,
+  type OccurrenceMessageStage,
+} from '@/services/api'
 import { useOccurrencesStore } from '@/stores/occurrences'
 import { useUsersStore } from '@/stores/users'
 import { useAuthStore } from '@/stores/auth'
@@ -55,6 +61,10 @@ const isAddingNote = ref(false)
 const replyContent = ref('')
 const isReplying = ref(false)
 const replyWindowClosed = ref(false)
+// Stage-message picker: prefills replyContent from a process's registered template.
+const messageStage = ref<Exclude<OccurrenceMessageStage, 'registration'>>('documents')
+const loadingSuggestion = ref(false)
+const lastSuggestedStage = ref<OccurrenceMessageStage | null>(null)
 const canWrite = computed(() => authStore.hasPermission('occurrences', 'write'))
 const newNoteContent = ref('')
 const isUpdatingAssignee = ref(false)
@@ -199,6 +209,36 @@ async function sendProtocol() {
   }
 }
 
+async function loadSuggestedMessage() {
+  const occ = occurrence.value
+  if (!occ?.process_id) return
+  if (replyContent.value.trim()) {
+    toast.info(t('occurrences.replyBoxNotEmpty'))
+    return
+  }
+  loadingSuggestion.value = true
+  try {
+    const res = await occurrenceProcessesService.previewMessage(occ.process_id, messageStage.value, occ.id)
+    if (!res.data.data.has_template || res.data.data.is_fallback) {
+      toast.info(t('occurrences.noMessageForStage'))
+      return
+    }
+    replyContent.value = res.data.data.content
+    lastSuggestedStage.value = messageStage.value
+  } catch (e) {
+    toast.error(getErrorMessage(e, t('occurrences.loadSuggestedMessageFailed')))
+  } finally {
+    loadingSuggestion.value = false
+  }
+}
+
+/** Clears the "window closed" warning as the agent edits, and drops a stale
+ * suggestion reference once the box is emptied by hand (not via send). */
+function handleReplyInput(value: string) {
+  replyWindowClosed.value = false
+  if (!value.trim()) lastSuggestedStage.value = null
+}
+
 async function submitReply() {
   // isReplying also guards against a double click before the button re-renders as disabled.
   if (!occurrence.value || isReplying.value || !replyContent.value.trim()) return
@@ -210,12 +250,21 @@ async function submitReply() {
       replyWindowClosed.value = true // text stays in the box
       return
     }
+    if (occurrence.value.process_id && lastSuggestedStage.value) {
+      try {
+        await occurrenceProcessesService.logMessageUse(
+          occurrence.value.id, lastSuggestedStage.value, occurrence.value.process_name)
+      } catch {
+        // A logging failure must not undo a reply that already went out.
+      }
+    }
     replyContent.value = ''
     toast.success(t('occurrences.replySent'))
   } catch (e) {
     toast.error(getErrorMessage(e, t('occurrences.replyFailed')))
   } finally {
     isReplying.value = false
+    lastSuggestedStage.value = null
   }
 }
 
@@ -398,11 +447,28 @@ onUnmounted(() => {
             <p class="text-xs text-muted-foreground">{{ $t('occurrences.replyHint') }}</p>
           </CardHeader>
           <CardContent class="space-y-2">
+            <div v-if="occurrence.process_id" class="flex items-center gap-2">
+              <Select v-model="messageStage">
+                <SelectTrigger class="w-56">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="documents">{{ $t('occurrences.stageDocuments') }}</SelectItem>
+                  <SelectItem value="follow_up">{{ $t('occurrences.stageFollowUp') }}</SelectItem>
+                  <SelectItem value="forwarding">{{ $t('occurrences.stageForwarding') }}</SelectItem>
+                  <SelectItem value="closing">{{ $t('occurrences.stageClosing') }}</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button size="sm" variant="outline" :disabled="loadingSuggestion" @click="loadSuggestedMessage">
+                <Loader2 v-if="loadingSuggestion" class="h-4 w-4 mr-2 animate-spin" />
+                {{ $t('occurrences.loadSuggestedMessage') }}
+              </Button>
+            </div>
             <Textarea
               v-model="replyContent"
               :placeholder="$t('occurrences.replyPlaceholder')"
               :rows="4"
-              @update:model-value="replyWindowClosed = false"
+              @update:model-value="handleReplyInput($event as string)"
             />
             <p v-if="replyWindowClosed" class="text-sm text-destructive" role="alert">
               {{ $t('chat.sendProtocolWindowClosed') }}
