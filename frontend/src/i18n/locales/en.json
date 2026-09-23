@@ -29,6 +29,7 @@
     "reset": "Reset",
     "submit": "Submit",
     "add": "Add",
+    "noAccessToSection": "You don't have permission to access any tab in this section.",
     "remove": "Remove",
     "yes": "Yes",
     "no": "No",

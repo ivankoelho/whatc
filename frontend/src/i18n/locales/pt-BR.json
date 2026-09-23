@@ -29,6 +29,7 @@
     "reset": "Redefinir",
     "submit": "Enviar",
     "add": "Adicionar",
+    "noAccessToSection": "Você não tem permissão para acessar nenhuma aba desta seção.",
     "remove": "Remover",
     "yes": "Sim",
     "no": "Não",
