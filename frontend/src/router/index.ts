@@ -6,6 +6,7 @@ declare module 'vue-router' {
   interface RouteMeta {
     requiresAuth?: boolean
     permission?: string // Resource permission required (e.g., 'analytics', 'chat')
+    anyPermission?: string[] // Route is allowed if the user has read on ANY of these (settings hubs)
   }
 }
 
@@ -300,40 +301,40 @@ const router = createRouter({
           meta: { permission: 'custom_actions' }
         },
         {
+          path: 'settings/occurrences',
+          name: 'settings-occurrences',
+          component: () => import('@/views/settings/OccurrenceSettingsHubView.vue'),
+          meta: { anyPermission: ['occurrences.stages', 'occurrences.categories', 'occurrences.what_happened', 'occurrences.processes', 'occurrences.sla_policies', 'units'] }
+        },
+        {
           path: 'settings/occurrence-stages',
           name: 'occurrence-stages',
-          component: () => import('@/views/settings/OccurrenceStagesView.vue'),
-          meta: { permission: 'occurrences.stages' }
+          redirect: () => ({ path: '/settings/occurrences', query: { tab: 'stages' } })
         },
         {
           path: 'settings/units',
           name: 'units',
-          component: () => import('@/views/settings/UnitsView.vue'),
-          meta: { permission: 'units' }
+          redirect: () => ({ path: '/settings/occurrences', query: { tab: 'units' } })
         },
         {
           path: 'settings/occurrence-sla-policies',
           name: 'occurrence-sla-policies',
-          component: () => import('@/views/settings/OccurrenceSLAPoliciesView.vue'),
-          meta: { permission: 'occurrences.sla_policies' }
+          redirect: () => ({ path: '/settings/occurrences', query: { tab: 'sla' } })
         },
         {
           path: 'settings/occurrence-categories',
           name: 'occurrence-categories',
-          component: () => import('@/views/settings/OccurrenceCategoriesView.vue'),
-          meta: { permission: 'occurrences.categories' }
+          redirect: () => ({ path: '/settings/occurrences', query: { tab: 'categories' } })
         },
         {
           path: 'settings/occurrence-what-happened',
           name: 'occurrence-what-happened',
-          component: () => import('@/views/settings/OccurrenceWhatHappenedView.vue'),
-          meta: { permission: 'occurrences.what_happened' }
+          redirect: () => ({ path: '/settings/occurrences', query: { tab: 'what-happened' } })
         },
         {
           path: 'settings/occurrence-processes',
           name: 'occurrence-processes',
-          component: () => import('@/views/settings/OccurrenceProcessesView.vue'),
-          meta: { permission: 'occurrences.processes' }
+          redirect: () => ({ path: '/settings/occurrences', query: { tab: 'processes' } })
         },
         {
           path: 'settings/audit-logs',
@@ -471,6 +472,16 @@ router.beforeEach(async (to, _from, next) => {
     if (requiredPermission) {
       if (!authStore.hasPermission(requiredPermission, 'read')) {
         // Redirect to first accessible page
+        return next({ path: getFirstAccessibleRoute(authStore) })
+      }
+    }
+
+    // Settings hubs: allowed if the user has read on at least one of the
+    // group's permissions. Which specific tab they land on is decided
+    // inside the hub component (resolveActiveTab), not here.
+    const anyPermission = to.meta.anyPermission
+    if (anyPermission) {
+      if (!anyPermission.some(p => authStore.hasPermission(p, 'read'))) {
         return next({ path: getFirstAccessibleRoute(authStore) })
       }
     }
