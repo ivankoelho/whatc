@@ -23,14 +23,20 @@ import (
 // name, and the frontend echoes that stored name back verbatim when
 // initiating a call for it — so an exact match alone 404s for every contact
 // whose account predates the most recent rename.
+//
+// Secrets are decrypted before returning: every caller hands the account to
+// Meta (call permission, initiate, permission request), and the access token
+// is encrypted at rest.
 func (a *App) resolveWhatsAppAccountByName(orgID uuid.UUID, name string) (*models.WhatsAppAccount, error) {
 	var account models.WhatsAppAccount
 	if err := a.DB.Where("organization_id = ? AND name = ?", orgID, name).First(&account).Error; err == nil {
+		a.decryptAccountSecrets(&account)
 		return &account, nil
 	}
 	if err := a.DB.Where("organization_id = ? AND name ILIKE ?", orgID, "%"+name+"%").First(&account).Error; err != nil {
 		return nil, err
 	}
+	a.decryptAccountSecrets(&account)
 	return &account, nil
 }
 

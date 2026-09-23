@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/shridarpatil/whatomate/internal/crypto"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/shridarpatil/whatomate/test/testutil"
@@ -183,4 +184,43 @@ func TestApp_GetCallPermission(t *testing.T) {
 			assert.Equal(t, tt.wantRequests, requests.Load())
 		})
 	}
+}
+
+// The access token is encrypted at rest: the call handlers must hand Meta the
+// decrypted token, not the stored ciphertext.
+func TestApp_GetCallPermission_SendsDecryptedAccessToken(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "call-reader", []string{"outgoing_calls:read"})
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
+
+	const plainToken = "plain-access-token"
+	encrypted, err := crypto.Encrypt(plainToken, app.Config.App.EncryptionKey)
+	require.NoError(t, err)
+	account := testutil.CreateTestWhatsAppAccountWith(t, app.DB, org.ID, func(account *models.WhatsAppAccount) {
+		account.BusinessCallingEnabled = true
+		account.AccessToken = encrypted
+	})
+	contact := testutil.CreateTestContactWith(t, app.DB, org.ID,
+		testutil.WithContactAccount(account.Name),
+		testutil.WithPhoneNumber("15551234567"),
+	)
+
+	var gotAuth atomic.Value
+	meta := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth.Store(r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"permission":{"status":"temporary"}}`))
+	}))
+	t.Cleanup(meta.Close)
+	app.WhatsApp = whatsapp.NewWithBaseURL(app.Log, meta.URL)
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	testutil.SetPathParam(req, "contactId", contact.ID.String())
+	testutil.SetQueryParam(req, "whatsapp_account", account.Name)
+
+	require.NoError(t, app.GetCallPermission(req))
+	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+	assert.Equal(t, "Bearer "+plainToken, gotAuth.Load())
 }
