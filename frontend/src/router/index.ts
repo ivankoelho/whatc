@@ -231,10 +231,15 @@ const router = createRouter({
           redirect: () => ({ path: '/settings/service', query: { tab: 'tags' } })
         },
         {
+          path: 'settings/access',
+          name: 'settings-access',
+          component: () => import('@/views/settings/AccessSettingsHubView.vue'),
+          meta: { anyPermission: ['teams', 'users', 'roles'] }
+        },
+        {
           path: 'settings/users',
           name: 'users',
-          component: () => import('@/views/settings/UsersView.vue'),
-          meta: { permission: 'users' }
+          redirect: () => ({ path: '/settings/access', query: { tab: 'users' } })
         },
         {
           path: 'settings/users/:id',
@@ -245,8 +250,7 @@ const router = createRouter({
         {
           path: 'settings/roles',
           name: 'roles',
-          component: () => import('@/views/settings/RolesView.vue'),
-          meta: { permission: 'roles' }
+          redirect: () => ({ path: '/settings/access', query: { tab: 'roles' } })
         },
         {
           path: 'settings/roles/:id',
@@ -257,8 +261,7 @@ const router = createRouter({
         {
           path: 'settings/teams',
           name: 'teams',
-          component: () => import('@/views/settings/TeamsView.vue'),
-          meta: { permission: 'teams' }
+          redirect: () => ({ path: '/settings/access', query: { tab: 'teams' } })
         },
         {
           path: 'settings/teams/:id',
