@@ -270,10 +270,15 @@ const router = createRouter({
           meta: { permission: 'teams' }
         },
         {
+          path: 'settings/integrations',
+          name: 'settings-integrations',
+          component: () => import('@/views/settings/IntegrationsSettingsHubView.vue'),
+          meta: { anyPermission: ['api_keys', 'webhooks', 'custom_actions'] }
+        },
+        {
           path: 'settings/api-keys',
           name: 'api-keys',
-          component: () => import('@/views/settings/APIKeysView.vue'),
-          meta: { permission: 'api_keys' }
+          redirect: () => ({ path: '/settings/integrations', query: { tab: 'api-keys' } })
         },
         {
           path: 'settings/api-keys/:id',
@@ -284,8 +289,7 @@ const router = createRouter({
         {
           path: 'settings/webhooks',
           name: 'webhooks',
-          component: () => import('@/views/settings/WebhooksView.vue'),
-          meta: { permission: 'webhooks' }
+          redirect: () => ({ path: '/settings/integrations', query: { tab: 'webhooks' } })
         },
         {
           path: 'settings/webhooks/:id',
@@ -302,8 +306,7 @@ const router = createRouter({
         {
           path: 'settings/custom-actions',
           name: 'custom-actions',
-          component: () => import('@/views/settings/CustomActionsView.vue'),
-          meta: { permission: 'custom_actions' }
+          redirect: () => ({ path: '/settings/integrations', query: { tab: 'custom-actions' } })
         },
         {
           path: 'settings/occurrences',
