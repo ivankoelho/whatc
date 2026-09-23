@@ -19,7 +19,7 @@ import OrganizationSwitcher from './OrganizationSwitcher.vue'
 import UserMenu from './UserMenu.vue'
 import ActiveCallPanel from '@/components/calling/ActiveCallPanel.vue'
 import { ScrollToTop } from '@/components/shared'
-import { navigationSections, type NavSection } from './navigation'
+import { navigationSections, type NavSection, type NavItem } from './navigation'
 
 useI18n() // Enable $t() in template
 
@@ -60,10 +60,18 @@ function filterItems(items: NavSection['items']) {
       const filteredChildren = item.children?.filter(
         child => !child.permission || authStore.hasPermission(child.permission, 'read')
       )
+      const filteredGroups = item.groups
+        ?.map(group => ({
+          ...group,
+          items: group.items.filter(child => !child.permission || authStore.hasPermission(child.permission, 'read'))
+        }))
+        .filter(group => group.items.length > 0)
+
+      const firstAccessibleChild: NavItem | undefined = filteredChildren?.[0] ?? filteredGroups?.[0]?.items[0]
 
       let effectivePath = item.path
-      if (item.childPermissions && item.permission && !authStore.hasPermission(item.permission, 'read') && filteredChildren?.length) {
-        effectivePath = filteredChildren[0].path
+      if (item.childPermissions && item.permission && !authStore.hasPermission(item.permission, 'read') && firstAccessibleChild) {
+        effectivePath = firstAccessibleChild.path
       }
 
       const originalPath = item.path
@@ -77,7 +85,8 @@ function filterItems(items: NavSection['items']) {
         ...item,
         path: effectivePath,
         active: isActive,
-        children: filteredChildren
+        children: filteredChildren,
+        groups: filteredGroups
       }
     })
 }
@@ -276,7 +285,31 @@ const handleLogout = async () => {
               <TooltipContent side="right">{{ $t(item.name) }}</TooltipContent>
             </Tooltip>
 
-            <template v-if="item.children && item.active && !isCollapsed">
+            <template v-if="item.groups && item.active && !isCollapsed">
+              <template v-for="group in item.groups" :key="group.label">
+                <div class="mt-2.5 mb-0.5 px-2.5 ml-4 text-[10px] font-semibold uppercase tracking-wider text-white/25 light:text-gray-400">
+                  {{ $t(group.label) }}
+                </div>
+                <RouterLink
+                  v-for="child in group.items"
+                  :key="child.path"
+                  :to="child.path"
+                  :class="[
+                    'flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-all duration-200 ml-4',
+                    route.path === child.path
+                      ? 'bg-white/[0.06] text-white light:bg-gray-100 light:text-gray-900'
+                      : 'text-white/40 hover:text-white/70 hover:bg-white/[0.04] light:text-gray-400 light:hover:text-gray-700 light:hover:bg-gray-50'
+                  ]"
+                  role="menuitem"
+                  :aria-current="route.path === child.path ? 'page' : undefined"
+                  @click="isMobileMenuOpen = false"
+                >
+                  <component :is="child.icon" class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <span>{{ $t(child.name) }}</span>
+                </RouterLink>
+              </template>
+            </template>
+            <template v-else-if="item.children && item.active && !isCollapsed">
               <RouterLink
                 v-for="child in item.children"
                 :key="child.path"
