@@ -6,27 +6,17 @@ import {
   Megaphone,
   Settings,
   Users,
-  Contact,
   Workflow,
   Sparkles,
   Key,
   UserX,
-  MessageSquareText,
-  Webhook,
   BarChart3,
   ShieldCheck,
-  Zap,
-  Shield,
   LineChart,
-  Tags,
   PhoneCall,
   PhoneForwarded,
   ScrollText,
-  ClipboardList,
-  Building2,
-  Timer,
-  Tag,
-  HelpCircle
+  ClipboardList
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
@@ -168,37 +158,25 @@ export const navigationSections: NavSection[] = [
           {
             label: 'nav.groupService',
             items: [
-              { name: 'nav.chatbot', path: '/settings/chatbot', icon: Bot, permission: 'settings.chatbot' },
-              { name: 'nav.cannedResponses', path: '/settings/canned-responses', icon: MessageSquareText, permission: 'canned_responses' },
-              { name: 'nav.tags', path: '/settings/tags', icon: Tags, permission: 'tags' },
-              { name: 'nav.contacts', path: '/settings/contacts', icon: Contact, permission: 'contacts' }
+              { name: 'nav.groupService', path: '/settings/service', icon: Bot, childPermissions: ['settings.chatbot', 'canned_responses', 'tags', 'contacts'] }
             ]
           },
           {
             label: 'nav.groupOccurrences',
             items: [
-              { name: 'nav.occurrenceStages', path: '/settings/occurrence-stages', icon: ClipboardList, permission: 'occurrences.stages' },
-              { name: 'nav.occurrenceCategories', path: '/settings/occurrence-categories', icon: Tag, permission: 'occurrences.categories' },
-              { name: 'nav.whatHappened', path: '/settings/occurrence-what-happened', icon: HelpCircle, permission: 'occurrences.what_happened' },
-              { name: 'nav.occurrenceProcesses', path: '/settings/occurrence-processes', icon: Workflow, permission: 'occurrences.processes' },
-              { name: 'nav.slaPolicies', path: '/settings/occurrence-sla-policies', icon: Timer, permission: 'occurrences.sla_policies' },
-              { name: 'nav.units', path: '/settings/units', icon: Building2, permission: 'units' }
+              { name: 'nav.groupOccurrences', path: '/settings/occurrences', icon: ClipboardList, childPermissions: ['occurrences.stages', 'occurrences.categories', 'occurrences.what_happened', 'occurrences.processes', 'occurrences.sla_policies', 'units'] }
             ]
           },
           {
             label: 'nav.groupAccess',
             items: [
-              { name: 'nav.teams', path: '/settings/teams', icon: Users, permission: 'teams' },
-              { name: 'nav.users', path: '/settings/users', icon: Users, permission: 'users' },
-              { name: 'nav.roles', path: '/settings/roles', icon: Shield, permission: 'roles' }
+              { name: 'nav.groupAccess', path: '/settings/access', icon: Users, childPermissions: ['teams', 'users', 'roles'] }
             ]
           },
           {
             label: 'nav.groupIntegrations',
             items: [
-              { name: 'nav.apiKeys', path: '/settings/api-keys', icon: Key, permission: 'api_keys' },
-              { name: 'nav.webhooks', path: '/settings/webhooks', icon: Webhook, permission: 'webhooks' },
-              { name: 'nav.customActions', path: '/settings/custom-actions', icon: Zap, permission: 'custom_actions' }
+              { name: 'nav.groupIntegrations', path: '/settings/integrations', icon: Key, childPermissions: ['api_keys', 'webhooks', 'custom_actions'] }
             ]
           }
         ]
