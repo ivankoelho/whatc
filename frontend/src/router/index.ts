@@ -178,10 +178,15 @@ const router = createRouter({
           meta: { permission: 'settings.general' }
         },
         {
+          path: 'settings/service',
+          name: 'settings-service',
+          component: () => import('@/views/settings/ServiceSettingsHubView.vue'),
+          meta: { anyPermission: ['settings.chatbot', 'canned_responses', 'tags', 'contacts'] }
+        },
+        {
           path: 'settings/chatbot',
           name: 'chatbot-settings',
-          component: () => import('@/views/settings/ChatbotSettingsView.vue'),
-          meta: { permission: 'settings.chatbot' }
+          redirect: () => ({ path: '/settings/service', query: { tab: 'chatbot' } })
         },
         {
           path: 'settings/accounts',
@@ -198,8 +203,7 @@ const router = createRouter({
         {
           path: 'settings/canned-responses',
           name: 'canned-responses',
-          component: () => import('@/views/settings/CannedResponsesView.vue'),
-          meta: { permission: 'canned_responses' }
+          redirect: () => ({ path: '/settings/service', query: { tab: 'canned-responses' } })
         },
         {
           path: 'settings/canned-responses/:id',
@@ -213,8 +217,7 @@ const router = createRouter({
         {
           path: 'settings/contacts',
           name: 'contacts',
-          component: () => import('@/views/settings/ContactsView.vue'),
-          meta: { permission: 'contacts' }
+          redirect: () => ({ path: '/settings/service', query: { tab: 'contacts' } })
         },
         {
           path: 'settings/contacts/:id',
@@ -225,8 +228,7 @@ const router = createRouter({
         {
           path: 'settings/tags',
           name: 'tags',
-          component: () => import('@/views/settings/TagsView.vue'),
-          meta: { permission: 'tags' }
+          redirect: () => ({ path: '/settings/service', query: { tab: 'tags' } })
         },
         {
           path: 'settings/users',
