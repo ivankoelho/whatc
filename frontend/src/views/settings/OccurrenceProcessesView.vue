@@ -468,12 +468,13 @@ async function confirmDelete() {
             <TabsContent v-for="stage in MESSAGE_STAGES" :key="stage" :value="stage" class="space-y-3 pt-3">
               <Textarea v-model="stageForms[stage].content" :rows="4" :disabled="!canWrite || messagesLoading" :placeholder="$t('occurrenceProcesses.messagePlaceholder')" />
               <p v-if="!stageForms[stage].content" class="text-xs text-muted-foreground">{{ $t('occurrenceProcesses.messageHint') }}</p>
+              <p v-if="!stageForms[stage].content.trim()" class="text-xs text-muted-foreground">{{ $t('occurrenceProcesses.messageContentRequired') }}</p>
               <div class="flex items-center justify-between">
                 <div class="flex items-center gap-2">
                   <Switch :checked="stageForms[stage].is_active" @update:checked="stageForms[stage].is_active = $event" :disabled="!canWrite" />
                   <Label class="font-normal">{{ $t('occurrenceProcesses.active') }}</Label>
                 </div>
-                <Button v-if="canWrite" size="sm" variant="outline" :disabled="stageForms[stage].saving || messagesLoading" @click="saveMessage(stage)">
+                <Button v-if="canWrite" size="sm" variant="outline" :disabled="stageForms[stage].saving || messagesLoading || !stageForms[stage].content.trim()" @click="saveMessage(stage)">
                   {{ $t('common.save') }}
                 </Button>
               </div>

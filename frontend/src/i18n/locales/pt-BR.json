@@ -2441,7 +2441,8 @@
     "stageForwarding": "Encaminhamento",
     "stageClosing": "Encerramento",
     "messagePlaceholder": "Mensagem enviada ao cliente nesta etapa",
-    "messageHint": "Variáveis disponíveis: [Nome] [Atendente] [Protocolo] [NF] [Prazo] [Loja]"
+    "messageHint": "Variáveis disponíveis: [Nome] [Atendente] [Protocolo] [NF] [Prazo] [Loja]",
+    "messageContentRequired": "Escreva uma mensagem para poder salvar."
   },
   "aiContexts": {
     "title": "Contextos de IA",

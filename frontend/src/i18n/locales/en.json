@@ -2452,7 +2452,8 @@
     "stageForwarding": "Forwarding",
     "stageClosing": "Closing",
     "messagePlaceholder": "Message sent to the customer at this stage",
-    "messageHint": "Available variables: [Nome] [Atendente] [Protocolo] [NF] [Prazo] [Loja]"
+    "messageHint": "Available variables: [Nome] [Atendente] [Protocolo] [NF] [Prazo] [Loja]",
+    "messageContentRequired": "Write a message before you can save."
   },
   "aiContexts": {
     "title": "AI Contexts",
