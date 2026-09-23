@@ -138,11 +138,11 @@ test.describe('Admin vs Limited Role Comparison', () => {
 
     await page.goto('/settings/users')
     await page.waitForLoadState('networkidle')
-    expect(page.url()).toContain('/settings/access')
+    expect(page.url()).toContain('/settings/access?tab=users')
 
     await page.goto('/settings/roles')
     await page.waitForLoadState('networkidle')
-    expect(page.url()).toContain('/settings/access')
+    expect(page.url()).toContain('/settings/access?tab=roles')
 
     await page.goto('/settings')
     await page.waitForLoadState('networkidle')

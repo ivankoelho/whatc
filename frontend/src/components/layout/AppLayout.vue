@@ -48,27 +48,22 @@ onMounted(() => {
   }
 })
 
+function isAccessible(item: NavItem): boolean {
+  if (item.childPermissions) {
+    return item.childPermissions.some(p => authStore.hasPermission(p, 'read'))
+  }
+  return !item.permission || authStore.hasPermission(item.permission, 'read')
+}
+
 function filterItems(items: NavSection['items']) {
   return items
-    .filter(item => {
-      if (item.childPermissions) {
-        return item.childPermissions.some(p => authStore.hasPermission(p, 'read'))
-      }
-      return !item.permission || authStore.hasPermission(item.permission, 'read')
-    })
+    .filter(isAccessible)
     .map(item => {
-      const filteredChildren = item.children?.filter(
-        child => !child.permission || authStore.hasPermission(child.permission, 'read')
-      )
+      const filteredChildren = item.children?.filter(isAccessible)
       const filteredGroups = item.groups
         ?.map(group => ({
           ...group,
-          items: group.items.filter(child => {
-            if (child.childPermissions) {
-              return child.childPermissions.some(p => authStore.hasPermission(p, 'read'))
-            }
-            return !child.permission || authStore.hasPermission(child.permission, 'read')
-          })
+          items: group.items.filter(isAccessible)
         }))
         .filter(group => group.items.length > 0)
 
@@ -292,7 +287,10 @@ const handleLogout = async () => {
 
             <template v-if="item.groups && item.active && !isCollapsed">
               <template v-for="group in item.groups" :key="group.label">
-                <div class="mt-2.5 mb-0.5 px-2.5 ml-4 text-[10px] font-semibold uppercase tracking-wider text-white/25 light:text-gray-400">
+                <div
+                  v-if="!(group.items.length === 1 && group.items[0].name === group.label)"
+                  class="mt-2.5 mb-0.5 px-2.5 ml-4 text-[10px] font-semibold uppercase tracking-wider text-white/25 light:text-gray-400"
+                >
                   {{ $t(group.label) }}
                 </div>
                 <RouterLink

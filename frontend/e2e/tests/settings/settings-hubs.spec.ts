@@ -52,6 +52,7 @@ test.describe('Settings hubs — per-tab authorization', () => {
   test('a user with permission on only one tab lands on it automatically, with only that tab visible', async ({ page }) => {
     await loginAs(page, singleTabUser)
     await page.goto('/settings/occurrences')
+    await expect(page).toHaveURL(/\/settings\/occurrences\?tab=categories/)
     await expect(page.getByRole('tab')).toHaveCount(1)
     await expect(page.getByRole('tab', { name: 'Occurrence Categories' })).toHaveAttribute('data-state', 'active')
   })
@@ -59,6 +60,7 @@ test.describe('Settings hubs — per-tab authorization', () => {
   test('that user cannot reach a different tab via ?tab= — falls back to the one they have', async ({ page }) => {
     await loginAs(page, singleTabUser)
     await page.goto('/settings/occurrences?tab=processes')
+    await expect(page).toHaveURL(/\/settings\/occurrences\?tab=categories/)
     await expect(page.getByRole('tab')).toHaveCount(1)
     await expect(page.getByRole('tab', { name: 'Occurrence Categories' })).toHaveAttribute('data-state', 'active')
   })

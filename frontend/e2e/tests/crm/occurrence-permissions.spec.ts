@@ -93,14 +93,16 @@ test.describe('CRM permissions', () => {
     await page.waitForLoadState('networkidle')
     await expect(page.locator('#occurrences-list')).toBeVisible()
 
-    // Sem occurrences.stages, a secao "Settings" inteira some do menu (ja que
-    // so existe, para este papel, por causa do item "Occurrence Stages") —
-    // essa e a asserção load-bearing que pegaria alguém alargando
-    // `childPermissions` displicentemente no futuro. (Uma asserção separada de
-    // "Occurrence Stages" nao provaria nada aqui: os filhos do submenu só
-    // renderizam quando o pai está ativo — AppLayout.vue:216 — e o usuário
-    // está em /crm/occurrences neste ponto, entao a contagem seria 0 de
-    // qualquer forma.)
+    // Este usuário não tem nenhuma das permissões que controlam a
+    // visibilidade de "Settings" (settings.general + as de cada hub:
+    // Ocorrências, Atendimento, Acesso, Integrações, Contas, SSO,
+    // Auditoria — ver o childPermissions do item nav.settings em
+    // navigation.ts), então a seção inteira some do menu — essa e a
+    // asserção load-bearing que pegaria alguém alargando `childPermissions`
+    // displicentemente no futuro. (Uma asserção separada de "Occurrences"
+    // nao provaria nada aqui: os filhos do submenu só renderizam quando o
+    // pai está ativo — AppLayout.vue — e o usuário está em /crm/occurrences
+    // neste ponto, entao a contagem seria 0 de qualquer forma.)
     await expect(page.getByRole('menuitem', { name: 'Settings', exact: true })).toHaveCount(0)
 
     await page.goto('/settings/occurrence-stages')
@@ -142,14 +144,16 @@ test.describe('CRM permissions', () => {
     // funcionou de fato.
     await expect(page.getByRole('cell', { name: 'Aberto' })).toBeVisible()
 
-    // E pelo menu: este papel nao tem nenhuma permissao settings.*, entao o
-    // item pai "Settings" resolve direto para o unico filho que ele pode
-    // abrir (AppLayout.vue calcula esse effectivePath), e a linha "Occurrence
-    // Stages" aparece expandida por baixo dele.
+    // E pelo menu: este papel só tem occurrences.stages entre as
+    // permissões que controlam a visibilidade dos grupos de Settings, então
+    // só o grupo "Occurrences" (e o único item dentro dele) sobrevive ao
+    // filtro — o item pai "Settings" resolve direto para /settings/occurrences
+    // (AppLayout.vue calcula esse effectivePath a partir do primeiro
+    // grupo/item acessível).
     //
     // A barra nasce recolhida por padrao agora, e os itens de submenu so
     // renderizam com `item.active && !isCollapsed` — expande primeiro, senao
-    // "Occurrence Stages" nunca chega a montar.
+    // "Occurrences" nunca chega a montar.
     await page.getByRole('button', { name: /expand sidebar|expandir/i }).click()
 
     const settingsLink = page.getByRole('menuitem', { name: 'Settings', exact: true })

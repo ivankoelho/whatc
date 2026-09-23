@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import type { Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -48,6 +48,16 @@ const activeTab = computed(() =>
     (permission) => authStore.hasPermission(permission, 'read'),
   ),
 )
+
+// Keep the URL honest: if resolveActiveTab fell back to a different tab
+// than the one requested (disallowed, unknown, or absent), reflect that
+// in ?tab= so a shared link shows whoever opens it the tab that's
+// actually displayed, not the one that was asked for.
+watch(activeTab, (value) => {
+  if (value && route.query.tab !== value) {
+    router.replace({ query: { ...route.query, tab: value } })
+  }
+}, { immediate: true })
 
 function onTabChange(value: string | number) {
   router.replace({ query: { ...route.query, tab: String(value) } })
