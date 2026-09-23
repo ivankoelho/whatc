@@ -68,6 +68,7 @@ interface ProcessFormData {
   response_minutes: number | ''
   resolution_minutes: number | ''
   is_active: boolean
+  position: number
 }
 
 const defaultFormData: ProcessFormData = {
@@ -83,6 +84,7 @@ const defaultFormData: ProcessFormData = {
   response_minutes: '',
   resolution_minutes: '',
   is_active: true,
+  position: 0,
 }
 
 const {
@@ -191,6 +193,7 @@ async function saveMessage(stage: OccurrenceMessageStage) {
 function openCreateDialog() {
   formError.value = ''
   baseOpenCreateDialog()
+  formData.value.position = processes.value.length
 }
 
 function openEditDialog(process: OccurrenceProcess) {
@@ -209,6 +212,7 @@ function openEditDialog(process: OccurrenceProcess) {
     response_minutes: p.response_minutes ?? '',
     resolution_minutes: p.resolution_minutes ?? '',
     is_active: p.is_active,
+    position: p.position,
   }))
   fetchMessages(process.id)
 }
@@ -242,6 +246,7 @@ function buildPayload(): Partial<OccurrenceProcess> {
     response_minutes: formData.value.response_minutes === '' ? undefined : Number(formData.value.response_minutes),
     resolution_minutes: formData.value.resolution_minutes === '' ? undefined : Number(formData.value.resolution_minutes),
     is_active: formData.value.is_active,
+    position: formData.value.position,
   }
 }
 
