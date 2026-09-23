@@ -154,8 +154,8 @@ test.describe('CRM permissions', () => {
 
     const settingsLink = page.getByRole('menuitem', { name: 'Settings', exact: true })
     await expect(settingsLink).toBeVisible()
-    await expect(settingsLink).toHaveAttribute('href', '/settings/occurrence-stages')
-    await expect(page.getByRole('menuitem', { name: 'Occurrence Stages' })).toBeVisible()
+    await expect(settingsLink).toHaveAttribute('href', '/settings/occurrences')
+    await expect(page.getByRole('menuitem', { name: 'Occurrences' })).toBeVisible()
   })
 
   // navigationOrder (router/index.ts) nao tinha entrada para /crm/occurrences:

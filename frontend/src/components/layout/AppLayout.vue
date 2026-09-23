@@ -63,7 +63,12 @@ function filterItems(items: NavSection['items']) {
       const filteredGroups = item.groups
         ?.map(group => ({
           ...group,
-          items: group.items.filter(child => !child.permission || authStore.hasPermission(child.permission, 'read'))
+          items: group.items.filter(child => {
+            if (child.childPermissions) {
+              return child.childPermissions.some(p => authStore.hasPermission(p, 'read'))
+            }
+            return !child.permission || authStore.hasPermission(child.permission, 'read')
+          })
         }))
         .filter(group => group.items.length > 0)
 
