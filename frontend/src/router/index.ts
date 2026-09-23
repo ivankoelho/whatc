@@ -6,6 +6,7 @@ declare module 'vue-router' {
   interface RouteMeta {
     requiresAuth?: boolean
     permission?: string // Resource permission required (e.g., 'analytics', 'chat')
+    anyPermission?: string[] // Route is allowed if the user has read on ANY of these (settings hubs)
   }
 }
 
@@ -177,10 +178,15 @@ const router = createRouter({
           meta: { permission: 'settings.general' }
         },
         {
+          path: 'settings/service',
+          name: 'settings-service',
+          component: () => import('@/views/settings/ServiceSettingsHubView.vue'),
+          meta: { anyPermission: ['settings.chatbot', 'canned_responses', 'tags', 'contacts'] }
+        },
+        {
           path: 'settings/chatbot',
           name: 'chatbot-settings',
-          component: () => import('@/views/settings/ChatbotSettingsView.vue'),
-          meta: { permission: 'settings.chatbot' }
+          redirect: () => ({ path: '/settings/service', query: { tab: 'chatbot' } })
         },
         {
           path: 'settings/accounts',
@@ -197,8 +203,7 @@ const router = createRouter({
         {
           path: 'settings/canned-responses',
           name: 'canned-responses',
-          component: () => import('@/views/settings/CannedResponsesView.vue'),
-          meta: { permission: 'canned_responses' }
+          redirect: () => ({ path: '/settings/service', query: { tab: 'canned-responses' } })
         },
         {
           path: 'settings/canned-responses/:id',
@@ -212,8 +217,7 @@ const router = createRouter({
         {
           path: 'settings/contacts',
           name: 'contacts',
-          component: () => import('@/views/settings/ContactsView.vue'),
-          meta: { permission: 'contacts' }
+          redirect: () => ({ path: '/settings/service', query: { tab: 'contacts' } })
         },
         {
           path: 'settings/contacts/:id',
@@ -224,14 +228,18 @@ const router = createRouter({
         {
           path: 'settings/tags',
           name: 'tags',
-          component: () => import('@/views/settings/TagsView.vue'),
-          meta: { permission: 'tags' }
+          redirect: () => ({ path: '/settings/service', query: { tab: 'tags' } })
+        },
+        {
+          path: 'settings/access',
+          name: 'settings-access',
+          component: () => import('@/views/settings/AccessSettingsHubView.vue'),
+          meta: { anyPermission: ['teams', 'users', 'roles'] }
         },
         {
           path: 'settings/users',
           name: 'users',
-          component: () => import('@/views/settings/UsersView.vue'),
-          meta: { permission: 'users' }
+          redirect: () => ({ path: '/settings/access', query: { tab: 'users' } })
         },
         {
           path: 'settings/users/:id',
@@ -242,8 +250,7 @@ const router = createRouter({
         {
           path: 'settings/roles',
           name: 'roles',
-          component: () => import('@/views/settings/RolesView.vue'),
-          meta: { permission: 'roles' }
+          redirect: () => ({ path: '/settings/access', query: { tab: 'roles' } })
         },
         {
           path: 'settings/roles/:id',
@@ -254,8 +261,7 @@ const router = createRouter({
         {
           path: 'settings/teams',
           name: 'teams',
-          component: () => import('@/views/settings/TeamsView.vue'),
-          meta: { permission: 'teams' }
+          redirect: () => ({ path: '/settings/access', query: { tab: 'teams' } })
         },
         {
           path: 'settings/teams/:id',
@@ -264,10 +270,15 @@ const router = createRouter({
           meta: { permission: 'teams' }
         },
         {
+          path: 'settings/integrations',
+          name: 'settings-integrations',
+          component: () => import('@/views/settings/IntegrationsSettingsHubView.vue'),
+          meta: { anyPermission: ['api_keys', 'webhooks', 'custom_actions'] }
+        },
+        {
           path: 'settings/api-keys',
           name: 'api-keys',
-          component: () => import('@/views/settings/APIKeysView.vue'),
-          meta: { permission: 'api_keys' }
+          redirect: () => ({ path: '/settings/integrations', query: { tab: 'api-keys' } })
         },
         {
           path: 'settings/api-keys/:id',
@@ -278,8 +289,7 @@ const router = createRouter({
         {
           path: 'settings/webhooks',
           name: 'webhooks',
-          component: () => import('@/views/settings/WebhooksView.vue'),
-          meta: { permission: 'webhooks' }
+          redirect: () => ({ path: '/settings/integrations', query: { tab: 'webhooks' } })
         },
         {
           path: 'settings/webhooks/:id',
@@ -296,44 +306,43 @@ const router = createRouter({
         {
           path: 'settings/custom-actions',
           name: 'custom-actions',
-          component: () => import('@/views/settings/CustomActionsView.vue'),
-          meta: { permission: 'custom_actions' }
+          redirect: () => ({ path: '/settings/integrations', query: { tab: 'custom-actions' } })
+        },
+        {
+          path: 'settings/occurrences',
+          name: 'settings-occurrences',
+          component: () => import('@/views/settings/OccurrenceSettingsHubView.vue'),
+          meta: { anyPermission: ['occurrences.stages', 'occurrences.categories', 'occurrences.what_happened', 'occurrences.processes', 'occurrences.sla_policies', 'units'] }
         },
         {
           path: 'settings/occurrence-stages',
           name: 'occurrence-stages',
-          component: () => import('@/views/settings/OccurrenceStagesView.vue'),
-          meta: { permission: 'occurrences.stages' }
+          redirect: () => ({ path: '/settings/occurrences', query: { tab: 'stages' } })
         },
         {
           path: 'settings/units',
           name: 'units',
-          component: () => import('@/views/settings/UnitsView.vue'),
-          meta: { permission: 'units' }
+          redirect: () => ({ path: '/settings/occurrences', query: { tab: 'units' } })
         },
         {
           path: 'settings/occurrence-sla-policies',
           name: 'occurrence-sla-policies',
-          component: () => import('@/views/settings/OccurrenceSLAPoliciesView.vue'),
-          meta: { permission: 'occurrences.sla_policies' }
+          redirect: () => ({ path: '/settings/occurrences', query: { tab: 'sla' } })
         },
         {
           path: 'settings/occurrence-categories',
           name: 'occurrence-categories',
-          component: () => import('@/views/settings/OccurrenceCategoriesView.vue'),
-          meta: { permission: 'occurrences.categories' }
+          redirect: () => ({ path: '/settings/occurrences', query: { tab: 'categories' } })
         },
         {
           path: 'settings/occurrence-what-happened',
           name: 'occurrence-what-happened',
-          component: () => import('@/views/settings/OccurrenceWhatHappenedView.vue'),
-          meta: { permission: 'occurrences.what_happened' }
+          redirect: () => ({ path: '/settings/occurrences', query: { tab: 'what-happened' } })
         },
         {
           path: 'settings/occurrence-processes',
           name: 'occurrence-processes',
-          component: () => import('@/views/settings/OccurrenceProcessesView.vue'),
-          meta: { permission: 'occurrences.processes' }
+          redirect: () => ({ path: '/settings/occurrences', query: { tab: 'processes' } })
         },
         {
           path: 'settings/audit-logs',
@@ -410,23 +419,23 @@ const navigationOrder = [
   ]},
   { path: '/settings', permission: 'settings.general', childPaths: [
     { path: '/settings', permission: 'settings.general' },
-    { path: '/settings/chatbot', permission: 'settings.chatbot' },
+    { path: '/settings/service', permission: 'settings.chatbot' },
     { path: '/settings/accounts', permission: 'accounts' },
-    { path: '/settings/canned-responses', permission: 'canned_responses' },
-    { path: '/settings/contacts', permission: 'contacts' },
-    { path: '/settings/tags', permission: 'tags' },
-    { path: '/settings/teams', permission: 'teams' },
-    { path: '/settings/users', permission: 'users' },
-    { path: '/settings/roles', permission: 'roles' },
-    { path: '/settings/api-keys', permission: 'api_keys' },
-    { path: '/settings/webhooks', permission: 'webhooks' },
-    { path: '/settings/custom-actions', permission: 'custom_actions' },
-    { path: '/settings/occurrence-stages', permission: 'occurrences.stages' },
-    { path: '/settings/units', permission: 'units' },
-    { path: '/settings/occurrence-sla-policies', permission: 'occurrences.sla_policies' },
-    { path: '/settings/occurrence-categories', permission: 'occurrences.categories' },
-    { path: '/settings/occurrence-what-happened', permission: 'occurrences.what_happened' },
-    { path: '/settings/occurrence-processes', permission: 'occurrences.processes' },
+    { path: '/settings/service', permission: 'canned_responses' },
+    { path: '/settings/service', permission: 'contacts' },
+    { path: '/settings/service', permission: 'tags' },
+    { path: '/settings/access', permission: 'teams' },
+    { path: '/settings/access', permission: 'users' },
+    { path: '/settings/access', permission: 'roles' },
+    { path: '/settings/integrations', permission: 'api_keys' },
+    { path: '/settings/integrations', permission: 'webhooks' },
+    { path: '/settings/integrations', permission: 'custom_actions' },
+    { path: '/settings/occurrences', permission: 'occurrences.stages' },
+    { path: '/settings/occurrences', permission: 'units' },
+    { path: '/settings/occurrences', permission: 'occurrences.sla_policies' },
+    { path: '/settings/occurrences', permission: 'occurrences.categories' },
+    { path: '/settings/occurrences', permission: 'occurrences.what_happened' },
+    { path: '/settings/occurrences', permission: 'occurrences.processes' },
     { path: '/settings/sso', permission: 'settings.sso' }
   ]}
 ]
@@ -471,6 +480,16 @@ router.beforeEach(async (to, _from, next) => {
     if (requiredPermission) {
       if (!authStore.hasPermission(requiredPermission, 'read')) {
         // Redirect to first accessible page
+        return next({ path: getFirstAccessibleRoute(authStore) })
+      }
+    }
+
+    // Settings hubs: allowed if the user has read on at least one of the
+    // group's permissions. Which specific tab they land on is decided
+    // inside the hub component (resolveActiveTab), not here.
+    const anyPermission = to.meta.anyPermission
+    if (anyPermission) {
+      if (!anyPermission.some(p => authStore.hasPermission(p, 'read'))) {
         return next({ path: getFirstAccessibleRoute(authStore) })
       }
     }
