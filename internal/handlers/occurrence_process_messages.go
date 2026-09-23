@@ -192,14 +192,26 @@ func resolveProcessMessageVariables(content string, occ *models.Occurrence, agen
 		deadline = formatProcessDeadline(time.Until(*occ.SLA.ResponseDeadline))
 	}
 
-	return strings.NewReplacer(
-		"[Nome]", name,
-		"[Atendente]", agentName,
-		"[Protocolo]", occ.ProtocolNumber,
-		"[NF]", occ.InvoiceNumber,
-		"[Prazo]", deadline,
-		"[Loja]", unit,
-	).Replace(content)
+	// An empty value is skipped so its placeholder stays literal in the text:
+	// the agent reviewing the suggested message must see what is missing rather
+	// than send "prazo previsto de .".
+	var pairs []string
+	for _, v := range [][2]string{
+		{"[Nome]", name},
+		{"[Atendente]", agentName},
+		{"[Protocolo]", occ.ProtocolNumber},
+		{"[NF]", occ.InvoiceNumber},
+		{"[Prazo]", deadline},
+		{"[Loja]", unit},
+	} {
+		if strings.TrimSpace(v[1]) != "" {
+			pairs = append(pairs, v[0], v[1])
+		}
+	}
+	if len(pairs) == 0 {
+		return content
+	}
+	return strings.NewReplacer(pairs...).Replace(content)
 }
 
 // fallbackProcessMessage is the explicit, stage-aware fallback. "registration"
@@ -266,13 +278,16 @@ func (a *App) PreviewOccurrenceProcessMessage(r *fastglue.Request) error {
 
 	var content string
 	hasTemplate := found
+	isFallback := false
 	if found {
 		content = resolveProcessMessageVariables(template.Content, &occ, audit.GetUserName(a.DB, userID))
 	} else {
 		content, hasTemplate = fallbackProcessMessage(stageRaw, &occ)
+		isFallback = hasTemplate
 	}
 
-	return r.SendEnvelope(map[string]any{"content": content, "has_template": hasTemplate})
+	// is_fallback marks the built-in text, as opposed to a real process template.
+	return r.SendEnvelope(map[string]any{"content": content, "has_template": hasTemplate, "is_fallback": isFallback})
 }
 
 // LogOccurrenceProcessMessageUseRequest is the body for logging that a
