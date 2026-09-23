@@ -25,6 +25,7 @@ type CreateOccurrenceRequest struct {
 	DepartmentID     *string `json:"department_id"`
 	CategoryID       *string `json:"category_id"`
 	WhatHappenedID   *string `json:"what_happened_id"`
+	ProcessID        *string `json:"process_id"`
 
 	// Sale context (§8 of the SAC MVP spec) — all optional, filled manually
 	// by the agent, no ERP lookup.
@@ -71,6 +72,8 @@ type OccurrenceResponse struct {
 	CategoryName     string     `json:"category_name,omitempty"`
 	WhatHappenedID   *uuid.UUID `json:"what_happened_id,omitempty"`
 	WhatHappenedName string     `json:"what_happened_name,omitempty"`
+	ProcessID        *uuid.UUID `json:"process_id,omitempty"`
+	ProcessName      string     `json:"process_name,omitempty"`
 	Source           string     `json:"source"`
 
 	SaleChannel        string     `json:"sale_channel,omitempty"`
@@ -104,6 +107,7 @@ func occurrenceToResponse(o models.Occurrence) OccurrenceResponse {
 		DepartmentID:          o.DepartmentID,
 		CategoryID:            o.CategoryID,
 		WhatHappenedID:        o.WhatHappenedID,
+		ProcessID:             o.ProcessID,
 		Source:                o.Source,
 		SLAResponseDeadline:   o.SLA.ResponseDeadline,
 		SLAResolutionDeadline: o.SLA.ResolutionDeadline,
@@ -137,6 +141,9 @@ func occurrenceToResponse(o models.Occurrence) OccurrenceResponse {
 	}
 	if o.WhatHappened != nil {
 		resp.WhatHappenedName = o.WhatHappened.Name
+	}
+	if o.Process != nil {
+		resp.ProcessName = o.Process.Name
 	}
 	return resp
 }
@@ -280,13 +287,30 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 		priority = models.OccurrencePriorityNormal
 	}
 
+	var processID *uuid.UUID
+	var processRow *models.OccurrenceProcess
+	if req.ProcessID != nil && *req.ProcessID != "" {
+		id, err := uuid.Parse(*req.ProcessID)
+		if err != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid process_id", nil, "")
+		}
+		process, err := findByIDAndOrg[models.OccurrenceProcess](a.DB, r, id, orgID, "Process")
+		if err != nil {
+			return nil
+		}
+		if !process.IsActive {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Process is inactive", nil, "")
+		}
+		processID, processRow = &id, process
+	}
+
 	var responseDeadline, resolutionDeadline *time.Time
-	if policy, err := a.getSLAPolicy(orgID, priority); err != nil {
+	if responseMinutes, resolutionMinutes, err := a.resolveOccurrenceSLAMinutes(orgID, priority, processID); err != nil {
 		a.Log.Error("Failed to resolve SLA policy", "error", err, "organization_id", orgID)
 	} else {
 		now := time.Now()
-		rd := now.Add(time.Duration(policy.ResponseMinutes) * time.Minute)
-		xd := now.Add(time.Duration(policy.ResolutionMinutes) * time.Minute)
+		rd := now.Add(time.Duration(responseMinutes) * time.Minute)
+		xd := now.Add(time.Duration(resolutionMinutes) * time.Minute)
 		responseDeadline, resolutionDeadline = &rd, &xd
 	}
 
@@ -302,6 +326,7 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 		InvoiceNumber:      req.InvoiceNumber,
 		PurchaseDate:       purchaseDate,
 		ProductDescription: req.ProductDescription,
+		ProcessID:          processID,
 		SLA: models.SLATracking{
 			ResponseDeadline:   responseDeadline,
 			ResolutionDeadline: resolutionDeadline,
@@ -433,6 +458,7 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 	occ.Contact = contact
 	occ.Category = category
 	occ.WhatHappened = whatHappened
+	occ.Process = processRow
 	// Reload the assignee relation so the broadcast payload's
 	// assigned_user_name isn't silently empty for the common case (an
 	// occurrence defaults its assignee to its creator) — the REST response
@@ -510,7 +536,7 @@ func (a *App) ListOccurrences(r *fastglue.Request) error {
 
 	var occurrences []models.Occurrence
 	if err := query.
-		Preload("Contact").Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").Preload("WhatHappened").
+		Preload("Contact").Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").Preload("WhatHappened").Preload("Process").
 		Order("occurrences.opened_at DESC").
 		Limit(pg.Limit).Offset(pg.Offset).
 		Find(&occurrences).Error; err != nil {
@@ -554,7 +580,7 @@ func (a *App) ListContactOccurrences(r *fastglue.Request) error {
 
 	var occurrences []models.Occurrence
 	if err := a.DB.Where("organization_id = ? AND contact_id = ?", orgID, contactID).
-		Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").Preload("WhatHappened").
+		Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").Preload("WhatHappened").Preload("Process").
 		Order("opened_at DESC").Find(&occurrences).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError,
 			"Failed to list occurrences", nil, "")
@@ -664,7 +690,7 @@ func (a *App) GetOccurrence(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
-	a.DB.Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").Preload("WhatHappened").First(occ, occ.ID)
+	a.DB.Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").Preload("WhatHappened").Preload("Process").First(occ, occ.ID)
 	return r.SendEnvelope(occurrenceToResponse(*occ))
 }
 
@@ -698,12 +724,12 @@ func (a *App) UpdateOccurrence(r *fastglue.Request) error {
 	}
 	if req.Priority != "" && req.Priority != string(occ.Priority) {
 		updates["priority"] = req.Priority
-		if policy, err := a.getSLAPolicy(orgID, models.OccurrencePriority(req.Priority)); err != nil {
+		if responseMinutes, resolutionMinutes, err := a.resolveOccurrenceSLAMinutes(orgID, models.OccurrencePriority(req.Priority), occ.ProcessID); err != nil {
 			a.Log.Error("Failed to resolve SLA policy on priority change", "error", err, "occurrence", occ.ID)
 		} else {
 			now := time.Now()
-			rd := now.Add(time.Duration(policy.ResponseMinutes) * time.Minute)
-			xd := now.Add(time.Duration(policy.ResolutionMinutes) * time.Minute)
+			rd := now.Add(time.Duration(responseMinutes) * time.Minute)
+			xd := now.Add(time.Duration(resolutionMinutes) * time.Minute)
 			updates["sla_response_deadline"] = rd
 			updates["sla_resolution_deadline"] = xd
 		}
@@ -803,7 +829,7 @@ func (a *App) UpdateOccurrence(r *fastglue.Request) error {
 		})
 	}
 
-	a.DB.Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").Preload("WhatHappened").First(occ, occ.ID)
+	a.DB.Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").Preload("WhatHappened").Preload("Process").First(occ, occ.ID)
 	resp := occurrenceToResponse(*occ)
 
 	a.broadcastOccurrenceMessage(orgID, occ.ContactID, occ.AssignedUserID, websocket.WSMessage{
@@ -915,7 +941,7 @@ func (a *App) ChangeOccurrenceStage(r *fastglue.Request) error {
 	}
 	// Preload (not just occ.Stage = target) so the broadcast payload's
 	// assigned_user_name isn't silently empty — mirrors UpdateOccurrence.
-	a.DB.Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").Preload("WhatHappened").First(occ, occ.ID)
+	a.DB.Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").Preload("WhatHappened").Preload("Process").First(occ, occ.ID)
 
 	resp := occurrenceToResponse(*occ)
 	a.broadcastOccurrenceMessage(orgID, occ.ContactID, occ.AssignedUserID, websocket.WSMessage{

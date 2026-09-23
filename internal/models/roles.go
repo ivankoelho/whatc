@@ -92,6 +92,7 @@ const (
 	ResourceOccurrenceCategories    = "occurrences.categories"
 	ResourceOccurrenceSLAPolicies   = "occurrences.sla_policies"
 	ResourceOccurrenceWhatHappened  = "occurrences.what_happened"
+	ResourceOccurrenceProcesses     = "occurrences.processes"
 	ResourceUnits                   = "units"
 	ResourceDepartments             = "departments"
 )
@@ -285,6 +286,9 @@ func DefaultPermissions() []Permission {
 		{Resource: ResourceOccurrenceWhatHappened, Action: ActionDelete, Description: "Delete occurrence \"what happened\" reasons"},
 		{Resource: ResourceOccurrenceSLAPolicies, Action: ActionRead, Description: "View occurrence SLA policies"},
 		{Resource: ResourceOccurrenceSLAPolicies, Action: ActionWrite, Description: "Edit occurrence SLA policies"},
+		{Resource: ResourceOccurrenceProcesses, Action: ActionRead, Description: "View occurrence processes and their message templates"},
+		{Resource: ResourceOccurrenceProcesses, Action: ActionWrite, Description: "Create and edit occurrence processes and message templates"},
+		{Resource: ResourceOccurrenceProcesses, Action: ActionDelete, Description: "Delete occurrence processes"},
 
 		// Help Desk — unidade e departamento. Listing is gated on occurrences:read
 		// (agents need unit/department names to work a case); these permissions
