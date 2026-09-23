@@ -105,7 +105,7 @@ test.describe('CRM permissions', () => {
 
     await page.goto('/settings/occurrence-stages')
     await page.waitForLoadState('networkidle')
-    expect(page.url()).not.toContain('/settings/occurrence-stages')
+    expect(page.url()).not.toContain('/settings/occurrences')
   })
 
   // O caso positivo, e o que teria pego o bug que quase foi para o plano:
@@ -133,7 +133,7 @@ test.describe('CRM permissions', () => {
     await page.goto('/settings/occurrence-stages')
     await page.waitForLoadState('networkidle')
 
-    expect(page.url()).toContain('/settings/occurrence-stages')
+    expect(page.url()).toContain('/settings/occurrences')
     await expect(page.locator('h1').filter({ hasText: 'Occurrence Stages' })).toBeVisible()
     // PageHeader (o h1 acima) fica fora do ramo de erro do componente — um 403
     // em GET /api/occurrence-stages (gate real: occurrences:read, nao a
