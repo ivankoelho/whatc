@@ -160,6 +160,7 @@ export const navigationSections: NavSection[] = [
           { name: 'nav.slaPolicies', path: '/settings/occurrence-sla-policies', icon: Timer, permission: 'occurrences.sla_policies' },
           { name: 'nav.occurrenceCategories', path: '/settings/occurrence-categories', icon: Tag, permission: 'occurrences.categories' },
           { name: 'nav.whatHappened', path: '/settings/occurrence-what-happened', icon: HelpCircle, permission: 'occurrences.what_happened' },
+          { name: 'nav.occurrenceProcesses', path: '/settings/occurrence-processes', icon: Workflow, permission: 'occurrences.processes' },
           { name: 'nav.sso', path: '/settings/sso', icon: ShieldCheck, permission: 'settings.sso' },
           { name: 'nav.auditLogs', path: '/settings/audit-logs', icon: ScrollText, permission: 'audit_logs' }
         ]

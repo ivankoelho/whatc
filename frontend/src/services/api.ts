@@ -1384,7 +1384,7 @@ export interface OccurrenceCategory {
 export interface OccurrenceEvent {
   id: string
   occurrence_id: string
-  type: 'opened' | 'note' | 'stage_change' | 'assignment' | 'protocol_sent' | 'closed'
+  type: 'opened' | 'note' | 'stage_change' | 'assignment' | 'protocol_sent' | 'closed' | 'reply' | 'process_message_used'
   content: string
   metadata: Record<string, unknown> | null
   created_by_id?: string
@@ -1428,6 +1428,9 @@ export const occurrencesService = {
     api.get<ApiEnvelope<{ events: OccurrenceEvent[] }>>(`/occurrences/${id}/events`),
   addNote: (id: string, content: string) =>
     api.post<ApiEnvelope<OccurrenceEvent>>(`/occurrences/${id}/events`, { content }),
+  // The ONLY way to send a public message from an occurrence: also stamps the first-response SLA.
+  reply: (id: string, content: string) =>
+    api.post<ApiEnvelope<{ sent: boolean }>>(`/occurrences/${id}/reply`, { content }),
   sendProtocol: (id: string, message?: string) =>
     api.post<ApiEnvelope<{ sent: boolean; protocol_number: string }>>(
       `/occurrences/${id}/send-protocol`, message ? { message } : undefined),

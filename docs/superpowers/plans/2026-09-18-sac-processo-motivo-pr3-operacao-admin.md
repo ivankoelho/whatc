@@ -23,10 +23,21 @@
 
 ---
 
+### Task 0 (added during execution): Reply box on the occurrence detail view
+
+**Why:** this plan assumed the detail view already had a reply box. It does not: `OccurrenceDetailView.vue` only has an internal-note textarea (`newNoteContent` / `submitNote`), and no frontend code calls `POST /api/occurrences/{id}/reply` (`ReplyToOccurrence`, the endpoint that also stamps the first-response SLA). Decision (product owner, 2026-09-19): build the minimal reply box in this PR; `ReplyToOccurrence` stays the ONLY sending mechanism.
+
+**Files:** `frontend/src/services/api.ts` (`occurrencesService.reply`), `frontend/src/views/crm/OccurrenceDetailView.vue`, the timeline rendering component(s) for event types, `frontend/src/i18n/locales/{en,pt-BR}.json`.
+
+- Add `occurrencesService.reply(id, content)` → `POST /occurrences/{id}/reply` `{content}` (response `{sent: true}`).
+- Add a "Responder ao cliente" section on the detail view, visually distinct from the internal note (a note is NOT sent to the customer — label both clearly): textarea + Enviar; disabled while sending or when blank; HTTP 422 (24h window closed) shows a plain message (reuse the `chat.sendProtocolWindowClosed` pattern the protocol button already uses) and keeps the text; other errors toast; on success clear the box and reload events. Same permission gate (`occurrences:write`) the note form uses.
+- Timeline: render `reply` events (content shown, label "Resposta ao cliente") and `process_message_used` events (label "Mensagem sugerida utilizada", content as detail) with the same icon/label mechanism the other event types use; an unknown type must not show a raw key. This absorbs Task 2 below.
+- Verification: browser, with a contact whose 24h window is closed (expect the 422 message and text preserved). A successful send needs an open window; cover with what exists.
+
 ### Task 1: Occurrence detail — stage message picker
 
 **Files:**
-- Modify: `frontend/src/views/crm/OccurrenceDetailView.vue`, `frontend/src/locales/*`
+- Modify: `frontend/src/views/crm/OccurrenceDetailView.vue`, `frontend/src/i18n/locales/{en,pt-BR}.json`
 
 - [ ] **Step 1: Read the view first**
 
@@ -95,8 +106,8 @@ Also reset `lastSuggestedStage.value = null` if the agent clears the reply box w
 - [ ] **Step 7: Commit**
 
 ```bash
-git checkout -b feature/sac-processo-motivo-pr3 development
-git add frontend/src/views/crm/OccurrenceDetailView.vue frontend/src/locales
+
+git add frontend/src/views/crm/OccurrenceDetailView.vue frontend/src/i18n/locales
 git commit -m "feat(sac): stage message picker prefills the occurrence reply box
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
@@ -107,7 +118,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 ### Task 2: Timeline rendering of `process_message_used`
 
 **Files:**
-- Modify: whichever component renders `OccurrenceEvent.type` in the timeline (grep `protocol_sent` and `stage_change` under `frontend/src`), `frontend/src/services/api.ts` (`OccurrenceEvent['type']` union if typed), `frontend/src/locales/*`
+- Modify: whichever component renders `OccurrenceEvent.type` in the timeline (grep `protocol_sent` and `stage_change` under `frontend/src`), `frontend/src/services/api.ts` (`OccurrenceEvent['type']` union if typed), `frontend/src/i18n/locales/{en,pt-BR}.json`
 
 - [ ] **Step 1: Find the event-type switch**
 
@@ -136,7 +147,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 
 **Files:**
 - Create: `frontend/src/views/settings/OccurrenceProcessesView.vue`
-- Modify: the router file and settings navigation that register `OccurrenceSLAPoliciesView`/`OccurrenceCategoriesView`; `frontend/src/locales/*`
+- Modify: the router file and settings navigation that register `OccurrenceSLAPoliciesView`/`OccurrenceCategoriesView`; `frontend/src/i18n/locales/{en,pt-BR}.json`
 
 - [ ] **Step 1: Read the precedents, then copy them**
 
@@ -162,7 +173,7 @@ As admin: the five seeded processes list; edit one's guidance, save, reload, cha
 - [ ] **Step 5: Commit**
 
 ```bash
-git add frontend/src/views/settings/OccurrenceProcessesView.vue frontend/src/router frontend/src/locales
+git add frontend/src/views/settings/OccurrenceProcessesView.vue frontend/src/router frontend/src/i18n/locales
 git commit -m "feat(sac): admin screen for processes and stage messages
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
@@ -176,7 +187,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 
 - [ ] **Step 1: Automated checks**
 
-Run: `go build ./... && go vet ./... && go test ./... -count=1` then `cd frontend && npm run build && npx vitest run`. Expected: all PASS. If the repo has a Playwright suite covering occurrences, run its occurrence specs too.
+Run: `go build ./... && go vet ./... && go test ./... -count=1` then `cd frontend && npm run typecheck && npm run test:unit && npm run i18n:keys && npm run build`. Expected: all PASS. If the repo has a Playwright suite covering occurrences, run its occurrence specs too.
 
 - [ ] **Step 2: Browser regression on untouched paths**
 

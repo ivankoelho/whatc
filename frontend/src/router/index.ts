@@ -330,6 +330,12 @@ const router = createRouter({
           meta: { permission: 'occurrences.what_happened' }
         },
         {
+          path: 'settings/occurrence-processes',
+          name: 'occurrence-processes',
+          component: () => import('@/views/settings/OccurrenceProcessesView.vue'),
+          meta: { permission: 'occurrences.processes' }
+        },
+        {
           path: 'settings/audit-logs',
           name: 'audit-logs',
           component: () => import('@/views/settings/AuditLogsView.vue'),
@@ -420,6 +426,7 @@ const navigationOrder = [
     { path: '/settings/occurrence-sla-policies', permission: 'occurrences.sla_policies' },
     { path: '/settings/occurrence-categories', permission: 'occurrences.categories' },
     { path: '/settings/occurrence-what-happened', permission: 'occurrences.what_happened' },
+    { path: '/settings/occurrence-processes', permission: 'occurrences.processes' },
     { path: '/settings/sso', permission: 'settings.sso' }
   ]}
 ]
