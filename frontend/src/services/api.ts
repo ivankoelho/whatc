@@ -1548,13 +1548,15 @@ export interface OccurrenceWhatHappened {
   name: string
   position: number
   is_active: boolean
+  category_id?: string
+  category?: OccurrenceCategory
 }
 
 export const occurrenceWhatHappenedService = {
   list: () => api.get<ApiEnvelope<{ reasons: OccurrenceWhatHappened[] }>>('/occurrence-what-happened'),
-  create: (data: { name: string; position: number; is_active?: boolean }) =>
+  create: (data: { name: string; position: number; is_active?: boolean; category_id?: string }) =>
     api.post<ApiEnvelope<OccurrenceWhatHappened>>('/occurrence-what-happened', data),
-  update: (id: string, data: { name: string; position: number; is_active?: boolean }) =>
+  update: (id: string, data: { name: string; position: number; is_active?: boolean; category_id?: string }) =>
     api.put<ApiEnvelope<OccurrenceWhatHappened>>(`/occurrence-what-happened/${id}`, data),
   delete: (id: string) => api.delete<ApiEnvelope<{ deleted: boolean }>>(`/occurrence-what-happened/${id}`),
 }

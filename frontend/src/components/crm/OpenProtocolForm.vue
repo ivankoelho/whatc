@@ -119,6 +119,16 @@ function clearAutoCategory() {
   autoCategoryId.value = ''
 }
 
+// Fill the category from a reason/process suggestion, unless the agent chose one by hand.
+function applySuggestedCategory(suggested?: string) {
+  if (!suggested) {
+    clearAutoCategory()
+  } else if (!categoryId.value || categoryId.value === autoCategoryId.value) {
+    categoryId.value = suggested
+    autoCategoryId.value = suggested
+  }
+}
+
 watch(whatHappenedId, async (id) => {
   resolvedProcess.value = null
   if (!id) {
@@ -126,25 +136,22 @@ watch(whatHappenedId, async (id) => {
     clearAutoCategory()
     return
   }
+  // The agent says what happened; the category follows from the reason.
+  const reasonCategory = whatHappenedOptions.value.find(w => w.id === id)?.category_id
+  applySuggestedCategory(reasonCategory)
   resolvingProcess.value = true
   try {
     const res = await occurrenceProcessesService.resolve(id)
     // A newer selection may have landed while this request was in flight.
     if (whatHappenedId.value !== id) return
     resolvedProcess.value = res.data.data.process
-    const suggested = resolvedProcess.value?.category_id
-    if (!suggested) {
-      clearAutoCategory()
-    } else if (!categoryId.value || categoryId.value === autoCategoryId.value) {
-      // Manual choice wins: only an empty or previously auto-filled category is replaced.
-      categoryId.value = suggested
-      autoCategoryId.value = suggested
-    }
+    // The reason's own category wins; the process only fills in when the reason has none.
+    if (!reasonCategory) applySuggestedCategory(resolvedProcess.value?.category_id)
   } catch {
     // Resolution is a convenience; failure must not block the form.
     if (whatHappenedId.value === id) {
       resolvedProcess.value = null
-      clearAutoCategory()
+      if (!reasonCategory) clearAutoCategory()
     }
   } finally {
     if (whatHappenedId.value === id) resolvingProcess.value = false
@@ -466,15 +473,6 @@ function goToProtocol() {
         <CardContent class="space-y-4">
           <div class="grid grid-cols-2 gap-4">
             <div class="space-y-2">
-              <Label>{{ t('occurrences.categoryLabel') }}</Label>
-              <Select v-model="categoryId">
-                <SelectTrigger><SelectValue :placeholder="t('occurrences.categoryPlaceholder')" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem v-for="c in categories" :key="c.id" :value="c.id">{{ c.name }}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div class="space-y-2">
               <Label>{{ t('occurrences.whatHappenedLabel') }}</Label>
               <Select v-model="whatHappenedId">
                 <SelectTrigger><SelectValue :placeholder="t('occurrences.whatHappenedPlaceholder')" /></SelectTrigger>
@@ -482,6 +480,16 @@ function goToProtocol() {
                   <SelectItem v-for="w in whatHappenedOptions" :key="w.id" :value="w.id">{{ w.name }}</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+            <div class="space-y-2">
+              <Label>{{ t('occurrences.categoryLabel') }}</Label>
+              <Select v-model="categoryId">
+                <SelectTrigger><SelectValue :placeholder="t('occurrences.categoryPlaceholder')" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem v-for="c in categories" :key="c.id" :value="c.id">{{ c.name }}</SelectItem>
+                </SelectContent>
+              </Select>
+              <p v-if="categoryId && categoryId === autoCategoryId" class="text-xs text-muted-foreground">{{ t('occurrences.categoryFromReason') }}</p>
             </div>
             <div v-if="resolvedProcess" class="col-span-2 rounded-md border border-blue-500/30 bg-blue-500/5 p-3 space-y-2">
               <p class="text-sm font-medium">{{ t('occurrences.processGuidanceTitle') }}: {{ resolvedProcess.name }}</p>

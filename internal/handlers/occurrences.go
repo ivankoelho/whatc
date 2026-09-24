@@ -166,6 +166,26 @@ func (a *App) visibleOccurrences(query *gorm.DB, userID, orgID uuid.UUID) *gorm.
 		visibleContacts, userID)
 }
 
+// suggestedCategory is the category an occurrence gets from its reason ("O que
+// aconteceu"), falling back to the reason's process. Nil when neither has one
+// or it no longer belongs to the org.
+func (a *App) suggestedCategory(orgID uuid.UUID, reason *models.OccurrenceWhatHappened, process *models.OccurrenceProcess) *models.OccurrenceCategory {
+	var id *uuid.UUID
+	switch {
+	case reason != nil && reason.CategoryID != nil:
+		id = reason.CategoryID
+	case process != nil && process.CategoryID != nil:
+		id = process.CategoryID
+	default:
+		return nil
+	}
+	var cat models.OccurrenceCategory
+	if a.DB.Where("id = ? AND organization_id = ?", *id, orgID).First(&cat).Error != nil {
+		return nil
+	}
+	return &cat
+}
+
 // resolveAssignee validates that a user id from a request body names a real
 // user in this organisation. Returns nil when the caller sent no assignee.
 // Without this check an arbitrary UUID lands in assigned_user_id and the
@@ -418,6 +438,15 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 		}
 		occ.WhatHappenedID = &id
 		whatHappened = wh
+	}
+
+	// The agent says what happened; the category follows from it unless the
+	// agent picked one.
+	if occ.CategoryID == nil {
+		if cat := a.suggestedCategory(orgID, whatHappened, processRow); cat != nil {
+			occ.CategoryID = &cat.ID
+			category = cat
+		}
 	}
 
 	// Derive the title when the agent didn't type one: "Categoria — Produto",
@@ -807,10 +836,18 @@ func (a *App) UpdateOccurrence(r *fastglue.Request) error {
 			if err != nil {
 				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid what_happened_id", nil, "")
 			}
-			if _, err := findByIDAndOrg[models.OccurrenceWhatHappened](a.DB, r, id, orgID, "Reason"); err != nil {
+			wh, err := findByIDAndOrg[models.OccurrenceWhatHappened](a.DB, r, id, orgID, "Reason")
+			if err != nil {
 				return nil
 			}
 			updates["what_happened_id"] = id
+			// Same rule as on create: a new reason without an explicit category
+			// brings its own category.
+			if req.CategoryID == nil {
+				if cat := a.suggestedCategory(orgID, wh, nil); cat != nil {
+					updates["category_id"] = cat.ID
+				}
+			}
 		}
 	}
 
