@@ -52,7 +52,7 @@ function isAccessible(item: NavItem): boolean {
   if (item.childPermissions) {
     return item.childPermissions.some(p => authStore.hasPermission(p, 'read'))
   }
-  return !item.permission || authStore.hasPermission(item.permission, item.permissionAction || 'read')
+  return !item.permission || authStore.hasPermission(item.permission, 'read')
 }
 
 function filterItems(items: NavSection['items']) {
@@ -70,7 +70,7 @@ function filterItems(items: NavSection['items']) {
       const firstAccessibleChild: NavItem | undefined = filteredChildren?.[0] ?? filteredGroups?.[0]?.items[0]
 
       let effectivePath = item.path
-      if (item.childPermissions && item.permission && !authStore.hasPermission(item.permission, item.permissionAction || 'read') && firstAccessibleChild) {
+      if (item.childPermissions && item.permission && !authStore.hasPermission(item.permission, 'read') && firstAccessibleChild) {
         effectivePath = firstAccessibleChild.path
       }
 

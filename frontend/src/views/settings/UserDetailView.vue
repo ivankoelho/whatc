@@ -75,7 +75,6 @@ const form = ref({
   role_id: '',
   is_active: true,
   is_super_admin: false,
-  xprocess_seller_code: '',
 })
 
 const breadcrumbs = computed(() => [
@@ -112,7 +111,6 @@ function syncForm() {
     role_id: user.value.role_id || '',
     is_active: user.value.is_active,
     is_super_admin: user.value.is_super_admin || false,
-    xprocess_seller_code: user.value.xprocess_seller_code || '',
   }
 }
 
@@ -143,7 +141,6 @@ async function save() {
       full_name: form.value.full_name,
       role_id: form.value.role_id,
       is_active: form.value.is_active,
-      xprocess_seller_code: form.value.xprocess_seller_code || undefined,
     }
     if (form.value.password) data.password = form.value.password
     if (isSuperAdmin.value) data.is_super_admin = form.value.is_super_admin
@@ -266,10 +263,6 @@ onMounted(async () => {
                 </SelectItem>
               </SelectContent>
             </Select>
-          </div>
-          <div class="space-y-1.5">
-            <Label class="text-xs">{{ $t('users.xprocessSellerCode') }}</Label>
-            <Input v-model="form.xprocess_seller_code" :placeholder="$t('users.xprocessSellerCodePlaceholder')" :disabled="!canWrite" />
           </div>
           <div class="flex items-center justify-between">
             <Label class="text-xs font-normal cursor-pointer">{{ $t('users.accountActive') }}</Label>

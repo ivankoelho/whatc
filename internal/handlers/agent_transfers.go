@@ -519,7 +519,6 @@ func (a *App) CreateAgentTransfer(r *fastglue.Request) error {
 	// Skip if already assigned to preserve a manually set relationship manager.
 	if agentID != nil && settings != nil && settings.AgentAssignment.AssignToSameAgent && contact.AssignedUserID == nil {
 		a.DB.Model(contact).Update("assigned_user_id", agentID)
-		a.assignOpenSalesOpportunityToAgent(a.DB, contact, *agentID)
 	}
 
 	// End any active chatbot session
@@ -946,7 +945,6 @@ func (a *App) AssignAgentTransfer(r *fastglue.Request) error {
 		settings, _ := a.getChatbotSettingsCached(orgID, "")
 		if settings != nil && settings.AgentAssignment.AssignToSameAgent && transfer.Contact.AssignedUserID == nil {
 			a.DB.Model(transfer.Contact).Update("assigned_user_id", targetAgentID)
-			a.assignOpenSalesOpportunityToAgent(a.DB, transfer.Contact, *targetAgentID)
 		}
 	} else if targetAgentID == nil && transfer.Contact != nil {
 		// Unassigning (returning to queue) — clear the relationship-manager
@@ -1187,7 +1185,6 @@ func (a *App) PickNextTransfer(r *fastglue.Request) error {
 				a.Log.Error("Failed to update contact assignment", "error", err, "transfer_id", transfer.ID)
 				return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update contact assignment", nil, "")
 			}
-			a.assignOpenSalesOpportunityToAgent(tx, &contact, userID)
 		}
 	}
 
@@ -1420,7 +1417,6 @@ func (a *App) saveAndFinalizeTransfer(transfer *models.AgentTransfer, account *m
 	// already grant the assigned agent visibility into the chat.
 	if transfer.AgentID != nil && settings != nil && settings.AgentAssignment.AssignToSameAgent && contact.AssignedUserID == nil {
 		a.DB.Model(contact).Update("assigned_user_id", transfer.AgentID)
-		a.assignOpenSalesOpportunityToAgent(a.DB, contact, *transfer.AgentID)
 	}
 
 	// End any active chatbot session

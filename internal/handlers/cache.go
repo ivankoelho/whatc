@@ -24,11 +24,11 @@ const (
 	// immediately; the short TTL bounds a missed invalidation to minutes.
 	accountDefaultTeamCacheTTL = 5 * time.Minute
 	webhooksCacheTTL           = 6 * time.Hour
-	slaSettingsCacheTTL        = 6 * time.Hour
-	aiContextsCacheTTL         = 6 * time.Hour
-	userPermissionsCacheTTL    = 6 * time.Hour
-	rolePermissionsCacheTTL    = 6 * time.Hour
-	tagsCacheTTL               = 6 * time.Hour
+	slaSettingsCacheTTL     = 6 * time.Hour
+	aiContextsCacheTTL      = 6 * time.Hour
+	userPermissionsCacheTTL = 6 * time.Hour
+	rolePermissionsCacheTTL = 6 * time.Hour
+	tagsCacheTTL            = 6 * time.Hour
 
 	// Cache key prefixes
 	settingsCachePrefix        = "chatbot:settings:"
@@ -382,8 +382,8 @@ func (a *App) getSLAEnabledSettingsCached() ([]models.ChatbotSettings, error) {
 
 	// Cache miss - fetch from database
 	var settings []models.ChatbotSettings
-	if err := a.DB.Where("sla_enabled = ? OR close_inactive_attendances = ? OR occurrence_sla_enabled = ? OR sales_opportunity_sla_enabled = ?",
-		true, true, true, true).Find(&settings).Error; err != nil {
+	if err := a.DB.Where("sla_enabled = ? OR close_inactive_attendances = ? OR occurrence_sla_enabled = ?",
+		true, true, true).Find(&settings).Error; err != nil {
 		return nil, err
 	}
 

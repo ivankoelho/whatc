@@ -6,9 +6,6 @@ declare module 'vue-router' {
   interface RouteMeta {
     requiresAuth?: boolean
     permission?: string // Resource permission required (e.g., 'analytics', 'chat')
-    // Action to check `permission` against — defaults to 'read'. Use
-    // 'view_all' for org-wide aggregate views (see /sales/dashboard).
-    permissionAction?: string
     anyPermission?: string[] // Route is allowed if the user has read on ANY of these (settings hubs)
   }
 }
@@ -161,20 +158,6 @@ const router = createRouter({
           name: 'occurrence-detail',
           component: () => import('@/views/crm/OccurrenceDetailView.vue'),
           meta: { permission: 'occurrences' }
-        },
-        {
-          path: 'sales/operation',
-          name: 'sales-operation',
-          component: () => import('@/views/sales/SalesOperationView.vue'),
-          meta: { permission: 'sales_opportunities' }
-        },
-        {
-          path: 'sales/dashboard',
-          name: 'sales-dashboard',
-          component: () => import('@/views/sales/SalesDashboardView.vue'),
-          // Finding 7: org-wide aggregates — spec §7 reserves this for
-          // manager/admin (view_all), not every agent with base 'read'.
-          meta: { permission: 'sales_opportunities', permissionAction: 'view_all' }
         },
         {
           path: 'analytics/agents',
@@ -417,8 +400,6 @@ const navigationOrder = [
   { path: '/', permission: 'analytics' },
   { path: '/chat', permission: 'chat' },
   { path: '/crm/occurrences', permission: 'occurrences' },
-  { path: '/sales/operation', permission: 'sales_opportunities' },
-  { path: '/sales/dashboard', permission: 'sales_opportunities', action: 'view_all' },
   { path: '/chatbot', permission: 'settings.chatbot', childPaths: [
     { path: '/chatbot', permission: 'settings.chatbot' },
     { path: '/chatbot/keywords', permission: 'chatbot.keywords' },
@@ -463,7 +444,7 @@ const navigationOrder = [
 function getFirstAccessibleRoute(authStore: ReturnType<typeof useAuthStore>): string {
   for (const item of navigationOrder) {
     // Check if user has permission for this item
-    if (authStore.hasPermission(item.permission, item.action || 'read')) {
+    if (authStore.hasPermission(item.permission, 'read')) {
       return item.path
     }
     // Check child paths if available
@@ -497,8 +478,7 @@ router.beforeEach(async (to, _from, next) => {
     // Check permission-based access
     const requiredPermission = to.meta.permission
     if (requiredPermission) {
-      const requiredAction = to.meta.permissionAction || 'read'
-      if (!authStore.hasPermission(requiredPermission, requiredAction)) {
+      if (!authStore.hasPermission(requiredPermission, 'read')) {
         // Redirect to first accessible page
         return next({ path: getFirstAccessibleRoute(authStore) })
       }

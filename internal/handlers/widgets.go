@@ -125,13 +125,6 @@ var widgetDataSources = map[string][]string{
 	"transfers":   {"status", "source"},
 	"sessions":    {"status"},
 	"occurrences": {"priority", "stage_id", "category_id", "unit_id", "department_id", "sale_channel"},
-	// This list also drives group_by_field validation in CreateWidget/UpdateWidget
-	// and the frontend's Group By / Filter dropdowns. assigned_user_id is valid
-	// here (group-by/listing): getGroupedData's query for sales_opportunities
-	// never joins contacts, so it's unambiguous on that path. It is deliberately
-	// excluded from allowedFilterFields["sales_opportunities"] below instead —
-	// see the comment there for why the filter path is different.
-	"sales_opportunities": {"stage", "status", "assigned_user_id"},
 }
 
 // Available metrics
@@ -210,90 +203,6 @@ func (a *App) ensureDefaultSACWidgets(orgID uuid.UUID) error {
 	return a.DB.Create(&widgets).Error
 }
 
-// salesOpportunityDashboardWidgets are the 6 managerial funnel cards seeded
-// once per organization (see ensureDefaultSalesOpportunityWidgets), mirroring
-// occurrenceDashboardWidgets/ensureDefaultSACWidgets' seed-on-first-read
-// pattern. Every Field value here (open/converted/lost/sla_breached) is
-// consumed by querySalesOpportunities's field-driven WHERE-clause switch,
-// not by allowedFilterFields/allowedGroupByFields — none of these widgets
-// set Filters or GroupByField, so those two whitelists don't apply. Metric
-// "sum" always aggregates the hardcoded estimated_value column, but Field
-// still matters for it: it's what picks the status filter via the same
-// switch (see the value-of-funnel card below, which uses Field: "open" so
-// the sum is scoped to aberta opportunities, matching its description).
-// Metric "rate" (final review finding 5) bypasses the Field switch entirely
-// — it always calls salesConversionRate, which computes convertidas/(convertidas+perdidas)
-// itself — so its Field value is documentation only.
-// Only "open"/"sla_breached" (current-state snapshots) skip the
-// date-in-range filter; "converted"/"lost"/"rate" stay period-scoped, but on
-// their own closure timestamp (converted_at/lost_at) rather than opened_at —
-// these are period reports of when opportunities closed, not of when the
-// still-open-today opportunities happened to be opened (final review
-// finding C) — see querySalesOpportunities.
-var salesOpportunityDashboardWidgets = []models.Widget{
-	{
-		Name: "Oportunidades abertas", Description: "Em potencial, orçamento ou direcionada",
-		DataSource: "sales_opportunities", Metric: "count", Field: "open",
-		DisplayType: "number", Color: "blue", Size: "small", ShowChange: false,
-		IsShared: true, IsDefault: true,
-	},
-	{
-		Name: "Convertidas", Description: "Marcadas como convertidas no período",
-		DataSource: "sales_opportunities", Metric: "count", Field: "converted",
-		DisplayType: "number", Color: "green", Size: "small", ShowChange: true,
-		IsShared: true, IsDefault: true,
-	},
-	{
-		Name: "Perdidas", Description: "Marcadas como perdidas no período",
-		DataSource: "sales_opportunities", Metric: "count", Field: "lost",
-		DisplayType: "number", Color: "red", Size: "small", ShowChange: true,
-		IsShared: true, IsDefault: true,
-	},
-	{
-		Name: "Valor estimado do funil", Description: "Soma de estimated_value das oportunidades abertas",
-		DataSource: "sales_opportunities", Metric: "sum", Field: "open",
-		DisplayType: "number", Color: "purple", Size: "small", ShowChange: false,
-		IsShared: true, IsDefault: true,
-	},
-	{
-		Name: "Oportunidades com SLA vencido", Description: "Mais de 7 dias em Direcionada",
-		DataSource: "sales_opportunities", Metric: "count", Field: "sla_breached",
-		DisplayType: "number", Color: "orange", Size: "small", ShowChange: false,
-		IsShared: true, IsDefault: true,
-	},
-	{
-		Name: "Taxa de conversão", Description: "Convertidas / (Convertidas + Perdidas) no período",
-		DataSource: "sales_opportunities", Metric: "rate", Field: "converted",
-		DisplayType: "number", Color: "cyan", Size: "small", ShowChange: true,
-		IsShared: true, IsDefault: true,
-	},
-}
-
-// ensureDefaultSalesOpportunityWidgets seeds the managerial dashboard's
-// default cards for an organization the first time its widgets are read, if
-// none exist yet. Same idempotent "seed on first read" pattern as
-// ensureDefaultSACWidgets above (including the same narrow, accepted
-// double-seed race on an org's very first ever widget fetch).
-func (a *App) ensureDefaultSalesOpportunityWidgets(orgID uuid.UUID) error {
-	var count int64
-	if err := a.DB.Model(&models.Widget{}).
-		Where("organization_id = ? AND data_source = ? AND is_default = true", orgID, "sales_opportunities").
-		Count(&count).Error; err != nil {
-		return err
-	}
-	if count > 0 {
-		return nil
-	}
-
-	widgets := make([]models.Widget, len(salesOpportunityDashboardWidgets))
-	for i, w := range salesOpportunityDashboardWidgets {
-		w.OrganizationID = orgID
-		w.DisplayOrder = i
-		widgets[i] = w
-	}
-	return a.DB.Create(&widgets).Error
-}
-
 // ListWidgets returns all widgets for the user (their own + shared)
 func (a *App) ListWidgets(r *fastglue.Request) error {
 	orgID, userID, err := a.getOrgAndUserID(r)
@@ -309,9 +218,6 @@ func (a *App) ListWidgets(r *fastglue.Request) error {
 	if err := a.ensureDefaultSACWidgets(orgID); err != nil {
 		a.Log.Error("Failed to seed default SAC widgets", "error", err)
 	}
-	if err := a.ensureDefaultSalesOpportunityWidgets(orgID); err != nil {
-		a.Log.Error("Failed to seed default sales opportunity widgets", "error", err)
-	}
 
 	// Get user's own widgets + shared widgets from org
 	var widgets []models.Widget
@@ -322,7 +228,6 @@ func (a *App) ListWidgets(r *fastglue.Request) error {
 		a.Log.Error("Failed to list widgets", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list widgets", nil, "")
 	}
-	widgets = a.filterSalesOpportunityWidgetsByViewAll(widgets, userID, orgID)
 
 	// Convert to response format
 	response := make([]WidgetResponse, len(widgets))
@@ -333,27 +238,6 @@ func (a *App) ListWidgets(r *fastglue.Request) error {
 	return r.SendEnvelope(map[string]any{
 		"widgets": response,
 	})
-}
-
-// filterSalesOpportunityWidgetsByViewAll drops sales_opportunities-sourced
-// widgets for callers without sales_opportunities:view_all. The 6 default
-// sales widgets are seeded is_shared=true so every org member with
-// analytics:read would otherwise see org-wide sales numbers on the main
-// /dashboard, bypassing the view_all gate that /sales/dashboard enforces at
-// the route level (finding B) — this closes the same gap in the API these
-// two list/data endpoints share.
-func (a *App) filterSalesOpportunityWidgetsByViewAll(widgets []models.Widget, userID, orgID uuid.UUID) []models.Widget {
-	if a.HasPermission(userID, models.ResourceSalesOpportunities, models.ActionViewAll, orgID) {
-		return widgets
-	}
-	filtered := widgets[:0]
-	for _, w := range widgets {
-		if w.DataSource == "sales_opportunities" {
-			continue
-		}
-		filtered = append(filtered, w)
-	}
-	return filtered
 }
 
 // GetWidget returns a single widget
@@ -899,9 +783,6 @@ func (a *App) GetAllWidgetsData(r *fastglue.Request) error {
 	if err := a.ensureDefaultSACWidgets(orgID); err != nil {
 		a.Log.Error("Failed to seed default SAC widgets", "error", err)
 	}
-	if err := a.ensureDefaultSalesOpportunityWidgets(orgID); err != nil {
-		a.Log.Error("Failed to seed default sales opportunity widgets", "error", err)
-	}
 
 	// Parse date range from query params
 	fromStr := string(r.RequestCtx.QueryArgs().Peek("from"))
@@ -916,7 +797,6 @@ func (a *App) GetAllWidgetsData(r *fastglue.Request) error {
 		a.Log.Error("Failed to list widgets", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list widgets", nil, "")
 	}
-	widgets = a.filterSalesOpportunityWidgetsByViewAll(widgets, userID, orgID)
 
 	// Execute queries for all widgets
 	results := make(map[string]WidgetDataResponse)
@@ -1021,10 +901,6 @@ func (a *App) executeWidgetQuery(orgID uuid.UUID, widget models.Widget, fromStr,
 	case "occurrences":
 		currentValue = a.queryOccurrences(orgID, widget.Metric, widget.Field, filters, periodStart, periodEnd)
 		previousValue = a.queryOccurrences(orgID, widget.Metric, widget.Field, filters, previousPeriodStart, previousPeriodEnd)
-
-	case "sales_opportunities":
-		currentValue = a.querySalesOpportunities(orgID, widget.Metric, widget.Field, filters, periodStart, periodEnd)
-		previousValue = a.querySalesOpportunities(orgID, widget.Metric, widget.Field, filters, previousPeriodStart, previousPeriodEnd)
 	}
 
 	response.Value = currentValue
@@ -1191,89 +1067,6 @@ func (a *App) queryOccurrences(orgID uuid.UUID, metric, field string, filters []
 	return float64(count)
 }
 
-// querySalesOpportunities computes the sales funnel dashboard metrics,
-// mirroring queryOccurrences's field-driven WHERE clause switch.
-//
-// Unlike occurrences, this data source mixes two kinds of metric:
-//   - "converted"/"lost" (and "rate", derived from both) are period reports —
-//     they count opportunities marked convertida/perdida during [start, end],
-//     i.e. whose converted_at/lost_at falls in the range, not opened_at: a
-//     sales cycle can span well beyond the selected window, and the widgets'
-//     own descriptions promise "no período" for the outcome, not the open
-//     date (final review finding C).
-//   - "open"/"sla_breached" are current-state snapshots — an opportunity
-//     opened before the selected range is still open or still breached today,
-//     so they intentionally ignore the range (final review finding 6).
-func (a *App) querySalesOpportunities(orgID uuid.UUID, metric, field string, filters []FilterInput, start, end time.Time) float64 {
-	// "rate" bypasses the field-driven query below entirely — salesConversionRate
-	// computes convertidas/(convertidas+perdidas) itself (final review finding 5).
-	if metric == "rate" {
-		return a.salesConversionRate(orgID, start, end)
-	}
-
-	q := a.DB.Model(&models.SalesOpportunity{}).Where("organization_id = ?", orgID)
-	switch field {
-	case "converted":
-		q = q.Where("converted_at >= ? AND converted_at <= ?", start, end)
-	case "lost":
-		q = q.Where("lost_at >= ? AND lost_at <= ?", start, end)
-	}
-	for _, f := range filters {
-		q = applyFilter("sales_opportunities", q, f)
-	}
-
-	switch field {
-	case "open":
-		q = q.Where("status = ?", models.SalesOpportunityStatusAberta)
-	case "converted":
-		q = q.Where("status = ?", models.SalesOpportunityStatusConvertida)
-	case "lost":
-		q = q.Where("status = ?", models.SalesOpportunityStatusPerdida)
-	case "sla_breached":
-		q = q.Where("sla_breached = ?", true)
-	}
-
-	switch metric {
-	case "count":
-		var count int64
-		q.Count(&count)
-		return float64(count)
-	case "sum":
-		var total float64
-		q.Select("COALESCE(SUM(estimated_value), 0)").Scan(&total)
-		return total
-	case "avg":
-		var avg float64
-		q.Select("COALESCE(AVG(estimated_value), 0)").Scan(&avg)
-		return avg
-	}
-	return 0
-}
-
-// salesConversionRate implements the fixed conversion-rate formula used
-// across the sales funnel spec: convertidas / (convertidas + perdidas) * 100
-// — aberta opportunities are excluded from the denominator on purpose.
-//
-// The numerator and denominator counts are scoped on each status's own
-// closure timestamp (converted_at/lost_at), matching the individual
-// "Convertidas"/"Perdidas" cards in querySalesOpportunities (final review
-// finding C) — not opened_at, which would undercount opportunities whose
-// sales cycle spans outside the selected period.
-func (a *App) salesConversionRate(orgID uuid.UUID, start, end time.Time) float64 {
-	var converted, lost int64
-	base := a.DB.Model(&models.SalesOpportunity{}).Where("organization_id = ?", orgID)
-	base.Session(&gorm.Session{}).
-		Where("status = ? AND converted_at >= ? AND converted_at <= ?", models.SalesOpportunityStatusConvertida, start, end).
-		Count(&converted)
-	base.Session(&gorm.Session{}).
-		Where("status = ? AND lost_at >= ? AND lost_at <= ?", models.SalesOpportunityStatusPerdida, start, end).
-		Count(&lost)
-	if converted+lost == 0 {
-		return 0
-	}
-	return float64(converted) / float64(converted+lost) * 100
-}
-
 func (a *App) getChartData(orgID uuid.UUID, widget models.Widget, filters []FilterInput, start, end time.Time) []ChartPoint {
 	chartData := make([]ChartPoint, 0)
 
@@ -1363,17 +1156,6 @@ var allowedFilterFields = map[string]map[string]bool{
 		"department_id": true,
 		"sale_channel":  true,
 	},
-	"sales_opportunities": {
-		"stage":  true,
-		"status": true,
-		// assigned_user_id omitted HERE ONLY (the filter whitelist): ambiguous
-		// against the contacts join in tableQuerySQL["sales_opportunities"]
-		// (both sales_opportunities and contacts have this column, and filter
-		// columns interpolate unqualified) until buildFilterSQL is made
-		// alias-aware. It remains valid for group_by_field/listing purposes —
-		// see widgetDataSources["sales_opportunities"] above, whose query path
-		// (getGroupedData) never joins contacts.
-	},
 }
 
 // allowedAggregateFields enumerates the columns each data source is
@@ -1400,8 +1182,6 @@ func resolveDataSourceTable(dataSource string) (tableName, dateField string, ok 
 		return "chatbot_sessions", "created_at", true
 	case "occurrences":
 		return "occurrences", "opened_at", true
-	case "sales_opportunities":
-		return "sales_opportunities", "opened_at", true
 	default:
 		return "", "", false
 	}
@@ -1442,12 +1222,6 @@ func (a *App) getGroupedData(orgID uuid.UUID, widget models.Widget, filters []Fi
 		"message_type": true, "assigned_user_id": true, "channel": true,
 		"is_active": true, "priority": true, "category": true,
 		"type": true, "action_type": true, "provider": true,
-		// stage: sales_opportunities only (see widgetDataSources above). The
-		// GROUP BY generated below is generic against resolveDataSourceTable's
-		// table for the current widget.DataSource, and no other data source
-		// lists "stage" in widgetDataSources, so this can't leak into another
-		// source's query.
-		"stage": true,
 	}
 	if !allowedGroupByFields[widget.GroupByField] {
 		a.Log.Error("Invalid GroupByField", "field", widget.GroupByField)
@@ -1762,17 +1536,6 @@ var tableQuerySQL = map[string]struct{ base, orderBy string }{
 			LEFT JOIN occurrence_stages s ON s.id = o.stage_id
 			WHERE o.organization_id = ? AND o.opened_at >= ? AND o.opened_at <= ? AND o.deleted_at IS NULL`,
 		orderBy: " ORDER BY o.opened_at DESC LIMIT 10",
-	},
-	"sales_opportunities": {
-		// Same soft-delete caveat as occurrences above: raw SQL bypasses
-		// GORM's scope, so so.deleted_at IS NULL is explicit here.
-		base: `SELECT so.id, COALESCE(c.profile_name, c.phone_number) as label,
-			so.opportunity_number || ' · ' || so.stage as sub_label,
-			so.status, '' as direction, so.opened_at as created_at
-			FROM sales_opportunities so
-			LEFT JOIN contacts c ON c.id = so.contact_id
-			WHERE so.organization_id = ? AND so.opened_at >= ? AND so.opened_at <= ? AND so.deleted_at IS NULL`,
-		orderBy: " ORDER BY so.opened_at DESC LIMIT 10",
 	},
 }
 

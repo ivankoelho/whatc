@@ -21,7 +21,6 @@ export interface User {
   organization_id: string
   created_at: string
   updated_at: string
-  xprocess_seller_code?: string
 }
 
 export interface CreateUserData {
@@ -39,7 +38,6 @@ export interface UpdateUserData {
   role_id?: string
   is_active?: boolean
   is_super_admin?: boolean
-  xprocess_seller_code?: string
 }
 
 export interface FetchUsersParams {
