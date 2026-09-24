@@ -222,7 +222,7 @@ const handleLogout = async () => {
                       :aria-current="item.active ? 'page' : undefined"
                       @click="isMobileMenuOpen = false"
                     >
-                      <component :is="item.icon" class="h-4 w-4 shrink-0" aria-hidden="true" />
+                      <component :is="item.icon" :class="['h-4 w-4 shrink-0', item.color]" aria-hidden="true" />
                       <span :class="isCollapsed && 'md:sr-only'">{{ $t(item.name) }}</span>
                     </RouterLink>
                   </TooltipTrigger>
@@ -245,7 +245,7 @@ const handleLogout = async () => {
                     :aria-current="route.path === child.path ? 'page' : undefined"
                     @click="isMobileMenuOpen = false"
                   >
-                    <component :is="child.icon" class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    <component :is="child.icon" :class="['h-3.5 w-3.5 shrink-0', item.color]" aria-hidden="true" />
                     <span>{{ $t(child.name) }}</span>
                   </RouterLink>
                 </template>
@@ -278,7 +278,7 @@ const handleLogout = async () => {
                   :aria-current="item.active ? 'page' : undefined"
                   @click="isMobileMenuOpen = false"
                 >
-                  <component :is="item.icon" class="h-4 w-4 shrink-0" aria-hidden="true" />
+                  <component :is="item.icon" :class="['h-4 w-4 shrink-0', item.color]" aria-hidden="true" />
                   <span :class="isCollapsed && 'md:sr-only'">{{ $t(item.name) }}</span>
                 </RouterLink>
               </TooltipTrigger>
@@ -307,7 +307,7 @@ const handleLogout = async () => {
                   :aria-current="route.path === child.path ? 'page' : undefined"
                   @click="isMobileMenuOpen = false"
                 >
-                  <component :is="child.icon" class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <component :is="child.icon" :class="['h-3.5 w-3.5 shrink-0', item.color]" aria-hidden="true" />
                   <span>{{ $t(child.name) }}</span>
                 </RouterLink>
               </template>
@@ -327,7 +327,7 @@ const handleLogout = async () => {
                 :aria-current="route.path === child.path ? 'page' : undefined"
                 @click="isMobileMenuOpen = false"
               >
-                <component :is="child.icon" class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                <component :is="child.icon" :class="['h-3.5 w-3.5 shrink-0', item.color]" aria-hidden="true" />
                 <span>{{ $t(child.name) }}</span>
               </RouterLink>
             </template>

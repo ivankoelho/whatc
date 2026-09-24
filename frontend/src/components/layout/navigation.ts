@@ -24,6 +24,8 @@ export interface NavItem {
   name: string
   path: string
   icon: Component
+  /** Tailwind text-colour classes for the icon; children inherit the parent's. */
+  color?: string
   permission?: string
   childPermissions?: string[]
   children?: NavItem[]
@@ -52,18 +54,21 @@ export const navigationSections: NavSection[] = [
         name: 'nav.dashboard',
         path: '/',
         icon: LayoutDashboard,
+        color: 'text-sky-400 light:text-sky-600',
         permission: 'analytics'
       },
       {
         name: 'nav.chat',
         path: '/chat',
         icon: MessageSquare,
+        color: 'text-emerald-400 light:text-emerald-600',
         permission: 'chat'
       },
       {
         name: 'nav.crm',
         path: '/crm/occurrences',
         icon: ClipboardList,
+        color: 'text-indigo-400 light:text-indigo-600',
         permission: 'occurrences'
       },
     ]
@@ -75,6 +80,7 @@ export const navigationSections: NavSection[] = [
         name: 'nav.chatbot',
         path: '/chatbot',
         icon: Bot,
+        color: 'text-violet-400 light:text-violet-600',
         permission: 'settings.chatbot',
         childPermissions: ['settings.chatbot', 'chatbot.keywords', 'flows.chatbot', 'chatbot.ai', 'transfers'],
         children: [
@@ -89,18 +95,21 @@ export const navigationSections: NavSection[] = [
         name: 'nav.campaigns',
         path: '/campaigns',
         icon: Megaphone,
+        color: 'text-teal-400 light:text-teal-600',
         permission: 'campaigns'
       },
       {
         name: 'nav.templates',
         path: '/templates',
         icon: FileText,
+        color: 'text-blue-400 light:text-blue-600',
         permission: 'templates'
       },
       {
         name: 'nav.flows',
         path: '/flows',
         icon: Workflow,
+        color: 'text-cyan-400 light:text-cyan-600',
         permission: 'flows.whatsapp'
       },
     ]
@@ -108,9 +117,9 @@ export const navigationSections: NavSection[] = [
   {
     label: 'nav.sectionCalling',
     items: [
-      { name: 'nav.callLogs', path: '/calling/logs', icon: PhoneCall, permission: 'call_logs' },
-      { name: 'nav.ivrFlows', path: '/calling/ivr-flows', icon: Workflow, permission: 'ivr_flows' },
-      { name: 'nav.callTransfers', path: '/calling/transfers', icon: PhoneForwarded, permission: 'call_transfers' },
+      { name: 'nav.callLogs', path: '/calling/logs', icon: PhoneCall, color: 'text-teal-400 light:text-teal-600', permission: 'call_logs' },
+      { name: 'nav.ivrFlows', path: '/calling/ivr-flows', icon: Workflow, color: 'text-cyan-400 light:text-cyan-600', permission: 'ivr_flows' },
+      { name: 'nav.callTransfers', path: '/calling/transfers', icon: PhoneForwarded, color: 'text-sky-400 light:text-sky-600', permission: 'call_transfers' },
     ]
   },
   {
@@ -120,12 +129,14 @@ export const navigationSections: NavSection[] = [
         name: 'nav.agentAnalytics',
         path: '/analytics/agents',
         icon: BarChart3,
+        color: 'text-blue-400 light:text-blue-600',
         permission: 'analytics.agents'
       },
       {
         name: 'nav.metaInsights',
         path: '/analytics/meta-insights',
         icon: LineChart,
+        color: 'text-violet-400 light:text-violet-600',
         permission: 'analytics'
       },
     ]
