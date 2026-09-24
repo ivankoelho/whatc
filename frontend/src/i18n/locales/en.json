@@ -1989,6 +1989,8 @@
     "currentConversationOnlyDesc": "When enabled, agents only see messages from the current session",
     "strictConversationVisibility": "Restrict conversations to the assigned agent",
     "strictConversationVisibilityDesc": "When on, an assigned conversation is visible and answerable only by the responsible agent. Supervisors and managers keep access via permissions.",
+    "signWithAgentName": "Sign messages with the agent's name",
+    "signWithAgentNameDesc": "When on, outgoing free-text and media captions are prefixed with the agent's first name (in bold), so the customer sees who is replying. Does not affect templates or the internal label.",
     "businessHours": "Business Hours",
     "businessHoursDesc": "Set when the chatbot is active and configure out-of-hours behavior",
     "enableBusinessHours": "Enable Business Hours",
