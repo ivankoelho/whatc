@@ -136,7 +136,7 @@ test.describe('Teams - Detail Page CRUD', () => {
     const href = await navigateToFirstItem(page)
     if (!href) { test.skip(true, 'No teams exist'); return }
 
-    await expectDeleteFromForm(page, '/settings/teams')
+    await expectDeleteFromForm(page, '/settings/access')
   })
 
   test('should show metadata', async ({ page }) => {

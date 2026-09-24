@@ -412,6 +412,56 @@ func BackfillWhatHappenedPermission(db *gorm.DB, lo logf.Logger) error {
 	return nil
 }
 
+// BackfillOccurrenceProcessesPermission concede occurrences.processes:{read,write,delete}
+// aos papéis que já administram occurrences.categories — mesmo raciocínio de
+// BackfillWhatHappenedPermission: telas de catálogo do SAC nascem juntas e são
+// geridas pelas mesmas pessoas.
+//
+// Backfill PRÓPRIO (não entra em nenhum grupo existente) pela mesma razão
+// documentada em BackfillWhatHappenedPermission: qualquer guarda de
+// idempotência compartilhada marcaria como "já migrada" uma organização que
+// só tinha as permissões antigas, e ela nunca receberia esta nova. Puramente
+// aditivo: nunca revoga nada.
+func BackfillOccurrenceProcessesPermission(db *gorm.DB, lo logf.Logger) error {
+	var seeded int64
+	if err := db.Model(&models.Permission{}).
+		Where("resource = ?", models.ResourceOccurrenceProcesses).
+		Count(&seeded).Error; err != nil {
+		return fmt.Errorf("failed to count the occurrence-processes permission: %w", err)
+	}
+	if seeded == 0 {
+		lo.Warn("occurrences.processes permissions not seeded yet, did nothing")
+		return nil
+	}
+
+	res := db.Exec(`
+		INSERT INTO role_permissions (custom_role_id, permission_id)
+		SELECT DISTINCT r.id, target.id
+		FROM custom_roles r
+		JOIN role_permissions rp ON rp.custom_role_id = r.id
+		JOIN permissions src ON src.id = rp.permission_id
+		JOIN permissions target ON target.resource = ? AND target.action = src.action
+		WHERE r.deleted_at IS NULL
+		  AND src.resource = ?
+		  AND NOT EXISTS (
+		    SELECT 1 FROM role_permissions existing
+		    WHERE existing.custom_role_id = r.id AND existing.permission_id = target.id
+		  )
+		ON CONFLICT DO NOTHING`,
+		models.ResourceOccurrenceProcesses, models.ResourceOccurrenceCategories,
+	)
+	if res.Error != nil {
+		return fmt.Errorf("failed to grant the occurrence-processes permission: %w", res.Error)
+	}
+
+	if res.RowsAffected == 0 {
+		lo.Info("occurrence-processes permission backfill: nothing pending")
+		return nil
+	}
+	lo.Info("occurrence-processes permission backfill complete", "links_granted", res.RowsAffected)
+	return nil
+}
+
 // BackfillContactNamePermission concede contacts.name:write aos papéis que
 // já renomeiam contatos hoje e aos que atendem conversas.
 //

@@ -6,27 +6,17 @@ import {
   Megaphone,
   Settings,
   Users,
-  Contact,
   Workflow,
   Sparkles,
   Key,
   UserX,
-  MessageSquareText,
-  Webhook,
   BarChart3,
   ShieldCheck,
-  Zap,
-  Shield,
   LineChart,
-  Tags,
   PhoneCall,
   PhoneForwarded,
   ScrollText,
-  ClipboardList,
-  Building2,
-  Timer,
-  Tag,
-  HelpCircle
+  ClipboardList
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
@@ -37,6 +27,14 @@ export interface NavItem {
   permission?: string
   childPermissions?: string[]
   children?: NavItem[]
+  /** Grouped submenu (labelled clusters), used instead of `children` when a
+   *  flat list would get too long to scan (e.g. Settings). */
+  groups?: NavChildGroup[]
+}
+
+export interface NavChildGroup {
+  label: string
+  items: NavItem[]
 }
 
 export interface NavSection {
@@ -141,27 +139,46 @@ export const navigationSections: NavSection[] = [
         path: '/settings',
         icon: Settings,
         permission: 'settings.general',
-        childPermissions: ['settings.general', 'settings.chatbot', 'accounts', 'contacts', 'canned_responses', 'tags', 'teams', 'users', 'roles', 'api_keys', 'webhooks', 'custom_actions', 'occurrences.stages', 'settings.sso', 'audit_logs'],
-        children: [
-          { name: 'nav.general', path: '/settings', icon: Settings, permission: 'settings.general' },
-          { name: 'nav.chatbot', path: '/settings/chatbot', icon: Bot, permission: 'settings.chatbot' },
-          { name: 'nav.accounts', path: '/settings/accounts', icon: Users, permission: 'accounts' },
-          { name: 'nav.contacts', path: '/settings/contacts', icon: Contact, permission: 'contacts' },
-          { name: 'nav.cannedResponses', path: '/settings/canned-responses', icon: MessageSquareText, permission: 'canned_responses' },
-          { name: 'nav.tags', path: '/settings/tags', icon: Tags, permission: 'tags' },
-          { name: 'nav.teams', path: '/settings/teams', icon: Users, permission: 'teams' },
-          { name: 'nav.users', path: '/settings/users', icon: Users, permission: 'users' },
-          { name: 'nav.roles', path: '/settings/roles', icon: Shield, permission: 'roles' },
-          { name: 'nav.apiKeys', path: '/settings/api-keys', icon: Key, permission: 'api_keys' },
-          { name: 'nav.webhooks', path: '/settings/webhooks', icon: Webhook, permission: 'webhooks' },
-          { name: 'nav.customActions', path: '/settings/custom-actions', icon: Zap, permission: 'custom_actions' },
-          { name: 'nav.occurrenceStages', path: '/settings/occurrence-stages', icon: ClipboardList, permission: 'occurrences.stages' },
-          { name: 'nav.units', path: '/settings/units', icon: Building2, permission: 'units' },
-          { name: 'nav.slaPolicies', path: '/settings/occurrence-sla-policies', icon: Timer, permission: 'occurrences.sla_policies' },
-          { name: 'nav.occurrenceCategories', path: '/settings/occurrence-categories', icon: Tag, permission: 'occurrences.categories' },
-          { name: 'nav.whatHappened', path: '/settings/occurrence-what-happened', icon: HelpCircle, permission: 'occurrences.what_happened' },
-          { name: 'nav.sso', path: '/settings/sso', icon: ShieldCheck, permission: 'settings.sso' },
-          { name: 'nav.auditLogs', path: '/settings/audit-logs', icon: ScrollText, permission: 'audit_logs' }
+        childPermissions: ['settings.general', 'settings.chatbot', 'accounts', 'contacts', 'canned_responses', 'tags', 'teams', 'users', 'roles', 'api_keys', 'webhooks', 'custom_actions', 'occurrences.stages', 'occurrences.categories', 'occurrences.what_happened', 'occurrences.processes', 'occurrences.sla_policies', 'units', 'settings.sso', 'audit_logs'],
+        groups: [
+          {
+            label: 'nav.groupOrganization',
+            items: [
+              { name: 'nav.general', path: '/settings', icon: Settings, permission: 'settings.general' },
+              { name: 'nav.sso', path: '/settings/sso', icon: ShieldCheck, permission: 'settings.sso' },
+              { name: 'nav.auditLogs', path: '/settings/audit-logs', icon: ScrollText, permission: 'audit_logs' }
+            ]
+          },
+          {
+            label: 'nav.groupChannels',
+            items: [
+              { name: 'nav.accounts', path: '/settings/accounts', icon: Users, permission: 'accounts' }
+            ]
+          },
+          {
+            label: 'nav.groupService',
+            items: [
+              { name: 'nav.groupService', path: '/settings/service', icon: Bot, childPermissions: ['settings.chatbot', 'canned_responses', 'tags', 'contacts'] }
+            ]
+          },
+          {
+            label: 'nav.groupOccurrences',
+            items: [
+              { name: 'nav.groupOccurrences', path: '/settings/occurrences', icon: ClipboardList, childPermissions: ['occurrences.stages', 'occurrences.categories', 'occurrences.what_happened', 'occurrences.processes', 'occurrences.sla_policies', 'units'] }
+            ]
+          },
+          {
+            label: 'nav.groupAccess',
+            items: [
+              { name: 'nav.groupAccess', path: '/settings/access', icon: Users, childPermissions: ['teams', 'users', 'roles'] }
+            ]
+          },
+          {
+            label: 'nav.groupIntegrations',
+            items: [
+              { name: 'nav.groupIntegrations', path: '/settings/integrations', icon: Key, childPermissions: ['api_keys', 'webhooks', 'custom_actions'] }
+            ]
+          }
         ]
       }
     ]

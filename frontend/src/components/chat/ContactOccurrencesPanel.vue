@@ -34,8 +34,8 @@ async function load() {
   }
 }
 
+// Keep the dialog open: the form now continues into the review-and-send step.
 function onCreated() {
-  isDialogOpen.value = false
   load()
 }
 
@@ -94,6 +94,7 @@ watch(() => props.contactId, load)
           :contact-phone="contactPhone"
           :contact-name="contactName"
           :source-transfer-id="sourceTransferId"
+          closable
           @created="onCreated"
           @cancel="isDialogOpen = false"
         />

@@ -80,7 +80,7 @@ test.describe('Organization Switching (Super Admin)', () => {
     await page.waitForSelector('table tbody tr', { timeout: 5000 }).catch(() => {})
 
     // Verify we're on users page
-    expect(page.url()).toContain('/settings/users')
+    expect(page.url()).toContain('/settings/access')
   })
 
   test('regular user cannot see organization switcher', async ({ page }) => {

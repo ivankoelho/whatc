@@ -133,6 +133,9 @@ func runMigrations(db *gorm.DB) error {
 		&models.Occurrence{},
 		&models.OccurrenceEvent{},
 		&models.OccurrenceCounter{},
+		&models.OccurrenceWhatHappened{},
+		&models.OccurrenceProcess{},
+		&models.OccurrenceProcessMessage{},
 		// Help Desk — unidade e departamento
 		&models.Unit{},
 		&models.Department{},
@@ -180,6 +183,9 @@ func cleanupTables(db *gorm.DB) {
 		"call_transfers",
 		"call_permissions",
 		// CRM de ocorrências
+		"occurrence_process_messages",
+		"occurrence_processes",
+		"occurrence_what_happened",
 		"occurrence_sla_policies",
 		"occurrence_counters",
 		"occurrence_events",
