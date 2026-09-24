@@ -25,6 +25,11 @@ type AgentAssignmentConfig struct {
 	// team-scoped supervisors with conversations:view_team sharing a team with
 	// the assigned agent, plus users with conversations:view_all.
 	StrictConversationVisibility bool `gorm:"column:strict_conversation_visibility;default:false" json:"strict_conversation_visibility"`
+	// SignWithAgentName, when true, prefixes the agent's first name (in bold) to
+	// outgoing free-text and media captions sent to the customer, so the client
+	// sees who is replying. Opt-in (default false); does not affect templates or
+	// interactive messages, nor the internal sent-by-agent label.
+	SignWithAgentName bool `gorm:"column:sign_with_agent_name;default:false" json:"sign_with_agent_name"`
 }
 
 // SLAConfig holds SLA tracking settings

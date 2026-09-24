@@ -206,6 +206,109 @@ func TestApp_SendOutgoingMessage_TextMessage_Success(t *testing.T) {
 	assert.Equal(t, mockServer.nextMessageID, dbMsg.WhatsAppMessageID)
 }
 
+// enableAgentNameSignature turns on the opt-in customer-facing agent signature
+// for the org (org-wide settings row, whats_app_account = '').
+func enableAgentNameSignature(t *testing.T, app *handlers.App, orgID uuid.UUID) {
+	t.Helper()
+	settings := &models.ChatbotSettings{OrganizationID: orgID}
+	require.NoError(t, app.DB.Where("organization_id = ? AND whats_app_account = ?", orgID, "").
+		FirstOrCreate(settings).Error)
+	require.NoError(t, app.DB.Model(&models.ChatbotSettings{}).
+		Where("id = ?", settings.ID).
+		Update("sign_with_agent_name", true).Error)
+	app.InvalidateChatbotSettingsCache(orgID)
+}
+
+// sentTextBody returns the text body of the single message captured by the mock.
+func sentTextBody(t *testing.T, mockServer *mockWhatsAppServer) string {
+	t.Helper()
+	require.Len(t, mockServer.sentMessages, 1)
+	return mockServer.sentMessages[0]["text"].(map[string]any)["body"].(string)
+}
+
+func makeAgentUser(t *testing.T, app *handlers.App, orgID uuid.UUID, fullName string) uuid.UUID {
+	t.Helper()
+	user := &models.User{
+		BaseModel:      models.BaseModel{ID: uuid.New()},
+		OrganizationID: orgID,
+		Email:          "agent-" + uuid.New().String()[:8] + "@test.com",
+		FullName:       fullName,
+		IsActive:       true,
+	}
+	require.NoError(t, app.DB.Create(user).Error)
+	return user.ID
+}
+
+// When the signature is on, an agent's outgoing text reaches WhatsApp prefixed
+// with the agent's first name in bold, while the stored message keeps the raw
+// text (the internal sent-by label already identifies the agent).
+func TestApp_SendOutgoingMessage_AgentNameSignature_On(t *testing.T) {
+	mockServer := newMockWhatsAppServer()
+	defer mockServer.close()
+
+	app := newMsgTestApp(t, mockServer)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	account := createTestAccount(t, app, org.ID)
+	contact := testutil.CreateTestContactWith(t, app.DB, org.ID, testutil.WithContactAccount(account.Name))
+	enableAgentNameSignature(t, app, org.ID)
+	agentID := makeAgentUser(t, app, org.ID, "Milena Souza")
+
+	opts := handlers.DefaultSendOptions()
+	opts.SentByUserID = &agentID
+	msg, err := app.SendOutgoingMessage(testutil.TestContext(t), handlers.OutgoingMessageRequest{
+		Account: account, Contact: contact, Type: models.MessageTypeText, Content: "Boa tarde! Tudo bem?",
+	}, opts)
+	require.NoError(t, err)
+	app.WaitForBackgroundTasks()
+
+	// Customer sees the first name in bold; stored content stays raw.
+	assert.Equal(t, "*Milena:*\nBoa tarde! Tudo bem?", sentTextBody(t, mockServer))
+	assert.Equal(t, "Boa tarde! Tudo bem?", msg.Content)
+}
+
+// With the signature off (default), the agent's text is sent verbatim.
+func TestApp_SendOutgoingMessage_AgentNameSignature_OffByDefault(t *testing.T) {
+	mockServer := newMockWhatsAppServer()
+	defer mockServer.close()
+
+	app := newMsgTestApp(t, mockServer)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	account := createTestAccount(t, app, org.ID)
+	contact := testutil.CreateTestContactWith(t, app.DB, org.ID, testutil.WithContactAccount(account.Name))
+	agentID := makeAgentUser(t, app, org.ID, "Milena Souza")
+
+	opts := handlers.DefaultSendOptions()
+	opts.SentByUserID = &agentID
+	_, err := app.SendOutgoingMessage(testutil.TestContext(t), handlers.OutgoingMessageRequest{
+		Account: account, Contact: contact, Type: models.MessageTypeText, Content: "Boa tarde!",
+	}, opts)
+	require.NoError(t, err)
+	app.WaitForBackgroundTasks()
+
+	assert.Equal(t, "Boa tarde!", sentTextBody(t, mockServer))
+}
+
+// Non-agent sends (chatbot/campaign/API) are never signed, even with the
+// setting on, because they carry no SentByUserID.
+func TestApp_SendOutgoingMessage_AgentNameSignature_SkipsNonAgent(t *testing.T) {
+	mockServer := newMockWhatsAppServer()
+	defer mockServer.close()
+
+	app := newMsgTestApp(t, mockServer)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	account := createTestAccount(t, app, org.ID)
+	contact := testutil.CreateTestContactWith(t, app.DB, org.ID, testutil.WithContactAccount(account.Name))
+	enableAgentNameSignature(t, app, org.ID)
+
+	_, err := app.SendOutgoingMessage(testutil.TestContext(t), handlers.OutgoingMessageRequest{
+		Account: account, Contact: contact, Type: models.MessageTypeText, Content: "Mensagem automática",
+	}, handlers.ChatbotSendOptions())
+	require.NoError(t, err)
+	app.WaitForBackgroundTasks()
+
+	assert.Equal(t, "Mensagem automática", sentTextBody(t, mockServer))
+}
+
 func TestApp_SendOutgoingMessage_TextMessage_APIError(t *testing.T) {
 	mockServer := newMockWhatsAppServer()
 	defer mockServer.close()
