@@ -529,3 +529,127 @@ func BackfillContactNamePermission(db *gorm.DB, lo logf.Logger) error {
 	lo.Info("contact name backfill complete", "links_granted", res.RowsAffected)
 	return nil
 }
+
+// salesOpportunityGrants concede sales_opportunities:{read,write} a quem já
+// atende (chat:write) e sales_opportunities:view_all a quem já enxerga toda
+// conversa (conversations:view_all) — a equivalência de capacidade definida
+// no spec §7 para papéis existentes que nunca tiveram a chance de ganhar
+// este recurso novo via SystemRolePermissions (que FixSystemRolePermissions
+// pula quando o papel já tem qualquer permissão).
+//
+// Puramente aditivo: nunca revoga nada.
+var salesOpportunityGrants = []grantRule{
+	{models.ResourceChat, models.ActionWrite, models.ResourceSalesOpportunities, models.ActionRead},
+	{models.ResourceChat, models.ActionWrite, models.ResourceSalesOpportunities, models.ActionWrite},
+	{models.ResourceConversations, models.ActionViewAll, models.ResourceSalesOpportunities, models.ActionViewAll},
+}
+
+// salesOpportunityPermissionKeys são as permissões que este backfill
+// distribui. A guarda de "já foi semeado" compara contra esta lista em vez
+// do tamanho de salesOpportunityGrants, que não corresponde 1:1 (view_all
+// não deriva de chat:write).
+var salesOpportunityPermissionKeys = []string{
+	models.ResourceSalesOpportunities + ":" + models.ActionRead,
+	models.ResourceSalesOpportunities + ":" + models.ActionWrite,
+	models.ResourceSalesOpportunities + ":" + models.ActionViewAll,
+}
+
+// BackfillSalesOpportunityPermissions concede as permissões do funil de
+// vendas aos papéis que já têm a capacidade equivalente por chat e por
+// conversations:view_all. Mesma razão de existir que
+// BackfillOccurrencePermissions: FixSystemRolePermissions pula qualquer
+// papel que já tenha permissões, então uma permissão nova jamais chega a uma
+// instalação existente por aquele caminho.
+//
+// É PURAMENTE ADITIVO: nunca revoga nada. Idempotência é por organização,
+// como o backfill de ocorrências: uma organização que já tenha qualquer
+// papel com qualquer permissão sales_opportunities:* é pulada inteira, então
+// isto roda uma vez por organização. Essa guarda vive inteira dentro do
+// INSERT, não como uma lista de ids calculada à parte.
+func BackfillSalesOpportunityPermissions(db *gorm.DB, lo logf.Logger) error {
+	var seededRows []string
+	if err := db.Model(&models.Permission{}).
+		Where("resource = ?", models.ResourceSalesOpportunities).
+		Pluck("resource || ':' || action", &seededRows).Error; err != nil {
+		return fmt.Errorf("failed to count sales opportunity permissions: %w", err)
+	}
+	seeded := make(map[string]bool, len(seededRows))
+	for _, k := range seededRows {
+		seeded[k] = true
+	}
+	for _, key := range salesOpportunityPermissionKeys {
+		if !seeded[key] {
+			lo.Warn("Sales opportunity permissions backfill: permissions not seeded yet, did nothing")
+			return nil
+		}
+	}
+
+	var pendingOrgs int64
+	if err := db.Raw(`
+		SELECT COUNT(*)
+		FROM organizations o
+		WHERE NOT EXISTS (
+			SELECT 1
+			FROM custom_roles r
+			JOIN role_permissions rp ON rp.custom_role_id = r.id
+			JOIN permissions p ON p.id = rp.permission_id
+			WHERE r.organization_id = o.id
+			  AND r.deleted_at IS NULL
+			  AND p.resource = 'sales_opportunities'
+		  )`).Scan(&pendingOrgs).Error; err != nil {
+		return fmt.Errorf("failed to count organisations pending the sales opportunity backfill: %w", err)
+	}
+	if pendingOrgs == 0 {
+		lo.Info("Sales opportunity permissions backfill: nothing pending, all organisations already migrated")
+		return nil
+	}
+
+	// Um único INSERT, pela mesma razão documentada em
+	// BackfillOccurrencePermissions: dentro de um statement só o Postgres lê
+	// um snapshot fixo, então a guarda "organização ainda não migrada" não vê
+	// as próprias linhas que este INSERT está gravando.
+	placeholders := make([]string, len(salesOpportunityGrants))
+	args := make([]any, 0, len(salesOpportunityGrants)*4)
+	for i, g := range salesOpportunityGrants {
+		placeholders[i] = "(?,?,?,?)"
+		args = append(args, g.fromResource, g.fromAction, g.toResource, g.toAction)
+	}
+
+	query := fmt.Sprintf(`
+		INSERT INTO role_permissions (custom_role_id, permission_id)
+		SELECT r.id, target.id
+		FROM custom_roles r
+		JOIN role_permissions rp ON rp.custom_role_id = r.id
+		JOIN permissions src ON src.id = rp.permission_id
+		JOIN (VALUES %s) AS g(from_resource, from_action, to_resource, to_action)
+		  ON src.resource = g.from_resource AND src.action = g.from_action
+		JOIN permissions target
+		  ON target.resource = g.to_resource AND target.action = g.to_action
+		WHERE r.deleted_at IS NULL
+		  AND NOT EXISTS (
+			SELECT 1 FROM role_permissions existing
+			WHERE existing.custom_role_id = r.id
+			  AND existing.permission_id = target.id
+		  )
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM custom_roles r2
+			JOIN role_permissions rp2 ON rp2.custom_role_id = r2.id
+			JOIN permissions p2 ON p2.id = rp2.permission_id
+			WHERE r2.organization_id = r.organization_id
+			  AND r2.deleted_at IS NULL
+			  AND p2.resource = 'sales_opportunities'
+		  )
+		ON CONFLICT (custom_role_id, permission_id) DO NOTHING`,
+		strings.Join(placeholders, ","),
+	)
+
+	res := db.Exec(query, args...)
+	if res.Error != nil {
+		return fmt.Errorf("failed to grant sales opportunity permissions: %w", res.Error)
+	}
+
+	lo.Info("Sales opportunity permissions backfill complete",
+		"organisations_processed", pendingOrgs, "links_granted", res.RowsAffected)
+	return nil
+}

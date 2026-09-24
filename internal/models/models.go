@@ -115,6 +115,10 @@ type User struct {
 	IsActive       bool       `gorm:"default:true" json:"is_active"`
 	IsAvailable    bool       `gorm:"default:true" json:"is_available"`    // Agent availability status (away/available)
 	IsSuperAdmin   bool       `gorm:"default:false" json:"is_super_admin"` // Super admin can access all organizations
+	// XProcessSellerCode identifies this user as a seller in the XProcess ERP
+	// (cod_vendedor). Filled manually by an admin; used only by the future
+	// Entrega 2 reconciliation job — unset has no effect in this delivery.
+	XProcessSellerCode *string `gorm:"column:xprocess_seller_code;size:20" json:"xprocess_seller_code,omitempty"`
 
 	// SSO fields
 	SSOProvider   string `gorm:"size:50" json:"sso_provider,omitempty"`     // google, microsoft, github, facebook, custom

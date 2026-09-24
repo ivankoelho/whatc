@@ -975,6 +975,85 @@ func TestApp_PickNextTransfer_DoesNotOverwriteExistingRelationshipManager(t *tes
 	assert.Equal(t, manager.ID, *got, "pickup must not overwrite a manually set relationship manager")
 }
 
+// readSalesOpportunityAssignedUser returns the current assigned_user_id for
+// a sales opportunity.
+func readSalesOpportunityAssignedUser(t *testing.T, app *handlers.App, oppID uuid.UUID) *uuid.UUID {
+	t.Helper()
+	var opp models.SalesOpportunity
+	require.NoError(t, app.DB.Where("id = ?", oppID).First(&opp).Error)
+	return opp.AssignedUserID
+}
+
+// TestApp_PickNextTransfer_AssignsOpenSalesOpportunityToAgent covers finding
+// A: the chatbot's "Realizar pedido" button routes to a team queue, so
+// contact.AssignedUserID (and therefore the opportunity's own snapshot at
+// creation) is nil at open time. Pickup is the moment an agent actually
+// takes ownership, so it must also claim the contact's open opportunity —
+// otherwise it stays invisible to the agent under the own-scope filter.
+func TestApp_PickNextTransfer_AssignsOpenSalesOpportunityToAgent(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+	upsertChatbotSettings(t, app, org.ID, true)
+
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	agent := createTestAgent(t, app, org.ID)
+
+	// Opportunity born unassigned, same as the queue-routed chatbot flow.
+	opp, err := app.CreateOrRetriggerSalesOpportunityForTest(contact, nil)
+	require.NoError(t, err)
+	require.Nil(t, opp.AssignedUserID)
+
+	createTestTransfer(t, app, org.ID, contact.ID, account.Name, models.TransferStatusActive, nil)
+
+	req := testutil.NewJSONRequest(t, nil)
+	testutil.SetAuthContext(req, org.ID, agent.ID)
+	require.NoError(t, app.PickNextTransfer(req))
+	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	gotContact := readContactAssignedUser(t, app, contact.ID)
+	require.NotNil(t, gotContact)
+	assert.Equal(t, agent.ID, *gotContact)
+
+	gotOpp := readSalesOpportunityAssignedUser(t, app, opp.ID)
+	require.NotNil(t, gotOpp, "expected the open sales opportunity to be assigned to the picking-up agent")
+	assert.Equal(t, agent.ID, *gotOpp)
+}
+
+// TestApp_PickNextTransfer_DoesNotOverwriteAssignedSalesOpportunity covers
+// the other half of finding A: an opportunity that already has an owner
+// (e.g. manually assigned by a sales manager) must not be reassigned just
+// because a different agent later picks up a queued transfer for the same
+// contact while contact.AssignedUserID happens to still be nil.
+func TestApp_PickNextTransfer_DoesNotOverwriteAssignedSalesOpportunity(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+	upsertChatbotSettings(t, app, org.ID, true)
+
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	owner := createTestAgent(t, app, org.ID)
+	agent := createTestAgent(t, app, org.ID)
+
+	opp, err := app.CreateOrRetriggerSalesOpportunityForTest(contact, nil)
+	require.NoError(t, err)
+	// Simulate the opportunity already having an owner (e.g. via the sales
+	// details endpoint) while the contact itself remains unassigned.
+	require.NoError(t, app.DB.Model(&models.SalesOpportunity{}).Where("id = ?", opp.ID).
+		Update("assigned_user_id", owner.ID).Error)
+
+	createTestTransfer(t, app, org.ID, contact.ID, account.Name, models.TransferStatusActive, nil)
+
+	req := testutil.NewJSONRequest(t, nil)
+	testutil.SetAuthContext(req, org.ID, agent.ID)
+	require.NoError(t, app.PickNextTransfer(req))
+	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	gotOpp := readSalesOpportunityAssignedUser(t, app, opp.ID)
+	require.NotNil(t, gotOpp)
+	assert.Equal(t, owner.ID, *gotOpp, "pickup must not overwrite an already-assigned opportunity")
+}
+
 func TestApp_ReturnAgentTransfersToQueue_DoesNotClearManualAssignment(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)

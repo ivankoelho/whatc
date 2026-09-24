@@ -277,23 +277,33 @@ func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 					if err != nil {
 						a.Log.Warn("buttons node has invalid team_id, skipping",
 							"node", node.ID, "team_id", tid, "error", err)
-						break
-					}
-					var count int64
-					a.DB.Model(&models.Team{}).
-						Where("id = ? AND organization_id = ?", parsed, ctx.contact.OrganizationID).
-						Count(&count)
-					if count == 0 {
-						a.Log.Warn("buttons node team_id not found in contact's organization, skipping",
-							"node", node.ID, "team_id", tid, "organization_id", ctx.contact.OrganizationID)
-						break
-					}
-					if err := a.DB.Model(&models.Contact{}).Where("id = ?", ctx.contact.ID).
-						Update("team_id", parsed).Error; err != nil {
-						a.Log.Error("buttons node failed to set contact team",
-							"node", node.ID, "contact", ctx.contact.ID, "error", err)
 					} else {
-						ctx.contact.TeamID = &parsed
+						var count int64
+						a.DB.Model(&models.Team{}).
+							Where("id = ? AND organization_id = ?", parsed, ctx.contact.OrganizationID).
+							Count(&count)
+						if count == 0 {
+							a.Log.Warn("buttons node team_id not found in contact's organization, skipping",
+								"node", node.ID, "team_id", tid, "organization_id", ctx.contact.OrganizationID)
+						} else if err := a.DB.Model(&models.Contact{}).Where("id = ?", ctx.contact.ID).
+							Update("team_id", parsed).Error; err != nil {
+							a.Log.Error("buttons node failed to set contact team",
+								"node", node.ID, "contact", ctx.contact.ID, "error", err)
+						} else {
+							ctx.contact.TeamID = &parsed
+						}
+					}
+				}
+
+				// create_opportunity: true opens a sales funnel entry for
+				// this contact (spec §5). Idempotent — a contact that
+				// already has one open just gets a "retriggered" event, no
+				// duplicate, no stage change (spec §5.2). Log-and-continue:
+				// a failure here must never block the bot from advancing.
+				if create, _ := b["create_opportunity"].(bool); create {
+					if _, err := a.createOrRetriggerSalesOpportunity(ctx.contact, nil); err != nil {
+						a.Log.Error("buttons node failed to create sales opportunity",
+							"node", node.ID, "contact", ctx.contact.ID, "error", err)
 					}
 				}
 				break
