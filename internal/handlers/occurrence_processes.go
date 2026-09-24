@@ -294,6 +294,13 @@ func (a *App) ensureDefaultOccurrenceProcesses(orgID uuid.UUID) error {
 			if err := tx.Create(&process).Error; err != nil {
 				return err
 			}
+			// The reason carries the category too (it drives the protocol's
+			// category); only fill it where an admin hasn't set one.
+			if err := tx.Model(&models.OccurrenceWhatHappened{}).
+				Where("id = ? AND category_id IS NULL", whatHappenedIDs[i]).
+				Update("category_id", categoryIDs[i]).Error; err != nil {
+				return err
+			}
 
 			messages := []models.OccurrenceProcessMessage{
 				{OrganizationID: orgID, ProcessID: process.ID, Stage: models.OccurrenceProcessMessageRegistration, Content: seed.registrationMessage, IsActive: true},
