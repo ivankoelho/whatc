@@ -57,6 +57,21 @@ const CLEANUP_STATEMENTS: Array<{ label: string; sql: string }> = [
     label: 'agent_transfers assigned to E2E users',
     sql: `DELETE FROM agent_transfers WHERE agent_id IN (SELECT id FROM users WHERE ${E2E_USER_EMAIL_PREDICATE})`,
   },
+  // Central de Vendas: sales_opportunities has FKs to contacts and users
+  // (assigned_user_id), and sales_opportunity_events to users (created_by_id).
+  // Events go first (they point at the opportunities, without an FK).
+  {
+    label: 'sales_opportunity_events of E2E opportunities',
+    sql: `DELETE FROM sales_opportunity_events WHERE sales_opportunity_id IN (SELECT id FROM sales_opportunities WHERE contact_id IN (SELECT id FROM contacts WHERE profile_name LIKE 'E2E-%' OR profile_name LIKE 'E2E %') OR assigned_user_id IN (SELECT id FROM users WHERE ${E2E_USER_EMAIL_PREDICATE}))`,
+  },
+  {
+    label: 'sales_opportunity_events created by E2E users',
+    sql: `DELETE FROM sales_opportunity_events WHERE created_by_id IN (SELECT id FROM users WHERE ${E2E_USER_EMAIL_PREDICATE})`,
+  },
+  {
+    label: 'sales_opportunities of E2E contacts or users',
+    sql: `DELETE FROM sales_opportunities WHERE contact_id IN (SELECT id FROM contacts WHERE profile_name LIKE 'E2E-%' OR profile_name LIKE 'E2E %') OR assigned_user_id IN (SELECT id FROM users WHERE ${E2E_USER_EMAIL_PREDICATE})`,
+  },
   // User org memberships first — covers both E2E users (so we can delete
   // them) and memberships pointing at E2E roles or orgs (so the role / org
   // delete below isn't blocked by FK).
