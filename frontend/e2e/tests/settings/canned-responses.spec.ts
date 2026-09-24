@@ -98,7 +98,7 @@ test.describe('Canned Responses Management', () => {
 
     await cannedResponsesPage.deleteFromDetail()
     await cannedResponsesPage.expectToast('deleted')
-    await page.waitForURL(/\/settings\/canned-responses$/)
+    await page.waitForURL(/\/settings\/service\?tab=canned-responses$/)
 
     await verifyAuditLogged(request, 'canned_response', id, 'deleted', {
       expectedFields: ['name'],

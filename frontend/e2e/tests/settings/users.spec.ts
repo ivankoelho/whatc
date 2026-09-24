@@ -165,7 +165,7 @@ test.describe('Users - Role-based Access', () => {
     await login(page, TEST_USERS.agent)
     await page.goto('/settings/users')
     await page.waitForURL(url => !url.pathname.endsWith('/settings/users'), { timeout: 5000 })
-    expect(page.url()).not.toContain('/settings/users')
+    expect(page.url()).not.toContain('/settings/access')
   })
 })
 

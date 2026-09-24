@@ -3,7 +3,9 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
@@ -19,6 +21,15 @@ import (
 // behavioural gain — see the spec's "no production change" constraint.
 func serviceWindowOpen(contact *models.Contact) bool {
 	return contact.LastInboundAt != nil && time.Since(*contact.LastInboundAt) < 24*time.Hour
+}
+
+// maxWhatsAppTextLength is WhatsApp's limit for a text message body.
+const maxWhatsAppTextLength = 4096
+
+// SendOccurrenceProtocolRequest is the optional body for sending the protocol
+// message. An absent, empty or blank Message keeps the legacy hardcoded text.
+type SendOccurrenceProtocolRequest struct {
+	Message string `json:"message"`
 }
 
 // SendOccurrenceProtocol sends the protocol number to the customer.
@@ -38,6 +49,21 @@ func (a *App) SendOccurrenceProtocol(r *fastglue.Request) error {
 		return nil
 	}
 
+	// The body is optional: no body keeps the legacy text. A present body must
+	// be valid JSON.
+	var customMessage string
+	if len(r.RequestCtx.PostBody()) > 0 {
+		var req SendOccurrenceProtocolRequest
+		if err := r.Decode(&req, "json"); err != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid request body", nil, "")
+		}
+		customMessage = strings.TrimSpace(req.Message)
+		if utf8.RuneCountInString(customMessage) > maxWhatsAppTextLength {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest,
+				"Message exceeds the 4096-character WhatsApp limit", nil, "")
+		}
+	}
+
 	contact := occ.Contact
 	if !serviceWindowOpen(contact) {
 		return r.SendErrorEnvelope(fasthttp.StatusUnprocessableEntity,
@@ -51,8 +77,11 @@ func (a *App) SendOccurrenceProtocol(r *fastglue.Request) error {
 			"WhatsApp account not found for this contact", nil, "")
 	}
 
-	body := fmt.Sprintf("Seu protocolo de atendimento é %s. Guarde este número para consultas futuras.",
-		occ.ProtocolNumber)
+	body := customMessage
+	if body == "" {
+		body = fmt.Sprintf("Seu protocolo de atendimento é %s. Guarde este número para consultas futuras.",
+			occ.ProtocolNumber)
+	}
 
 	if _, err := a.SendOutgoingMessage(context.Background(), OutgoingMessageRequest{
 		Account: &account,

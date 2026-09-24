@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { occurrencesService, type Occurrence, type OccurrenceStage, type OccurrenceEvent } from '@/services/api'
+import { toast } from 'vue-sonner'
+import { i18n } from '@/i18n'
+import { occurrencesService, occurrenceProcessesService, type Occurrence, type OccurrenceStage, type OccurrenceEvent } from '@/services/api'
 
 export const useOccurrencesStore = defineStore('occurrences', () => {
   const occurrences = ref<Occurrence[]>([])
@@ -61,6 +63,7 @@ export const useOccurrencesStore = defineStore('occurrences', () => {
     department_id?: string
     category_id?: string
     what_happened_id?: string
+    process_id?: string
     sale_channel?: string
     invoice_number?: string
     purchase_date?: string
@@ -72,12 +75,26 @@ export const useOccurrencesStore = defineStore('occurrences', () => {
     return res.data.data
   }
 
-  // Tries to send the protocol right after creation. A 422 means the 24h
-  // service window is closed — that's an expected outcome the UI must show
-  // plainly (spec §16/§17), not an error to throw past the caller.
-  async function trySendProtocol(occurrenceId: string): Promise<boolean> {
+  // Suggested registration text for the agent to review; never sent by this call.
+  async function previewRegistrationMessage(occurrenceId: string, processId?: string) {
+    if (!processId) return { content: '', hasTemplate: false, isFallback: false }
     try {
-      await occurrencesService.sendProtocol(occurrenceId)
+      const res = await occurrenceProcessesService.previewMessage(processId, 'registration', occurrenceId)
+      const { content, has_template, is_fallback } = res.data.data
+      return { content, hasTemplate: has_template, isFallback: is_fallback }
+    } catch {
+      // The protocol already exists; the agent can still write a message or send the default text.
+      toast.error(i18n.global.t('occurrences.previewMessageFailed'))
+      return { content: '', hasTemplate: false, isFallback: false }
+    }
+  }
+
+  // false = the 24h service window is closed (HTTP 422): an expected outcome the
+  // UI shows plainly (spec 16/17), not an error to throw past the caller.
+  // An empty message makes the backend send the legacy protocol text.
+  async function sendRegistrationMessage(occurrenceId: string, message: string): Promise<boolean> {
+    try {
+      await occurrencesService.sendProtocol(occurrenceId, message.trim() || undefined)
       return true
     } catch (e: any) {
       if (e?.response?.status === 422) return false
@@ -103,6 +120,19 @@ export const useOccurrencesStore = defineStore('occurrences', () => {
     await fetchEvents(occurrenceId)
   }
 
+  // false = the 24h service window is closed (HTTP 422), an expected outcome the
+  // caller shows plainly; any other failure is thrown.
+  async function reply(occurrenceId: string, content: string): Promise<boolean> {
+    try {
+      await occurrencesService.reply(occurrenceId, content)
+    } catch (e: any) {
+      if (e?.response?.status === 422) return false
+      throw e
+    }
+    await fetchEvents(occurrenceId)
+    return true
+  }
+
   async function sendProtocol(occurrenceId: string) {
     await occurrencesService.sendProtocol(occurrenceId)
     await fetchEvents(occurrenceId)
@@ -118,6 +148,7 @@ export const useOccurrencesStore = defineStore('occurrences', () => {
   return {
     occurrences, total, contactOccurrences, stages, events, isLoading,
     fetchStages, stageColor, fetchOccurrences, fetchColumn, fetchContactOccurrences, fetchEvents,
-    createOccurrence, changeStage, moveStage, addNote, sendProtocol, trySendProtocol, clear,
+    createOccurrence, changeStage, moveStage, addNote, reply, sendProtocol,
+    previewRegistrationMessage, sendRegistrationMessage, clear,
   }
 })

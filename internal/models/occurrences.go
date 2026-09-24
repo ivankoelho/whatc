@@ -17,6 +17,8 @@ const (
 	OccurrenceEventAssignment   OccurrenceEventType = "assignment"
 	OccurrenceEventProtocolSent OccurrenceEventType = "protocol_sent"
 	OccurrenceEventClosed       OccurrenceEventType = "closed"
+
+	OccurrenceEventProcessMessageUsed OccurrenceEventType = "process_message_used"
 )
 
 // OccurrencePriority ranks how urgent a case is.
@@ -87,6 +89,13 @@ type Occurrence struct {
 	// doc comment for why these are two separate dimensions.
 	WhatHappenedID *uuid.UUID `gorm:"type:uuid;index" json:"what_happened_id,omitempty"`
 
+	// ProcessID links the case to the Processo/Motivo that determines its
+	// guidance, required fields and SLA parameters. Nil means the case was
+	// opened without a resolvable process (e.g. WhatHappenedID left blank, or
+	// no OccurrenceProcess configured for that reason yet) — the form and SLA
+	// then behave exactly as before this feature existed.
+	ProcessID *uuid.UUID `gorm:"type:uuid;index" json:"process_id,omitempty"`
+
 	// Source documents where this case originated. Whatomate has one channel
 	// today (WhatsApp), so this is a placeholder for a future channel, not
 	// active logic — "manual" when there is no SourceTransferID.
@@ -123,6 +132,7 @@ type Occurrence struct {
 	Department   *Department             `gorm:"foreignKey:DepartmentID" json:"department,omitempty"`
 	Category     *OccurrenceCategory     `gorm:"foreignKey:CategoryID" json:"category,omitempty"`
 	WhatHappened *OccurrenceWhatHappened `gorm:"foreignKey:WhatHappenedID" json:"what_happened,omitempty"`
+	Process      *OccurrenceProcess      `gorm:"foreignKey:ProcessID" json:"process,omitempty"`
 }
 
 func (Occurrence) TableName() string { return "occurrences" }

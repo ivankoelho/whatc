@@ -19,7 +19,7 @@ import OrganizationSwitcher from './OrganizationSwitcher.vue'
 import UserMenu from './UserMenu.vue'
 import ActiveCallPanel from '@/components/calling/ActiveCallPanel.vue'
 import { ScrollToTop } from '@/components/shared'
-import { navigationSections, type NavSection } from './navigation'
+import { navigationSections, type NavSection, type NavItem } from './navigation'
 
 useI18n() // Enable $t() in template
 
@@ -48,22 +48,30 @@ onMounted(() => {
   }
 })
 
+function isAccessible(item: NavItem): boolean {
+  if (item.childPermissions) {
+    return item.childPermissions.some(p => authStore.hasPermission(p, 'read'))
+  }
+  return !item.permission || authStore.hasPermission(item.permission, item.permissionAction || 'read')
+}
+
 function filterItems(items: NavSection['items']) {
   return items
-    .filter(item => {
-      if (item.childPermissions) {
-        return item.childPermissions.some(p => authStore.hasPermission(p, 'read'))
-      }
-      return !item.permission || authStore.hasPermission(item.permission, item.permissionAction || 'read')
-    })
+    .filter(isAccessible)
     .map(item => {
-      const filteredChildren = item.children?.filter(
-        child => !child.permission || authStore.hasPermission(child.permission, child.permissionAction || 'read')
-      )
+      const filteredChildren = item.children?.filter(isAccessible)
+      const filteredGroups = item.groups
+        ?.map(group => ({
+          ...group,
+          items: group.items.filter(isAccessible)
+        }))
+        .filter(group => group.items.length > 0)
+
+      const firstAccessibleChild: NavItem | undefined = filteredChildren?.[0] ?? filteredGroups?.[0]?.items[0]
 
       let effectivePath = item.path
-      if (item.childPermissions && item.permission && !authStore.hasPermission(item.permission, item.permissionAction || 'read') && filteredChildren?.length) {
-        effectivePath = filteredChildren[0].path
+      if (item.childPermissions && item.permission && !authStore.hasPermission(item.permission, item.permissionAction || 'read') && firstAccessibleChild) {
+        effectivePath = firstAccessibleChild.path
       }
 
       const originalPath = item.path
@@ -77,7 +85,8 @@ function filterItems(items: NavSection['items']) {
         ...item,
         path: effectivePath,
         active: isActive,
-        children: filteredChildren
+        children: filteredChildren,
+        groups: filteredGroups
       }
     })
 }
@@ -92,8 +101,6 @@ const navSections = computed(() => {
     .filter(section => section.items.length > 0)
 })
 
-const mainSections = computed(() => navSections.value.filter(s => !s.pinBottom))
-const bottomSections = computed(() => navSections.value.filter(s => s.pinBottom))
 
 const toggleSidebar = () => {
   isCollapsed.value = !isCollapsed.value
@@ -181,7 +188,7 @@ const handleLogout = async () => {
       <!-- Navigation -->
       <ScrollArea class="flex-1 py-2">
         <nav class="px-2" role="menubar">
-          <template v-for="(section, sIdx) in mainSections" :key="section.label">
+          <template v-for="(section, sIdx) in navSections" :key="section.label">
             <!-- Section header -->
             <div
               v-if="section.label && !isCollapsed"
@@ -213,15 +220,42 @@ const handleLogout = async () => {
                       :aria-current="item.active ? 'page' : undefined"
                       @click="isMobileMenuOpen = false"
                     >
-                      <component :is="item.icon" class="h-4 w-4 shrink-0" aria-hidden="true" />
+                      <component :is="item.icon" :class="['h-4 w-4 shrink-0', item.color]" aria-hidden="true" />
                       <span :class="isCollapsed && 'md:sr-only'">{{ $t(item.name) }}</span>
                     </RouterLink>
                   </TooltipTrigger>
                   <TooltipContent side="right">{{ $t(item.name) }}</TooltipContent>
                 </Tooltip>
 
-                <!-- Submenu items -->
-                <template v-if="item.children && item.active && !isCollapsed">
+                <!-- Submenu items (grouped for Settings, flat otherwise) -->
+                <template v-if="item.groups && item.active && !isCollapsed">
+                  <template v-for="group in item.groups" :key="group.label">
+                    <div
+                      v-if="!(group.items.length === 1 && group.items[0].name === group.label)"
+                      class="mt-2.5 mb-0.5 px-2.5 ml-4 text-[10px] font-semibold uppercase tracking-wider text-white/25 light:text-gray-400"
+                    >
+                      {{ $t(group.label) }}
+                    </div>
+                    <RouterLink
+                      v-for="child in group.items"
+                      :key="child.path"
+                      :to="child.path"
+                      :class="[
+                        'flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-all duration-200 ml-4',
+                        route.path === child.path
+                          ? 'bg-white/[0.06] text-white light:bg-gray-100 light:text-gray-900'
+                          : 'text-white/40 hover:text-white/70 hover:bg-white/[0.04] light:text-gray-400 light:hover:text-gray-700 light:hover:bg-gray-50'
+                      ]"
+                      role="menuitem"
+                      :aria-current="route.path === child.path ? 'page' : undefined"
+                      @click="isMobileMenuOpen = false"
+                    >
+                      <component :is="child.icon" :class="['h-3.5 w-3.5 shrink-0', item.color]" aria-hidden="true" />
+                      <span>{{ $t(child.name) }}</span>
+                    </RouterLink>
+                  </template>
+                </template>
+                <template v-else-if="item.children && item.active && !isCollapsed">
                   <RouterLink
                     v-for="child in item.children"
                     :key="child.path"
@@ -236,7 +270,7 @@ const handleLogout = async () => {
                     :aria-current="route.path === child.path ? 'page' : undefined"
                     @click="isMobileMenuOpen = false"
                   >
-                    <component :is="child.icon" class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    <component :is="child.icon" :class="['h-3.5 w-3.5 shrink-0', item.color]" aria-hidden="true" />
                     <span>{{ $t(child.name) }}</span>
                   </RouterLink>
                 </template>
@@ -245,59 +279,6 @@ const handleLogout = async () => {
           </template>
         </nav>
       </ScrollArea>
-
-      <!-- Bottom-pinned navigation (Settings) -->
-      <div v-if="bottomSections.length > 0" class="border-t border-white/[0.06] light:border-gray-200 px-2 py-2">
-        <template v-for="section in bottomSections" :key="section.label">
-          <template v-for="item in section.items" :key="item.path">
-            <!-- ponytail: tooltip still mounts once isCollapsed flips true even on
-                 sub-md viewports where the label stays visible; needs viewport-width
-                 tracking to fix, out of scope for this pass -->
-            <Tooltip :disabled="!isCollapsed" :delay-duration="150">
-              <TooltipTrigger as-child>
-                <RouterLink
-                  :to="item.path"
-                  :class="[
-                    'nav-active-indicator btn-press flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium transition-all duration-200',
-                    item.active
-                      ? 'bg-white/[0.08] text-white light:bg-gray-100 light:text-gray-900'
-                      : 'text-white/50 hover:text-white hover:bg-white/[0.06] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-50',
-                    isCollapsed && 'md:justify-center md:px-2'
-                  ]"
-                  :data-active="item.active"
-                  role="menuitem"
-                  :aria-current="item.active ? 'page' : undefined"
-                  @click="isMobileMenuOpen = false"
-                >
-                  <component :is="item.icon" class="h-4 w-4 shrink-0" aria-hidden="true" />
-                  <span :class="isCollapsed && 'md:sr-only'">{{ $t(item.name) }}</span>
-                </RouterLink>
-              </TooltipTrigger>
-              <TooltipContent side="right">{{ $t(item.name) }}</TooltipContent>
-            </Tooltip>
-
-            <template v-if="item.children && item.active && !isCollapsed">
-              <RouterLink
-                v-for="child in item.children"
-                :key="child.path"
-                :to="child.path"
-                :class="[
-                  'flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-all duration-200 ml-4',
-                  route.path === child.path
-                    ? 'bg-white/[0.06] text-white light:bg-gray-100 light:text-gray-900'
-                    : 'text-white/40 hover:text-white/70 hover:bg-white/[0.04] light:text-gray-400 light:hover:text-gray-700 light:hover:bg-gray-50'
-                ]"
-                role="menuitem"
-                :aria-current="route.path === child.path ? 'page' : undefined"
-                @click="isMobileMenuOpen = false"
-              >
-                <component :is="child.icon" class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                <span>{{ $t(child.name) }}</span>
-              </RouterLink>
-            </template>
-          </template>
-        </template>
-      </div>
 
       <!-- User Menu -->
       <UserMenu :collapsed="isCollapsed" @logout="handleLogout" />

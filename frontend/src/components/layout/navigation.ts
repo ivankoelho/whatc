@@ -6,27 +6,17 @@ import {
   Megaphone,
   Settings,
   Users,
-  Contact,
   Workflow,
   Sparkles,
   Key,
   UserX,
-  MessageSquareText,
-  Webhook,
   BarChart3,
   ShieldCheck,
-  Zap,
-  Shield,
   LineChart,
-  Tags,
   PhoneCall,
   PhoneForwarded,
   ScrollText,
   ClipboardList,
-  Building2,
-  Timer,
-  Tag,
-  HelpCircle,
   TrendingUp
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
@@ -35,6 +25,8 @@ export interface NavItem {
   name: string
   path: string
   icon: Component
+  /** Tailwind text-colour classes for the icon; children inherit the parent's. */
+  color?: string
   permission?: string
   /** Action to check `permission` against — defaults to 'read'. Use
    * 'view_all' for org-wide aggregate views that every holder of the base
@@ -42,13 +34,19 @@ export interface NavItem {
   permissionAction?: string
   childPermissions?: string[]
   children?: NavItem[]
+  /** Grouped submenu (labelled clusters), used instead of `children` when a
+   *  flat list would get too long to scan (e.g. Settings). */
+  groups?: NavChildGroup[]
+}
+
+export interface NavChildGroup {
+  label: string
+  items: NavItem[]
 }
 
 export interface NavSection {
   label: string
   items: NavItem[]
-  /** Pin to bottom of sidebar */
-  pinBottom?: boolean
 }
 
 export const navigationSections: NavSection[] = [
@@ -59,30 +57,35 @@ export const navigationSections: NavSection[] = [
         name: 'nav.dashboard',
         path: '/',
         icon: LayoutDashboard,
+        color: 'text-sky-400 light:text-sky-600',
         permission: 'analytics'
       },
       {
         name: 'nav.chat',
         path: '/chat',
         icon: MessageSquare,
+        color: 'text-emerald-400 light:text-emerald-600',
         permission: 'chat'
       },
       {
         name: 'nav.crm',
         path: '/crm/occurrences',
         icon: ClipboardList,
+        color: 'text-indigo-400 light:text-indigo-600',
         permission: 'occurrences'
       },
       {
         name: 'nav.salesOperation',
         path: '/sales/operation',
         icon: TrendingUp,
+        color: 'text-teal-400 light:text-teal-600',
         permission: 'sales_opportunities'
       },
       {
         name: 'nav.salesDashboard',
         path: '/sales/dashboard',
         icon: BarChart3,
+        color: 'text-blue-400 light:text-blue-600',
         permission: 'sales_opportunities',
         // Finding 7: this view shows org-wide aggregates, which spec §7
         // reserves for manager/admin (view_all) — agents only get read/write
@@ -98,6 +101,7 @@ export const navigationSections: NavSection[] = [
         name: 'nav.chatbot',
         path: '/chatbot',
         icon: Bot,
+        color: 'text-violet-400 light:text-violet-600',
         permission: 'settings.chatbot',
         childPermissions: ['settings.chatbot', 'chatbot.keywords', 'flows.chatbot', 'chatbot.ai', 'transfers'],
         children: [
@@ -112,18 +116,21 @@ export const navigationSections: NavSection[] = [
         name: 'nav.campaigns',
         path: '/campaigns',
         icon: Megaphone,
+        color: 'text-teal-400 light:text-teal-600',
         permission: 'campaigns'
       },
       {
         name: 'nav.templates',
         path: '/templates',
         icon: FileText,
+        color: 'text-blue-400 light:text-blue-600',
         permission: 'templates'
       },
       {
         name: 'nav.flows',
         path: '/flows',
         icon: Workflow,
+        color: 'text-cyan-400 light:text-cyan-600',
         permission: 'flows.whatsapp'
       },
     ]
@@ -131,9 +138,9 @@ export const navigationSections: NavSection[] = [
   {
     label: 'nav.sectionCalling',
     items: [
-      { name: 'nav.callLogs', path: '/calling/logs', icon: PhoneCall, permission: 'call_logs' },
-      { name: 'nav.ivrFlows', path: '/calling/ivr-flows', icon: Workflow, permission: 'ivr_flows' },
-      { name: 'nav.callTransfers', path: '/calling/transfers', icon: PhoneForwarded, permission: 'call_transfers' },
+      { name: 'nav.callLogs', path: '/calling/logs', icon: PhoneCall, color: 'text-teal-400 light:text-teal-600', permission: 'call_logs' },
+      { name: 'nav.ivrFlows', path: '/calling/ivr-flows', icon: Workflow, color: 'text-cyan-400 light:text-cyan-600', permission: 'ivr_flows' },
+      { name: 'nav.callTransfers', path: '/calling/transfers', icon: PhoneForwarded, color: 'text-sky-400 light:text-sky-600', permission: 'call_transfers' },
     ]
   },
   {
@@ -143,46 +150,66 @@ export const navigationSections: NavSection[] = [
         name: 'nav.agentAnalytics',
         path: '/analytics/agents',
         icon: BarChart3,
+        color: 'text-blue-400 light:text-blue-600',
         permission: 'analytics.agents'
       },
       {
         name: 'nav.metaInsights',
         path: '/analytics/meta-insights',
         icon: LineChart,
+        color: 'text-violet-400 light:text-violet-600',
         permission: 'analytics'
       },
     ]
   },
   {
     label: '',
-    pinBottom: true,
     items: [
       {
         name: 'nav.settings',
         path: '/settings',
         icon: Settings,
         permission: 'settings.general',
-        childPermissions: ['settings.general', 'settings.chatbot', 'accounts', 'contacts', 'canned_responses', 'tags', 'teams', 'users', 'roles', 'api_keys', 'webhooks', 'custom_actions', 'occurrences.stages', 'settings.sso', 'audit_logs'],
-        children: [
-          { name: 'nav.general', path: '/settings', icon: Settings, permission: 'settings.general' },
-          { name: 'nav.chatbot', path: '/settings/chatbot', icon: Bot, permission: 'settings.chatbot' },
-          { name: 'nav.accounts', path: '/settings/accounts', icon: Users, permission: 'accounts' },
-          { name: 'nav.contacts', path: '/settings/contacts', icon: Contact, permission: 'contacts' },
-          { name: 'nav.cannedResponses', path: '/settings/canned-responses', icon: MessageSquareText, permission: 'canned_responses' },
-          { name: 'nav.tags', path: '/settings/tags', icon: Tags, permission: 'tags' },
-          { name: 'nav.teams', path: '/settings/teams', icon: Users, permission: 'teams' },
-          { name: 'nav.users', path: '/settings/users', icon: Users, permission: 'users' },
-          { name: 'nav.roles', path: '/settings/roles', icon: Shield, permission: 'roles' },
-          { name: 'nav.apiKeys', path: '/settings/api-keys', icon: Key, permission: 'api_keys' },
-          { name: 'nav.webhooks', path: '/settings/webhooks', icon: Webhook, permission: 'webhooks' },
-          { name: 'nav.customActions', path: '/settings/custom-actions', icon: Zap, permission: 'custom_actions' },
-          { name: 'nav.occurrenceStages', path: '/settings/occurrence-stages', icon: ClipboardList, permission: 'occurrences.stages' },
-          { name: 'nav.units', path: '/settings/units', icon: Building2, permission: 'units' },
-          { name: 'nav.slaPolicies', path: '/settings/occurrence-sla-policies', icon: Timer, permission: 'occurrences.sla_policies' },
-          { name: 'nav.occurrenceCategories', path: '/settings/occurrence-categories', icon: Tag, permission: 'occurrences.categories' },
-          { name: 'nav.whatHappened', path: '/settings/occurrence-what-happened', icon: HelpCircle, permission: 'occurrences.what_happened' },
-          { name: 'nav.sso', path: '/settings/sso', icon: ShieldCheck, permission: 'settings.sso' },
-          { name: 'nav.auditLogs', path: '/settings/audit-logs', icon: ScrollText, permission: 'audit_logs' }
+        childPermissions: ['settings.general', 'settings.chatbot', 'accounts', 'contacts', 'canned_responses', 'tags', 'teams', 'users', 'roles', 'api_keys', 'webhooks', 'custom_actions', 'occurrences.stages', 'occurrences.categories', 'occurrences.what_happened', 'occurrences.processes', 'occurrences.sla_policies', 'units', 'settings.sso', 'audit_logs'],
+        groups: [
+          {
+            label: 'nav.groupOrganization',
+            items: [
+              { name: 'nav.general', path: '/settings', icon: Settings, permission: 'settings.general' },
+              { name: 'nav.sso', path: '/settings/sso', icon: ShieldCheck, permission: 'settings.sso' },
+              { name: 'nav.auditLogs', path: '/settings/audit-logs', icon: ScrollText, permission: 'audit_logs' }
+            ]
+          },
+          {
+            label: 'nav.groupChannels',
+            items: [
+              { name: 'nav.accounts', path: '/settings/accounts', icon: Users, permission: 'accounts' }
+            ]
+          },
+          {
+            label: 'nav.groupService',
+            items: [
+              { name: 'nav.groupService', path: '/settings/service', icon: Bot, childPermissions: ['settings.chatbot', 'canned_responses', 'tags', 'contacts'] }
+            ]
+          },
+          {
+            label: 'nav.groupOccurrences',
+            items: [
+              { name: 'nav.groupOccurrences', path: '/settings/occurrences', icon: ClipboardList, childPermissions: ['occurrences.stages', 'occurrences.categories', 'occurrences.what_happened', 'occurrences.processes', 'occurrences.sla_policies', 'units'] }
+            ]
+          },
+          {
+            label: 'nav.groupAccess',
+            items: [
+              { name: 'nav.groupAccess', path: '/settings/access', icon: Users, childPermissions: ['teams', 'users', 'roles'] }
+            ]
+          },
+          {
+            label: 'nav.groupIntegrations',
+            items: [
+              { name: 'nav.groupIntegrations', path: '/settings/integrations', icon: Key, childPermissions: ['api_keys', 'webhooks', 'custom_actions'] }
+            ]
+          }
         ]
       }
     ]

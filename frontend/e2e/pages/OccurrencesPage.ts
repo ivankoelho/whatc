@@ -158,9 +158,16 @@ export class OccurrencesPage extends BasePage {
     await dialog.getByPlaceholder('E.g.: Oak Laminate Flooring').fill(title)
     await dialog.getByPlaceholder('Describe what the customer reported...').fill('Automated e2e test note.')
     await dialog.getByRole('button', { name: 'Register protocol' }).click()
-    // The dialog closes only after the create request resolves. Wait for
-    // that here so a second call right after this one finds a clean,
-    // closed dialog instead of racing the toggle button against this one.
+    // The dialog no longer closes by itself: after the create request resolves
+    // it stays open on the review-and-send screen. Wait for that screen, then
+    // close it with the form's own Close button (the dialog's X also has the
+    // accessible name "Close", so exclude it via its sr-only label) so a
+    // second call right after this one finds a clean, closed dialog.
+    await expect(dialog.getByRole('heading', { name: 'Protocol created successfully' })).toBeVisible({ timeout: 15000 })
+    await dialog
+      .getByRole('button', { name: 'Close', exact: true })
+      .and(this.page.locator(':not(:has(.sr-only))'))
+      .click()
     await dialog.waitFor({ state: 'hidden' })
   }
 

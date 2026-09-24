@@ -26,6 +26,7 @@ const props = withDefaults(defineProps<{
   createSubmitLabel?: string
   cancelLabel?: string
   maxWidth?: string
+  hideSubmit?: boolean
 }>(), {
   title: '',
   editTitle: 'Edit Item',
@@ -40,6 +41,7 @@ const props = withDefaults(defineProps<{
   createSubmitLabel: 'Create',
   cancelLabel: 'Cancel',
   maxWidth: 'max-w-md',
+  hideSubmit: false,
 })
 
 const emit = defineEmits<{
@@ -92,7 +94,7 @@ import { computed } from 'vue'
         <Button variant="outline" size="sm" @click="handleCancel">
           {{ cancelLabel }}
         </Button>
-        <Button size="sm" @click="handleSubmit" :disabled="isSubmitting">
+        <Button v-if="!hideSubmit" size="sm" @click="handleSubmit" :disabled="isSubmitting">
           <Loader2 v-if="isSubmitting" class="h-4 w-4 mr-2 animate-spin" />
           {{ computedSubmitLabel }}
         </Button>

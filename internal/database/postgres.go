@@ -121,12 +121,14 @@ func GetMigrationModels() []MigrationModel {
 		{"OccurrenceCategory", &models.OccurrenceCategory{}},
 		{"OccurrenceWhatHappened", &models.OccurrenceWhatHappened{}},
 		{"OccurrenceSLAPolicy", &models.OccurrenceSLAPolicy{}},
+		{"OccurrenceProcess", &models.OccurrenceProcess{}},
 		{"Occurrence", &models.Occurrence{}},
 		{"OccurrenceEvent", &models.OccurrenceEvent{}},
 		{"OccurrenceCounter", &models.OccurrenceCounter{}},
 		{"SalesOpportunity", &models.SalesOpportunity{}},
 		{"SalesOpportunityEvent", &models.SalesOpportunityEvent{}},
 		{"SalesOpportunityCounter", &models.SalesOpportunityCounter{}},
+		{"OccurrenceProcessMessage", &models.OccurrenceProcessMessage{}},
 
 		// Help Desk — unidade e departamento
 		{"Unit", &models.Unit{}},
