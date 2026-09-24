@@ -105,7 +105,7 @@ type Occurrence struct {
 	// lookup yet). All optional — the case can be opened without a purchase
 	// on file at all.
 	SaleChannel        string     `gorm:"size:30" json:"sale_channel,omitempty"`
-	InvoiceNumber      string     `gorm:"size:50" json:"invoice_number,omitempty"`
+	InvoiceNumber      string     `gorm:"size:255" json:"invoice_number,omitempty"`
 	PurchaseDate       *time.Time `json:"purchase_date,omitempty"`
 	ProductDescription string     `gorm:"size:255" json:"product_description,omitempty"`
 

@@ -13,6 +13,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
+	"gorm.io/gorm"
 )
 
 // OccurrenceDocumentItem is one product line of a purchase document.
@@ -66,10 +67,9 @@ func buildOccurrenceDocument(orgID, userID uuid.UUID, loc *time.Location, req Oc
 	if req.Type != models.OccurrenceDocumentNF && req.Type != models.OccurrenceDocumentCupom {
 		return models.OccurrenceDocument{}, errors.New("document type must be nf or cupom")
 	}
+	// The number is optional, as the old single NF field was: sometimes all the
+	// customer has is the product or a photo of the receipt.
 	number := strings.TrimSpace(req.Number)
-	if number == "" {
-		return models.OccurrenceDocument{}, errors.New("document number is required")
-	}
 	if len(number) > 60 {
 		return models.OccurrenceDocument{}, errors.New("document number is too long")
 	}
@@ -112,19 +112,89 @@ func buildOccurrenceDocument(orgID, userID uuid.UUID, loc *time.Location, req Oc
 func summarizeOccurrenceDocuments(docs []models.OccurrenceDocument) (invoice string, purchaseDate *time.Time, product string) {
 	var numbers, products []string
 	for _, d := range docs {
-		numbers = append(numbers, d.Number)
+		if d.Number != "" {
+			numbers = append(numbers, d.Number)
+		}
 		if d.PurchaseDate != nil && (purchaseDate == nil || d.PurchaseDate.Before(*purchaseDate)) {
 			purchaseDate = d.PurchaseDate
 		}
-		for _, it := range d.Items {
-			if m, ok := it.(map[string]any); ok {
-				if desc, _ := m["description"].(string); desc != "" {
-					products = append(products, desc)
-				}
+		products = append(products, documentProducts(d)...)
+	}
+	return truncateRunes(strings.Join(numbers, summaryNumberSep), 255), purchaseDate, truncateRunes(strings.Join(products, summaryProductSep), 255)
+}
+
+const (
+	summaryNumberSep  = ", "
+	summaryProductSep = "; "
+)
+
+func documentProducts(d models.OccurrenceDocument) []string {
+	var out []string
+	for _, it := range d.Items {
+		if m, ok := it.(map[string]any); ok {
+			if desc, _ := m["description"].(string); desc != "" {
+				out = append(out, desc)
 			}
 		}
 	}
-	return truncateRunes(strings.Join(numbers, ", "), 50), purchaseDate, truncateRunes(strings.Join(products, "; "), 255)
+	return out
+}
+
+// updateSummaryForDocument keeps the protocol's single-value fields in step
+// when a document is added or removed after the protocol was opened. It edits
+// the lists rather than rebuilding them from the documents, so values typed in
+// those fields before documents existed are not thrown away.
+func updateSummaryForDocument(occ *models.Occurrence, doc models.OccurrenceDocument, added bool, remaining []models.OccurrenceDocument) map[string]any {
+	numbers := splitSummary(occ.InvoiceNumber, summaryNumberSep)
+	products := splitSummary(occ.ProductDescription, summaryProductSep)
+	purchaseDate := occ.PurchaseDate
+	if added {
+		if doc.Number != "" && !containsString(numbers, doc.Number) {
+			numbers = append(numbers, doc.Number)
+		}
+		products = append(products, documentProducts(doc)...)
+		if doc.PurchaseDate != nil && (purchaseDate == nil || doc.PurchaseDate.Before(*purchaseDate)) {
+			purchaseDate = doc.PurchaseDate
+		}
+	} else {
+		numbers = removeOnce(numbers, doc.Number)
+		for _, p := range documentProducts(doc) {
+			products = removeOnce(products, p)
+		}
+		if doc.PurchaseDate != nil && purchaseDate != nil && purchaseDate.Equal(*doc.PurchaseDate) {
+			_, purchaseDate, _ = summarizeOccurrenceDocuments(remaining)
+		}
+	}
+	return map[string]any{
+		"invoice_number":      truncateRunes(strings.Join(numbers, summaryNumberSep), 255),
+		"product_description": truncateRunes(strings.Join(products, summaryProductSep), 255),
+		"purchase_date":       purchaseDate,
+	}
+}
+
+func splitSummary(s, sep string) []string {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	return strings.Split(s, sep)
+}
+
+func containsString(list []string, v string) bool {
+	for _, x := range list {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+func removeOnce(list []string, v string) []string {
+	for i, x := range list {
+		if x == v {
+			return append(list[:i:i], list[i+1:]...)
+		}
+	}
+	return list
 }
 
 func truncateRunes(s string, n int) string {
@@ -177,7 +247,14 @@ func (a *App) CreateOccurrenceDocument(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "too many documents", nil, "")
 	}
 	doc.OccurrenceID = occ.ID
-	if err := a.DB.Create(&doc).Error; err != nil {
+	err = a.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&doc).Error; err != nil {
+			return err
+		}
+		return tx.Model(&models.Occurrence{}).Where("id = ?", occ.ID).
+			Updates(updateSummaryForDocument(occ, doc, true, nil)).Error
+	})
+	if err != nil {
 		a.Log.Error("Failed to create occurrence document", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save document", nil, "")
 	}
@@ -213,7 +290,25 @@ func (a *App) DeleteOccurrenceDocument(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
-	if err := a.DB.Delete(doc).Error; err != nil {
+	var occ models.Occurrence
+	if err := a.DB.First(&occ, "id = ?", doc.OccurrenceID).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Occurrence not found", nil, "")
+	}
+	// Hard delete: the file is removed too, so a soft-deleted row would only
+	// point at nothing.
+	err = a.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Unscoped().Delete(doc).Error; err != nil {
+			return err
+		}
+		var remaining []models.OccurrenceDocument
+		if err := tx.Where("occurrence_id = ?", doc.OccurrenceID).Find(&remaining).Error; err != nil {
+			return err
+		}
+		return tx.Model(&models.Occurrence{}).Where("id = ?", doc.OccurrenceID).
+			Updates(updateSummaryForDocument(&occ, *doc, false, remaining)).Error
+	})
+	if err != nil {
+		a.Log.Error("Failed to delete occurrence document", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to delete document", nil, "")
 	}
 	a.removeOccurrenceAttachment(doc.AttachmentPath)
@@ -274,6 +369,7 @@ func (a *App) UploadOccurrenceDocumentAttachment(r *fastglue.Request) error {
 	if err := a.DB.Model(doc).Updates(map[string]any{
 		"attachment_path": relPath, "attachment_name": truncateRunes(name, 255), "attachment_mime": mimeType,
 	}).Error; err != nil {
+		a.removeOccurrenceAttachment(relPath)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save file", nil, "")
 	}
 	return r.SendEnvelope(doc)
@@ -314,4 +410,16 @@ func (a *App) removeOccurrenceAttachment(relPath string) {
 	if fullPath, err := a.resolveSafeStoragePath(relPath); err == nil {
 		_ = os.Remove(fullPath)
 	}
+}
+
+// deleteOccurrenceDocuments removes every document of an occurrence inside tx
+// and returns their file paths, to be removed once the transaction commits.
+func deleteOccurrenceDocuments(tx *gorm.DB, occurrenceID uuid.UUID) ([]string, error) {
+	var paths []string
+	if err := tx.Model(&models.OccurrenceDocument{}).Unscoped().
+		Where("occurrence_id = ? AND attachment_path <> ''", occurrenceID).
+		Pluck("attachment_path", &paths).Error; err != nil {
+		return nil, err
+	}
+	return paths, tx.Unscoped().Where("occurrence_id = ?", occurrenceID).Delete(&models.OccurrenceDocument{}).Error
 }

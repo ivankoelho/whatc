@@ -943,15 +943,24 @@ func (a *App) DeleteOccurrence(r *fastglue.Request) error {
 		"contact_id":      occ.ContactID,
 	}
 
+	var attachmentPaths []string
 	txErr := a.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Unscoped().Where("occurrence_id = ?", occ.ID).Delete(&models.OccurrenceEvent{}).Error; err != nil {
 			return err
 		}
+		paths, err := deleteOccurrenceDocuments(tx, occ.ID)
+		if err != nil {
+			return err
+		}
+		attachmentPaths = paths
 		return tx.Unscoped().Delete(&models.Occurrence{}, "id = ?", occ.ID).Error
 	})
 	if txErr != nil {
 		a.Log.Error("Failed to delete occurrence", "error", txErr)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to delete occurrence", nil, "")
+	}
+	for _, p := range attachmentPaths {
+		a.removeOccurrenceAttachment(p)
 	}
 
 	a.logAudit(orgID, userID, "occurrence", occ.ID, models.AuditActionDeleted, snapshot, nil)

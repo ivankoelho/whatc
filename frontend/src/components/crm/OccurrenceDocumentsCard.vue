@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { IconButton, DeleteConfirmDialog } from '@/components/shared'
 import OccurrenceDocumentsEditor from '@/components/crm/OccurrenceDocumentsEditor.vue'
 import { occurrenceDocumentsService, type OccurrenceDocument } from '@/services/api'
-import { type DocumentDraft, newDocumentDraft, draftToInput, MAX_ATTACHMENT_BYTES, ATTACHMENT_ACCEPT } from '@/lib/occurrence-documents'
+import { type DocumentDraft, newDocumentDraft, draftToInput, isBlankDraft, MAX_ATTACHMENT_BYTES, ATTACHMENT_ACCEPT } from '@/lib/occurrence-documents'
 import { getErrorMessage } from '@/lib/api-utils'
 import { FileText, Paperclip, Plus, Trash2, Loader2 } from 'lucide-vue-next'
 
@@ -42,8 +42,8 @@ function formatDate(value?: string) {
 async function saveDraft() {
   const d = draft.value?.[0]
   if (!d) return
-  if (!d.number.trim()) {
-    toast.error(t('occurrenceDocuments.validationNumberRequired'))
+  if (isBlankDraft(d)) {
+    toast.error(t('occurrenceDocuments.validationEmpty'))
     return
   }
   isSaving.value = true
@@ -136,7 +136,7 @@ async function confirmRemove() {
         <div class="flex items-center justify-between gap-2">
           <div class="flex items-center gap-2 min-w-0">
             <Badge variant="outline" class="shrink-0">{{ doc.type === 'nf' ? t('occurrenceDocuments.typeNf') : t('occurrenceDocuments.typeCupom') }}</Badge>
-            <span class="font-medium tabular-nums truncate">{{ doc.number }}</span>
+            <span class="font-medium tabular-nums truncate">{{ doc.number || t('occurrenceDocuments.noNumber') }}</span>
             <span v-if="doc.purchase_date" class="text-xs text-muted-foreground shrink-0">{{ formatDate(doc.purchase_date) }}</span>
           </div>
           <div class="flex items-center gap-1 shrink-0">
@@ -166,7 +166,7 @@ async function confirmRemove() {
       </div>
 
       <template v-if="draft">
-        <OccurrenceDocumentsEditor v-model="draft" single :number-required="true" />
+        <OccurrenceDocumentsEditor v-model="draft" single />
         <div class="flex justify-end gap-2">
           <Button variant="ghost" size="sm" :disabled="isSaving" @click="draft = null">{{ t('occurrenceDocuments.cancel') }}</Button>
           <Button size="sm" :disabled="isSaving" @click="saveDraft">
@@ -180,7 +180,7 @@ async function confirmRemove() {
   <DeleteConfirmDialog
     :open="!!docToDelete"
     :title="t('occurrenceDocuments.deleteConfirm')"
-    :item-name="docToDelete?.number"
+    :item-name="docToDelete?.number || t('occurrenceDocuments.noNumber')"
     :is-submitting="!!busyId"
     @update:open="v => { if (!v) docToDelete = null }"
     @confirm="confirmRemove"

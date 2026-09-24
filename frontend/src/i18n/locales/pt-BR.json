@@ -3515,7 +3515,6 @@
     "removeDocument": "Remover",
     "addAnother": "Adicionar outra nota ou cupom",
     "addFirst": "Adicionar nota ou cupom",
-    "validationNumberRequired": "Informe o número de cada nota ou cupom adicionado.",
     "uploadFailedAfterCreate": "Protocolo aberto, mas {count} anexo(s) não subiram. Anexe de novo pelo detalhe do protocolo.",
     "fileTooLarge": "Arquivo acima de 10 MB.",
     "cardTitle": "Notas fiscais e cupons",
@@ -3530,6 +3529,8 @@
     "cancel": "Cancelar",
     "attachmentSaved": "Anexo salvo",
     "loadFailed": "Não foi possível carregar os documentos",
-    "saveFailed": "Não foi possível salvar o documento"
+    "saveFailed": "Não foi possível salvar o documento",
+    "validationEmpty": "Preencha o número, um produto ou anexe o arquivo.",
+    "noNumber": "Sem número"
   }
 }

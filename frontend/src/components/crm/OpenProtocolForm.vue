@@ -238,10 +238,6 @@ async function submit() {
     toast.error(t('occurrences.validationDescriptionRequired'))
     return
   }
-  if (filledDocuments.value.some(d => !d.number.trim())) {
-    toast.error(t('occurrenceDocuments.validationNumberRequired'))
-    return
-  }
   const missing = missingProcessFields(resolvedProcess.value, {
     ...documentsSummary(filledDocuments.value),
     sale_channel: saleChannel.value,

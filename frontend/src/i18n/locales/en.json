@@ -3526,7 +3526,6 @@
     "removeDocument": "Remove",
     "addAnother": "Add another invoice or receipt",
     "addFirst": "Add invoice or receipt",
-    "validationNumberRequired": "Enter the number of every invoice or receipt you added.",
     "uploadFailedAfterCreate": "Protocol opened, but {count} attachment(s) failed. Attach again from the protocol page.",
     "fileTooLarge": "File is larger than 10 MB.",
     "cardTitle": "Invoices and receipts",
@@ -3541,6 +3540,8 @@
     "cancel": "Cancel",
     "attachmentSaved": "Attachment saved",
     "loadFailed": "Could not load documents",
-    "saveFailed": "Could not save the document"
+    "saveFailed": "Could not save the document",
+    "validationEmpty": "Fill in the number, a product or attach the file.",
+    "noNumber": "No number"
   }
 }
