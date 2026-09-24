@@ -129,6 +129,7 @@ func GetMigrationModels() []MigrationModel {
 		{"SalesOpportunityEvent", &models.SalesOpportunityEvent{}},
 		{"SalesOpportunityCounter", &models.SalesOpportunityCounter{}},
 		{"OccurrenceProcessMessage", &models.OccurrenceProcessMessage{}},
+		{"OccurrenceDocument", &models.OccurrenceDocument{}},
 
 		// Help Desk — unidade e departamento
 		{"Unit", &models.Unit{}},

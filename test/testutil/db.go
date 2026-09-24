@@ -148,6 +148,7 @@ func runMigrations(db *gorm.DB) error {
 		&models.OccurrenceWhatHappened{},
 		&models.OccurrenceProcess{},
 		&models.OccurrenceProcessMessage{},
+		&models.OccurrenceDocument{},
 		// Help Desk — unidade e departamento
 		&models.Unit{},
 		&models.Department{},

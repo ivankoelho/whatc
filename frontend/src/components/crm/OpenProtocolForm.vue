@@ -9,8 +9,11 @@ import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Loader2, Search, CheckCircle2, UserRound, XCircle } from 'lucide-vue-next'
+import OccurrenceDocumentsEditor from '@/components/crm/OccurrenceDocumentsEditor.vue'
+import { type DocumentDraft, newDocumentDraft, isBlankDraft, draftToInput, documentsSummary } from '@/lib/occurrence-documents'
 import {
   contactsService,
+  occurrenceDocumentsService,
   unitsService,
   occurrenceCategoriesService,
   occurrenceWhatHappenedService,
@@ -91,11 +94,11 @@ function changeContact() {
 
 // --- Venda ---
 const saleChannel = ref('')
-const invoiceNumber = ref('')
-const purchaseDate = ref('')
 const unitId = ref('')
-const productDescription = ref('')
 const units = ref<Unit[]>([])
+// NFs and cupons/pedidos, each with its products and optional file.
+const documents = ref<DocumentDraft[]>([newDocumentDraft()])
+const filledDocuments = computed(() => documents.value.filter(d => !isBlankDraft(d)))
 
 // --- Ocorrência ---
 const categoryId = ref('')
@@ -204,10 +207,8 @@ function resetForm() {
   newContactName.value = ''
   cpfCnpj.value = ''
   saleChannel.value = ''
-  invoiceNumber.value = ''
-  purchaseDate.value = ''
   unitId.value = ''
-  productDescription.value = ''
+  documents.value = [newDocumentDraft()]
   categoryId.value = ''
   autoCategoryId.value = ''
   whatHappenedId.value = ''
@@ -238,9 +239,7 @@ async function submit() {
     return
   }
   const missing = missingProcessFields(resolvedProcess.value, {
-    invoice_number: invoiceNumber.value,
-    product_description: productDescription.value,
-    purchase_date: purchaseDate.value,
+    ...documentsSummary(filledDocuments.value),
     sale_channel: saleChannel.value,
   })
   if (missing.length > 0) {
@@ -277,12 +276,18 @@ async function submit() {
       process_id: resolvedProcess.value?.id || undefined,
       unit_id: unitId.value || undefined,
       sale_channel: saleChannel.value || undefined,
-      invoice_number: invoiceNumber.value.trim() || undefined,
-      purchase_date: purchaseDate.value || undefined,
-      product_description: productDescription.value.trim() || undefined,
+      documents: filledDocuments.value.map(draftToInput),
       internal_note: internalNote.value.trim() || undefined,
       source_transfer_id: props.sourceTransferId,
     })
+
+    const createdDocs = occurrence.documents || []
+    const uploads = filledDocuments.value
+      .map((draft, i) => ({ draft, doc: createdDocs[i] }))
+      .filter(({ draft, doc }) => draft.file && doc)
+      .map(({ draft, doc }) => occurrenceDocumentsService.uploadAttachment(occurrence.id, doc.id, draft.file as File))
+    const failedUploads = (await Promise.allSettled(uploads)).filter(u => u.status === 'rejected').length
+    if (failedUploads > 0) toast.warning(t('occurrenceDocuments.uploadFailedAfterCreate', { count: failedUploads }))
 
     const preview = await store.previewRegistrationMessage(occurrence.id, resolvedProcess.value?.id)
     suggestedMessage.value = preview.content
@@ -445,14 +450,6 @@ function goToProtocol() {
             </Select>
           </div>
           <div class="space-y-2">
-            <Label>{{ t('occurrences.invoiceNumberLabel') }} <span v-if="isProcessFieldRequired(resolvedProcess, 'invoice_number')" class="text-destructive">*</span></Label>
-            <Input v-model="invoiceNumber" />
-          </div>
-          <div class="space-y-2">
-            <Label>{{ t('occurrences.purchaseDateLabel') }} <span v-if="isProcessFieldRequired(resolvedProcess, 'purchase_date')" class="text-destructive">*</span></Label>
-            <Input v-model="purchaseDate" type="date" />
-          </div>
-          <div class="space-y-2">
             <Label>{{ t('occurrences.unitLabel') }}</Label>
             <Select v-model="unitId">
               <SelectTrigger><SelectValue :placeholder="t('occurrences.unitPlaceholder')" /></SelectTrigger>
@@ -462,8 +459,14 @@ function goToProtocol() {
             </Select>
           </div>
           <div class="space-y-2 col-span-2">
-            <Label>{{ t('occurrences.productLabel') }} <span v-if="isProcessFieldRequired(resolvedProcess, 'product_description')" class="text-destructive">*</span></Label>
-            <Input v-model="productDescription" :placeholder="t('occurrences.productPlaceholder')" />
+            <Label>{{ t('occurrenceDocuments.sectionLabel') }}</Label>
+            <p class="text-xs text-muted-foreground">{{ t('occurrenceDocuments.sectionHint') }}</p>
+            <OccurrenceDocumentsEditor
+              v-model="documents"
+              :number-required="isProcessFieldRequired(resolvedProcess, 'invoice_number')"
+              :product-required="isProcessFieldRequired(resolvedProcess, 'product_description')"
+              :date-required="isProcessFieldRequired(resolvedProcess, 'purchase_date')"
+            />
           </div>
         </CardContent>
 
