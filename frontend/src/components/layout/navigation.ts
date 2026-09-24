@@ -42,8 +42,6 @@ export interface NavChildGroup {
 export interface NavSection {
   label: string
   items: NavItem[]
-  /** Pin to bottom of sidebar */
-  pinBottom?: boolean
 }
 
 export const navigationSections: NavSection[] = [
@@ -143,7 +141,6 @@ export const navigationSections: NavSection[] = [
   },
   {
     label: '',
-    pinBottom: true,
     items: [
       {
         name: 'nav.settings',
