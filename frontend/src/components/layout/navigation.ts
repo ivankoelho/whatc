@@ -16,7 +16,8 @@ import {
   PhoneCall,
   PhoneForwarded,
   ScrollText,
-  ClipboardList
+  ClipboardList,
+  TrendingUp
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
@@ -27,6 +28,10 @@ export interface NavItem {
   /** Tailwind text-colour classes for the icon; children inherit the parent's. */
   color?: string
   permission?: string
+  /** Action to check `permission` against — defaults to 'read'. Use
+   * 'view_all' for org-wide aggregate views that every holder of the base
+   * `read` permission should NOT see (spec §7 for sales_opportunities). */
+  permissionAction?: string
   childPermissions?: string[]
   children?: NavItem[]
   /** Grouped submenu (labelled clusters), used instead of `children` when a
@@ -68,6 +73,24 @@ export const navigationSections: NavSection[] = [
         icon: ClipboardList,
         color: 'text-indigo-400 light:text-indigo-600',
         permission: 'occurrences'
+      },
+      {
+        name: 'nav.salesOperation',
+        path: '/sales/operation',
+        icon: TrendingUp,
+        color: 'text-teal-400 light:text-teal-600',
+        permission: 'sales_opportunities'
+      },
+      {
+        name: 'nav.salesDashboard',
+        path: '/sales/dashboard',
+        icon: BarChart3,
+        color: 'text-blue-400 light:text-blue-600',
+        permission: 'sales_opportunities',
+        // Finding 7: this view shows org-wide aggregates, which spec §7
+        // reserves for manager/admin (view_all) — agents only get read/write
+        // on their own opportunities. /sales/operation stays plain 'read'.
+        permissionAction: 'view_all'
       },
     ]
   },
