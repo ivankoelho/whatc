@@ -54,8 +54,11 @@ function onTabChange(value: string | number) {
   <div v-if="visibleTabs.length === 0" class="p-6 text-sm text-white/50 light:text-gray-500">
     {{ t('common.noAccessToSection') }}
   </div>
-  <Tabs v-else :model-value="activeTab ?? undefined" class="w-full" @update:model-value="onTabChange">
-    <TabsList class="h-auto w-full justify-start gap-6 overflow-x-auto rounded-none border-b border-white/[0.08] bg-transparent p-0 px-6 light:border-gray-200">
+  <!-- The hub fills the page height and hands what is left under the tab strip
+       to the active tab, so each settings page keeps its own scroll area
+       (they are all h-full + ScrollArea). -->
+  <Tabs v-else :model-value="activeTab ?? undefined" class="flex h-full min-h-0 w-full flex-col" @update:model-value="onTabChange">
+    <TabsList class="h-auto w-full shrink-0 justify-start gap-6 overflow-x-auto rounded-none border-b border-white/[0.08] bg-transparent p-0 px-6 light:border-gray-200">
       <TabsTrigger
         v-for="tab in visibleTabs"
         :key="tab.value"
@@ -65,7 +68,7 @@ function onTabChange(value: string | number) {
         {{ t(tab.labelKey) }}
       </TabsTrigger>
     </TabsList>
-    <TabsContent v-for="tab in visibleTabs" :key="tab.value" :value="tab.value">
+    <TabsContent v-for="tab in visibleTabs" :key="tab.value" :value="tab.value" class="mt-0 min-h-0 flex-1">
       <component :is="tab.component" />
     </TabsContent>
   </Tabs>
