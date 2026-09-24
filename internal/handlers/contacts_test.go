@@ -1781,3 +1781,65 @@ func TestApp_CreateContact_AssignsCreatorForVisibility(t *testing.T) {
 	assert.False(t, app.CanViewConversationForTest(other.ID, org.ID, &contact),
 		"an unrelated agent must not see someone else's private contact")
 }
+
+// The contacts table's CPF/CNPJ column is physically named "cpfcnpj" (no
+// underscore) -- GORM's default snake_case naming for the all-caps field
+// CPFCNPJ. UpdateContact builds a map[string]any and GORM treats a map's
+// keys as literal SQL column names (unlike a struct, which it resolves via
+// reflection), so writing "cpf_cnpj" there targets a column that doesn't
+// exist. Struct-based writes (CreateContact's fresh-contact branch) are
+// unaffected -- only the two map-based update sites are.
+func TestApp_UpdateContact_PersistsCPFCNPJ(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "atendente",
+		[]string{"chat:read", "chat:write", "contacts:read", "contacts:write"})
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+
+	req := testutil.NewJSONRequest(t, map[string]any{"cpf_cnpj": "037.138.295-51"})
+	testutil.SetPathParam(req, "id", contact.ID.String())
+	testutil.SetAuthContext(req, org.ID, user.ID)
+
+	require.NoError(t, app.UpdateContact(req))
+	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req),
+		"body: %s", testutil.GetResponseBody(req))
+
+	var reloaded models.Contact
+	require.NoError(t, app.DB.First(&reloaded, "id = ?", contact.ID).Error)
+	assert.Equal(t, "03713829551", reloaded.CPFCNPJ)
+}
+
+// Same underlying bug as TestApp_UpdateContact_PersistsCPFCNPJ, hit through
+// CreateContact's other code path: an agent "creates" a contact for a phone
+// number that already exists, unassigned (e.g. left behind by an inbound
+// WhatsApp message before anyone claimed it) -- CreateContact claims it via
+// the same map-based Updates() call instead of erroring, and that claim
+// breaks exactly the same way when a CPF/CNPJ is supplied.
+func TestApp_CreateContact_ClaimingExisting_PersistsCPFCNPJ(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "atendente",
+		[]string{"chat:read", "chat:write", "contacts:read", "contacts:write"})
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
+
+	// Unassigned pre-existing contact. A digits-only number, not the default
+	// fixture phone (which embeds hex letters from a UUID) -- CreateContact
+	// normalizes the incoming number to digits-only before matching, so a
+	// stored number containing letters could never match anything sent to it.
+	existing := testutil.CreateTestContactWith(t, app.DB, org.ID, testutil.WithPhoneNumber("5511990009999"))
+
+	req := testutil.NewJSONRequest(t, map[string]any{
+		"phone_number": existing.PhoneNumber,
+		"cpf_cnpj":     "037.138.295-51",
+	})
+	testutil.SetAuthContext(req, org.ID, user.ID)
+
+	require.NoError(t, app.CreateContact(req))
+	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req),
+		"body: %s", testutil.GetResponseBody(req))
+
+	var reloaded models.Contact
+	require.NoError(t, app.DB.First(&reloaded, "id = ?", existing.ID).Error)
+	assert.Equal(t, "03713829551", reloaded.CPFCNPJ)
+}

@@ -1516,7 +1516,12 @@ func (a *App) CreateContact(r *fastglue.Request) error {
 			updates["whats_app_account"] = req.WhatsAppAccount
 		}
 		if req.CPFCNPJ != "" {
-			updates["cpf_cnpj"] = normalizeDocument(req.CPFCNPJ)
+			// Column is physically named "cpfcnpj" (GORM's default snake_case
+			// for the all-caps field CPFCNPJ) -- a map's keys are literal SQL
+			// column names to GORM, unlike a struct's, which it resolves by
+			// reflection. "cpf_cnpj" here would target a column that doesn't
+			// exist.
+			updates["cpfcnpj"] = normalizeDocument(req.CPFCNPJ)
 		}
 		if req.Tags != nil {
 			tagsArray := make(models.JSONBArray, len(req.Tags))
@@ -1532,7 +1537,10 @@ func (a *App) CreateContact(r *fastglue.Request) error {
 			updates["assigned_user_id"] = userID
 		}
 		if len(updates) > 0 {
-			a.DB.Model(&existingContact).Updates(updates)
+			if err := a.DB.Model(&existingContact).Updates(updates).Error; err != nil {
+				a.Log.Error("Failed to update claimed contact", "error", err)
+				return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update contact", nil, "")
+			}
 		}
 		a.DB.First(&existingContact, existingContact.ID)
 		return r.SendEnvelope(a.buildContactResponse(&existingContact, orgID))
@@ -1638,7 +1646,11 @@ func (a *App) UpdateContact(r *fastglue.Request) error {
 		updates["whats_app_account"] = *req.WhatsAppAccount
 	}
 	if req.CPFCNPJ != nil {
-		updates["cpf_cnpj"] = normalizeDocument(*req.CPFCNPJ)
+		// Column is physically named "cpfcnpj" (GORM's default snake_case for
+		// the all-caps field CPFCNPJ) -- a map's keys are literal SQL column
+		// names to GORM, unlike a struct's, which it resolves by reflection.
+		// "cpf_cnpj" here would target a column that doesn't exist.
+		updates["cpfcnpj"] = normalizeDocument(*req.CPFCNPJ)
 	}
 	if req.Tags != nil {
 		tagsArray := make(models.JSONBArray, len(req.Tags))
