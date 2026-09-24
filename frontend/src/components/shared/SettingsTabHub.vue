@@ -54,18 +54,25 @@ function onTabChange(value: string | number) {
   <div v-if="visibleTabs.length === 0" class="p-6 text-sm text-white/50 light:text-gray-500">
     {{ t('common.noAccessToSection') }}
   </div>
-  <Tabs v-else :model-value="activeTab ?? undefined" class="w-full" @update:model-value="onTabChange">
-    <TabsList class="h-auto w-full justify-start gap-6 overflow-x-auto rounded-none border-b border-white/[0.08] bg-transparent p-0 px-6 light:border-gray-200">
+  <!-- The hub fills the page height and hands what is left under the tab strip
+       to the active tab, so each settings page keeps its own scroll area
+       (they are all h-full + ScrollArea). -->
+  <Tabs v-else :model-value="activeTab ?? undefined" class="flex h-full min-h-0 w-full flex-col" @update:model-value="onTabChange">
+    <!-- h-12 matches the sidebar header so both bottom lines align. The line is an
+         inset shadow, not a border, so the active tab's underline sits on it without
+         overflowing (an overflow made the strip show a scrollbar). Tabs still scroll
+         sideways on narrow screens, with the bar hidden. -->
+    <TabsList class="h-12 w-full shrink-0 justify-start gap-6 overflow-x-auto overflow-y-hidden rounded-none bg-transparent p-0 px-6 shadow-[inset_0_-1px_0_0_rgba(255,255,255,0.08)] [scrollbar-width:none] light:shadow-[inset_0_-1px_0_0_#e5e7eb] [&::-webkit-scrollbar]:hidden">
       <TabsTrigger
         v-for="tab in visibleTabs"
         :key="tab.value"
         :value="tab.value"
-        class="-mb-px h-11 rounded-none border-b-2 border-transparent bg-transparent px-0 text-[13px] text-white/50 shadow-none hover:text-white/80 data-[state=active]:border-emerald-500 data-[state=active]:bg-transparent data-[state=active]:text-white data-[state=active]:shadow-none light:text-gray-500 light:hover:text-gray-800 light:data-[state=active]:text-gray-900"
+        class="h-12 rounded-none border-b-2 border-transparent bg-transparent px-0 text-[13px] text-white/50 shadow-none hover:text-white/80 data-[state=active]:border-emerald-500 data-[state=active]:bg-transparent data-[state=active]:text-white data-[state=active]:shadow-none light:text-gray-500 light:hover:text-gray-800 light:data-[state=active]:text-gray-900"
       >
         {{ t(tab.labelKey) }}
       </TabsTrigger>
     </TabsList>
-    <TabsContent v-for="tab in visibleTabs" :key="tab.value" :value="tab.value">
+    <TabsContent v-for="tab in visibleTabs" :key="tab.value" :value="tab.value" class="mt-0 min-h-0 flex-1">
       <component :is="tab.component" />
     </TabsContent>
   </Tabs>
