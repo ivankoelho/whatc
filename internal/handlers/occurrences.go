@@ -418,6 +418,15 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 		}
 		occ.WhatHappenedID = &id
 		whatHappened = wh
+
+		// The reason decides the category unless the agent picked one.
+		if occ.CategoryID == nil && wh.CategoryID != nil {
+			var cat models.OccurrenceCategory
+			if a.DB.Where("id = ? AND organization_id = ?", *wh.CategoryID, orgID).First(&cat).Error == nil {
+				occ.CategoryID = wh.CategoryID
+				category = &cat
+			}
+		}
 	}
 
 	// Derive the title when the agent didn't type one: "Categoria — Produto",

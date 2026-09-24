@@ -2252,17 +2252,14 @@
     "noStagesYet": "No stages yet",
     "noStagesYetDesc": "Add your first pipeline stage.",
     "stageNameRequired": "Name is required",
-
     "tabInProgress": "Protocols in progress",
     "tabOpenProtocol": "Open protocol",
-
     "openProtocolTitle": "Open protocol",
     "openProtocolDesc": "Identify the customer to register the case",
     "sectionClient": "Customer",
     "sectionSale": "Sale",
     "sectionCase": "Case",
     "sectionInternal": "Internal note (optional)",
-
     "searchingContact": "Searching for customer...",
     "contactFound": "Customer found",
     "contactNotFound": "No customer found",
@@ -2271,7 +2268,6 @@
     "changeContact": "Change customer",
     "cpfCnpjLabel": "Tax ID (CPF/CNPJ)",
     "cpfCnpjPlaceholder": "Digits only",
-
     "saleChannelLabel": "Sale channel",
     "saleChannelPlaceholder": "Select channel",
     "saleChannelLojaFisica": "Physical store",
@@ -2284,7 +2280,6 @@
     "unitPlaceholder": "Select unit",
     "productLabel": "Product",
     "productPlaceholder": "E.g.: Oak Laminate Flooring",
-
     "categoryLabel": "Category",
     "categoryPlaceholder": "Select category",
     "whatHappenedLabel": "What happened",
@@ -2293,7 +2288,6 @@
     "descriptionRequired": "Description *",
     "descriptionPlaceholder": "Describe what the customer reported...",
     "internalNotePlaceholder": "Visible only to the internal team",
-
     "registerProtocol": "Register protocol",
     "registeringProtocol": "Registering...",
     "protocolCreatedTitle": "Protocol created successfully",
@@ -2309,7 +2303,6 @@
     "previewMessageFailed": "Could not load the suggested message. You can still write a message or send the default text.",
     "openAnotherProtocol": "Open another protocol",
     "viewProtocol": "View protocol",
-
     "validationPhoneRequired": "Enter the customer's phone number",
     "validationNameRequired": "Enter the customer's name",
     "validationDescriptionRequired": "Description is required",
@@ -2318,13 +2311,13 @@
     "processEvidenceTitle": "Documents to request from the customer",
     "processRestrictionsTitle": "What NOT to tell the customer",
     "validationSaleChannelInvalid": "Select a valid sale channel",
-
     "columnPhone": "Phone",
     "columnUnit": "Unit",
     "columnSLA": "SLA",
     "slaOnTime": "On time",
     "slaOverdue": "Overdue",
-    "slaNone": "—"
+    "slaNone": "—",
+    "categoryFromReason": "Filled in from the reason. You can change it."
   },
   "units": {
     "title": "Units",
@@ -2403,7 +2396,7 @@
     "title": "What Happened",
     "subtitle": "Root cause of the occurrence, used to filter reports in the future",
     "cardTitle": "Registered reasons",
-    "cardDesc": "Appear in the \"What happened\" picker when opening a protocol — independent of Category, to allow filtering by root cause in reports.",
+    "cardDesc": "Appear in the \"What happened\" picker when opening a protocol. The category set here is filled in automatically on the protocol.",
     "reason": "reason",
     "addReason": "Add reason",
     "editReason": "Edit reason",
@@ -2422,7 +2415,11 @@
     "noReasonsYetDesc": "Add your first reason.",
     "deleteTitle": "Delete reason",
     "deleteWarning": "This cannot be undone. Reasons in use by occurrences cannot be deleted.",
-    "nameRequired": "Name is required"
+    "nameRequired": "Name is required",
+    "columnCategory": "Category",
+    "category": "Category",
+    "noCategory": "No category",
+    "categoryHint": "On a protocol, picking this reason fills in this category."
   },
   "occurrenceProcesses": {
     "title": "Occurrence Processes",

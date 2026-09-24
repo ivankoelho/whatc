@@ -211,6 +211,10 @@ func runServer(args []string) {
 			lo.Fatal("Occurrence source backfill failed", "error", err)
 		}
 
+		if err := database.BackfillWhatHappenedCategory(db); err != nil {
+			lo.Fatal("What-happened category backfill failed", "error", err)
+		}
+
 		// Semeia a linha única de configuração de marca do sistema. Precisa
 		// rodar aqui, depois do AutoMigrate (a tabela precisa existir) e antes
 		// do ListenAndServe — os handlers de branding assumem que a linha já

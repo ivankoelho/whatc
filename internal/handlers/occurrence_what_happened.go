@@ -51,6 +51,23 @@ type OccurrenceWhatHappenedRequest struct {
 	Name     string `json:"name"`
 	Position int    `json:"position"`
 	IsActive *bool  `json:"is_active"`
+	// CategoryID is sent on every save; empty clears it.
+	CategoryID string `json:"category_id"`
+}
+
+// resolveWhatHappenedCategory validates that a category id belongs to the org.
+// Empty means "no category".
+func (a *App) resolveWhatHappenedCategory(orgID uuid.UUID, raw string) (*uuid.UUID, bool) {
+	if raw == "" {
+		return nil, true
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		return nil, false
+	}
+	var count int64
+	a.DB.Model(&models.OccurrenceCategory{}).Where("id = ? AND organization_id = ?", id, orgID).Count(&count)
+	return &id, count > 0
 }
 
 // ListOccurrenceWhatHappened returns the org's reasons, seeding defaults on
@@ -95,8 +112,13 @@ func (a *App) CreateOccurrenceWhatHappened(r *fastglue.Request) error {
 		isActive = *req.IsActive
 	}
 
+	categoryID, ok := a.resolveWhatHappenedCategory(orgID, req.CategoryID)
+	if !ok {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid category", nil, "")
+	}
+
 	reason := models.OccurrenceWhatHappened{
-		OrganizationID: orgID, Name: req.Name, Position: req.Position, IsActive: isActive,
+		OrganizationID: orgID, Name: req.Name, Position: req.Position, IsActive: isActive, CategoryID: categoryID,
 	}
 	if err := a.DB.Create(&reason).Error; err != nil {
 		a.Log.Error("Failed to create what-happened reason", "error", err)
@@ -130,7 +152,12 @@ func (a *App) UpdateOccurrenceWhatHappened(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "name is required", nil, "")
 	}
 
-	updates := map[string]any{"name": req.Name, "position": req.Position}
+	categoryID, ok := a.resolveWhatHappenedCategory(orgID, req.CategoryID)
+	if !ok {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid category", nil, "")
+	}
+
+	updates := map[string]any{"name": req.Name, "position": req.Position, "category_id": categoryID}
 	if req.IsActive != nil {
 		updates["is_active"] = *req.IsActive
 	}

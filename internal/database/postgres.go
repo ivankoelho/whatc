@@ -490,6 +490,20 @@ func BackfillOccurrenceSourceForManualCases(db *gorm.DB) error {
 	`).Error
 }
 
+// BackfillWhatHappenedCategory gives each "o que aconteceu" the category its
+// active process already pointed to, so the reason → category flow starts with
+// the mapping admins had configured. Only fills empty categories.
+func BackfillWhatHappenedCategory(db *gorm.DB) error {
+	return db.Exec(`
+		UPDATE occurrence_what_happened w
+		SET category_id = p.category_id
+		FROM occurrence_processes p
+		WHERE p.what_happened_id = w.id AND p.category_id IS NOT NULL
+		  AND p.is_active AND p.deleted_at IS NULL
+		  AND w.category_id IS NULL
+	`).Error
+}
+
 // EnsureBrandingSettingsRow seeds the one branding_settings row this system
 // ever has, keyed by the fixed models.BrandingSettingsSingletonID. Runs once
 // at migrate time; ON CONFLICT DO NOTHING makes re-running a safe no-op —

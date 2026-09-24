@@ -17,6 +17,11 @@ type OccurrenceWhatHappened struct {
 	Name           string    `gorm:"size:100;not null" json:"name"`
 	Position       int       `gorm:"not null;default:0" json:"position"`
 	IsActive       bool      `gorm:"default:true" json:"is_active"`
+
+	// CategoryID is the category an occurrence gets when the agent picks this
+	// reason: the agent says what happened and the category follows from it.
+	CategoryID *uuid.UUID          `gorm:"type:uuid;index" json:"category_id,omitempty"`
+	Category   *OccurrenceCategory `gorm:"foreignKey:CategoryID" json:"category,omitempty"`
 }
 
 func (OccurrenceWhatHappened) TableName() string { return "occurrence_what_happened" }
