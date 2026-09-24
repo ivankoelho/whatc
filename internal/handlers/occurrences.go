@@ -34,6 +34,10 @@ type CreateOccurrenceRequest struct {
 	PurchaseDate       string  `json:"purchase_date"` // "2006-01-02", optional
 	ProductDescription string  `json:"product_description"`
 	InternalNote       *string `json:"internal_note"`
+
+	// Documents are the purchase documents (NF or cupom/pedido) with their
+	// products. When sent, the single-value fields above are derived from them.
+	Documents []OccurrenceDocumentRequest `json:"documents"`
 }
 
 // occurrenceSaleChannels is the closed list the sale_channel field is
@@ -88,6 +92,10 @@ type OccurrenceResponse struct {
 	SLABreachedAt         *time.Time `json:"sla_breached_at,omitempty"`
 	FirstResponseAt       *time.Time `json:"first_response_at,omitempty"`
 	FirstResponseByID     *uuid.UUID `json:"first_response_by_id,omitempty"`
+
+	// Documents is only filled on create, so the client can upload each
+	// document's file right after.
+	Documents []models.OccurrenceDocument `json:"documents,omitempty"`
 }
 
 func occurrenceToResponse(o models.Occurrence) OccurrenceResponse {
@@ -164,6 +172,26 @@ func (a *App) visibleOccurrences(query *gorm.DB, userID, orgID uuid.UUID) *gorm.
 	// to open, even when the contact itself is outside your scope.
 	return query.Where("occurrences.contact_id IN (?) OR occurrences.assigned_user_id = ?",
 		visibleContacts, userID)
+}
+
+// suggestedCategory is the category an occurrence gets from its reason ("O que
+// aconteceu"), falling back to the reason's process. Nil when neither has one
+// or it no longer belongs to the org.
+func (a *App) suggestedCategory(orgID uuid.UUID, reason *models.OccurrenceWhatHappened, process *models.OccurrenceProcess) *models.OccurrenceCategory {
+	var id *uuid.UUID
+	switch {
+	case reason != nil && reason.CategoryID != nil:
+		id = reason.CategoryID
+	case process != nil && process.CategoryID != nil:
+		id = process.CategoryID
+	default:
+		return nil
+	}
+	var cat models.OccurrenceCategory
+	if a.DB.Where("id = ? AND organization_id = ?", *id, orgID).First(&cat).Error != nil {
+		return nil
+	}
+	return &cat
 }
 
 // resolveAssignee validates that a user id from a request body names a real
@@ -257,6 +285,23 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "purchase_date must be YYYY-MM-DD", nil, "")
 		}
 		purchaseDate = &pd
+	}
+
+	documents, err := buildOccurrenceDocuments(orgID, userID, a.orgLocation(orgID), req.Documents)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, err.Error(), nil, "")
+	}
+	if len(documents) > 0 {
+		invoice, docDate, product := summarizeOccurrenceDocuments(documents)
+		if req.InvoiceNumber == "" {
+			req.InvoiceNumber = invoice
+		}
+		if purchaseDate == nil {
+			purchaseDate = docDate
+		}
+		if req.ProductDescription == "" {
+			req.ProductDescription = product
+		}
 	}
 
 	contactID, err := uuid.Parse(req.ContactID)
@@ -420,6 +465,15 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 		whatHappened = wh
 	}
 
+	// The agent says what happened; the category follows from it unless the
+	// agent picked one.
+	if occ.CategoryID == nil {
+		if cat := a.suggestedCategory(orgID, whatHappened, processRow); cat != nil {
+			occ.CategoryID = &cat.ID
+			category = cat
+		}
+	}
+
 	// Derive the title when the agent didn't type one: "Categoria — Produto",
 	// or "Categoria — Atendimento SAC" without a product, per the SAC MVP
 	// spec (§8) — the product asked not to ask for a title when it can be
@@ -442,6 +496,17 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 		a.Log.Error("Failed to create occurrence", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError,
 			"Failed to create occurrence", nil, "")
+	}
+
+	for i := range documents {
+		documents[i].OccurrenceID = occ.ID
+	}
+	if len(documents) > 0 {
+		if err := a.DB.Create(&documents).Error; err != nil {
+			// The occurrence already carries the documents' summary in its own
+			// fields, so the case is not lost; the agent can re-add the detail.
+			a.Log.Error("Failed to save occurrence documents", "error", err, "occurrence_id", occ.ID)
+		}
 	}
 
 	if req.InternalNote != nil && *req.InternalNote != "" {
@@ -471,6 +536,7 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 		}
 	}
 	resp := occurrenceToResponse(occ)
+	resp.Documents = documents
 
 	a.broadcastOccurrenceMessage(orgID, occ.ContactID, occ.AssignedUserID, websocket.WSMessage{
 		Type:    websocket.TypeOccurrenceChanged,
@@ -807,10 +873,18 @@ func (a *App) UpdateOccurrence(r *fastglue.Request) error {
 			if err != nil {
 				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid what_happened_id", nil, "")
 			}
-			if _, err := findByIDAndOrg[models.OccurrenceWhatHappened](a.DB, r, id, orgID, "Reason"); err != nil {
+			wh, err := findByIDAndOrg[models.OccurrenceWhatHappened](a.DB, r, id, orgID, "Reason")
+			if err != nil {
 				return nil
 			}
 			updates["what_happened_id"] = id
+			// Same rule as on create: a new reason without an explicit category
+			// brings its own category.
+			if req.CategoryID == nil {
+				if cat := a.suggestedCategory(orgID, wh, nil); cat != nil {
+					updates["category_id"] = cat.ID
+				}
+			}
 		}
 	}
 
@@ -869,15 +943,24 @@ func (a *App) DeleteOccurrence(r *fastglue.Request) error {
 		"contact_id":      occ.ContactID,
 	}
 
+	var attachmentPaths []string
 	txErr := a.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Unscoped().Where("occurrence_id = ?", occ.ID).Delete(&models.OccurrenceEvent{}).Error; err != nil {
 			return err
 		}
+		paths, err := deleteOccurrenceDocuments(tx, occ.ID)
+		if err != nil {
+			return err
+		}
+		attachmentPaths = paths
 		return tx.Unscoped().Delete(&models.Occurrence{}, "id = ?", occ.ID).Error
 	})
 	if txErr != nil {
 		a.Log.Error("Failed to delete occurrence", "error", txErr)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to delete occurrence", nil, "")
+	}
+	for _, p := range attachmentPaths {
+		a.removeOccurrenceAttachment(p)
 	}
 
 	a.logAudit(orgID, userID, "occurrence", occ.ID, models.AuditActionDeleted, snapshot, nil)

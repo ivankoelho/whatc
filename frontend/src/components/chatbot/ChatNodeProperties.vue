@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { Trash2, Plus } from 'lucide-vue-next'
@@ -393,6 +394,16 @@ const typeLabel = computed<Record<string, string>>(() => ({
                 <SelectItem v-for="team in teamsStore.teams" :key="team.id" :value="team.id">{{ team.name }}</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+          <div class="flex items-center gap-2 pt-1">
+            <Checkbox
+              :id="'create-opportunity-' + idx"
+              :checked="btn.create_opportunity === true"
+              @update:checked="(v) => updateButton(Number(idx), 'create_opportunity', v === true)"
+            />
+            <Label :for="'create-opportunity-' + idx" class="text-xs font-normal cursor-pointer">
+              {{ t('chatbot.properties.startsSalesOpportunity') }}
+            </Label>
           </div>
         </div>
         <p class="text-[10px] text-muted-foreground">{{ t('chatbot.properties.replyButtonsHint') }}</p>

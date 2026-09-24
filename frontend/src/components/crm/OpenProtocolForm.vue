@@ -9,8 +9,11 @@ import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Loader2, Search, CheckCircle2, UserRound, XCircle } from 'lucide-vue-next'
+import OccurrenceDocumentsEditor from '@/components/crm/OccurrenceDocumentsEditor.vue'
+import { type DocumentDraft, newDocumentDraft, isBlankDraft, draftToInput, documentsSummary } from '@/lib/occurrence-documents'
 import {
   contactsService,
+  occurrenceDocumentsService,
   unitsService,
   occurrenceCategoriesService,
   occurrenceWhatHappenedService,
@@ -91,11 +94,11 @@ function changeContact() {
 
 // --- Venda ---
 const saleChannel = ref('')
-const invoiceNumber = ref('')
-const purchaseDate = ref('')
 const unitId = ref('')
-const productDescription = ref('')
 const units = ref<Unit[]>([])
+// NFs and cupons/pedidos, each with its products and optional file.
+const documents = ref<DocumentDraft[]>([newDocumentDraft()])
+const filledDocuments = computed(() => documents.value.filter(d => !isBlankDraft(d)))
 
 // --- Ocorrência ---
 const categoryId = ref('')
@@ -119,6 +122,16 @@ function clearAutoCategory() {
   autoCategoryId.value = ''
 }
 
+// Fill the category from a reason/process suggestion, unless the agent chose one by hand.
+function applySuggestedCategory(suggested?: string) {
+  if (!suggested) {
+    clearAutoCategory()
+  } else if (!categoryId.value || categoryId.value === autoCategoryId.value) {
+    categoryId.value = suggested
+    autoCategoryId.value = suggested
+  }
+}
+
 watch(whatHappenedId, async (id) => {
   resolvedProcess.value = null
   if (!id) {
@@ -126,25 +139,22 @@ watch(whatHappenedId, async (id) => {
     clearAutoCategory()
     return
   }
+  // The agent says what happened; the category follows from the reason.
+  const reasonCategory = whatHappenedOptions.value.find(w => w.id === id)?.category_id
+  applySuggestedCategory(reasonCategory)
   resolvingProcess.value = true
   try {
     const res = await occurrenceProcessesService.resolve(id)
     // A newer selection may have landed while this request was in flight.
     if (whatHappenedId.value !== id) return
     resolvedProcess.value = res.data.data.process
-    const suggested = resolvedProcess.value?.category_id
-    if (!suggested) {
-      clearAutoCategory()
-    } else if (!categoryId.value || categoryId.value === autoCategoryId.value) {
-      // Manual choice wins: only an empty or previously auto-filled category is replaced.
-      categoryId.value = suggested
-      autoCategoryId.value = suggested
-    }
+    // The reason's own category wins; the process only fills in when the reason has none.
+    if (!reasonCategory) applySuggestedCategory(resolvedProcess.value?.category_id)
   } catch {
     // Resolution is a convenience; failure must not block the form.
     if (whatHappenedId.value === id) {
       resolvedProcess.value = null
-      clearAutoCategory()
+      if (!reasonCategory) clearAutoCategory()
     }
   } finally {
     if (whatHappenedId.value === id) resolvingProcess.value = false
@@ -197,10 +207,8 @@ function resetForm() {
   newContactName.value = ''
   cpfCnpj.value = ''
   saleChannel.value = ''
-  invoiceNumber.value = ''
-  purchaseDate.value = ''
   unitId.value = ''
-  productDescription.value = ''
+  documents.value = [newDocumentDraft()]
   categoryId.value = ''
   autoCategoryId.value = ''
   whatHappenedId.value = ''
@@ -231,9 +239,7 @@ async function submit() {
     return
   }
   const missing = missingProcessFields(resolvedProcess.value, {
-    invoice_number: invoiceNumber.value,
-    product_description: productDescription.value,
-    purchase_date: purchaseDate.value,
+    ...documentsSummary(filledDocuments.value),
     sale_channel: saleChannel.value,
   })
   if (missing.length > 0) {
@@ -270,12 +276,18 @@ async function submit() {
       process_id: resolvedProcess.value?.id || undefined,
       unit_id: unitId.value || undefined,
       sale_channel: saleChannel.value || undefined,
-      invoice_number: invoiceNumber.value.trim() || undefined,
-      purchase_date: purchaseDate.value || undefined,
-      product_description: productDescription.value.trim() || undefined,
+      documents: filledDocuments.value.map(draftToInput),
       internal_note: internalNote.value.trim() || undefined,
       source_transfer_id: props.sourceTransferId,
     })
+
+    const createdDocs = occurrence.documents || []
+    const uploads = filledDocuments.value
+      .map((draft, i) => ({ draft, doc: createdDocs[i] }))
+      .filter(({ draft, doc }) => draft.file && doc)
+      .map(({ draft, doc }) => occurrenceDocumentsService.uploadAttachment(occurrence.id, doc.id, draft.file as File))
+    const failedUploads = (await Promise.allSettled(uploads)).filter(u => u.status === 'rejected').length
+    if (failedUploads > 0) toast.warning(t('occurrenceDocuments.uploadFailedAfterCreate', { count: failedUploads }))
 
     const preview = await store.previewRegistrationMessage(occurrence.id, resolvedProcess.value?.id)
     suggestedMessage.value = preview.content
@@ -438,14 +450,6 @@ function goToProtocol() {
             </Select>
           </div>
           <div class="space-y-2">
-            <Label>{{ t('occurrences.invoiceNumberLabel') }} <span v-if="isProcessFieldRequired(resolvedProcess, 'invoice_number')" class="text-destructive">*</span></Label>
-            <Input v-model="invoiceNumber" />
-          </div>
-          <div class="space-y-2">
-            <Label>{{ t('occurrences.purchaseDateLabel') }} <span v-if="isProcessFieldRequired(resolvedProcess, 'purchase_date')" class="text-destructive">*</span></Label>
-            <Input v-model="purchaseDate" type="date" />
-          </div>
-          <div class="space-y-2">
             <Label>{{ t('occurrences.unitLabel') }}</Label>
             <Select v-model="unitId">
               <SelectTrigger><SelectValue :placeholder="t('occurrences.unitPlaceholder')" /></SelectTrigger>
@@ -455,8 +459,14 @@ function goToProtocol() {
             </Select>
           </div>
           <div class="space-y-2 col-span-2">
-            <Label>{{ t('occurrences.productLabel') }} <span v-if="isProcessFieldRequired(resolvedProcess, 'product_description')" class="text-destructive">*</span></Label>
-            <Input v-model="productDescription" :placeholder="t('occurrences.productPlaceholder')" />
+            <Label>{{ t('occurrenceDocuments.sectionLabel') }}</Label>
+            <p class="text-xs text-muted-foreground">{{ t('occurrenceDocuments.sectionHint') }}</p>
+            <OccurrenceDocumentsEditor
+              v-model="documents"
+              :number-required="isProcessFieldRequired(resolvedProcess, 'invoice_number')"
+              :product-required="isProcessFieldRequired(resolvedProcess, 'product_description')"
+              :date-required="isProcessFieldRequired(resolvedProcess, 'purchase_date')"
+            />
           </div>
         </CardContent>
 
@@ -466,15 +476,6 @@ function goToProtocol() {
         <CardContent class="space-y-4">
           <div class="grid grid-cols-2 gap-4">
             <div class="space-y-2">
-              <Label>{{ t('occurrences.categoryLabel') }}</Label>
-              <Select v-model="categoryId">
-                <SelectTrigger><SelectValue :placeholder="t('occurrences.categoryPlaceholder')" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem v-for="c in categories" :key="c.id" :value="c.id">{{ c.name }}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div class="space-y-2">
               <Label>{{ t('occurrences.whatHappenedLabel') }}</Label>
               <Select v-model="whatHappenedId">
                 <SelectTrigger><SelectValue :placeholder="t('occurrences.whatHappenedPlaceholder')" /></SelectTrigger>
@@ -482,6 +483,16 @@ function goToProtocol() {
                   <SelectItem v-for="w in whatHappenedOptions" :key="w.id" :value="w.id">{{ w.name }}</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+            <div class="space-y-2">
+              <Label>{{ t('occurrences.categoryLabel') }}</Label>
+              <Select v-model="categoryId">
+                <SelectTrigger><SelectValue :placeholder="t('occurrences.categoryPlaceholder')" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem v-for="c in categories" :key="c.id" :value="c.id">{{ c.name }}</SelectItem>
+                </SelectContent>
+              </Select>
+              <p v-if="categoryId && categoryId === autoCategoryId" class="text-xs text-muted-foreground">{{ t('occurrences.categoryFromReason') }}</p>
             </div>
             <div v-if="resolvedProcess" class="col-span-2 rounded-md border border-blue-500/30 bg-blue-500/5 p-3 space-y-2">
               <p class="text-sm font-medium">{{ t('occurrences.processGuidanceTitle') }}: {{ resolvedProcess.name }}</p>

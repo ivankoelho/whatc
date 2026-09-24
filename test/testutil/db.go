@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/shridarpatil/whatomate/internal/database"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -44,6 +45,13 @@ func SetupTestDB(t *testing.T) *gorm.DB {
 		// Run migrations once
 		if err := runMigrations(testDB); err != nil {
 			testDBInitErr = fmt.Errorf("failed to run migrations: %w", err)
+			return
+		}
+
+		// Create the additional indexes/constraints not covered by GORM tags
+		// (partial unique indexes, etc.) — same call production uses.
+		if err := database.CreateIndexes(testDB); err != nil {
+			testDBInitErr = fmt.Errorf("failed to create indexes: %w", err)
 			return
 		}
 
@@ -133,9 +141,14 @@ func runMigrations(db *gorm.DB) error {
 		&models.Occurrence{},
 		&models.OccurrenceEvent{},
 		&models.OccurrenceCounter{},
+		// Sales opportunity — funil de vendas
+		&models.SalesOpportunity{},
+		&models.SalesOpportunityEvent{},
+		&models.SalesOpportunityCounter{},
 		&models.OccurrenceWhatHappened{},
 		&models.OccurrenceProcess{},
 		&models.OccurrenceProcessMessage{},
+		&models.OccurrenceDocument{},
 		// Help Desk — unidade e departamento
 		&models.Unit{},
 		&models.Department{},
@@ -192,6 +205,10 @@ func cleanupTables(db *gorm.DB) {
 		"occurrences",
 		"occurrence_categories",
 		"occurrence_stages",
+		// Sales opportunity — funil de vendas
+		"sales_opportunity_counters",
+		"sales_opportunity_events",
+		"sales_opportunities",
 		// Help Desk — unidade e departamento
 		"departments",
 		"units",
@@ -255,6 +272,9 @@ func TruncateTables(db *gorm.DB) {
 		"occurrences",
 		"occurrence_categories",
 		"occurrence_stages",
+		"sales_opportunity_counters",
+		"sales_opportunity_events",
+		"sales_opportunities",
 		"departments",
 		"units",
 		"conversation_notes",

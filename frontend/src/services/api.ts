@@ -160,7 +160,7 @@ export const usersService = {
   get: (id: string) => api.get(`/users/${id}`),
   create: (data: { email: string; password: string; full_name: string; role_id?: string }) =>
     api.post('/users', data),
-  update: (id: string, data: { email?: string; password?: string; full_name?: string; role_id?: string; is_active?: boolean }) =>
+  update: (id: string, data: { email?: string; password?: string; full_name?: string; role_id?: string; is_active?: boolean; xprocess_seller_code?: string }) =>
     api.put(`/users/${id}`, data),
   delete: (id: string) => api.delete(`/users/${id}`),
   me: () => api.get('/me'),
@@ -1365,6 +1365,7 @@ export interface Unit {
   id: string
   name: string
   code?: string
+  cnpj?: string
   type?: string
   active: boolean
 }
@@ -1394,6 +1395,47 @@ export interface OccurrenceEvent {
   created_at: string
 }
 
+export type OccurrenceDocumentType = 'nf' | 'cupom'
+
+export interface OccurrenceDocumentItem {
+  code: string
+  description: string
+  quantity: string
+}
+
+export interface OccurrenceDocumentInput {
+  type: OccurrenceDocumentType
+  number: string
+  purchase_date?: string
+  items: OccurrenceDocumentItem[]
+}
+
+export interface OccurrenceDocument extends OccurrenceDocumentInput {
+  id: string
+  occurrence_id: string
+  attachment_name?: string
+  attachment_mime?: string
+  created_at: string
+}
+
+export const occurrenceDocumentsService = {
+  list: (occurrenceId: string) =>
+    api.get<ApiEnvelope<{ documents: OccurrenceDocument[] }>>(`/occurrences/${occurrenceId}/documents`),
+  create: (occurrenceId: string, data: OccurrenceDocumentInput) =>
+    api.post<ApiEnvelope<OccurrenceDocument>>(`/occurrences/${occurrenceId}/documents`, data),
+  delete: (occurrenceId: string, documentId: string) =>
+    api.delete<ApiEnvelope<{ deleted: boolean }>>(`/occurrences/${occurrenceId}/documents/${documentId}`),
+  uploadAttachment: (occurrenceId: string, documentId: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return api.post<ApiEnvelope<OccurrenceDocument>>(`/occurrences/${occurrenceId}/documents/${documentId}/attachment`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+  },
+  downloadAttachment: (occurrenceId: string, documentId: string) =>
+    api.get<Blob>(`/occurrences/${occurrenceId}/documents/${documentId}/attachment`, { responseType: 'blob' }),
+}
+
 export const occurrencesService = {
   list: (params?: Record<string, string>) =>
     api.get<ApiEnvelope<{ occurrences: Occurrence[]; total: number; has_more: boolean }>>('/occurrences', { params }),
@@ -1415,7 +1457,8 @@ export const occurrencesService = {
     purchase_date?: string
     product_description?: string
     internal_note?: string
-  }) => api.post<ApiEnvelope<Occurrence>>('/occurrences', data),
+    documents?: OccurrenceDocumentInput[]
+  }) => api.post<ApiEnvelope<Occurrence & { documents?: OccurrenceDocument[] }>>('/occurrences', data),
   update: (id: string, data: {
     title: string
     description?: string
@@ -1448,15 +1491,84 @@ export const occurrencesService = {
   deleteStage: (id: string) => api.delete<ApiEnvelope<{ deleted: boolean }>>(`/occurrence-stages/${id}`),
 }
 
+// Sales opportunities (Central de Vendas funnel) — see
+// internal/models/sales_opportunity.go and internal/handlers/sales_opportunities.go.
+// Mirrors the Occurrence types/service above: organization_id is tenant-scoping
+// only and intentionally left off, same as Occurrence/OccurrenceEvent.
+export type SalesOpportunityStage = 'potencial' | 'abrir_orcamento' | 'direcionada'
+export type SalesOpportunityStatus = 'aberta' | 'convertida' | 'perdida' | 'cancelada'
+export type SalesDirecionamento = 'visita' | 'whatsapp'
+export type SalesConversionSource = 'manual' | 'xprocess'
+export type SalesLossReason =
+  | 'cliente_desistiu' | 'preco' | 'prazo' | 'indisponibilidade'
+  | 'comprou_concorrente' | 'sem_retorno' | 'problema_comercial' | 'outro'
+
+export interface SalesOpportunity {
+  id: string
+  opportunity_number: string
+  contact_id: string
+  source_transfer_id?: string
+  assigned_user_id?: string
+  stage: SalesOpportunityStage
+  status: SalesOpportunityStatus
+  interest?: string
+  estimated_value?: number
+  estimated_quantity?: number
+  direcionamento?: SalesDirecionamento
+  conversion_source?: SalesConversionSource
+  loss_reason?: SalesLossReason
+  loss_notes?: string
+  opened_at: string
+  stage_changed_at: string
+  converted_at?: string
+  lost_at?: string
+  cancelled_at?: string
+  sla_breached: boolean
+  sla_breached_at?: string
+  // Populated only where the handler preloads the association — neither
+  // list nor get does today, so these are typically undefined.
+  contact?: { id: string; profile_name?: string; phone_number?: string }
+  assigned_user?: { id: string; full_name: string }
+}
+
+export interface SalesOpportunityEvent {
+  id: string
+  sales_opportunity_id: string
+  type: 'opened' | 'stage_changed' | 'direcionamento_changed' | 'converted' | 'lost' | 'cancelled' | 'retriggered'
+  from_stage?: SalesOpportunityStage
+  to_stage?: SalesOpportunityStage
+  source: 'manual' | 'xprocess' | 'system'
+  created_by_id?: string
+  created_by?: { id: string; full_name: string }
+  created_at: string
+}
+
+export const salesOpportunitiesService = {
+  list: (params?: Record<string, string>) =>
+    api.get<ApiEnvelope<{ opportunities: SalesOpportunity[]; total: number; has_more: boolean }>>('/sales-opportunities', { params }),
+  get: (id: string) => api.get<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}`),
+  changeStage: (id: string, stage: SalesOpportunityStage) =>
+    api.put<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/stage`, { stage }),
+  changeDirecionamento: (id: string, direcionamento: SalesDirecionamento) =>
+    api.put<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/direcionamento`, { direcionamento }),
+  updateDetails: (id: string, details: { interest?: string; estimated_value?: number; estimated_quantity?: number }) =>
+    api.put<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/details`, details),
+  convert: (id: string) => api.post<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/convert`),
+  lose: (id: string, lossReason: SalesLossReason, lossNotes?: string) =>
+    api.post<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/lose`, { loss_reason: lossReason, loss_notes: lossNotes }),
+  listEvents: (id: string) =>
+    api.get<ApiEnvelope<{ events: SalesOpportunityEvent[] }>>(`/sales-opportunities/${id}/events`),
+}
+
 // Units / Departments / Occurrence categories — Fase 3 of the Ocorrências
 // backend (see docs/superpowers/specs/2026-09-04-helpdesk-unidade-departamento-sla-design.md).
 // List-only: this MVP only needs them to populate the "Abrir protocolo" form
 // dropdowns, not the CRUD settings screens (still unbuilt on the frontend).
 export const unitsService = {
   list: () => api.get<ApiEnvelope<{ units: Unit[] }>>('/units'),
-  create: (data: { name: string; code?: string; type?: string; active: boolean }) =>
+  create: (data: { name: string; cnpj?: string; type?: string; active: boolean }) =>
     api.post<ApiEnvelope<Unit>>('/units', data),
-  update: (id: string, data: { name: string; code?: string; type?: string; active: boolean }) =>
+  update: (id: string, data: { name: string; cnpj?: string; type?: string; active: boolean }) =>
     api.put<ApiEnvelope<Unit>>(`/units/${id}`, data),
   delete: (id: string) => api.delete<ApiEnvelope<{ deleted: boolean }>>(`/units/${id}`),
 }
@@ -1479,13 +1591,15 @@ export interface OccurrenceWhatHappened {
   name: string
   position: number
   is_active: boolean
+  category_id?: string
+  category?: OccurrenceCategory
 }
 
 export const occurrenceWhatHappenedService = {
   list: () => api.get<ApiEnvelope<{ reasons: OccurrenceWhatHappened[] }>>('/occurrence-what-happened'),
-  create: (data: { name: string; position: number; is_active?: boolean }) =>
+  create: (data: { name: string; position: number; is_active?: boolean; category_id?: string }) =>
     api.post<ApiEnvelope<OccurrenceWhatHappened>>('/occurrence-what-happened', data),
-  update: (id: string, data: { name: string; position: number; is_active?: boolean }) =>
+  update: (id: string, data: { name: string; position: number; is_active?: boolean; category_id?: string }) =>
     api.put<ApiEnvelope<OccurrenceWhatHappened>>(`/occurrence-what-happened/${id}`, data),
   delete: (id: string) => api.delete<ApiEnvelope<{ deleted: boolean }>>(`/occurrence-what-happened/${id}`),
 }

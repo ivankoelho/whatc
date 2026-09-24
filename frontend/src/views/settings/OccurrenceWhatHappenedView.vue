@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, computed } from 'vue'
+import { onMounted, computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -8,8 +8,9 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { PageHeader, DataTable, CrudFormDialog, DeleteConfirmDialog, IconButton, ErrorState, type Column } from '@/components/shared'
-import { occurrenceWhatHappenedService, type OccurrenceWhatHappened } from '@/services/api'
+import { occurrenceWhatHappenedService, occurrenceCategoriesService, type OccurrenceWhatHappened, type OccurrenceCategory } from '@/services/api'
 import { useCrudState } from '@/composables/useCrudState'
 import { toast } from 'vue-sonner'
 import { Plus, HelpCircle, Pencil, Trash2 } from 'lucide-vue-next'
@@ -21,9 +22,14 @@ interface ReasonFormData {
   name: string
   position: number
   is_active: boolean
+  category_id: string
 }
 
-const defaultFormData: ReasonFormData = { name: '', position: 0, is_active: true }
+// Select items can't carry an empty value, so "no category" travels as this sentinel.
+const NO_CATEGORY = 'none'
+const defaultFormData: ReasonFormData = { name: '', position: 0, is_active: true, category_id: NO_CATEGORY }
+const categories = ref<OccurrenceCategory[]>([])
+const categoryName = (id?: string) => categories.value.find(c => c.id === id)?.name
 
 const {
   items: reasons, isLoading, isSubmitting, isDialogOpen, editingItem: editingReason, deleteDialogOpen, itemToDelete: reasonToDelete,
@@ -34,6 +40,7 @@ const error = computed(() => false)
 
 const columns = computed<Column<OccurrenceWhatHappened>[]>(() => [
   { key: 'name', label: t('whatHappened.columnName') },
+  { key: 'category', label: t('whatHappened.columnCategory') },
   { key: 'position', label: t('whatHappened.columnPosition'), width: 'w-[100px]' },
   { key: 'is_active', label: t('whatHappened.columnActive'), align: 'center' },
   { key: 'actions', label: t('common.actions'), align: 'right' },
@@ -45,14 +52,15 @@ function openCreateDialog() {
 }
 
 function openEditDialog(reason: OccurrenceWhatHappened) {
-  baseOpenEditDialog(reason, (r) => ({ name: r.name, position: r.position, is_active: r.is_active }))
+  baseOpenEditDialog(reason, (r) => ({ name: r.name, position: r.position, is_active: r.is_active, category_id: r.category_id || NO_CATEGORY }))
 }
 
 async function fetchReasons() {
   isLoading.value = true
   try {
-    const res = await occurrenceWhatHappenedService.list()
+    const [res, catRes] = await Promise.all([occurrenceWhatHappenedService.list(), occurrenceCategoriesService.list()])
     reasons.value = res.data.data.reasons
+    categories.value = catRes.data.data.categories
   } catch (e) {
     toast.error(getErrorMessage(e, t('common.failedLoad', { resource: t('whatHappened.title') })))
   } finally {
@@ -69,7 +77,8 @@ async function saveReason() {
   }
   isSubmitting.value = true
   try {
-    const payload = { ...formData.value, name: formData.value.name.trim() }
+    const categoryId = formData.value.category_id === NO_CATEGORY ? '' : formData.value.category_id
+    const payload = { ...formData.value, name: formData.value.name.trim(), category_id: categoryId }
     if (editingReason.value) {
       await occurrenceWhatHappenedService.update(editingReason.value.id, payload)
       toast.success(t('common.updatedSuccess', { resource: t('whatHappened.reason') }))
@@ -140,6 +149,9 @@ async function confirmDelete() {
                 <template #cell-name="{ item: reason }">
                   <span class="font-medium">{{ reason.name }}</span>
                 </template>
+                <template #cell-category="{ item: reason }">
+                  <span class="text-muted-foreground">{{ categoryName(reason.category_id) ?? '—' }}</span>
+                </template>
                 <template #cell-position="{ item: reason }">
                   <span class="text-muted-foreground">{{ reason.position }}</span>
                 </template>
@@ -182,6 +194,17 @@ async function confirmDelete() {
         <div class="space-y-2">
           <Label>{{ $t('whatHappened.name') }} <span class="text-destructive">*</span></Label>
           <Input v-model="formData.name" :placeholder="$t('whatHappened.namePlaceholder')" maxlength="100" />
+        </div>
+        <div class="space-y-2">
+          <Label>{{ $t('whatHappened.category') }}</Label>
+          <Select v-model="formData.category_id">
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem :value="NO_CATEGORY">{{ $t('whatHappened.noCategory') }}</SelectItem>
+              <SelectItem v-for="c in categories" :key="c.id" :value="c.id">{{ c.name }}</SelectItem>
+            </SelectContent>
+          </Select>
+          <p class="text-xs text-muted-foreground">{{ $t('whatHappened.categoryHint') }}</p>
         </div>
         <div class="space-y-2">
           <Label>{{ $t('whatHappened.position') }}</Label>

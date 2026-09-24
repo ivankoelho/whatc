@@ -125,7 +125,11 @@ func GetMigrationModels() []MigrationModel {
 		{"Occurrence", &models.Occurrence{}},
 		{"OccurrenceEvent", &models.OccurrenceEvent{}},
 		{"OccurrenceCounter", &models.OccurrenceCounter{}},
+		{"SalesOpportunity", &models.SalesOpportunity{}},
+		{"SalesOpportunityEvent", &models.SalesOpportunityEvent{}},
+		{"SalesOpportunityCounter", &models.SalesOpportunityCounter{}},
 		{"OccurrenceProcessMessage", &models.OccurrenceProcessMessage{}},
+		{"OccurrenceDocument", &models.OccurrenceDocument{}},
 
 		// Help Desk — unidade e departamento
 		{"Unit", &models.Unit{}},
@@ -321,6 +325,8 @@ func getIndexes() []string {
 		// IVR flows
 		`CREATE INDEX IF NOT EXISTS idx_ivr_flows_org_active ON ivr_flows(organization_id, whatsapp_account, is_active)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_ivr_flows_org_call_start ON ivr_flows(organization_id, whatsapp_account) WHERE is_call_start = true AND is_active = true AND deleted_at IS NULL`,
+		// Sales opportunities
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_opp_org_contact_open ON sales_opportunities (organization_id, contact_id) WHERE status = 'aberta' AND deleted_at IS NULL`,
 	}
 }
 
@@ -482,6 +488,27 @@ func BackfillOccurrenceSourceForManualCases(db *gorm.DB) error {
 		UPDATE occurrences
 		SET source = 'manual'
 		WHERE source_transfer_id IS NULL AND source = 'whatsapp'
+	`).Error
+}
+
+// BackfillWhatHappenedCategory gives each "o que aconteceu" the category its
+// active process already pointed to, so the reason → category flow starts with
+// the mapping admins had configured. Only fills empty categories, and only in
+// organizations where no reason has a category yet: once one exists the
+// mapping is the admin's, and a category they cleared on purpose must not come
+// back on the next restart.
+func BackfillWhatHappenedCategory(db *gorm.DB) error {
+	return db.Exec(`
+		UPDATE occurrence_what_happened w
+		SET category_id = p.category_id
+		FROM occurrence_processes p
+		WHERE p.what_happened_id = w.id AND p.category_id IS NOT NULL
+		  AND p.is_active AND p.deleted_at IS NULL
+		  AND w.category_id IS NULL
+		  AND NOT EXISTS (
+		    SELECT 1 FROM occurrence_what_happened o
+		    WHERE o.organization_id = w.organization_id AND o.category_id IS NOT NULL
+		  )
 	`).Error
 }
 
