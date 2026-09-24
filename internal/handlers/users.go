@@ -15,12 +15,11 @@ import (
 // Note: is_super_admin is intentionally excluded to prevent mass assignment.
 // Super admin status changes are handled via parseSuperAdminField.
 type UserRequest struct {
-	Email              string     `json:"email"`
-	Password           string     `json:"password"`
-	FullName           string     `json:"full_name"`
-	RoleID             *uuid.UUID `json:"role_id"`
-	IsActive           *bool      `json:"is_active"`
-	XProcessSellerCode *string    `json:"xprocess_seller_code"`
+	Email    string     `json:"email"`
+	Password string     `json:"password"`
+	FullName string     `json:"full_name"`
+	RoleID   *uuid.UUID `json:"role_id"`
+	IsActive *bool      `json:"is_active"`
 }
 
 // superAdminField is used to extract is_super_admin separately from the request body.
@@ -511,10 +510,6 @@ func (a *App) UpdateUser(r *fastglue.Request) error {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Cannot deactivate yourself", nil, "")
 		}
 		user.IsActive = *req.IsActive
-	}
-
-	if req.XProcessSellerCode != nil {
-		user.XProcessSellerCode = req.XProcessSellerCode
 	}
 
 	// Handle super admin update - only superadmins can change this

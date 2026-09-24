@@ -42,11 +42,6 @@ type SLAConfig struct {
 	// CloseInactiveAttendances: its own switch, so enabling chat SLA never
 	// silently turns on occurrence SLA processing for an org that never asked.
 	OccurrenceEnabled bool `gorm:"column:occurrence_sla_enabled;default:false" json:"occurrence_sla_enabled"`
-	// SalesOpportunityEnabled gates SLA breach-marking for Central de Vendas
-	// opportunities in "direcionada" — its own switch, same reasoning as
-	// OccurrenceEnabled: enabling chat/occurrence SLA must never silently
-	// turn this on for an org that never asked.
-	SalesOpportunityEnabled bool `gorm:"column:sales_opportunity_sla_enabled;default:false" json:"sales_opportunity_sla_enabled"`
 }
 
 // ClientInactivityConfig holds client inactivity and reminder settings

@@ -141,19 +141,18 @@ func TestApp_UpdateChatbotSettings(t *testing.T) {
 		timeout := 60
 
 		req := testutil.NewJSONRequest(t, map[string]any{
-			"enabled":                       enabled,
-			"greeting_message":              greeting,
-			"session_timeout_minutes":       timeout,
-			"fallback_message":              "Sorry, I did not understand that.",
-			"ai_enabled":                    true,
-			"ai_provider":                   "openai",
-			"ai_model":                      "gpt-4",
-			"ai_max_tokens":                 1000,
-			"ai_system_prompt":              "You are a helpful assistant.",
-			"sla_enabled":                   true,
-			"sla_response_minutes":          10,
-			"occurrence_sla_enabled":        true,
-			"sales_opportunity_sla_enabled": true,
+			"enabled":                 enabled,
+			"greeting_message":        greeting,
+			"session_timeout_minutes": timeout,
+			"fallback_message":        "Sorry, I did not understand that.",
+			"ai_enabled":              true,
+			"ai_provider":             "openai",
+			"ai_model":                "gpt-4",
+			"ai_max_tokens":           1000,
+			"ai_system_prompt":        "You are a helpful assistant.",
+			"sla_enabled":             true,
+			"sla_response_minutes":    10,
+			"occurrence_sla_enabled":  true,
 		})
 		testutil.SetAuthContext(req, org.ID, user.ID)
 
@@ -200,10 +199,6 @@ func TestApp_UpdateChatbotSettings(t *testing.T) {
 		// existed only in the model, the cache WHERE clause and the processor
 		// gate, so no org could ever turn it on.
 		assert.True(t, getResp.Data.Settings.OccurrenceSLAEnabled)
-		// Final review finding 2: same gap for the Central de Vendas SLA gate
-		// (models.SLAConfig.SalesOpportunityEnabled) — mirror the occurrence
-		// case to prove it now round-trips too.
-		assert.True(t, getResp.Data.Settings.SalesOpportunitySLAEnabled)
 	})
 
 	t.Run("rejects a close time at or below the reminder", func(t *testing.T) {

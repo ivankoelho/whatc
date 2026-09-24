@@ -190,12 +190,6 @@ func runServer(args []string) {
 			lo.Fatal("What-happened permission backfill failed", "error", err)
 		}
 
-		// Same window: sales_opportunities is a brand-new resource, needs its
-		// own guard rather than piggybacking on an existing one.
-		if err := database.BackfillSalesOpportunityPermissions(db, lo); err != nil {
-			lo.Fatal("Sales opportunity permissions backfill failed", "error", err)
-		}
-
 		// Same window: occurrences.processes is a new resource added after the
 		// what-happened backfill above, so it needs its own guard rather than
 		// piggybacking on that one's already-migrated check.
@@ -762,16 +756,6 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/occurrences/{id}/events", app.CreateOccurrenceEvent)
 	g.POST("/api/occurrences/{id}/send-protocol", app.SendOccurrenceProtocol)
 	g.POST("/api/occurrences/{id}/reply", app.ReplyToOccurrence)
-
-	// CRM — central de vendas
-	g.GET("/api/sales-opportunities", app.ListSalesOpportunities)
-	g.GET("/api/sales-opportunities/{id}", app.GetSalesOpportunity)
-	g.GET("/api/sales-opportunities/{id}/events", app.ListSalesOpportunityEvents)
-	g.PUT("/api/sales-opportunities/{id}/stage", app.ChangeSalesOpportunityStage)
-	g.PUT("/api/sales-opportunities/{id}/direcionamento", app.ChangeSalesOpportunityDirecionamento)
-	g.PUT("/api/sales-opportunities/{id}/details", app.UpdateSalesOpportunityDetails)
-	g.POST("/api/sales-opportunities/{id}/convert", app.ConvertSalesOpportunity)
-	g.POST("/api/sales-opportunities/{id}/lose", app.LoseSalesOpportunity)
 
 	// CRM — unidades
 	g.GET("/api/units", app.ListUnits)
