@@ -2334,7 +2334,9 @@
     "noUnitsYetDesc": "Adicione a primeira unidade/loja.",
     "deleteTitle": "Excluir unidade",
     "deleteWarning": "Esta ação não pode ser desfeita. Unidades em uso por uma equipe não podem ser excluídas.",
-    "nameRequired": "O nome é obrigatório"
+    "nameRequired": "O nome é obrigatório",
+    "columnCnpj": "CNPJ",
+    "cnpj": "CNPJ"
   },
   "slaPolicies": {
     "title": "SLA de ocorrências",

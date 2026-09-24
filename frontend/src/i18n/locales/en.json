@@ -2345,7 +2345,9 @@
     "noUnitsYetDesc": "Add your first unit/store.",
     "deleteTitle": "Delete unit",
     "deleteWarning": "This cannot be undone. Units in use by a team cannot be deleted.",
-    "nameRequired": "Name is required"
+    "nameRequired": "Name is required",
+    "columnCnpj": "CNPJ",
+    "cnpj": "CNPJ"
   },
   "slaPolicies": {
     "title": "Occurrence SLA",
