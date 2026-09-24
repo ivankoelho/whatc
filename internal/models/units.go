@@ -8,12 +8,12 @@ import "github.com/google/uuid"
 // them costs a UI change, not a second migration.
 type Unit struct {
 	BaseModel
-	OrganizationID uuid.UUID `gorm:"type:uuid;index;not null;uniqueIndex:idx_units_org_name,where:deleted_at IS NULL" json:"organization_id"`
+	OrganizationID uuid.UUID `gorm:"type:uuid;index;not null;uniqueIndex:idx_units_org_name,where:deleted_at IS NULL;uniqueIndex:idx_units_org_cnpj,where:cnpj <> '' AND deleted_at IS NULL" json:"organization_id"`
 	Name           string    `gorm:"size:255;not null;uniqueIndex:idx_units_org_name,where:deleted_at IS NULL" json:"name"`
 	// Code is the legacy store code, kept in the table but no longer edited:
 	// CNPJ replaced it as the unit's identifier for integrations.
 	Code            string     `gorm:"size:50" json:"code,omitempty"`
-	CNPJ            string     `gorm:"column:cnpj;size:14" json:"cnpj,omitempty"` // digits only
+	CNPJ            string     `gorm:"column:cnpj;size:14;uniqueIndex:idx_units_org_cnpj,where:cnpj <> '' AND deleted_at IS NULL" json:"cnpj,omitempty"` // digits only
 	Type            string     `gorm:"size:50" json:"type,omitempty"`
 	Active          bool       `gorm:"default:true" json:"active"`
 	Address         string     `gorm:"size:500" json:"address,omitempty"`

@@ -97,4 +97,12 @@ func TestUnits_CNPJIsValidatedAndStoredAsDigits(t *testing.T) {
 	assert.Equal(t, fasthttp.StatusBadRequest, create("Loja Porto", "11.222.333/0001-82"), "wrong check digit")
 	assert.Equal(t, fasthttp.StatusBadRequest, create("Loja X", "11111111111111"), "all-equal digits")
 	assert.Equal(t, fasthttp.StatusOK, create("Loja sem CNPJ", ""), "CNPJ stays optional")
+	assert.Equal(t, fasthttp.StatusOK, create("Outra sem CNPJ", ""), "many units may have no CNPJ")
+
+	// The same CNPJ can't be on two units of one organization.
+	req := testutil.NewJSONRequest(t, map[string]any{"name": "Loja Serrinha 2", "cnpj": "11222333000181", "active": true})
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	require.NoError(t, app.CreateUnit(req))
+	assert.Equal(t, fasthttp.StatusConflict, testutil.GetResponseStatusCode(req))
+	assert.Contains(t, string(testutil.GetResponseBody(req)), "CNPJ")
 }

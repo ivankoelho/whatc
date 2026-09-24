@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"errors"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -60,6 +62,9 @@ func (a *App) CreateUnit(r *fastglue.Request) error {
 		Active:         req.Active,
 	}
 	if err := a.DB.Create(&unit).Error; err != nil {
+		if isUniqueCNPJViolation(err) {
+			return r.SendErrorEnvelope(fasthttp.StatusConflict, "A unit with this CNPJ already exists", nil, "")
+		}
 		if isUniqueNameViolation(err) {
 			return r.SendErrorEnvelope(fasthttp.StatusConflict, "A unit with this name already exists", nil, "")
 		}
@@ -101,6 +106,9 @@ func (a *App) UpdateUnit(r *fastglue.Request) error {
 	if err := a.DB.Model(unit).Updates(map[string]any{
 		"name": req.Name, "cnpj": cnpj, "type": req.Type, "active": req.Active,
 	}).Error; err != nil {
+		if isUniqueCNPJViolation(err) {
+			return r.SendErrorEnvelope(fasthttp.StatusConflict, "A unit with this CNPJ already exists", nil, "")
+		}
 		if isUniqueNameViolation(err) {
 			return r.SendErrorEnvelope(fasthttp.StatusConflict, "A unit with this name already exists", nil, "")
 		}
@@ -159,4 +167,11 @@ func validCNPJ(c string) bool {
 		return '0'
 	}
 	return c[12] == digit(12) && c[13] == digit(13)
+}
+
+// isUniqueCNPJViolation tells a duplicate CNPJ apart from a duplicate name:
+// both are unique violations on units.
+func isUniqueCNPJViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "idx_units_org_cnpj"
 }
