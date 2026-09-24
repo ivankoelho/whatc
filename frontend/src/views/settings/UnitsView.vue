@@ -19,12 +19,22 @@ const { t } = useI18n()
 
 interface UnitFormData {
   name: string
-  code: string
+  cnpj: string
   type: string
   active: boolean
 }
 
-const defaultFormData: UnitFormData = { name: '', code: '', type: '', active: true }
+const defaultFormData: UnitFormData = { name: '', cnpj: '', type: '', active: true }
+
+// 12345678000199 -> 12.345.678/0001-99 (partial input is formatted as far as it goes).
+function formatCNPJ(value?: string): string {
+  const d = (value || '').replace(/\D/g, '').slice(0, 14)
+  return d
+    .replace(/^(\d{2})(\d)/, '$1.$2')
+    .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
+    .replace(/\.(\d{3})(\d)/, '.$1/$2')
+    .replace(/(\d{4})(\d)/, '$1-$2')
+}
 
 const {
   items: units, isLoading, isSubmitting, isDialogOpen, editingItem: editingUnit, deleteDialogOpen, itemToDelete: unitToDelete,
@@ -36,7 +46,7 @@ const error = computed(() => false)
 
 const columns = computed<Column<Unit>[]>(() => [
   { key: 'name', label: t('units.columnName') },
-  { key: 'code', label: t('units.columnCode') },
+  { key: 'cnpj', label: t('units.columnCnpj') },
   { key: 'type', label: t('units.columnType') },
   { key: 'active', label: t('units.columnActive'), align: 'center' },
   { key: 'actions', label: t('common.actions'), align: 'right' },
@@ -45,7 +55,7 @@ const columns = computed<Column<Unit>[]>(() => [
 function openEditDialog(unit: Unit) {
   baseOpenEditDialog(unit, (u) => ({
     name: u.name,
-    code: u.code || '',
+    cnpj: formatCNPJ(u.cnpj),
     type: u.type || '',
     active: u.active,
   }))
@@ -72,7 +82,7 @@ async function saveUnit() {
   }
   isSubmitting.value = true
   try {
-    const payload = { ...formData.value, name: formData.value.name.trim() }
+    const payload = { ...formData.value, name: formData.value.name.trim(), cnpj: formData.value.cnpj.replace(/\D/g, '') }
     if (editingUnit.value) {
       await unitsService.update(editingUnit.value.id, payload)
       toast.success(t('common.updatedSuccess', { resource: t('resources.Unit') }))
@@ -143,8 +153,8 @@ async function confirmDelete() {
                 <template #cell-name="{ item: unit }">
                   <span class="font-medium">{{ unit.name }}</span>
                 </template>
-                <template #cell-code="{ item: unit }">
-                  <span class="text-muted-foreground">{{ unit.code || '—' }}</span>
+                <template #cell-cnpj="{ item: unit }">
+                  <span class="text-muted-foreground tabular-nums">{{ unit.cnpj ? formatCNPJ(unit.cnpj) : '—' }}</span>
                 </template>
                 <template #cell-type="{ item: unit }">
                   <span class="text-muted-foreground">{{ unit.type || '—' }}</span>
@@ -190,8 +200,14 @@ async function confirmDelete() {
           <Input v-model="formData.name" :placeholder="$t('units.namePlaceholder')" maxlength="255" />
         </div>
         <div class="space-y-2">
-          <Label>{{ $t('units.code') }}</Label>
-          <Input v-model="formData.code" :placeholder="$t('units.codePlaceholder')" maxlength="50" />
+          <Label>{{ $t('units.cnpj') }}</Label>
+          <Input
+            :model-value="formData.cnpj"
+            placeholder="00.000.000/0000-00"
+            inputmode="numeric"
+            maxlength="18"
+            @update:model-value="formData.cnpj = formatCNPJ(String($event))"
+          />
         </div>
         <div class="space-y-2">
           <Label>{{ $t('units.type') }}</Label>

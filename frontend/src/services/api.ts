@@ -1365,6 +1365,7 @@ export interface Unit {
   id: string
   name: string
   code?: string
+  cnpj?: string
   type?: string
   active: boolean
 }
@@ -1523,9 +1524,9 @@ export const salesOpportunitiesService = {
 // dropdowns, not the CRUD settings screens (still unbuilt on the frontend).
 export const unitsService = {
   list: () => api.get<ApiEnvelope<{ units: Unit[] }>>('/units'),
-  create: (data: { name: string; code?: string; type?: string; active: boolean }) =>
+  create: (data: { name: string; cnpj?: string; type?: string; active: boolean }) =>
     api.post<ApiEnvelope<Unit>>('/units', data),
-  update: (id: string, data: { name: string; code?: string; type?: string; active: boolean }) =>
+  update: (id: string, data: { name: string; cnpj?: string; type?: string; active: boolean }) =>
     api.put<ApiEnvelope<Unit>>(`/units/${id}`, data),
   delete: (id: string) => api.delete<ApiEnvelope<{ deleted: boolean }>>(`/units/${id}`),
 }
