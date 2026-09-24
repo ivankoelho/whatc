@@ -178,7 +178,8 @@ test.describe('Central de Vendas', () => {
 
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible()
-    const submit = dialog.getByRole('button', { name: /marcar/i })
+    // The e2e users run the UI in English ("Mark as lost"); match either locale.
+    const submit = dialog.getByRole('button', { name: /marcar como perdida|mark as lost/i })
     await expect(submit).toBeDisabled()
   })
 
