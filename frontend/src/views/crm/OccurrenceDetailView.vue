@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import DetailPageLayout from '@/components/shared/DetailPageLayout.vue'
 import { IconButton, DeleteConfirmDialog } from '@/components/shared'
+import OccurrenceDocumentsCard from '@/components/crm/OccurrenceDocumentsCard.vue'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -397,6 +398,8 @@ onUnmounted(() => {
             </div>
           </CardContent>
         </Card>
+
+        <OccurrenceDocumentsCard :occurrence-id="occurrence.id" :can-write="canWrite" />
 
         <!-- Timeline -->
         <Card>

@@ -34,6 +34,10 @@ type CreateOccurrenceRequest struct {
 	PurchaseDate       string  `json:"purchase_date"` // "2006-01-02", optional
 	ProductDescription string  `json:"product_description"`
 	InternalNote       *string `json:"internal_note"`
+
+	// Documents are the purchase documents (NF or cupom/pedido) with their
+	// products. When sent, the single-value fields above are derived from them.
+	Documents []OccurrenceDocumentRequest `json:"documents"`
 }
 
 // occurrenceSaleChannels is the closed list the sale_channel field is
@@ -88,6 +92,10 @@ type OccurrenceResponse struct {
 	SLABreachedAt         *time.Time `json:"sla_breached_at,omitempty"`
 	FirstResponseAt       *time.Time `json:"first_response_at,omitempty"`
 	FirstResponseByID     *uuid.UUID `json:"first_response_by_id,omitempty"`
+
+	// Documents is only filled on create, so the client can upload each
+	// document's file right after.
+	Documents []models.OccurrenceDocument `json:"documents,omitempty"`
 }
 
 func occurrenceToResponse(o models.Occurrence) OccurrenceResponse {
@@ -257,6 +265,23 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "purchase_date must be YYYY-MM-DD", nil, "")
 		}
 		purchaseDate = &pd
+	}
+
+	documents, err := buildOccurrenceDocuments(orgID, userID, a.orgLocation(orgID), req.Documents)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, err.Error(), nil, "")
+	}
+	if len(documents) > 0 {
+		invoice, docDate, product := summarizeOccurrenceDocuments(documents)
+		if req.InvoiceNumber == "" {
+			req.InvoiceNumber = invoice
+		}
+		if purchaseDate == nil {
+			purchaseDate = docDate
+		}
+		if req.ProductDescription == "" {
+			req.ProductDescription = product
+		}
 	}
 
 	contactID, err := uuid.Parse(req.ContactID)
@@ -453,6 +478,17 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 			"Failed to create occurrence", nil, "")
 	}
 
+	for i := range documents {
+		documents[i].OccurrenceID = occ.ID
+	}
+	if len(documents) > 0 {
+		if err := a.DB.Create(&documents).Error; err != nil {
+			// The occurrence already carries the documents' summary in its own
+			// fields, so the case is not lost; the agent can re-add the detail.
+			a.Log.Error("Failed to save occurrence documents", "error", err, "occurrence_id", occ.ID)
+		}
+	}
+
 	if req.InternalNote != nil && *req.InternalNote != "" {
 		a.DB.Create(&models.OccurrenceEvent{
 			OrganizationID: orgID,
@@ -480,6 +516,7 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 		}
 	}
 	resp := occurrenceToResponse(occ)
+	resp.Documents = documents
 
 	a.broadcastOccurrenceMessage(orgID, occ.ContactID, occ.AssignedUserID, websocket.WSMessage{
 		Type:    websocket.TypeOccurrenceChanged,

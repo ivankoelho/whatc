@@ -1394,6 +1394,47 @@ export interface OccurrenceEvent {
   created_at: string
 }
 
+export type OccurrenceDocumentType = 'nf' | 'cupom'
+
+export interface OccurrenceDocumentItem {
+  code: string
+  description: string
+  quantity: string
+}
+
+export interface OccurrenceDocumentInput {
+  type: OccurrenceDocumentType
+  number: string
+  purchase_date?: string
+  items: OccurrenceDocumentItem[]
+}
+
+export interface OccurrenceDocument extends OccurrenceDocumentInput {
+  id: string
+  occurrence_id: string
+  attachment_name?: string
+  attachment_mime?: string
+  created_at: string
+}
+
+export const occurrenceDocumentsService = {
+  list: (occurrenceId: string) =>
+    api.get<ApiEnvelope<{ documents: OccurrenceDocument[] }>>(`/occurrences/${occurrenceId}/documents`),
+  create: (occurrenceId: string, data: OccurrenceDocumentInput) =>
+    api.post<ApiEnvelope<OccurrenceDocument>>(`/occurrences/${occurrenceId}/documents`, data),
+  delete: (occurrenceId: string, documentId: string) =>
+    api.delete<ApiEnvelope<{ deleted: boolean }>>(`/occurrences/${occurrenceId}/documents/${documentId}`),
+  uploadAttachment: (occurrenceId: string, documentId: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return api.post<ApiEnvelope<OccurrenceDocument>>(`/occurrences/${occurrenceId}/documents/${documentId}/attachment`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+  },
+  downloadAttachment: (occurrenceId: string, documentId: string) =>
+    api.get<Blob>(`/occurrences/${occurrenceId}/documents/${documentId}/attachment`, { responseType: 'blob' }),
+}
+
 export const occurrencesService = {
   list: (params?: Record<string, string>) =>
     api.get<ApiEnvelope<{ occurrences: Occurrence[]; total: number; has_more: boolean }>>('/occurrences', { params }),
@@ -1415,7 +1456,8 @@ export const occurrencesService = {
     purchase_date?: string
     product_description?: string
     internal_note?: string
-  }) => api.post<ApiEnvelope<Occurrence>>('/occurrences', data),
+    documents?: OccurrenceDocumentInput[]
+  }) => api.post<ApiEnvelope<Occurrence & { documents?: OccurrenceDocument[] }>>('/occurrences', data),
   update: (id: string, data: {
     title: string
     description?: string

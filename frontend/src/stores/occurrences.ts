@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { toast } from 'vue-sonner'
 import { i18n } from '@/i18n'
-import { occurrencesService, occurrenceProcessesService, type Occurrence, type OccurrenceStage, type OccurrenceEvent } from '@/services/api'
+import { occurrencesService, occurrenceProcessesService, type Occurrence, type OccurrenceStage, type OccurrenceEvent, type OccurrenceDocumentInput } from '@/services/api'
 
 export const useOccurrencesStore = defineStore('occurrences', () => {
   const occurrences = ref<Occurrence[]>([])
@@ -69,6 +69,7 @@ export const useOccurrencesStore = defineStore('occurrences', () => {
     purchase_date?: string
     product_description?: string
     internal_note?: string
+    documents?: OccurrenceDocumentInput[]
   }) {
     const res = await occurrencesService.create(payload)
     await fetchContactOccurrences(payload.contact_id)
