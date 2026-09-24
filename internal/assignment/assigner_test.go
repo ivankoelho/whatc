@@ -464,3 +464,21 @@ func TestCallLoadCounter_OnlyWaitingAndConnected(t *testing.T) {
 	loads := assignment.CallLoadCounter(db, org.ID, []uuid.UUID{agent.ID})
 	assert.Equal(t, int64(2), loads[agent.ID], "only waiting + connected should be counted")
 }
+
+func TestIsAgentOnActiveCall_IgnoresCallLogsOrphanedByARestart(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	org := testutil.CreateTestOrganization(t, db)
+	agent := testutil.CreateTestUser(t, db, org.ID)
+
+	assert.False(t, assignment.IsAgentOnActiveCall(db, agent.ID))
+
+	contact := testutil.CreateTestContact(t, db, org.ID)
+	log := models.CallLog{OrganizationID: org.ID, WhatsAppAccount: "acc", ContactID: contact.ID, CallerPhone: "5571900000000",
+		Status: models.CallStatusAnswered, AgentID: &agent.ID}
+	require.NoError(t, db.Create(&log).Error)
+	assert.True(t, assignment.IsAgentOnActiveCall(db, agent.ID), "a live answered call makes the agent busy")
+
+	// Same row, but left behind by a restart hours ago: must not block the agent forever.
+	require.NoError(t, db.Model(&log).UpdateColumn("created_at", time.Now().Add(-4*time.Hour)).Error)
+	assert.False(t, assignment.IsAgentOnActiveCall(db, agent.ID))
+}

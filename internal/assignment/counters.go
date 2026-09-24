@@ -1,6 +1,8 @@
 package assignment
 
 import (
+	"time"
+
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"gorm.io/gorm"
@@ -44,3 +46,32 @@ func CallLoadCounter(db *gorm.DB, orgID uuid.UUID, agentIDs []uuid.UUID) map[uui
 	}
 	return loadMap
 }
+
+// IsAgentOnActiveCall checks whether an agent is currently on an active telephone call
+// (either an answered incoming transfer or an active outgoing call).
+//
+// Only rows younger than activeCallMaxAge count: a server restart mid-call leaves
+// its rows stuck in an active status, and without the cutoff that agent would
+// never be offered a call again.
+func IsAgentOnActiveCall(db *gorm.DB, agentID uuid.UUID) bool {
+	since := time.Now().Add(-activeCallMaxAge)
+
+	var transferCount int64
+	db.Model(&models.CallTransfer{}).
+		Where("agent_id = ? AND status = ? AND created_at > ?", agentID, models.CallTransferStatusConnected, since).
+		Count(&transferCount)
+	if transferCount > 0 {
+		return true
+	}
+
+	var callLogCount int64
+	db.Model(&models.CallLog{}).
+		Where("agent_id = ? AND status IN (?, ?, ?) AND created_at > ?",
+			agentID, models.CallStatusInitiating, models.CallStatusRinging, models.CallStatusAnswered, since).
+		Count(&callLogCount)
+	return callLogCount > 0
+}
+
+// ponytail: time cutoff instead of a startup sweep of orphaned call rows; calls
+// longer than this stop blocking rotation. Add a sweep if that ever matters.
+const activeCallMaxAge = 3 * time.Hour
