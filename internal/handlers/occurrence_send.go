@@ -83,6 +83,9 @@ func (a *App) SendOccurrenceProtocol(r *fastglue.Request) error {
 			occ.ProtocolNumber)
 	}
 
+	// A system message on purpose (no SentByUserID): the protocol number and the
+	// registration text are the company speaking, so they are never signed and
+	// never open an attendance or change the contact status.
 	if _, err := a.SendOutgoingMessage(context.Background(), OutgoingMessageRequest{
 		Account: &account,
 		Contact: contact,
