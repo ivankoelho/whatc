@@ -22,23 +22,9 @@ const router = useRouter()
 const authStore = useAuthStore()
 const { t } = useI18n()
 
-// Tailwind's scanner needs literal class names — a template-literal
-// `grid-cols-${n}` would compile to nothing since it never appears as a
-// whole string in the source.
-const GRID_COLS_CLASS: Record<number, string> = {
-  1: 'grid-cols-1',
-  2: 'grid-cols-2',
-  3: 'grid-cols-3',
-  4: 'grid-cols-4',
-  5: 'grid-cols-5',
-  6: 'grid-cols-6',
-}
-
 const visibleTabs = computed(() =>
   props.tabs.filter(tab => authStore.hasPermission(tab.permission, 'read')),
 )
-
-const gridColsClass = computed(() => GRID_COLS_CLASS[visibleTabs.value.length] ?? 'grid-cols-1')
 
 const activeTab = computed(() =>
   resolveActiveTab(
@@ -69,8 +55,13 @@ function onTabChange(value: string | number) {
     {{ t('common.noAccessToSection') }}
   </div>
   <Tabs v-else :model-value="activeTab ?? undefined" class="w-full" @update:model-value="onTabChange">
-    <TabsList :class="['grid w-full mb-6 lg:w-auto lg:inline-flex', gridColsClass]">
-      <TabsTrigger v-for="tab in visibleTabs" :key="tab.value" :value="tab.value">
+    <TabsList class="h-auto w-full justify-start gap-6 overflow-x-auto rounded-none border-b border-white/[0.08] bg-transparent p-0 px-6 light:border-gray-200">
+      <TabsTrigger
+        v-for="tab in visibleTabs"
+        :key="tab.value"
+        :value="tab.value"
+        class="-mb-px h-11 rounded-none border-b-2 border-transparent bg-transparent px-0 text-[13px] text-white/50 shadow-none hover:text-white/80 data-[state=active]:border-emerald-500 data-[state=active]:bg-transparent data-[state=active]:text-white data-[state=active]:shadow-none light:text-gray-500 light:hover:text-gray-800 light:data-[state=active]:text-gray-900"
+      >
         {{ t(tab.labelKey) }}
       </TabsTrigger>
     </TabsList>
