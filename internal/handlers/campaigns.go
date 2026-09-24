@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/contactutil"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/queue"
 	"github.com/shridarpatil/whatomate/internal/utils"
@@ -674,48 +675,153 @@ func (a *App) ImportRecipients(r *fastglue.Request) error {
 		return nil
 	}
 
-	// Create recipients
-	recipients := make([]models.BulkMessageRecipient, len(req.Recipients))
-	for i, rec := range req.Recipients {
-		recipients[i] = models.BulkMessageRecipient{
-			CampaignID:     id,
+	return a.addCampaignRecipients(r, orgID, userID, campaign, req.Recipients, false)
+}
+
+// AddRecipientsFromContacts adds every contact of the organization whose phone
+// belongs to one of the given Brazilian DDDs (area codes). Contacts already in
+// the campaign are skipped. With dry_run it only reports how many would be added.
+func (a *App) AddRecipientsFromContacts(r *fastglue.Request) error {
+	orgID, userID, err := a.getOrgAndUserID(r)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+
+	id, err := parsePathUUID(r, "id", "campaign")
+	if err != nil {
+		return nil
+	}
+
+	campaign, err := findByIDAndOrg[models.BulkMessageCampaign](a.DB, r, id, orgID, "Campaign")
+	if err != nil {
+		return nil
+	}
+
+	if campaign.Status != models.CampaignStatusDraft {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Can only add recipients to draft campaigns", nil, "")
+	}
+
+	var req struct {
+		DDDs   []string `json:"ddds" validate:"required"`
+		DryRun bool     `json:"dry_run"`
+	}
+	if err := a.decodeRequest(r, &req); err != nil {
+		return nil
+	}
+
+	prefixes := make([]string, 0, len(req.DDDs))
+	for _, ddd := range req.DDDs {
+		if !dddPattern.MatchString(ddd) {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid DDD: "+ddd, nil, "")
+		}
+		prefixes = append(prefixes, "55"+ddd)
+	}
+	if len(prefixes) == 0 {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "At least one DDD is required", nil, "")
+	}
+
+	var contacts []models.Contact
+	if err := a.DB.Select("phone_number", "profile_name").
+		Where("organization_id = ?", orgID).
+		Where("left(regexp_replace(phone_number, '\\D', '', 'g'), 4) IN ?", prefixes).
+		Where(`NOT EXISTS (SELECT 1 FROM bulk_message_recipients b
+			WHERE b.campaign_id = ? AND b.deleted_at IS NULL
+			AND regexp_replace(b.phone_number, '\D', '', 'g') = regexp_replace(contacts.phone_number, '\D', '', 'g'))`, id).
+		Find(&contacts).Error; err != nil {
+		a.Log.Error("Failed to load contacts by DDD", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to load contacts", nil, "")
+	}
+
+	recs := make([]RecipientRequest, len(contacts))
+	for i, c := range contacts {
+		recs[i] = RecipientRequest{PhoneNumber: c.PhoneNumber, RecipientName: c.ProfileName}
+	}
+	return a.addCampaignRecipients(r, orgID, userID, campaign, recs, req.DryRun)
+}
+
+var dddPattern = regexp.MustCompile(`^[1-9][0-9]$`)
+
+// activeOccurrencePhones returns every phone identity of the organization's
+// contacts that have an open occurrence. Marketing must not reach a customer
+// whose complaint is still being handled.
+func (a *App) activeOccurrencePhones(orgID uuid.UUID) (map[string]bool, error) {
+	var phones []string
+	err := a.DB.Model(&models.Contact{}).
+		Where("organization_id = ?", orgID).
+		Where("id IN (?)", a.DB.Model(&models.Occurrence{}).Select("contact_id").
+			Where("organization_id = ? AND closed_at IS NULL", orgID)).
+		Pluck("phone_number", &phones).Error
+	set := make(map[string]bool, len(phones)*2)
+	for _, p := range phones {
+		for _, identity := range contactutil.PhoneIdentities(p) {
+			set[identity] = true
+		}
+	}
+	return set, err
+}
+
+// addCampaignRecipients is the single path every recipient takes into a
+// campaign: it drops contacts with an open occurrence, inserts the rest and
+// refreshes the campaign total. With dryRun nothing is written.
+func (a *App) addCampaignRecipients(r *fastglue.Request, orgID, userID uuid.UUID, campaign *models.BulkMessageCampaign, reqs []RecipientRequest, dryRun bool) error {
+	blocked, err := a.activeOccurrencePhones(orgID)
+	if err != nil {
+		a.Log.Error("Failed to load contacts with active occurrences", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to add recipients", nil, "")
+	}
+
+	skipped := []string{}
+	recipients := make([]models.BulkMessageRecipient, 0, len(reqs))
+	for _, rec := range reqs {
+		if blocked[contactutil.NormalizePhone(rec.PhoneNumber)] {
+			skipped = append(skipped, rec.PhoneNumber)
+			continue
+		}
+		recipients = append(recipients, models.BulkMessageRecipient{
+			CampaignID:     campaign.ID,
 			PhoneNumber:    rec.PhoneNumber,
 			RecipientName:  rec.RecipientName,
 			TemplateParams: models.JSONB(rec.TemplateParams),
 			HeaderParams:   models.JSONB(rec.HeaderParams),
 			Status:         models.MessageStatusPending,
-		}
+		})
 	}
 
-	if err := a.DB.Create(&recipients).Error; err != nil {
-		a.Log.Error("Failed to add recipients", "error", err)
-		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to add recipients", nil, "")
+	if dryRun {
+		return r.SendEnvelope(map[string]any{
+			"added_count":               len(recipients),
+			"skipped_active_occurrence": skipped,
+			"total_recipients":          campaign.TotalRecipients,
+		})
+	}
+
+	if len(recipients) > 0 {
+		if err := a.DB.CreateInBatches(&recipients, 1000).Error; err != nil {
+			a.Log.Error("Failed to add recipients", "error", err)
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to add recipients", nil, "")
+		}
 	}
 
 	// Update total recipients count
 	var totalCount int64
-	a.DB.Model(&models.BulkMessageRecipient{}).Where("campaign_id = ?", id).Count(&totalCount)
+	a.DB.Model(&models.BulkMessageRecipient{}).Where("campaign_id = ?", campaign.ID).Count(&totalCount)
 	a.DB.Model(campaign).Update("total_recipients", totalCount)
 
-	a.Log.Info("Recipients added to campaign", "campaign_id", id, "count", len(req.Recipients))
+	a.Log.Info("Recipients added to campaign", "campaign_id", campaign.ID, "count", len(recipients), "skipped_active_occurrence", len(skipped))
 
-	// Log recipient addition as audit
-	phoneNumbers := make([]string, len(req.Recipients))
-	for i, rec := range req.Recipients {
-		phoneNumbers[i] = rec.PhoneNumber
-	}
 	a.logAudit(orgID, userID,
-		"campaign", id, models.AuditActionUpdated, nil, nil,
+		"campaign", campaign.ID, models.AuditActionUpdated, nil, nil,
 		map[string]any{
 			"field":     "recipients_added",
 			"old_value": nil,
-			"new_value": fmt.Sprintf("%d recipients added", len(req.Recipients)),
+			"new_value": fmt.Sprintf("%d recipients added", len(recipients)),
 		})
 
 	return r.SendEnvelope(map[string]any{
-		"message":          "Recipients added successfully",
-		"added_count":      len(req.Recipients),
-		"total_recipients": totalCount,
+		"message":                   "Recipients added successfully",
+		"added_count":               len(recipients),
+		"skipped_active_occurrence": skipped,
+		"total_recipients":          totalCount,
 	})
 }
 

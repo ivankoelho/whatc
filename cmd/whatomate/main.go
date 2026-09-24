@@ -832,6 +832,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/campaigns/{id}/retry-failed", app.RetryFailed)
 	g.GET("/api/campaigns/{id}/progress", app.GetCampaign)
 	g.POST("/api/campaigns/{id}/recipients/import", app.ImportRecipients)
+	g.POST("/api/campaigns/{id}/recipients/from-contacts", app.AddRecipientsFromContacts)
 	g.GET("/api/campaigns/{id}/recipients", app.GetCampaignRecipients)
 	g.DELETE("/api/campaigns/{id}/recipients/{recipientId}", app.DeleteCampaignRecipient)
 	g.POST("/api/campaigns/{id}/media", app.UploadCampaignMedia)

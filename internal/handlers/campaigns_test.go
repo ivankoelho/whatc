@@ -940,3 +940,51 @@ func TestApp_Campaign_CrossOrgIsolation(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req))
 }
+
+func TestApp_AddRecipientsFromContacts_ByDDD_SkipsActiveOccurrencesAndDuplicates(t *testing.T) {
+	app := newTestApp(t, withQueue(testutil.NewMockQueue()))
+	org := testutil.CreateTestOrganization(t, app.DB)
+	admin := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&admin.ID))
+	account := testutil.CreateTestWhatsAppAccountWith(t, app.DB, org.ID, testutil.WithAccountName("ddd-account"))
+	template := testutil.CreateTestTemplate(t, app.DB, org.ID, account.Name)
+	campaign := createTestCampaign(t, app, org.ID, template.ID, user.ID, account.Name, models.CampaignStatusDraft)
+
+	complaining := testutil.CreateTestContactWith(t, app.DB, org.ID, testutil.WithPhoneNumber("5571996002928"))
+	testutil.CreateTestContactWith(t, app.DB, org.ID, testutil.WithPhoneNumber("5571988887777"))
+	testutil.CreateTestContactWith(t, app.DB, org.ID, testutil.WithPhoneNumber("5511999990000"))
+	occ := createOccurrenceWith(t, app, org.ID, user.ID, complaining.ID, nil)
+	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(occ))
+
+	type result struct {
+		Data struct {
+			AddedCount int      `json:"added_count"`
+			Skipped    []string `json:"skipped_active_occurrence"`
+		} `json:"data"`
+	}
+	addByDDD := func() result {
+		req := testutil.NewJSONRequest(t, map[string]any{"ddds": []string{"71"}})
+		testutil.SetAuthContext(req, org.ID, user.ID)
+		testutil.SetPathParam(req, "id", campaign.ID.String())
+		require.NoError(t, app.AddRecipientsFromContacts(req))
+		require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+		var res result
+		require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &res))
+		return res
+	}
+
+	first := addByDDD()
+	assert.Equal(t, 1, first.Data.AddedCount, "only the DDD-71 contact without an open occurrence")
+	assert.Equal(t, []string{"5571996002928"}, first.Data.Skipped)
+
+	assert.Equal(t, 0, addByDDD().Data.AddedCount, "contacts already in the campaign are not added twice")
+
+	// Manual import is blocked too, even in the legacy 8-digit form of the number.
+	req := testutil.NewJSONRequest(t, map[string]any{"recipients": []map[string]any{{"phone_number": "+55 71 9600-2928"}}})
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	testutil.SetPathParam(req, "id", campaign.ID.String())
+	require.NoError(t, app.ImportRecipients(req))
+	var manual result
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &manual))
+	assert.Equal(t, 0, manual.Data.AddedCount)
+}

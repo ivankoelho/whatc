@@ -75,6 +75,8 @@ import {
   FileSpreadsheet,
   ChevronDown,
   Download,
+  MapPin,
+  Wallet,
 } from 'lucide-vue-next'
 
 interface Campaign {
@@ -114,6 +116,7 @@ interface Template {
   body_content?: string
   header_type?: string
   header_content?: string
+  category?: string
 }
 
 interface Recipient {
@@ -577,9 +580,81 @@ async function deleteRecipient(recipientId: string) {
   }
 }
 
+const dddInput = ref('')
+const dddPreview = ref<{ added: number; skipped: number } | null>(null)
+
+const parsedDDDs = computed(() =>
+  [...new Set(dddInput.value.split(/[^0-9]+/).filter(d => /^[1-9][0-9]$/.test(d)))]
+)
+
+// Contacts carry no per-recipient template values, so bulk-by-DDD only works
+// for templates without variables; those still go through CSV.
+const templateHasParams = computed(() => templateParamNames.value.length > 0 || !!templateHeaderParamName.value)
+
+// ponytail: rough BRL per-message defaults per Meta category; the field is
+// editable and remembered per category because Meta changes its price table.
+const DEFAULT_PRICE_BRL: Record<string, number> = { MARKETING: 0.35, UTILITY: 0.05, AUTHENTICATION: 0.05 }
+const templateCategory = computed(() => (selectedTemplate.value?.category || 'MARKETING').toUpperCase())
+const pricePerMessage = ref(0)
+watch(templateCategory, (cat) => {
+  let saved: string | null = null
+  try { saved = localStorage.getItem('campaignPrice:' + cat) } catch { /* storage unavailable */ }
+  pricePerMessage.value = saved ? Number(saved) : (DEFAULT_PRICE_BRL[cat] ?? DEFAULT_PRICE_BRL.MARKETING)
+}, { immediate: true })
+watch(pricePerMessage, (v) => {
+  try { localStorage.setItem('campaignPrice:' + templateCategory.value, String(v)) } catch { /* storage unavailable */ }
+})
+// Meta bills per delivered message, so the range spans a typical 85% delivery rate up to 100%.
+const costRange = computed(() => {
+  const total = (campaign.value?.total_recipients || 0) * (Number(pricePerMessage.value) || 0)
+  return { min: total * 0.85, max: total }
+})
+const formatBRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+
+function warnSkipped(result: any) {
+  const skipped = result?.skipped_active_occurrence?.length || 0
+  if (skipped > 0) {
+    toast.warning(t('campaigns.skippedActiveOccurrence', { count: skipped }, `${skipped} contacts with an open occurrence were left out`))
+  }
+}
+
+async function previewDDD() {
+  if (!campaign.value || parsedDDDs.value.length === 0) return
+  isAddingRecipients.value = true
+  try {
+    const response = await campaignsService.addRecipientsFromContacts(campaign.value.id, parsedDDDs.value, true)
+    const result = (response.data as any).data
+    dddPreview.value = { added: result.added_count, skipped: result.skipped_active_occurrence?.length || 0 }
+  } catch (err: unknown) {
+    toast.error(getErrorMessage(err, t('campaigns.addRecipientsFailed', 'Failed to add recipients')))
+  } finally {
+    isAddingRecipients.value = false
+  }
+}
+
+async function addRecipientsByDDD() {
+  if (!campaign.value || parsedDDDs.value.length === 0) return
+  isAddingRecipients.value = true
+  try {
+    const response = await campaignsService.addRecipientsFromContacts(campaign.value.id, parsedDDDs.value)
+    const result = (response.data as any).data
+    toast.success(t('campaigns.addedRecipients', { count: result?.added_count || 0 }, `Added ${result?.added_count || 0} recipients`))
+    warnSkipped(result)
+    showAddRecipientsDialog.value = false
+    await loadCampaign()
+    await loadRecipients()
+  } catch (err: unknown) {
+    toast.error(getErrorMessage(err, t('campaigns.addRecipientsFailed', 'Failed to add recipients')))
+  } finally {
+    isAddingRecipients.value = false
+  }
+}
+
 async function openAddRecipientsDialog() {
   recipientsInput.value = ''
   csvFile.value = null
+  dddInput.value = ''
+  dddPreview.value = null
   addRecipientsTab.value = 'manual'
 
   // Fetch template details if needed
@@ -710,6 +785,7 @@ async function addRecipients() {
     const response = await campaignsService.addRecipients(campaign.value.id, recipientsList)
     const result = (response.data as any).data
     toast.success(t('campaigns.addedRecipients', { count: result?.added_count || recipientsList.length }, `Added ${result?.added_count || recipientsList.length} recipients`))
+    warnSkipped(result)
     showAddRecipientsDialog.value = false
     recipientsInput.value = ''
     await loadCampaign()
@@ -881,6 +957,7 @@ async function addRecipientsFromCSV() {
     const response = await campaignsService.addRecipients(campaign.value.id, recipientsList)
     const result = (response.data as any).data
     toast.success(t('campaigns.addedFromCsv', { count: result?.added_count || recipientsList.length }, `Imported ${result?.added_count || recipientsList.length} recipients from CSV`))
+    warnSkipped(result)
     showAddRecipientsDialog.value = false
     csvFile.value = null
     await loadCampaign()
@@ -1286,6 +1363,31 @@ onUnmounted(() => {
         :created-by-name="campaign?.created_by_name"
         :updated-by-name="campaign?.updated_by_name"
       />
+      <Card class="mt-4">
+        <CardHeader class="pb-2">
+          <CardTitle class="text-sm font-medium flex items-center gap-2">
+            <Wallet class="h-4 w-4 text-emerald-400 light:text-emerald-600" />
+            {{ $t('campaigns.costEstimate', 'Estimated investment') }}
+          </CardTitle>
+        </CardHeader>
+        <CardContent class="space-y-3">
+          <div>
+            <p class="text-xl font-semibold">{{ formatBRL(costRange.min) }} – {{ formatBRL(costRange.max) }}</p>
+            <p class="text-xs text-muted-foreground">
+              {{ $t('campaigns.costEstimateFor', { count: campaign?.total_recipients || 0 }, `for ${campaign?.total_recipients || 0} recipients`) }}
+            </p>
+          </div>
+          <div class="space-y-1">
+            <Label for="price-per-message" class="text-xs text-muted-foreground">
+              {{ $t('campaigns.pricePerMessage', 'Price per message (R$)') }} · {{ $t('templates.' + templateCategory.toLowerCase(), templateCategory) }}
+            </Label>
+            <Input id="price-per-message" v-model.number="pricePerMessage" type="number" min="0" step="0.01" class="h-8" />
+          </div>
+          <p class="text-[11px] text-muted-foreground">
+            {{ $t('campaigns.costEstimateNote', 'Meta charges per delivered message. The range assumes 85% to 100% delivery. Check the price on your Meta invoice.') }}
+          </p>
+        </CardContent>
+      </Card>
     </template>
   </DetailPageLayout>
 
@@ -1354,6 +1456,10 @@ onUnmounted(() => {
           <TabsTrigger value="csv" class="flex-1">
             <FileSpreadsheet class="h-4 w-4 mr-1" />
             {{ $t('campaigns.csvUpload', 'CSV Upload') }}
+          </TabsTrigger>
+          <TabsTrigger value="ddd" class="flex-1">
+            <MapPin class="h-4 w-4 mr-1" />
+            {{ $t('campaigns.byDDD', 'By area code') }}
           </TabsTrigger>
         </TabsList>
 
@@ -1438,6 +1544,34 @@ onUnmounted(() => {
             >
               <FileSpreadsheet class="h-4 w-4 mr-1" />
               {{ isAddingRecipients ? $t('common.importing', 'Importing...') : $t('campaigns.importCSV', 'Import CSV') }}
+            </Button>
+          </DialogFooter>
+        </TabsContent>
+
+        <!-- By DDD Tab -->
+        <TabsContent value="ddd" class="space-y-3 mt-3">
+          <p v-if="templateHasParams" class="text-xs text-destructive">
+            {{ $t('campaigns.dddNeedsNoParams', 'This template has variables. Use CSV upload to fill them per recipient.') }}
+          </p>
+          <div class="space-y-1.5">
+            <Label for="ddd-input" class="text-xs text-muted-foreground">
+              {{ $t('campaigns.dddHint', 'Area codes (DDD), separated by commas. All contacts with these codes are added.') }}
+            </Label>
+            <Input id="ddd-input" v-model="dddInput" placeholder="71, 75, 11" @input="dddPreview = null" />
+          </div>
+          <p v-if="dddPreview" class="text-xs">
+            {{ $t('campaigns.dddPreview', { added: dddPreview.added, skipped: dddPreview.skipped }, `${dddPreview.added} contacts will be added; ${dddPreview.skipped} with an open occurrence will be left out.`) }}
+          </p>
+          <p class="text-[11px] text-muted-foreground">
+            {{ $t('campaigns.activeOccurrenceNote', 'Contacts with an open occurrence are never added to campaigns.') }}
+          </p>
+          <DialogFooter class="gap-2">
+            <Button variant="outline" :disabled="isAddingRecipients || parsedDDDs.length === 0 || templateHasParams" @click="previewDDD">
+              {{ $t('campaigns.dddCheck', 'Check') }}
+            </Button>
+            <Button :disabled="isAddingRecipients || parsedDDDs.length === 0 || templateHasParams" @click="addRecipientsByDDD">
+              <MapPin class="h-4 w-4 mr-1" />
+              {{ isAddingRecipients ? $t('common.adding', 'Adding...') : $t('campaigns.addRecipients', 'Add Recipients') }}
             </Button>
           </DialogFooter>
         </TabsContent>
