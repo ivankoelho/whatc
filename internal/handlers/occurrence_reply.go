@@ -51,12 +51,18 @@ func (a *App) ReplyToOccurrence(r *fastglue.Request) error {
 			"WhatsApp account not found for this contact", nil, "")
 	}
 
+	// A reply typed by the agent is human conversation, wherever it is typed:
+	// same as the chat composer it is attributed to the agent (signed when the
+	// org opted in) and opens or keeps the attendance, so the customer's answer
+	// reaches a person instead of the chatbot.
+	opts := DefaultSendOptions()
+	opts.SentByUserID = &userID
 	if _, err := a.SendOutgoingMessage(context.Background(), OutgoingMessageRequest{
 		Account: &account,
 		Contact: contact,
 		Type:    models.MessageTypeText,
 		Content: req.Content,
-	}, DefaultSendOptions()); err != nil {
+	}, opts); err != nil {
 		a.Log.Error("Failed to send occurrence reply", "error", err, "occurrence", occ.ID)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to send reply", nil, "")
 	}
