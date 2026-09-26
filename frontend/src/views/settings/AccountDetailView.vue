@@ -61,6 +61,7 @@ interface WhatsAppAccount {
   is_default_outgoing: boolean
   auto_read_receipt: boolean
   default_team_id?: string | null
+  business_calling_enabled: boolean
   status: string
   has_access_token: boolean
   has_app_secret: boolean
