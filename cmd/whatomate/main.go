@@ -788,6 +788,11 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/sales-opportunities/{id}/convert", app.ConvertSalesOpportunity)
 	g.POST("/api/sales-opportunities/{id}/lose", app.LoseSalesOpportunity)
 
+	// CRM — integração X2 ERP
+	g.GET("/api/xprocess-integration", app.GetXProcessIntegration)
+	g.PUT("/api/xprocess-integration", app.UpsertXProcessIntegration)
+	g.POST("/api/xprocess-integration/test", app.TestXProcessIntegrationConnection)
+
 	// CRM — unidades
 	g.GET("/api/units", app.ListUnits)
 	g.POST("/api/units", app.CreateUnit)
