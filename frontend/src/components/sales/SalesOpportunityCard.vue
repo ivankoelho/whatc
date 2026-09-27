@@ -151,7 +151,7 @@ async function saveValue() {
         </SelectContent>
       </Select>
     </div>
-    <div v-if="opportunity.stage === 'direcionada'" class="mt-2 flex gap-2">
+    <div v-if="opportunity.status === 'aberta' && opportunity.stage === 'direcionada'" class="mt-2 flex gap-2">
       <Button data-testid="sales-opportunity-convert-button" size="sm" variant="outline" class="flex-1 text-xs px-1" @click.stop="$emit('convert', opportunity)">
         {{ $t('sales.markConvertedShort') }}
       </Button>
