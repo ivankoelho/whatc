@@ -12,10 +12,12 @@ import (
 // xprocessAPIKeyPlaceholder is what a chatbot flow author types into a
 // header value to use the organization's X2 credential — never the key
 // itself. Resolved server-side only, right before the HTTP call is made;
-// it is never written to SessionData and never passes through
-// processTemplate, so it cannot leak into a later message or log line that
+// it is never written to SessionData and never used to populate a template
+// *variable*, so it cannot leak into a later message or log line that
 // happens to dump session variables (design §3: "Chave do X2 dentro de
-// fluxos do bot").
+// fluxos do bot"). The resolved header value does still pass, as literal
+// input text, through executeConfiguredAPI's existing processTemplate call
+// on header values — a no-op unless that text itself contains "{{...}}".
 const xprocessAPIKeyPlaceholder = "{{integrations.xprocess.api_key}}"
 
 // resolveIntegrationSecrets returns a copy of config with the X2 API key
