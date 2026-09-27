@@ -3555,9 +3555,12 @@
   "xprocessLink": {
     "title": "Pedido X2",
     "numPedido": "Número do pedido",
+    "numPedidoNew": "Número do novo pedido",
     "documento": "CPF/CNPJ do cliente",
     "register": "Registrar",
+    "registerNew": "Registrar novo vínculo",
     "registered": "Registrado — a confirmação automática roda amanhã de manhã.",
+    "registerFailure": "Não foi possível registrar — confira o número do pedido e o documento.",
     "pendingReview": "Pedido ainda não localizado no X2 após 5 consultas — vale conferir número ou documento.",
     "status": "Status no X2"
   }

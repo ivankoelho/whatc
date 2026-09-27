@@ -27,6 +27,17 @@ async function load() {
   try {
     const res = await salesOpportunityXProcessLinkService.get(props.opportunityId)
     link.value = res.data.data
+    // An open link (resolved_at nulo) is editable in place (design §6) — show
+    // the agent what's already registered instead of an empty form. A
+    // resolved link is immutable, so registering again is a NEW vínculo:
+    // leave the fields blank rather than pre-filling historical data.
+    if (link.value && !link.value.resolved_at) {
+      numPedido.value = link.value.num_pedido ?? ''
+      documento.value = link.value.documento ?? ''
+    } else {
+      numPedido.value = ''
+      documento.value = ''
+    }
   } catch {
     link.value = null
   } finally {
@@ -53,6 +64,8 @@ async function register() {
     numPedido.value = ''
     documento.value = ''
     await load()
+  } catch {
+    toast.error(t('xprocessLink.registerFailure'))
   } finally {
     saving.value = false
   }
@@ -64,6 +77,7 @@ async function register() {
     <button
       type="button"
       class="flex w-full items-center justify-between text-sm font-medium"
+      :aria-expanded="expanded"
       @click="toggle"
     >
       <span>{{ t('xprocessLink.title') }}</span>
@@ -79,9 +93,9 @@ async function register() {
           <p v-if="link.pending_review" class="text-amber-600">{{ t('xprocessLink.pendingReview') }}</p>
         </div>
 
-        <div v-if="editable && (!link || link.resolved_at)" class="flex flex-col gap-2 sm:flex-row">
+        <div v-if="editable" class="flex flex-col gap-2 sm:flex-row">
           <div class="flex-1 space-y-1">
-            <Label>{{ t('xprocessLink.numPedido') }}</Label>
+            <Label>{{ link && link.resolved_at ? t('xprocessLink.numPedidoNew') : t('xprocessLink.numPedido') }}</Label>
             <Input v-model="numPedido" />
           </div>
           <div class="flex-1 space-y-1">
@@ -89,7 +103,7 @@ async function register() {
             <Input v-model="documento" />
           </div>
           <Button class="self-end" :disabled="saving || !numPedido || !documento" @click="register">
-            {{ t('xprocessLink.register') }}
+            {{ link && link.resolved_at ? t('xprocessLink.registerNew') : t('xprocessLink.register') }}
           </Button>
         </div>
       </template>
