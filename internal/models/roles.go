@@ -96,6 +96,7 @@ const (
 	ResourceUnits                   = "units"
 	ResourceDepartments             = "departments"
 	ResourceSalesOpportunities      = "sales_opportunities"
+	ResourceXProcessIntegration     = "xprocess_integration"
 )
 
 // PermissionAction constants for available actions
@@ -220,6 +221,10 @@ func DefaultPermissions() []Permission {
 		{Resource: ResourceAPIKeys, Action: ActionRead, Description: "View API keys"},
 		{Resource: ResourceAPIKeys, Action: ActionWrite, Description: "Create API keys"},
 		{Resource: ResourceAPIKeys, Action: ActionDelete, Description: "Delete API keys"},
+
+		// X2 ERP Integration
+		{Resource: ResourceXProcessIntegration, Action: ActionRead, Description: "View the X2 ERP integration settings"},
+		{Resource: ResourceXProcessIntegration, Action: ActionWrite, Description: "Configure the X2 ERP integration credential"},
 
 		// Canned Responses
 		{Resource: ResourceCannedResponses, Action: ActionRead, Description: "View canned responses"},

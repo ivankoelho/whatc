@@ -196,6 +196,12 @@ func runServer(args []string) {
 			lo.Fatal("Sales opportunity permissions backfill failed", "error", err)
 		}
 
+		// Same window: xprocess_integration is a brand-new resource, needs its
+		// own guard rather than piggybacking on an existing one.
+		if err := database.BackfillXProcessIntegrationPermission(db, lo); err != nil {
+			lo.Fatal("XProcess integration permission backfill failed", "error", err)
+		}
+
 		// Same window: occurrences.processes is a new resource added after the
 		// what-happened backfill above, so it needs its own guard rather than
 		// piggybacking on that one's already-migrated check.
