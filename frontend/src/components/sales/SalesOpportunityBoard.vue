@@ -23,19 +23,63 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
-const STAGES: SalesOpportunityStage[] = ['potencial', 'abrir_orcamento', 'direcionada']
-const STAGE_LABEL_KEY: Record<SalesOpportunityStage, string> = {
-  potencial: 'sales.stagePotencial',
-  abrir_orcamento: 'sales.stageAbrirOrcamento',
-  direcionada: 'sales.stageDirecionada',
-}
+// The 3 funnel stages plus 2 terminal outcomes — Convertida/Perdida are
+// status, not stage, but the board renders them as columns too so a card
+// visibly moves there instead of just vanishing (spec item 11's board
+// restructuring). ColumnKey covers both kinds; STAGE_KEYS is the subset
+// that changeStage() actually accepts.
+type ColumnKey = SalesOpportunityStage | 'convertida' | 'perdida'
+const COLUMN_DEFS: { key: ColumnKey; labelKey: string; accent: string }[] = [
+  { key: 'potencial', labelKey: 'sales.stagePotencial', accent: '' },
+  { key: 'abrir_orcamento', labelKey: 'sales.stageAbrirOrcamento', accent: '' },
+  { key: 'direcionada', labelKey: 'sales.stageDirecionada', accent: '' },
+  { key: 'convertida', labelKey: 'sales.statusConvertida', accent: 'border-t-2 border-t-emerald-500/60' },
+  { key: 'perdida', labelKey: 'sales.statusPerdida', accent: 'border-t-2 border-t-red-500/60' },
+]
+
+// A page per column, fetched server-side-filtered — replaces the old
+// single "up to 100 across every column" fetch (see git history), which
+// grew the whole board (and the page around it) tall instead of giving
+// each column its own scroll.
+const PAGE_SIZE = 20
 
 interface ColumnState {
-  stage: SalesOpportunityStage
+  key: ColumnKey
   items: SalesOpportunity[]
+  offset: number
+  total: number
+  hasMore: boolean
+  loadingMore: boolean
 }
 
-const columns = ref<ColumnState[]>(STAGES.map(stage => ({ stage, items: [] })))
+// Every opportunity belongs to exactly one column: its stage while aberta,
+// or its terminal status once closed. Cancelada (X2-cancelled-after-convert)
+// has no column of its own — it stays visible in "Minhas vendas fechadas"
+// instead; folding it into Perdida would misrepresent a completed sale.
+function columnKeyFor(o: SalesOpportunity): ColumnKey | null {
+  if (o.status === 'convertida') return 'convertida'
+  if (o.status === 'perdida') return 'perdida'
+  if (o.status === 'aberta') return o.stage
+  return null
+}
+
+function emptyColumn(key: ColumnKey): ColumnState {
+  return { key, items: [], offset: 0, total: 0, hasMore: false, loadingMore: false }
+}
+
+function paramsFor(key: ColumnKey, offset: number): Record<string, string> {
+  const params: Record<string, string> = { limit: String(PAGE_SIZE), offset: String(offset) }
+  if (props.assignedUserId) params.assigned_user_id = props.assignedUserId
+  if (key === 'convertida' || key === 'perdida') {
+    params.status = key
+  } else {
+    params.status = 'aberta'
+    params.stage = key
+  }
+  return params
+}
+
+const columns = ref<ColumnState[]>(COLUMN_DEFS.map(c => emptyColumn(c.key)))
 const loading = ref(false)
 const failed = ref(false)
 
@@ -43,25 +87,17 @@ const failed = ref(false)
 const pending = ref(new Set<string>())
 
 /** Origem do arrasto, capturada no início e usada na reversão. */
-let dragOrigin: { opportunityId: string; fromStage: SalesOpportunityStage } | null = null
+let dragOrigin: { opportunityId: string; fromKey: ColumnKey } | null = null
 
-// ponytail: uma única página de até 100 abertas por escopo (o board só
-// mostra status=aberta — fechadas vivem na aba "Minhas vendas fechadas"), sem
-// paginação por coluna como OccurrenceBoard.vue. Suficiente pro "primeiro
-// corte" da carteira de um agente; adicionar paginação por coluna se o volume
-// por vendedor crescer além disso.
 async function loadAll() {
   loading.value = true
   failed.value = false
   try {
-    const params: Record<string, string> = { status: 'aberta', limit: '100' }
-    if (props.assignedUserId) params.assigned_user_id = props.assignedUserId
-    const { data } = await salesOpportunitiesService.list(params)
-    const opportunities = data.data.opportunities
-    columns.value = STAGES.map(stage => ({
-      stage,
-      items: opportunities.filter(o => o.stage === stage),
-    }))
+    const results = await Promise.all(COLUMN_DEFS.map(c => salesOpportunitiesService.list(paramsFor(c.key, 0))))
+    columns.value = COLUMN_DEFS.map((c, i) => {
+      const { opportunities, total, has_more } = results[i].data.data
+      return { key: c.key, items: opportunities, offset: opportunities.length, total, hasMore: has_more, loadingMore: false }
+    })
   } catch {
     failed.value = true
   } finally {
@@ -69,9 +105,24 @@ async function loadAll() {
   }
 }
 
+async function loadMore(col: ColumnState) {
+  col.loadingMore = true
+  try {
+    const { data } = await salesOpportunitiesService.list(paramsFor(col.key, col.offset))
+    col.items.push(...data.data.opportunities)
+    col.offset += data.data.opportunities.length
+    col.total = data.data.total
+    col.hasMore = data.data.has_more
+  } catch (e) {
+    toast.error(getErrorMessage(e, t('sales.boardLoadFailed')))
+  } finally {
+    col.loadingMore = false
+  }
+}
+
 function onDragStart(col: ColumnState, evt: { oldIndex: number }) {
   const item = col.items[evt.oldIndex]
-  dragOrigin = item ? { opportunityId: item.id, fromStage: col.stage } : null
+  dragOrigin = item ? { opportunityId: item.id, fromKey: col.key } : null
 }
 
 function canMove(evt: { draggedContext: { element: SalesOpportunity } }): boolean {
@@ -86,17 +137,33 @@ async function onColumnChange(toCol: ColumnState, evt: { added?: { element: Sale
   if (!origin) return
 
   const opp = evt.added.element
-  if (origin.fromStage === toCol.stage) return // guarda explícita do no-op
+  if (origin.fromKey === toCol.key) return // guarda explícita do no-op
 
-  const fromCol = columns.value.find(c => c.stage === origin.fromStage)
+  const fromCol = columns.value.find(c => c.key === origin.fromKey)
 
+  // Convertida/Perdida são desfechos, não etapas do funil — soltar aqui não
+  // chama a API diretamente (Perder exige motivo obrigatório via diálogo;
+  // Converter deve se comportar igual, seja pelo botão ou pelo arrasto).
+  // Volta o card na hora pra origem e dispara o mesmo fluxo que os botões já
+  // usam; se a ação for concluída, o card reaparece aqui após o refresh do
+  // board feito pelo componente pai.
+  if (toCol.key === 'convertida' || toCol.key === 'perdida') {
+    const idx = toCol.items.findIndex(i => i.id === opp.id)
+    if (idx !== -1) toCol.items.splice(idx, 1)
+    if (fromCol) fromCol.items.push(opp)
+    if (toCol.key === 'convertida') emit('convert', opp)
+    else emit('lose', opp)
+    return
+  }
+
+  const targetStage = toCol.key as SalesOpportunityStage
   pending.value.add(opp.id)
   try {
-    const { data } = await salesOpportunitiesService.changeStage(opp.id, toCol.stage)
+    const { data } = await salesOpportunitiesService.changeStage(opp.id, targetStage)
     const updated = data.data
     const idx = toCol.items.findIndex(i => i.id === opp.id)
     if (idx !== -1) toCol.items.splice(idx, 1, updated)
-    emit('stage-change', updated, toCol.stage)
+    emit('stage-change', updated, targetStage)
   } catch (e) {
     // Reversão pela origem guardada, não pelo que está na tela.
     const idx = toCol.items.findIndex(i => i.id === opp.id)
@@ -108,7 +175,7 @@ async function onColumnChange(toCol: ColumnState, evt: { added?: { element: Sale
     // board), então um 400 ao soltar ali é tratado como esse erro específico
     // em vez do texto genérico do servidor.
     const status = axios.isAxiosError(e) ? e.response?.status : undefined
-    if (status === 400 && toCol.stage === 'direcionada') {
+    if (status === 400 && targetStage === 'direcionada') {
       toast.error(t('sales.direcionamentoRequired'))
     } else {
       toast.error(getErrorMessage(e, t('sales.stageChangeFailed')))
@@ -119,14 +186,16 @@ async function onColumnChange(toCol: ColumnState, evt: { added?: { element: Sale
 }
 
 function onDirecionamentoChange(updated: SalesOpportunity) {
-  const col = columns.value.find(c => c.stage === updated.stage)
+  const key = columnKeyFor(updated)
+  const col = columns.value.find(c => c.key === key)
   const idx = col?.items.findIndex(i => i.id === updated.id)
   if (col && idx !== undefined && idx !== -1) col.items.splice(idx, 1, updated)
   emit('direcionamento-change', updated)
 }
 
 function onDetailsChange(updated: SalesOpportunity) {
-  const col = columns.value.find(c => c.stage === updated.stage)
+  const key = columnKeyFor(updated)
+  const col = columns.value.find(c => c.key === key)
   const idx = col?.items.findIndex(i => i.id === updated.id)
   if (col && idx !== undefined && idx !== -1) col.items.splice(idx, 1, updated)
   emit('details-change', updated)
@@ -147,23 +216,26 @@ defineExpose({ refresh: loadAll })
     <template v-else>
       <div
         v-for="col in columns"
-        :key="col.stage"
-        :data-board-column="col.stage"
-        class="flex w-72 shrink-0 flex-col rounded-lg border border-white/[0.08] light:border-gray-200 bg-white/[0.02] light:bg-gray-50"
+        :key="col.key"
+        :data-board-column="col.key"
+        :class="['flex w-72 shrink-0 flex-col rounded-lg border border-white/[0.08] light:border-gray-200 bg-white/[0.02] light:bg-gray-50', COLUMN_DEFS.find(c => c.key === col.key)?.accent]"
       >
-        <div class="flex items-center justify-between gap-2 border-b border-white/[0.08] light:border-gray-200 p-3">
-          <span class="text-sm font-medium">{{ $t(STAGE_LABEL_KEY[col.stage]) }}</span>
-          <span class="text-xs text-muted-foreground" data-board-column-count>{{ col.items.length }}</span>
+        <div class="flex items-center justify-between gap-2 border-b border-white/[0.08] light:border-gray-200 p-3 shrink-0">
+          <span class="text-sm font-medium">{{ $t(COLUMN_DEFS.find(c => c.key === col.key)!.labelKey) }}</span>
+          <span class="text-xs text-muted-foreground" data-board-column-count>{{ col.total }}</span>
         </div>
 
-        <div class="flex flex-1 flex-col gap-2 p-2 min-h-24">
+        <!-- Fixed column height, own scrollbar — the board (and the page
+             around it) no longer grows with the column's content. -->
+        <div class="flex flex-1 flex-col gap-2 p-2 min-h-24 max-h-[65vh] overflow-y-auto">
           <draggable
             v-model="col.items"
             :group="{ name: 'sales-opportunities' }"
             :move="canMove"
+            :disabled="col.key === 'convertida' || col.key === 'perdida'"
             item-key="id"
             data-board-dropzone
-            class="flex flex-1 flex-col gap-2 min-h-16"
+            class="flex flex-col gap-2"
             @start="onDragStart(col, $event)"
             @change="onColumnChange(col, $event)"
             @end="dragOrigin = null"
@@ -187,6 +259,19 @@ defineExpose({ refresh: loadAll })
           <p v-else-if="col.items.length === 0" class="p-3 text-center text-xs text-muted-foreground">
             {{ $t('sales.columnEmpty') }}
           </p>
+
+          <Button
+            v-if="col.hasMore"
+            data-board-load-more
+            variant="ghost"
+            size="sm"
+            class="w-full text-xs shrink-0"
+            :disabled="col.loadingMore"
+            @click="loadMore(col)"
+          >
+            <Spinner v-if="col.loadingMore" class="h-3 w-3 mr-1.5" />
+            {{ $t('sales.loadMore') }} ({{ col.total - col.items.length }})
+          </Button>
         </div>
       </div>
     </template>

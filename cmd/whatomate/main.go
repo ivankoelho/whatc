@@ -196,6 +196,12 @@ func runServer(args []string) {
 			lo.Fatal("Sales opportunity permissions backfill failed", "error", err)
 		}
 
+		// Same window: xprocess_integration is a brand-new resource, needs its
+		// own guard rather than piggybacking on an existing one.
+		if err := database.BackfillXProcessIntegrationPermission(db, lo); err != nil {
+			lo.Fatal("XProcess integration permission backfill failed", "error", err)
+		}
+
 		// Same window: occurrences.processes is a new resource added after the
 		// what-happened backfill above, so it needs its own guard rather than
 		// piggybacking on that one's already-migrated check.
@@ -347,6 +353,12 @@ func runServer(args []string) {
 	go slaProcessor.Start(slaCtx)
 	lo.Info("SLA processor started")
 
+	// Start XProcess reconciler (checks once daily, first tick after 2am)
+	xprocessReconciler := handlers.NewXProcessReconciler(app, 15*time.Minute, 2)
+	xprocessCtx, xprocessCancel := context.WithCancel(context.Background())
+	go xprocessReconciler.Start(xprocessCtx)
+	lo.Info("XProcess reconciler started")
+
 	// Start embedded workers
 	var workers []*worker.Worker
 	var workerCancel context.CancelFunc
@@ -391,6 +403,12 @@ func runServer(args []string) {
 	slaCancel()
 	slaProcessor.Stop()
 	lo.Info("SLA processor stopped")
+
+	// Stop XProcess reconciler
+	lo.Info("Stopping XProcess reconciler...")
+	xprocessCancel()
+	xprocessReconciler.Stop()
+	lo.Info("XProcess reconciler stopped")
 
 	// Stop workers first
 	if workerCancel != nil {
@@ -773,6 +791,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/occurrences/{id}/documents/{docId}/attachment", app.ServeOccurrenceDocumentAttachment)
 
 	// CRM — central de vendas
+	g.POST("/api/sales-opportunities", app.CreateSalesOpportunity)
 	g.GET("/api/sales-opportunities", app.ListSalesOpportunities)
 	g.GET("/api/sales-opportunities/{id}", app.GetSalesOpportunity)
 	g.GET("/api/sales-opportunities/{id}/events", app.ListSalesOpportunityEvents)
@@ -781,6 +800,14 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.PUT("/api/sales-opportunities/{id}/details", app.UpdateSalesOpportunityDetails)
 	g.POST("/api/sales-opportunities/{id}/convert", app.ConvertSalesOpportunity)
 	g.POST("/api/sales-opportunities/{id}/lose", app.LoseSalesOpportunity)
+	g.GET("/api/sales-opportunities/{id}/xprocess-link", app.GetSalesOpportunityXProcessLink)
+	g.PUT("/api/sales-opportunities/{id}/xprocess-link", app.UpsertSalesOpportunityXProcessLink)
+	g.GET("/api/sales-opportunities/{id}/xprocess-candidates", app.ListSalesOpportunityXProcessCandidates)
+
+	// CRM — integração X2 ERP
+	g.GET("/api/xprocess-integration", app.GetXProcessIntegration)
+	g.PUT("/api/xprocess-integration", app.UpsertXProcessIntegration)
+	g.POST("/api/xprocess-integration/test", app.TestXProcessIntegrationConnection)
 
 	// CRM — unidades
 	g.GET("/api/units", app.ListUnits)

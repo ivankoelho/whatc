@@ -22,15 +22,18 @@ import {
   CommandItem,
   CommandList
 } from '@/components/ui/command'
-import { X, ChevronDown, Phone, User, Plus, Check, Tags, Loader2, Copy, Pencil } from 'lucide-vue-next'
+import { X, ArrowLeft, ChevronDown, Phone, User, Plus, Check, Tags, Loader2, Copy, Pencil } from 'lucide-vue-next'
 import { TagBadge } from '@/components/ui/tag-badge'
 import { IconButton } from '@/components/shared'
 import { Input } from '@/components/ui/input'
 import MetadataSection from '@/components/chat/MetadataSection.vue'
+import ContactSalesOpportunitiesPanel from '@/components/chat/ContactSalesOpportunitiesPanel.vue'
+import ContactOccurrencesPanel from '@/components/chat/ContactOccurrencesPanel.vue'
 import { getInitials, getAvatarGradient, formatLabel } from '@/lib/utils'
 import { getTagColorClass } from '@/lib/constants'
 import { useTagsStore } from '@/stores/tags'
 import { useAuthStore } from '@/stores/auth'
+import { useIsMobile } from '@/composables/useIsMobile'
 import { useI18n } from 'vue-i18n'
 import { contactsService, type Tag } from '@/services/api'
 import { toast } from 'vue-sonner'
@@ -70,6 +73,7 @@ interface SessionData {
 const props = defineProps<{
   contact: Contact
   sessionData?: SessionData | null
+  sourceTransferId?: string
 }>()
 
 const emit = defineEmits<{
@@ -81,6 +85,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const tagsStore = useTagsStore()
 const authStore = useAuthStore()
+const isMobile = useIsMobile()
 const collapsedSections = ref<Record<string, boolean>>({})
 const tagSelectorOpen = ref(false)
 const isUpdatingTags = ref(false)
@@ -95,6 +100,11 @@ const isResizing = ref(false)
 const canEditTags = computed(() => authStore.hasPermission('contacts', 'write'))
 
 const canRenameContact = computed(() => authStore.hasPermission('contacts.name', 'write'))
+
+// Spec item 4: Oportunidades/Ocorrências render as sections of this same
+// column instead of their own separate toggleable side panels.
+const canReadSalesOpportunities = computed(() => authStore.hasPermission('sales_opportunities', 'read'))
+const canReadOccurrences = computed(() => authStore.hasPermission('occurrences', 'read'))
 
 const isEditingName = ref(false)
 const nameDraft = ref('')
@@ -300,10 +310,12 @@ async function updateContactTags(tags: string[]) {
 <template>
   <div
     class="flex flex-col bg-card h-full relative"
-    :style="{ width: `${panelWidth}px` }"
+    :class="isMobile && 'w-full'"
+    :style="!isMobile && { width: `${panelWidth}px` }"
   >
-    <!-- Resize Handle -->
+    <!-- Resize Handle — desktop only, the mobile pane is always full-width -->
     <div
+      v-if="!isMobile"
       class="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-primary/20 active:bg-primary/30 z-10 border-l"
       :class="{ 'bg-primary/30': isResizing }"
       @mousedown="startResize"
@@ -312,8 +324,9 @@ async function updateContactTags(tags: string[]) {
     <!-- Header -->
     <div class="h-12 px-3 border-b flex items-center justify-between">
       <h3 class="font-medium text-sm">{{ $t('chat.contactInfo') }}</h3>
-      <Button variant="ghost" size="icon" class="h-8 w-8" @click="emit('close')">
-        <X class="h-4 w-4" />
+      <Button variant="ghost" size="icon" class="h-8 w-8" :aria-label="isMobile ? $t('common.back') : undefined" @click="emit('close')">
+        <ArrowLeft v-if="isMobile" class="h-4 w-4" />
+        <X v-else class="h-4 w-4" />
       </Button>
     </div>
 
@@ -567,6 +580,19 @@ async function updateContactTags(tags: string[]) {
             </div>
           </div>
         </template>
+
+        <ContactSalesOpportunitiesPanel
+          v-if="canReadSalesOpportunities"
+          :contact-id="contact.id"
+        />
+
+        <ContactOccurrencesPanel
+          v-if="canReadOccurrences"
+          :contact-id="contact.id"
+          :contact-phone="contact.phone_number"
+          :contact-name="contact.profile_name || contact.name"
+          :source-transfer-id="sourceTransferId"
+        />
       </div>
     </ScrollArea>
   </div>

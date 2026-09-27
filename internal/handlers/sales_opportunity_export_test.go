@@ -12,5 +12,5 @@ func (a *App) NextOpportunityNumberForTest(orgID uuid.UUID, day time.Time) (stri
 }
 
 func (a *App) CreateOrRetriggerSalesOpportunityForTest(contact *models.Contact, sourceTransferID *uuid.UUID) (*models.SalesOpportunity, error) {
-	return a.createOrRetriggerSalesOpportunity(contact, sourceTransferID)
+	return a.createOrRetriggerSalesOpportunity(contact, sourceTransferID, models.SalesOpportunityEventSourceSystem, "", nil)
 }

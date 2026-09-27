@@ -115,6 +115,19 @@ type SalesOpportunity struct {
 	// transition. Required before entering "direcionada" (spec §5).
 	Direcionamento *SalesDirecionamento `gorm:"size:20" json:"direcionamento,omitempty"`
 
+	// XProcessNumPedido/XProcessDocumento always mirror the CURRENT (open,
+	// or latest if all resolved) SalesOpportunityXProcessLink — a read
+	// convenience; the link table is the source of truth and the only
+	// place a full history is kept (design §4, §6).
+	// column: explicit on both — GORM's default namer produces
+	// "x_process_num_pedido"/"x_process_documento" (verified against
+	// gorm.io/gorm/schema.NamingStrategy), not "xprocess_...". Same reason
+	// User.XProcessSellerCode already carries an explicit column tag; match
+	// it here instead of letting AutoMigrate create yet another
+	// differently-named column for the same "xprocess" concept.
+	XProcessNumPedido *string `gorm:"column:xprocess_num_pedido;size:20" json:"xprocess_num_pedido,omitempty"`
+	XProcessDocumento *string `gorm:"column:xprocess_documento;size:14" json:"xprocess_documento,omitempty"`
+
 	ConversionSource *SalesConversionSource `gorm:"size:20" json:"conversion_source,omitempty"`
 	LossReason       *SalesLossReason       `gorm:"size:30" json:"loss_reason,omitempty"`
 	LossNotes        string                 `gorm:"type:text" json:"loss_notes,omitempty"`

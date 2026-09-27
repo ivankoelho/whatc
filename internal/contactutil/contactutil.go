@@ -1,6 +1,7 @@
 package contactutil
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/google/uuid"
@@ -178,4 +179,20 @@ func FindContact(db *gorm.DB, orgID uuid.UUID, phoneNumber string) (*models.Cont
 		return nil, gorm.ErrRecordNotFound
 	}
 	return &contact, nil
+}
+
+// ErrInvalidDocumento is returned by NormalizeDocumento when the digits-only
+// value is neither 11 (CPF) nor 14 (CNPJ) characters long.
+var ErrInvalidDocumento = errors.New("documento must be a valid CPF (11 digits) or CNPJ (14 digits)")
+
+// NormalizeDocumento reduces a CPF or CNPJ to its digits-only form and
+// validates the length. This is deliberately structural only — it never
+// checks the value against the Receita Federal or the X2 API (design §3,
+// §6): it exists to catch an obvious typo before saving, nothing more.
+func NormalizeDocumento(raw string) (string, error) {
+	digits := NormalizePhone(raw) // same "keep only 0-9" logic, reused rather than duplicated
+	if len(digits) != 11 && len(digits) != 14 {
+		return "", ErrInvalidDocumento
+	}
+	return digits, nil
 }

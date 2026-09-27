@@ -9,6 +9,8 @@ import { Input } from '@/components/ui/input'
 import { salesOpportunitiesService } from '@/services/api'
 import type { SalesOpportunity, SalesDirecionamento } from '@/services/api'
 import { getErrorMessage } from '@/lib/api-utils'
+import { formatCurrency } from '@/lib/currency'
+import XProcessLinkForm from '@/components/sales/XProcessLinkForm.vue'
 
 const props = defineProps<{ opportunity: SalesOpportunity; disabled?: boolean }>()
 
@@ -43,14 +45,6 @@ async function onDirecionamentoChange(value: unknown) {
   } finally {
     changingDirecionamento.value = false
   }
-}
-
-// pt-BR/BRL: this is a Brazilian sales funnel (XProcess integration, spec in
-// Portuguese) — same one-off Intl.NumberFormat call MetaInsightsView.vue uses
-// for its own currency, just with the locale/currency this domain needs.
-function formatCurrency(value?: number): string {
-  if (value == null) return '—'
-  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value)
 }
 
 // Click-to-edit for estimated_value — the one field with real downstream
@@ -134,6 +128,12 @@ async function saveValue() {
     >
       {{ formatCurrency(opportunity.estimated_value) }}
     </p>
+    <p v-if="opportunity.status === 'convertida' && opportunity.conversion_source" class="text-xs mt-0.5 text-white/40 light:text-muted-foreground">
+      {{ opportunity.conversion_source === 'xprocess' ? $t('sales.conversionSourceXProcess') : $t('sales.conversionSourceManual') }}
+    </p>
+    <div class="mt-2" @click.stop @mousedown.stop>
+      <XProcessLinkForm :opportunity-id="opportunity.id" :editable="opportunity.status === 'aberta'" />
+    </div>
     <div v-if="opportunity.status === 'aberta'" class="mt-2" @click.stop @mousedown.stop>
       <Select
         data-testid="sales-opportunity-direcionamento-select"
@@ -151,12 +151,12 @@ async function saveValue() {
         </SelectContent>
       </Select>
     </div>
-    <div v-if="opportunity.stage === 'direcionada'" class="mt-2 flex gap-2">
-      <Button data-testid="sales-opportunity-convert-button" size="sm" variant="outline" class="flex-1 text-xs" @click.stop="$emit('convert', opportunity)">
-        {{ $t('sales.markConverted') }}
+    <div v-if="opportunity.status === 'aberta' && opportunity.stage === 'direcionada'" class="mt-2 flex gap-2">
+      <Button data-testid="sales-opportunity-convert-button" size="sm" variant="outline" class="flex-1 text-xs px-1" @click.stop="$emit('convert', opportunity)">
+        {{ $t('sales.markConvertedShort') }}
       </Button>
-      <Button data-testid="sales-opportunity-lose-button" size="sm" variant="outline" class="flex-1 text-xs" @click.stop="$emit('lose', opportunity)">
-        {{ $t('sales.markLost') }}
+      <Button data-testid="sales-opportunity-lose-button" size="sm" variant="outline" class="flex-1 text-xs px-1" @click.stop="$emit('lose', opportunity)">
+        {{ $t('sales.markLostShort') }}
       </Button>
     </div>
   </div>
