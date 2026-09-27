@@ -326,11 +326,11 @@ Chain two API calls: first fetch the customer's code, then use it to fetch their
 
 ```
 Step 1: GET /api/clientes?documento={{documento}}
-Headers: Authorization: {{integrations.xprocess.api_key}}
+Headers: x-api-key: {{integrations.xprocess.api_key}}
 Response Mapping: cod_cliente = cliente.cod_cliente
 
 Step 2: GET /api/vendas?cod_cliente={{cod_cliente}}
-Headers: Authorization: {{integrations.xprocess.api_key}}
+Headers: x-api-key: {{integrations.xprocess.api_key}}
 Response Mapping: pedidos = vendas[*]
 ```
 
@@ -340,7 +340,7 @@ Fetch order details directly with both the order number and customer document.
 
 ```
 POST /api/pedido
-Headers: Authorization: {{integrations.xprocess.api_key}}
+Headers: x-api-key: {{integrations.xprocess.api_key}}
 Body: {"numero_pedido": "{{numero_pedido}}", "documento": "{{documento}}"}
 Response Mapping: status = pedido.status, valor = pedido.valor_total
 ```
