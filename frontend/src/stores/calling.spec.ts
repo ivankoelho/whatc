@@ -42,6 +42,8 @@ beforeEach(() => {
     },
   })
   vi.stubGlobal('RTCPeerConnection', MockPeerConnection)
+  // acceptTransfer primes a remote <audio> element (silent-audio fix) before connecting.
+  vi.stubGlobal('Audio', class { autoplay = false; srcObject: unknown = null; play = vi.fn(async () => undefined); pause = vi.fn() })
   vi.stubGlobal('RTCSessionDescription', class { constructor(public init: unknown) {} })
   vi.stubGlobal('window', { setInterval: vi.fn(() => 1) })
 })
