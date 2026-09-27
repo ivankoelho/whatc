@@ -8,12 +8,14 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Skeleton } from '@/components/ui/skeleton'
 import { PageHeader, DataTable, ErrorState, type Column } from '@/components/shared'
-import { TrendingUp, Briefcase, Target, CheckCircle2, XCircle, Percent, AlertTriangle } from 'lucide-vue-next'
+import { TrendingUp, Briefcase, Target, CheckCircle2, XCircle, Percent, AlertTriangle, Wallet, PiggyBank, TrendingDown } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { salesOpportunitiesService } from '@/services/api'
 import type { SalesOpportunity } from '@/services/api'
 import { getErrorMessage } from '@/lib/api-utils'
 import { formatDate } from '@/lib/utils'
+import { formatCurrency } from '@/lib/currency'
+import { Doughnut } from '@/lib/charts'
 import SalesOpportunityBoard from '@/components/sales/SalesOpportunityBoard.vue'
 import LoseSalesOpportunityDialog from '@/components/sales/LoseSalesOpportunityDialog.vue'
 
@@ -49,6 +51,10 @@ async function fetchWallet() {
   }
 }
 
+function sumEstimatedValue(opportunities: SalesOpportunity[]): number {
+  return opportunities.reduce((sum, o) => sum + (o.estimated_value ?? 0), 0)
+}
+
 const stats = computed(() => {
   const total = wallet.value.length
   const potencial = wallet.value.filter(o => o.stage === 'potencial').length
@@ -57,8 +63,31 @@ const stats = computed(() => {
   const semDirecionamento = wallet.value.filter(o => o.status === 'aberta' && !o.direcionamento).length
   const closedTotal = convertida + perdida
   const conversionRate = closedTotal > 0 ? (convertida / closedTotal) * 100 : 0
-  return { total, potencial, convertida, perdida, semDirecionamento, conversionRate }
+  // Value totals the agent needs alongside the counts above — how much is
+  // still open (prospecção/pipeline) vs. how much already closed either way.
+  const valorProspecto = sumEstimatedValue(wallet.value.filter(o => o.status === 'aberta'))
+  const valorConvertido = sumEstimatedValue(wallet.value.filter(o => o.status === 'convertida'))
+  const valorPerdido = sumEstimatedValue(wallet.value.filter(o => o.status === 'perdida'))
+  return { total, potencial, convertida, perdida, semDirecionamento, conversionRate, valorProspecto, valorConvertido, valorPerdido }
 })
+
+const valueChartData = computed(() => ({
+  labels: [t('sales.statValueProspect'), t('sales.statValueConverted'), t('sales.statValueLost')],
+  datasets: [{
+    data: [stats.value.valorProspecto, stats.value.valorConvertido, stats.value.valorPerdido],
+    backgroundColor: ['#8b5cf6', '#10b981', '#ef4444'],
+    borderWidth: 0,
+  }],
+}))
+
+const valueChartOptions = {
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: {
+    legend: { position: 'bottom' as const },
+    tooltip: { callbacks: { label: (ctx: { label: string; raw: unknown }) => `${ctx.label}: ${formatCurrency(ctx.raw as number)}` } },
+  },
+}
 
 const closedOpportunities = computed(() =>
   wallet.value.filter(o => o.status === 'convertida' || o.status === 'perdida')
@@ -69,14 +98,10 @@ const closedColumns = computed<Column<SalesOpportunity>[]>(() => [
   { key: 'contact', label: t('sales.columnContact') },
   { key: 'estimated_value', label: t('sales.columnEstimatedValue') },
   { key: 'status', label: t('sales.columnStatus') },
+  { key: 'conversion_source', label: t('sales.columnConversionSource') },
   { key: 'closed_at', label: t('sales.columnClosedDate') },
   { key: 'loss_reason', label: t('sales.columnLossReason') },
 ])
-
-function formatCurrency(value?: number): string {
-  if (value == null) return '—'
-  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value)
-}
 
 const LOSS_REASON_LABEL_KEY: Record<string, string> = {
   cliente_desistiu: 'sales.lossReasonClienteDesistiu',
@@ -216,6 +241,53 @@ onMounted(fetchWallet)
               </template>
             </div>
 
+            <!-- Value totals — how much is still in the pipeline vs. already
+                 closed either way, in R$ rather than a headcount. -->
+            <div class="grid gap-4 md:grid-cols-3">
+              <template v-if="walletLoading">
+                <div v-for="i in 3" :key="i" class="rounded-xl border border-white/[0.08] bg-white/[0.02] p-6 light:bg-white light:border-gray-200">
+                  <Skeleton class="h-4 w-24 mb-3 bg-white/[0.08] light:bg-gray-200" />
+                  <Skeleton class="h-8 w-32 bg-white/[0.08] light:bg-gray-200" />
+                </div>
+              </template>
+              <template v-else>
+                <div class="card-depth rounded-xl border border-white/[0.08] bg-white/[0.04] p-6 light:bg-white light:border-gray-200">
+                  <div class="flex items-center justify-between pb-2">
+                    <span class="text-sm font-medium text-white/50 light:text-gray-500">{{ $t('sales.statValueProspect') }}</span>
+                    <div class="h-10 w-10 rounded-lg bg-violet-500/20 flex items-center justify-center">
+                      <Wallet class="h-5 w-5 text-violet-400" />
+                    </div>
+                  </div>
+                  <div class="text-2xl font-bold text-white light:text-gray-900">{{ formatCurrency(stats.valorProspecto) }}</div>
+                </div>
+                <div class="card-depth rounded-xl border border-white/[0.08] bg-white/[0.04] p-6 light:bg-white light:border-gray-200">
+                  <div class="flex items-center justify-between pb-2">
+                    <span class="text-sm font-medium text-white/50 light:text-gray-500">{{ $t('sales.statValueConverted') }}</span>
+                    <div class="h-10 w-10 rounded-lg bg-emerald-500/20 flex items-center justify-center">
+                      <PiggyBank class="h-5 w-5 text-emerald-400" />
+                    </div>
+                  </div>
+                  <div class="text-2xl font-bold text-white light:text-gray-900">{{ formatCurrency(stats.valorConvertido) }}</div>
+                </div>
+                <div class="card-depth rounded-xl border border-white/[0.08] bg-white/[0.04] p-6 light:bg-white light:border-gray-200">
+                  <div class="flex items-center justify-between pb-2">
+                    <span class="text-sm font-medium text-white/50 light:text-gray-500">{{ $t('sales.statValueLost') }}</span>
+                    <div class="h-10 w-10 rounded-lg bg-red-500/20 flex items-center justify-center">
+                      <TrendingDown class="h-5 w-5 text-red-400" />
+                    </div>
+                  </div>
+                  <div class="text-2xl font-bold text-white light:text-gray-900">{{ formatCurrency(stats.valorPerdido) }}</div>
+                </div>
+              </template>
+            </div>
+
+            <Card v-if="!walletLoading && (stats.valorProspecto || stats.valorConvertido || stats.valorPerdido)" class="p-6">
+              <h3 class="text-sm font-medium text-white/70 light:text-gray-600 mb-4">{{ $t('sales.valueChartTitle') }}</h3>
+              <div class="h-64">
+                <Doughnut :data="valueChartData" :options="valueChartOptions" />
+              </div>
+            </Card>
+
             <Card class="overflow-hidden">
               <SalesOpportunityBoard
                 ref="boardRef"
@@ -254,6 +326,12 @@ onMounted(fetchWallet)
                   <Badge :variant="item.status === 'convertida' ? 'success' : 'destructive'">
                     {{ item.status === 'convertida' ? $t('sales.statusConvertida') : $t('sales.statusPerdida') }}
                   </Badge>
+                </template>
+                <template #cell-conversion_source="{ item }">
+                  <span v-if="item.status === 'convertida' && item.conversion_source">
+                    {{ item.conversion_source === 'xprocess' ? $t('sales.conversionSourceXProcess') : $t('sales.conversionSourceManual') }}
+                  </span>
+                  <span v-else>—</span>
                 </template>
                 <template #cell-closed_at="{ item }">
                   {{ formatDate(item.converted_at || item.lost_at || item.stage_changed_at) }}

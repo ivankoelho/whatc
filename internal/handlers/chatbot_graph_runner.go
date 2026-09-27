@@ -301,7 +301,7 @@ func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 				// duplicate, no stage change (spec §5.2). Log-and-continue:
 				// a failure here must never block the bot from advancing.
 				if create, _ := b["create_opportunity"].(bool); create {
-					if _, err := a.createOrRetriggerSalesOpportunity(ctx.contact, nil); err != nil {
+					if _, err := a.createOrRetriggerSalesOpportunity(ctx.contact, nil, models.SalesOpportunityEventSourceSystem, "", nil); err != nil {
 						a.Log.Error("buttons node failed to create sales opportunity",
 							"node", node.ID, "contact", ctx.contact.ID, "error", err)
 					}
@@ -450,7 +450,13 @@ func (a *App) handleChatPromptInvalid(node *ChatNode, ctx *chatNodeCtx) (nodeOut
 //	  "message_template": "Hello {{customer_id}}!"
 //	}
 func (a *App) execChatAPICall(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, error) {
-	cfgJSONB := models.JSONB(node.Config)
+	resolvedConfig, err := a.resolveIntegrationSecrets(ctx.account.OrganizationID, node.Config)
+	if err != nil {
+		a.Log.Error("api_call node failed to resolve integration secret",
+			"node", node.ID, "session", ctx.session.ID, "error", err)
+		return nodeOutcome{outcome: "http:non2xx"}, nil
+	}
+	cfgJSONB := models.JSONB(resolvedConfig)
 
 	if ctx.session.SessionData == nil {
 		ctx.session.SessionData = models.JSONB{}

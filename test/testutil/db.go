@@ -156,6 +156,9 @@ func runMigrations(db *gorm.DB) error {
 		&models.AuditLog{},
 		// Branding
 		&models.BrandingSettings{},
+		// X2 ERP integration
+		&models.XProcessIntegration{},
+		&models.SalesOpportunityXProcessLink{},
 	)
 }
 
@@ -216,6 +219,9 @@ func cleanupTables(db *gorm.DB) {
 		"conversation_notes",
 		// Branding
 		"branding_settings",
+		// X2 ERP integration
+		"xprocess_integrations",
+		"sales_opportunity_xprocess_links",
 		// Roles and permissions
 		"role_permissions",
 		"custom_roles",
@@ -279,6 +285,8 @@ func TruncateTables(db *gorm.DB) {
 		"units",
 		"conversation_notes",
 		"branding_settings",
+		"xprocess_integrations",
+		"sales_opportunity_xprocess_links",
 		"role_permissions",
 		"custom_roles",
 		"permissions",

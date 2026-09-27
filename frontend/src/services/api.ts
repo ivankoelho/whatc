@@ -184,6 +184,20 @@ export const apiKeysService = {
   delete: (id: string) => api.delete(`/api-keys/${id}`)
 }
 
+export interface XProcessIntegrationStatus {
+  base_url: string
+  is_active: boolean
+  is_configured: boolean
+}
+
+export const xprocessIntegrationService = {
+  get: () => api.get<{ data: XProcessIntegrationStatus }>('/xprocess-integration'),
+  upsert: (payload: { base_url: string; api_key: string }) =>
+    api.put<{ data: XProcessIntegrationStatus }>('/xprocess-integration', payload),
+  test: (payload: { base_url: string; api_key: string }) =>
+    api.post<{ data: { message: string } }>('/xprocess-integration/test', payload),
+}
+
 export interface WhatsAppAccountUpdatePayload {
   name?: string
   app_id?: string
@@ -1528,7 +1542,7 @@ export interface SalesOpportunity {
   sla_breached_at?: string
   // Populated only where the handler preloads the association — neither
   // list nor get does today, so these are typically undefined.
-  contact?: { id: string; profile_name?: string; phone_number?: string }
+  contact?: { id: string; profile_name?: string; phone_number?: string; cpf_cnpj?: string }
   assigned_user?: { id: string; full_name: string }
 }
 
@@ -1547,6 +1561,8 @@ export interface SalesOpportunityEvent {
 export const salesOpportunitiesService = {
   list: (params?: Record<string, string>) =>
     api.get<ApiEnvelope<{ opportunities: SalesOpportunity[]; total: number; has_more: boolean }>>('/sales-opportunities', { params }),
+  create: (data: { contact_id: string; interest?: string; estimated_value?: number }) =>
+    api.post<ApiEnvelope<SalesOpportunity>>('/sales-opportunities', data),
   get: (id: string) => api.get<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}`),
   changeStage: (id: string, stage: SalesOpportunityStage) =>
     api.put<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/stage`, { stage }),
@@ -1559,6 +1575,42 @@ export const salesOpportunitiesService = {
     api.post<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/lose`, { loss_reason: lossReason, loss_notes: lossNotes }),
   listEvents: (id: string) =>
     api.get<ApiEnvelope<{ events: SalesOpportunityEvent[] }>>(`/sales-opportunities/${id}/events`),
+}
+
+// X2 (XProcess) pedido/documento link on a sales opportunity — Task 8's
+// GET/PUT /sales-opportunities/{id}/xprocess-link.
+export interface SalesOpportunityXProcessLink {
+  num_pedido: string
+  documento: string
+  status_xprocess?: string
+  valor_vendido?: number
+  last_checked_at?: string
+  resolved_at?: string
+  pending_review: boolean
+}
+
+export const salesOpportunityXProcessLinkService = {
+  get: (opportunityId: string) =>
+    api.get<ApiEnvelope<SalesOpportunityXProcessLink>>(`/sales-opportunities/${opportunityId}/xprocess-link`),
+  upsert: (opportunityId: string, payload: { num_pedido: string; documento: string }) =>
+    api.put<ApiEnvelope<SalesOpportunityXProcessLink>>(`/sales-opportunities/${opportunityId}/xprocess-link`, payload),
+}
+
+// Spec item G: X2 pedidos found live for the opportunity's contact, placed
+// after the opportunity was opened and not yet linked to anything —
+// "esse cliente comprou recentemente" hint. Identification is automatic
+// (this call), linking is always a separate manual action.
+export interface SalesOpportunityXProcessCandidate {
+  num_pedido: string
+  cod_empresa: string
+  status: string
+  valor_vendido: number
+  data_venda: string
+}
+
+export const salesOpportunityXProcessCandidatesService = {
+  list: (opportunityId: string) =>
+    api.get<ApiEnvelope<{ candidates: SalesOpportunityXProcessCandidate[] }>>(`/sales-opportunities/${opportunityId}/xprocess-candidates`),
 }
 
 // Units / Departments / Occurrence categories — Fase 3 of the Ocorrências
