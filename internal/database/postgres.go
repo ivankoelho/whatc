@@ -70,6 +70,7 @@ func GetMigrationModels() []MigrationModel {
 		{"CustomAction", &models.CustomAction{}},
 		{"WhatsAppAccount", &models.WhatsAppAccount{}},
 		{"XProcessIntegration", &models.XProcessIntegration{}},
+		{"SalesOpportunityXProcessLink", &models.SalesOpportunityXProcessLink{}},
 		{"Contact", &models.Contact{}},
 		{"Tag", &models.Tag{}},
 		{"Message", &models.Message{}},
