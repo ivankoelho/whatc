@@ -331,7 +331,15 @@ Response Mapping: cod_cliente = cliente.cod_cliente
 
 Step 2: GET /api/vendas?cod_cliente={{cod_cliente}}
 Headers: x-api-key: {{integrations.xprocess.api_key}}
-Response Mapping: pedidos = vendas[*]
+Response Mapping: pedidos = vendas
+```
+
+Then, in a message step, loop over the mapped array (see [Loops](#loops) below) — `response_mapping` paths support a field name or a numeric index (`field[0]`) but not a wildcard like `vendas[*]`, so map the whole array as one variable and iterate it instead of trying to flatten it in the mapping itself:
+
+```
+{{for pedido in pedidos}}
+Pedido {{pedido.num_pedido}}: {{pedido.status}}
+{{endfor}}
 ```
 
 **Example 2: Lookup by order number**
@@ -342,13 +350,24 @@ Fetch order details directly with both the order number and customer document.
 POST /api/pedido
 Headers: x-api-key: {{integrations.xprocess.api_key}}
 Body: {"numero_pedido": "{{numero_pedido}}", "documento": "{{documento}}"}
-Response Mapping: status = pedido.status, valor = pedido.valor_total
+Response Mapping: status = pedido[0].status, itens = pedido
+```
+
+`/api/pedido` returns `pedido` as an **array of line items** (one row per product in the order), not a single object — so the status has to be read off the first item, `pedido[0].status`, not `pedido.status`. Every item in one pedido shares the same status, so `pedido[0]` is enough regardless of how many items the order has.
+
+There is no single `valor_total` field on the raw response either — each item only carries its own `total` (a comma-decimal string, e.g. `"230,0418"`). To show a per-item breakdown or a sum, map the whole array (`itens = pedido`, same pattern as Example 1) and loop over it in your message template:
+
+```
+{{for item in itens}}
+- {{item.cod_produto}}: R$ {{item.total}}
+{{endfor}}
 ```
 
 **Important notes:**
 
 - **D-1 data**: X2 data is refreshed nightly; you're always seeing status as of yesterday close-of-business. Recommend adding text to your message template like "dados até o fechamento de ontem à noite" to set customer expectations.
 - **Document masking**: Never echo the customer's full documento (CPF/CNPJ) back into the conversation. Display only the last 4 digits, e.g., `•••••••••••1234`.
+- **`response_mapping` path syntax**: only `field`, `field.nested`, and `field[N]` (a literal numeric index) are supported — there is no wildcard (`[*]`) or array-flattening syntax. To work with a whole array, map it as one variable and use a `{{for}}` loop in your message template, as both examples above do.
 
 ### Template Syntax
 
