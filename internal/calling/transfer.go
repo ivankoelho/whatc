@@ -524,17 +524,6 @@ func (m *Manager) ConnectAgentToTransfer(transferID, agentID uuid.UUID, sdpOffer
 		}
 	})
 
-	// Handle agent connection state changes
-	agentPC.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-		m.log.Info("Agent peer connection state changed",
-			"transfer_id", transferID,
-			"state", state.String(),
-		)
-		if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateDisconnected {
-			m.EndTransfer(transferID)
-		}
-	})
-
 	// Set remote description (agent's offer)
 	offer := webrtc.SessionDescription{
 		Type: webrtc.SDPTypeOffer,
@@ -569,6 +558,20 @@ func (m *Manager) ConnectAgentToTransfer(transferID, agentID uuid.UUID, sdpOffer
 	session.AgentPC = agentPC
 	session.AgentAudioTrack = agentAudioTrack
 	session.mu.Unlock()
+
+	// Watch for the agent dropping off, only once the PC belongs to the
+	// session. Registered later than the setup above on purpose: the error
+	// paths there close a PC that was never committed, and a teardown handler
+	// would end the whole transfer instead of just failing this attempt.
+	agentPC.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+		m.log.Info("Agent peer connection state changed",
+			"transfer_id", transferID,
+			"state", state.String(),
+		)
+		if peerGone(state) {
+			m.EndTransfer(transferID)
+		}
+	})
 
 	// Wait for agent's audio track, then start bridge
 	go m.completeTransferConnection(session, transferID, agentID, agentTrackReady)
@@ -721,12 +724,18 @@ func (m *Manager) completeTransferConnection(session *CallSession, transferID, a
 func (m *Manager) EndTransfer(transferID uuid.UUID) {
 	session := m.findSessionByTransferID(transferID)
 	if session == nil {
+		m.log.Warn("EndTransfer: no live session for transfer, nothing to tear down",
+			"transfer_id", transferID)
 		return
 	}
 
 	session.mu.Lock()
 	if session.TransferStatus == models.CallTransferStatusCompleted {
 		session.mu.Unlock()
+		// Expected on a normal teardown: EndTransfer closes the agent PC,
+		// which re-enters here through the connection-state handler.
+		m.log.Debug("EndTransfer: transfer already completed, skipping",
+			"transfer_id", transferID, "call_id", session.ID)
 		return
 	}
 	session.TransferStatus = models.CallTransferStatusCompleted

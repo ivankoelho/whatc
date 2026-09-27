@@ -607,6 +607,7 @@ export interface MetaAnalyticsResponse {
   account_name: string
   data: MetaAnalyticsData | null
   template_names?: Record<string, string> // meta_template_id -> template name
+  currency?: string // ISO 4217 code the WABA is billed in, from Meta
 }
 
 export const metaAnalyticsService = {
@@ -1202,7 +1203,7 @@ export interface CallTransfer {
   caller_phone: string
   contact_id: string
   whatsapp_account: string
-  status: 'waiting' | 'connected' | 'completed' | 'abandoned' | 'no_answer'
+  status: 'waiting' | 'connecting' | 'connected' | 'completed' | 'abandoned' | 'no_answer'
   team_id?: string
   agent_id?: string
   initiating_agent_id?: string

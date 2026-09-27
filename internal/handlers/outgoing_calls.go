@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,14 +23,20 @@ import (
 // name, and the frontend echoes that stored name back verbatim when
 // initiating a call for it — so an exact match alone 404s for every contact
 // whose account predates the most recent rename.
+//
+// Secrets are decrypted before returning: every caller hands the account to
+// Meta (call permission, initiate, permission request), and the access token
+// is encrypted at rest.
 func (a *App) resolveWhatsAppAccountByName(orgID uuid.UUID, name string) (*models.WhatsAppAccount, error) {
 	var account models.WhatsAppAccount
 	if err := a.DB.Where("organization_id = ? AND name = ?", orgID, name).First(&account).Error; err == nil {
+		a.decryptAccountSecrets(&account)
 		return &account, nil
 	}
 	if err := a.DB.Where("organization_id = ? AND name ILIKE ?", orgID, "%"+name+"%").First(&account).Error; err != nil {
 		return nil, err
 	}
+	a.decryptAccountSecrets(&account)
 	return &account, nil
 }
 
@@ -253,17 +260,21 @@ func (a *App) GetCallPermission(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "WhatsApp account not found", nil, "")
 	}
 
-	waAccount := account.ToWAAccount()
+	status := "unknown"
+	// Calling is opt-in; do not query Meta for permissions on disabled accounts.
+	if account.BusinessCallingEnabled {
+		waAccount := account.ToWAAccount()
+		ctx, cancel := context.WithTimeout(context.Background(), whatsapp.DefaultTimeout)
+		defer cancel()
 
-	// Check permission via WhatsApp API
-	ctx := r.RequestCtx
-	status, err := a.WhatsApp.GetCallPermission(ctx, waAccount, contact.PhoneNumber)
-	if err != nil {
-		a.Log.Error("Failed to check call permission via API", "error", err, "phone", contact.PhoneNumber)
-		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to check permission", nil, "")
+		permissionStatus, err := a.WhatsApp.GetCallPermission(ctx, waAccount, contact.PhoneNumber)
+		if err != nil {
+			a.Log.Debug("Call permission unavailable via API", "error", err, "phone", contact.PhoneNumber)
+		} else {
+			status = permissionStatus
+			a.Log.Info("Call permission check result", "contact_id", contactID, "phone", contact.PhoneNumber, "status", status)
+		}
 	}
-
-	a.Log.Info("Call permission check result", "contact_id", contactID, "phone", contact.PhoneNumber, "status", status)
 
 	return r.SendEnvelope(map[string]string{
 		"status": status,
