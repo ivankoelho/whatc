@@ -1,12 +1,14 @@
 package handlers_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/shridarpatil/whatomate/internal/handlers"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/xprocess"
 	"github.com/shridarpatil/whatomate/test/testutil"
@@ -256,4 +258,90 @@ func TestReconcileXProcessLink_Cancelado_AlreadyConverted_MarksCancelledPreservi
 	var got models.SalesOpportunityXProcessLink
 	require.NoError(t, app.DB.First(&got, "id = ?", link.ID).Error)
 	require.NotNil(t, got.ResolvedAt, "CANCELADO within the grace window must resolve immediately, not wait for 7 days")
+}
+
+func TestRunXProcessReconciliation_ProcessesOnlyPendingLinksForActiveIntegrations(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "agent", []string{"sales_opportunities:write"})
+	agent := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+
+	openOpp := newOpenOpportunity(t, app, org.ID, agent.ID, contact.ID)
+	openLink := models.SalesOpportunityXProcessLink{OrganizationID: org.ID, SalesOpportunityID: openOpp.ID, NumPedido: "1", Documento: "12345678900"}
+	require.NoError(t, app.DB.Create(&openLink).Error)
+
+	// Separate contact: idx_sales_opp_org_contact_open is a partial unique
+	// index on (organization_id, contact_id) WHERE status='aberta', so two
+	// aberta opportunities can't share a contact (see widgets_sales_test.go).
+	resolvedContact := testutil.CreateTestContact(t, app.DB, org.ID)
+	resolvedOpp := newOpenOpportunity(t, app, org.ID, agent.ID, resolvedContact.ID)
+	resolvedAt := time.Now()
+	resolvedLink := models.SalesOpportunityXProcessLink{OrganizationID: org.ID, SalesOpportunityID: resolvedOpp.ID, NumPedido: "2", Documento: "12345678900", ResolvedAt: &resolvedAt}
+	require.NoError(t, app.DB.Create(&resolvedLink).Error)
+
+	var requestedNums []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			NumeroPedido string `json:"numero_pedido"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		requestedNums = append(requestedNums, body.NumeroPedido)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(pedidoJSON("SEPARACAO")))
+	}))
+	defer srv.Close()
+
+	integ := models.XProcessIntegration{OrganizationID: org.ID, BaseURL: srv.URL, APIKey: "the-key", IsActive: true}
+	require.NoError(t, integ.EncryptSecrets(app.Config.App.EncryptionKey))
+	require.NoError(t, app.DB.Create(&integ).Error)
+
+	app.RunXProcessReconciliation()
+
+	assert.Equal(t, []string{"1"}, requestedNums, "only the unresolved link must be checked")
+}
+
+func TestRunXProcessReconciliation_SkipsInactiveIntegration(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "agent", []string{"sales_opportunities:write"})
+	agent := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	opp := newOpenOpportunity(t, app, org.ID, agent.ID, contact.ID)
+	link := models.SalesOpportunityXProcessLink{OrganizationID: org.ID, SalesOpportunityID: opp.ID, NumPedido: "1", Documento: "12345678900"}
+	require.NoError(t, app.DB.Create(&link).Error)
+
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
+	defer srv.Close()
+
+	// IsActive is created true then flipped to false via Update: the model's
+	// `gorm:"default:true"` tag makes GORM omit an explicit false (its Go zero
+	// value) from the INSERT, so Create alone would silently leave it active
+	// (same footgun documented in goroutines_test.go for models.Webhook).
+	integ := models.XProcessIntegration{OrganizationID: org.ID, BaseURL: srv.URL, APIKey: "the-key", IsActive: true}
+	require.NoError(t, integ.EncryptSecrets(app.Config.App.EncryptionKey))
+	require.NoError(t, app.DB.Create(&integ).Error)
+	require.NoError(t, app.DB.Model(&integ).Update("is_active", false).Error)
+
+	app.RunXProcessReconciliation()
+	assert.False(t, called, "an inactive integration must never be queried")
+}
+
+func TestXProcessReconciler_RunsOnceAtTriggerHourNotBefore(t *testing.T) {
+	app := newTestApp(t)
+	var runs int
+	reconciler := handlers.NewXProcessReconcilerForTest(app, func() { runs++ })
+
+	reconciler.MaybeRunForTest(time.Date(2026, 9, 27, 1, 59, 0, 0, time.UTC))
+	assert.Equal(t, 0, runs, "must not run before the trigger hour")
+
+	reconciler.MaybeRunForTest(time.Date(2026, 9, 27, 2, 5, 0, 0, time.UTC))
+	assert.Equal(t, 1, runs)
+
+	reconciler.MaybeRunForTest(time.Date(2026, 9, 27, 3, 0, 0, 0, time.UTC))
+	assert.Equal(t, 1, runs, "must not run twice on the same calendar day")
+
+	reconciler.MaybeRunForTest(time.Date(2026, 9, 28, 2, 5, 0, 0, time.UTC))
+	assert.Equal(t, 2, runs, "must run again the next day")
 }

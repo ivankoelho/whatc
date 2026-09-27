@@ -183,3 +183,110 @@ func xprocessItemsToJSONB(items []xprocess.PedidoItem) (models.JSONBArray, error
 func (a *App) ReconcileXProcessLinkForTest(client *xprocess.Client, apiKey string, link *models.SalesOpportunityXProcessLink) {
 	a.reconcileXProcessLink(client, apiKey, link)
 }
+
+// RunXProcessReconciliation is one full sweep: every active
+// XProcessIntegration, every one of that organization's unresolved links.
+// Called once daily by XProcessReconciler.Start, and directly by the
+// backfill/manual-trigger path if one is ever added.
+func (a *App) RunXProcessReconciliation() {
+	var integrations []models.XProcessIntegration
+	if err := a.DB.Where("is_active = ?", true).Find(&integrations).Error; err != nil {
+		a.Log.Error("xprocess reconciliation: failed to load integrations", "error", err)
+		return
+	}
+	for i := range integrations {
+		integ := integrations[i]
+		integ.DecryptSecrets(a.Config.App.EncryptionKey)
+
+		var links []models.SalesOpportunityXProcessLink
+		if err := a.DB.Where("organization_id = ? AND resolved_at IS NULL", integ.OrganizationID).Find(&links).Error; err != nil {
+			a.Log.Error("xprocess reconciliation: failed to load pending links", "org_id", integ.OrganizationID, "error", err)
+			continue
+		}
+		if len(links) == 0 {
+			continue
+		}
+
+		client := xprocess.New(a.Log, integ.BaseURL)
+		for j := range links {
+			a.reconcileXProcessLink(client, integ.APIKey, &links[j])
+		}
+		a.Log.Info("xprocess reconciliation: organization done", "org_id", integ.OrganizationID, "links_checked", len(links))
+	}
+}
+
+// XProcessReconciler runs RunXProcessReconciliation once per calendar day,
+// starting at triggerHour. Mirrors SLAProcessor's ticker+goroutine shape
+// (internal/handlers/sla_processor.go) rather than adding a cron
+// dependency — the interval just needs to be short enough that the daily
+// run starts promptly after triggerHour, nothing fancier.
+//
+// lastRunDate is in-memory only: a server restart between triggerHour and
+// midnight will run the sweep again that day. Harmless — reconciliation is
+// naturally idempotent per link (an already-resolved link is never
+// re-selected, and re-checking an unresolved one just re-fetches the same
+// D-1 snapshot) — not worth a persisted "did we run today" ledger.
+// ponytail: in-memory day tracking, move to a persisted marker if this ever
+// runs across multiple server instances (it doesn't, as of this entrega).
+type XProcessReconciler struct {
+	app         *App
+	interval    time.Duration
+	triggerHour int
+	runFunc     func()
+	lastRunDate string
+	stopCh      chan struct{}
+}
+
+// NewXProcessReconciler creates a reconciler that calls
+// app.RunXProcessReconciliation once per day, on the first tick at or after
+// triggerHour (server local time).
+func NewXProcessReconciler(app *App, interval time.Duration, triggerHour int) *XProcessReconciler {
+	r := &XProcessReconciler{app: app, interval: interval, triggerHour: triggerHour, stopCh: make(chan struct{})}
+	r.runFunc = app.RunXProcessReconciliation
+	return r
+}
+
+func (p *XProcessReconciler) Start(ctx context.Context) {
+	p.app.Log.Info("XProcess reconciler started", "interval", p.interval, "trigger_hour", p.triggerHour)
+	ticker := time.NewTicker(p.interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-p.stopCh:
+			return
+		case <-ticker.C:
+			p.maybeRun(time.Now())
+		}
+	}
+}
+
+func (p *XProcessReconciler) Stop() {
+	select {
+	case <-p.stopCh:
+	default:
+		close(p.stopCh)
+	}
+}
+
+func (p *XProcessReconciler) maybeRun(now time.Time) {
+	today := now.Format("2006-01-02")
+	if now.Hour() < p.triggerHour || p.lastRunDate == today {
+		return
+	}
+	p.lastRunDate = today
+	p.runFunc()
+}
+
+// NewXProcessReconcilerForTest and MaybeRunForTest let
+// TestXProcessReconciler_RunsOnceAtTriggerHourNotBefore drive maybeRun with
+// fixed timestamps instead of waiting on a real ticker, and substitute a
+// counting stub for the real (DB-hitting) RunXProcessReconciliation.
+func NewXProcessReconcilerForTest(app *App, runFunc func()) *XProcessReconciler {
+	r := NewXProcessReconciler(app, time.Minute, 2)
+	r.runFunc = runFunc
+	return r
+}
+
+func (p *XProcessReconciler) MaybeRunForTest(now time.Time) { p.maybeRun(now) }

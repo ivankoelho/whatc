@@ -353,6 +353,12 @@ func runServer(args []string) {
 	go slaProcessor.Start(slaCtx)
 	lo.Info("SLA processor started")
 
+	// Start XProcess reconciler (checks once daily, first tick after 2am)
+	xprocessReconciler := handlers.NewXProcessReconciler(app, 15*time.Minute, 2)
+	xprocessCtx, xprocessCancel := context.WithCancel(context.Background())
+	go xprocessReconciler.Start(xprocessCtx)
+	lo.Info("XProcess reconciler started")
+
 	// Start embedded workers
 	var workers []*worker.Worker
 	var workerCancel context.CancelFunc
@@ -397,6 +403,12 @@ func runServer(args []string) {
 	slaCancel()
 	slaProcessor.Stop()
 	lo.Info("SLA processor stopped")
+
+	// Stop XProcess reconciler
+	lo.Info("Stopping XProcess reconciler...")
+	xprocessCancel()
+	xprocessReconciler.Stop()
+	lo.Info("XProcess reconciler stopped")
 
 	// Stop workers first
 	if workerCancel != nil {
