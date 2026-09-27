@@ -1,0 +1,173 @@
+package handlers_test
+
+import (
+	"encoding/json"
+	"testing"
+	"time"
+
+	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/test/testutil"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/valyala/fasthttp"
+)
+
+func TestUpsertSalesOpportunityXProcessLink_CreatesLinkAndFillsContactCPF(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "agent", []string{"sales_opportunities:read", "sales_opportunities:write"})
+	agent := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	opp := newOpenOpportunity(t, app, org.ID, agent.ID, contact.ID)
+
+	req := testutil.NewJSONRequest(t, map[string]any{
+		"num_pedido": "666", "documento": "123.456.789-00",
+	})
+	testutil.SetAuthContext(req, org.ID, agent.ID)
+	req.RequestCtx.SetUserValue("id", opp.ID.String())
+	require.NoError(t, app.UpsertSalesOpportunityXProcessLink(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var link models.SalesOpportunityXProcessLink
+	require.NoError(t, app.DB.Where("sales_opportunity_id = ?", opp.ID).First(&link).Error)
+	assert.Equal(t, "666", link.NumPedido)
+	assert.Equal(t, "12345678900", link.Documento)
+	assert.Nil(t, link.ResolvedAt)
+
+	var updatedOpp models.SalesOpportunity
+	require.NoError(t, app.DB.First(&updatedOpp, "id = ?", opp.ID).Error)
+	require.NotNil(t, updatedOpp.XProcessNumPedido)
+	assert.Equal(t, "666", *updatedOpp.XProcessNumPedido)
+
+	var updatedContact models.Contact
+	require.NoError(t, app.DB.First(&updatedContact, "id = ?", contact.ID).Error)
+	assert.Equal(t, "12345678900", updatedContact.CPFCNPJ)
+}
+
+func TestUpsertSalesOpportunityXProcessLink_DoesNotOverwriteExistingContactCPF(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "agent", []string{"sales_opportunities:write"})
+	agent := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	// Column is physically "cpfcnpj" (no underscore) — see the fix note in
+	// UpsertSalesOpportunityXProcessLink below; get this wrong here and the
+	// test would silently pass against a column the handler never touches.
+	require.NoError(t, app.DB.Model(contact).Update("cpfcnpj", "99999999999").Error)
+	opp := newOpenOpportunity(t, app, org.ID, agent.ID, contact.ID)
+
+	req := testutil.NewJSONRequest(t, map[string]any{"num_pedido": "1", "documento": "12345678900"})
+	testutil.SetAuthContext(req, org.ID, agent.ID)
+	req.RequestCtx.SetUserValue("id", opp.ID.String())
+	require.NoError(t, app.UpsertSalesOpportunityXProcessLink(req))
+
+	var updatedContact models.Contact
+	require.NoError(t, app.DB.First(&updatedContact, "id = ?", contact.ID).Error)
+	assert.Equal(t, "99999999999", updatedContact.CPFCNPJ, "must not clobber a CPF the contact already had")
+}
+
+func TestUpsertSalesOpportunityXProcessLink_InvalidDocumentoRejected(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "agent", []string{"sales_opportunities:write"})
+	agent := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	opp := newOpenOpportunity(t, app, org.ID, agent.ID, contact.ID)
+
+	req := testutil.NewJSONRequest(t, map[string]any{"num_pedido": "666", "documento": "123"})
+	testutil.SetAuthContext(req, org.ID, agent.ID)
+	req.RequestCtx.SetUserValue("id", opp.ID.String())
+	require.NoError(t, app.UpsertSalesOpportunityXProcessLink(req))
+	testutil.AssertErrorResponse(t, req, fasthttp.StatusBadRequest, "")
+
+	var count int64
+	app.DB.Model(&models.SalesOpportunityXProcessLink{}).Where("sales_opportunity_id = ?", opp.ID).Count(&count)
+	assert.Equal(t, int64(0), count)
+}
+
+func TestUpsertSalesOpportunityXProcessLink_UpdatesOpenLinkInPlace(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "agent", []string{"sales_opportunities:write"})
+	agent := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	opp := newOpenOpportunity(t, app, org.ID, agent.ID, contact.ID)
+
+	first := testutil.NewJSONRequest(t, map[string]any{"num_pedido": "111", "documento": "12345678900"})
+	testutil.SetAuthContext(first, org.ID, agent.ID)
+	first.RequestCtx.SetUserValue("id", opp.ID.String())
+	require.NoError(t, app.UpsertSalesOpportunityXProcessLink(first))
+
+	second := testutil.NewJSONRequest(t, map[string]any{"num_pedido": "222", "documento": "98765432100"})
+	testutil.SetAuthContext(second, org.ID, agent.ID)
+	second.RequestCtx.SetUserValue("id", opp.ID.String())
+	require.NoError(t, app.UpsertSalesOpportunityXProcessLink(second))
+
+	var links []models.SalesOpportunityXProcessLink
+	require.NoError(t, app.DB.Where("sales_opportunity_id = ?", opp.ID).Find(&links).Error)
+	require.Len(t, links, 1, "editing an unresolved link must update it in place, not create a second row")
+	assert.Equal(t, "222", links[0].NumPedido)
+}
+
+func TestUpsertSalesOpportunityXProcessLink_ResolvedLinkIsImmutable_CreatesNewRow(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "agent", []string{"sales_opportunities:write"})
+	agent := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	opp := newOpenOpportunity(t, app, org.ID, agent.ID, contact.ID)
+
+	first := testutil.NewJSONRequest(t, map[string]any{"num_pedido": "111", "documento": "12345678900"})
+	testutil.SetAuthContext(first, org.ID, agent.ID)
+	first.RequestCtx.SetUserValue("id", opp.ID.String())
+	require.NoError(t, app.UpsertSalesOpportunityXProcessLink(first))
+
+	now := time.Now()
+	require.NoError(t, app.DB.Model(&models.SalesOpportunityXProcessLink{}).
+		Where("sales_opportunity_id = ?", opp.ID).Update("resolved_at", now).Error)
+
+	second := testutil.NewJSONRequest(t, map[string]any{"num_pedido": "222", "documento": "98765432100"})
+	testutil.SetAuthContext(second, org.ID, agent.ID)
+	second.RequestCtx.SetUserValue("id", opp.ID.String())
+	require.NoError(t, app.UpsertSalesOpportunityXProcessLink(second))
+
+	var links []models.SalesOpportunityXProcessLink
+	require.NoError(t, app.DB.Where("sales_opportunity_id = ?", opp.ID).Order("created_at asc").Find(&links).Error)
+	require.Len(t, links, 2, "a resolved link must never be overwritten — a new registration creates a new row")
+	assert.Equal(t, "111", links[0].NumPedido)
+	assert.NotNil(t, links[0].ResolvedAt, "the original resolved link must stay untouched")
+	assert.Equal(t, "222", links[1].NumPedido)
+	assert.Nil(t, links[1].ResolvedAt)
+}
+
+func TestGetSalesOpportunityXProcessLink_ReturnsPendingReviewFlag(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "agent", []string{"sales_opportunities:read", "sales_opportunities:write"})
+	agent := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	opp := newOpenOpportunity(t, app, org.ID, agent.ID, contact.ID)
+
+	create := testutil.NewJSONRequest(t, map[string]any{"num_pedido": "666", "documento": "12345678900"})
+	testutil.SetAuthContext(create, org.ID, agent.ID)
+	create.RequestCtx.SetUserValue("id", opp.ID.String())
+	require.NoError(t, app.UpsertSalesOpportunityXProcessLink(create))
+
+	require.NoError(t, app.DB.Model(&models.SalesOpportunityXProcessLink{}).
+		Where("sales_opportunity_id = ?", opp.ID).Update("consecutive_not_found", 5).Error)
+
+	get := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(get, org.ID, agent.ID)
+	get.RequestCtx.SetUserValue("id", opp.ID.String())
+	require.NoError(t, app.GetSalesOpportunityXProcessLink(get))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(get))
+
+	var resp struct {
+		Data struct {
+			NumPedido     string `json:"num_pedido"`
+			PendingReview bool   `json:"pending_review"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(get), &resp))
+	assert.True(t, resp.Data.PendingReview)
+}
