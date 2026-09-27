@@ -50,23 +50,45 @@ func (a *App) UpsertSalesOpportunityXProcessLink(r *fastglue.Request) error {
 	hasOpenLink := a.DB.Where("sales_opportunity_id = ? AND resolved_at IS NULL", opp.ID).
 		First(&openLink).Error == nil
 
-	if hasOpenLink {
-		if err := a.DB.Model(&openLink).Updates(map[string]any{
-			"num_pedido":            req.NumPedido,
-			"documento":             documento,
-			"consecutive_not_found": 0,
-			"last_checked_at":       nil,
-		}).Error; err != nil {
-			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update link", nil, "")
-		}
-	} else {
+	createLink := func() error {
 		newLink := models.SalesOpportunityXProcessLink{
 			OrganizationID:     orgID,
 			SalesOpportunityID: opp.ID,
 			NumPedido:          req.NumPedido,
 			Documento:          documento,
 		}
-		if err := a.DB.Create(&newLink).Error; err != nil {
+		return a.DB.Create(&newLink).Error
+	}
+
+	if hasOpenLink {
+		// Finding 8 (TOCTOU): re-check resolved_at IS NULL atomically in the
+		// UPDATE's own WHERE clause, same reasoning as ConvertSalesOpportunity/
+		// LoseSalesOpportunity above. Without it, a concurrent reconciliation
+		// run (a later task) resolving this exact link between our read above
+		// and this write would let us silently overwrite num_pedido/documento
+		// on a row that's supposed to be immutable once resolved. If we lose
+		// that race (RowsAffected == 0), fall back to creating a new row —
+		// same as the "no open link" branch — so the agent's registration
+		// isn't dropped just because a reconciliation run landed at the same
+		// moment.
+		result := a.DB.Model(&models.SalesOpportunityXProcessLink{}).
+			Where("id = ? AND resolved_at IS NULL", openLink.ID).
+			Updates(map[string]any{
+				"num_pedido":            req.NumPedido,
+				"documento":             documento,
+				"consecutive_not_found": 0,
+				"last_checked_at":       nil,
+			})
+		if result.Error != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update link", nil, "")
+		}
+		if result.RowsAffected == 0 {
+			if err := createLink(); err != nil {
+				return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create link", nil, "")
+			}
+		}
+	} else {
+		if err := createLink(); err != nil {
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create link", nil, "")
 		}
 	}
