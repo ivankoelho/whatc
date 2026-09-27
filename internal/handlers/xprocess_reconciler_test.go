@@ -334,22 +334,34 @@ func TestXProcessReconciler_RunsOnceAtTriggerHourNotBefore(t *testing.T) {
 	reconciler := handlers.NewXProcessReconcilerForTest(app, func() { runs++ })
 
 	// maybeRun compares against the deployment's real local time
-	// (America/Bahia by default, see helpers.go's appLocation), not the
-	// server's bare wall clock (the deployment runs with TZ=UTC). These
-	// timestamps are expressed directly in that location so the test
-	// asserts real-world trigger-hour behavior, not UTC clock time.
-	bahia, err := time.LoadLocation("America/Bahia")
-	require.NoError(t, err)
-
-	reconciler.MaybeRunForTest(time.Date(2026, 9, 27, 1, 59, 0, 0, bahia))
+	// (America/Bahia, UTC-3, no DST) by converting the UTC instant it's
+	// given via .In(appLocation). Production feeds it time.Now() from a
+	// TZ=UTC deployment, so these test timestamps are UTC instants too —
+	// building them already in Bahia local time would make the .In()
+	// conversion a no-op and let this test pass even if that conversion
+	// were deleted.
+	//
+	// Calls are in real chronological (UTC) order across two Bahia calendar
+	// days, 2026-09-26 and 2026-09-27. The fourth call is the regression
+	// case: 2026-09-27T02:05Z has hour-of-day 2 *in UTC*, which numerically
+	// matches triggerHour and falls on a different UTC calendar date
+	// (2026-09-27) than the run that already happened that Bahia day
+	// (2026-09-26). A bare-UTC comparison (no .In(appLocation)) would see
+	// it as a new, not-yet-run day and fire again. Converted to Bahia it's
+	// actually 23:05 on 2026-09-26 — the same Bahia day already run — so it
+	// must not run again.
+	reconciler.MaybeRunForTest(time.Date(2026, 9, 26, 4, 59, 0, 0, time.UTC)) // 01:59 Bahia, 09-26
 	assert.Equal(t, 0, runs, "must not run before the trigger hour")
 
-	reconciler.MaybeRunForTest(time.Date(2026, 9, 27, 2, 5, 0, 0, bahia))
-	assert.Equal(t, 1, runs)
+	reconciler.MaybeRunForTest(time.Date(2026, 9, 26, 5, 5, 0, 0, time.UTC)) // 02:05 Bahia, 09-26
+	assert.Equal(t, 1, runs, "must run once at the trigger hour")
 
-	reconciler.MaybeRunForTest(time.Date(2026, 9, 27, 3, 0, 0, 0, bahia))
-	assert.Equal(t, 1, runs, "must not run twice on the same calendar day")
+	reconciler.MaybeRunForTest(time.Date(2026, 9, 26, 6, 0, 0, 0, time.UTC)) // 03:00 Bahia, 09-26 (same day)
+	assert.Equal(t, 1, runs, "must not run twice on the same Bahia calendar day")
 
-	reconciler.MaybeRunForTest(time.Date(2026, 9, 28, 2, 5, 0, 0, bahia))
-	assert.Equal(t, 2, runs, "must run again the next day")
+	reconciler.MaybeRunForTest(time.Date(2026, 9, 27, 2, 5, 0, 0, time.UTC)) // 23:05 Bahia, still 09-26
+	assert.Equal(t, 1, runs, "must not run again: UTC-hour-2 regression case, still the same Bahia day")
+
+	reconciler.MaybeRunForTest(time.Date(2026, 9, 27, 5, 5, 0, 0, time.UTC)) // 02:05 Bahia, 09-27 (next day)
+	assert.Equal(t, 2, runs, "must run again the next Bahia calendar day")
 }

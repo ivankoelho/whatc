@@ -239,7 +239,8 @@ type XProcessReconciler struct {
 
 // NewXProcessReconciler creates a reconciler that calls
 // app.RunXProcessReconciliation once per day, on the first tick at or after
-// triggerHour (server local time).
+// triggerHour. The tick time is converted to appLocation (America/Bahia)
+// before comparing against triggerHour, not compared as server local time.
 func NewXProcessReconciler(app *App, interval time.Duration, triggerHour int) *XProcessReconciler {
 	r := &XProcessReconciler{app: app, interval: interval, triggerHour: triggerHour, stopCh: make(chan struct{})}
 	r.runFunc = app.RunXProcessReconciliation
