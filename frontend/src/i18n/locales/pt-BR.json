@@ -289,6 +289,7 @@
     "roles": "Funções",
     "apiKeys": "Chaves de API",
     "webhooks": "Webhooks",
+    "xprocessIntegration": "ERP X2",
     "customActions": "Ações personalizadas",
     "occurrenceStages": "Etapas de ocorrência",
     "units": "Unidades",
@@ -1359,6 +1360,17 @@
     "confirmDisableDescription": "Esta ação não aparecerá mais nos cabeçalhos de chat. Você pode reativá-la a qualquer momento.",
     "fetchErrorTitle": "Falha ao carregar ações personalizadas",
     "fetchErrorDescription": "Algo deu errado ao carregar suas ações personalizadas. Tente novamente."
+  },
+  "xprocessIntegration": {
+    "title": "Integração ERP X2",
+    "description": "Credencial usada pelo job diário de conciliação e por fluxos do bot que consultam status de pedido.",
+    "baseUrl": "URL base",
+    "apiKey": "Chave de API",
+    "apiKeyConfigured": "Configurada — digite uma nova chave para substituir",
+    "testConnection": "Testar conexão",
+    "testSuccess": "Conexão bem-sucedida",
+    "testFailure": "Não foi possível conectar — confira a URL e a chave",
+    "save": "Salvar"
   },
   "errors": {
     "generic": "Algo deu errado. Tente novamente.",

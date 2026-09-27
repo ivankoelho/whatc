@@ -290,6 +290,7 @@
     "apiKeys": "API Keys",
     "webhooks": "Webhooks",
     "customActions": "Custom Actions",
+    "xprocessIntegration": "ERP X2",
     "occurrenceStages": "Occurrence Stages",
     "units": "Units",
     "slaPolicies": "Occurrence SLA",
@@ -1372,6 +1373,17 @@
     "confirmDisableDescription": "This action will no longer appear in chat headers. You can re-enable it at any time.",
     "fetchErrorTitle": "Failed to load custom actions",
     "fetchErrorDescription": "Something went wrong while loading your custom actions. Please try again."
+  },
+  "xprocessIntegration": {
+    "title": "ERP X2 Integration",
+    "description": "Credential used by the daily reconciliation job and by chatbot flows that look up order status.",
+    "baseUrl": "Base URL",
+    "apiKey": "API Key",
+    "apiKeyConfigured": "Configured — enter a new key to replace it",
+    "testConnection": "Test connection",
+    "testSuccess": "Connection successful",
+    "testFailure": "Could not connect — check the URL and key",
+    "save": "Save"
   },
   "errors": {
     "generic": "Something went wrong. Please try again.",

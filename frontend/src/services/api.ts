@@ -184,6 +184,20 @@ export const apiKeysService = {
   delete: (id: string) => api.delete(`/api-keys/${id}`)
 }
 
+export interface XProcessIntegrationStatus {
+  base_url: string
+  is_active: boolean
+  is_configured: boolean
+}
+
+export const xprocessIntegrationService = {
+  get: () => api.get<{ data: XProcessIntegrationStatus }>('/xprocess-integration'),
+  upsert: (payload: { base_url: string; api_key: string }) =>
+    api.put<{ data: XProcessIntegrationStatus }>('/xprocess-integration', payload),
+  test: (payload: { base_url: string; api_key: string }) =>
+    api.post<{ data: { message: string } }>('/xprocess-integration/test', payload),
+}
+
 export interface WhatsAppAccountUpdatePayload {
   name?: string
   app_id?: string
