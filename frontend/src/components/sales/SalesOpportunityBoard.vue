@@ -37,9 +37,19 @@ const COLUMN_DEFS: { key: ColumnKey; labelKey: string; accent: string }[] = [
   { key: 'perdida', labelKey: 'sales.statusPerdida', accent: 'border-t-2 border-t-red-500/60' },
 ]
 
+// A page per column, fetched server-side-filtered — replaces the old
+// single "up to 100 across every column" fetch (see git history), which
+// grew the whole board (and the page around it) tall instead of giving
+// each column its own scroll.
+const PAGE_SIZE = 20
+
 interface ColumnState {
   key: ColumnKey
   items: SalesOpportunity[]
+  offset: number
+  total: number
+  hasMore: boolean
+  loadingMore: boolean
 }
 
 // Every opportunity belongs to exactly one column: its stage while aberta,
@@ -53,7 +63,23 @@ function columnKeyFor(o: SalesOpportunity): ColumnKey | null {
   return null
 }
 
-const columns = ref<ColumnState[]>(COLUMN_DEFS.map(c => ({ key: c.key, items: [] })))
+function emptyColumn(key: ColumnKey): ColumnState {
+  return { key, items: [], offset: 0, total: 0, hasMore: false, loadingMore: false }
+}
+
+function paramsFor(key: ColumnKey, offset: number): Record<string, string> {
+  const params: Record<string, string> = { limit: String(PAGE_SIZE), offset: String(offset) }
+  if (props.assignedUserId) params.assigned_user_id = props.assignedUserId
+  if (key === 'convertida' || key === 'perdida') {
+    params.status = key
+  } else {
+    params.status = 'aberta'
+    params.stage = key
+  }
+  return params
+}
+
+const columns = ref<ColumnState[]>(COLUMN_DEFS.map(c => emptyColumn(c.key)))
 const loading = ref(false)
 const failed = ref(false)
 
@@ -63,26 +89,34 @@ const pending = ref(new Set<string>())
 /** Origem do arrasto, capturada no início e usada na reversão. */
 let dragOrigin: { opportunityId: string; fromKey: ColumnKey } | null = null
 
-// ponytail: uma única página de até 100 por escopo, sem paginação por
-// coluna como OccurrenceBoard.vue. Suficiente pro "primeiro corte" da
-// carteira de um agente; adicionar paginação por coluna se o volume por
-// vendedor crescer além disso.
 async function loadAll() {
   loading.value = true
   failed.value = false
   try {
-    const params: Record<string, string> = { limit: '100' }
-    if (props.assignedUserId) params.assigned_user_id = props.assignedUserId
-    const { data } = await salesOpportunitiesService.list(params)
-    const opportunities = data.data.opportunities
-    columns.value = COLUMN_DEFS.map(c => ({
-      key: c.key,
-      items: opportunities.filter(o => columnKeyFor(o) === c.key),
-    }))
+    const results = await Promise.all(COLUMN_DEFS.map(c => salesOpportunitiesService.list(paramsFor(c.key, 0))))
+    columns.value = COLUMN_DEFS.map((c, i) => {
+      const { opportunities, total, has_more } = results[i].data.data
+      return { key: c.key, items: opportunities, offset: opportunities.length, total, hasMore: has_more, loadingMore: false }
+    })
   } catch {
     failed.value = true
   } finally {
     loading.value = false
+  }
+}
+
+async function loadMore(col: ColumnState) {
+  col.loadingMore = true
+  try {
+    const { data } = await salesOpportunitiesService.list(paramsFor(col.key, col.offset))
+    col.items.push(...data.data.opportunities)
+    col.offset += data.data.opportunities.length
+    col.total = data.data.total
+    col.hasMore = data.data.has_more
+  } catch (e) {
+    toast.error(getErrorMessage(e, t('sales.boardLoadFailed')))
+  } finally {
+    col.loadingMore = false
   }
 }
 
@@ -186,12 +220,14 @@ defineExpose({ refresh: loadAll })
         :data-board-column="col.key"
         :class="['flex w-72 shrink-0 flex-col rounded-lg border border-white/[0.08] light:border-gray-200 bg-white/[0.02] light:bg-gray-50', COLUMN_DEFS.find(c => c.key === col.key)?.accent]"
       >
-        <div class="flex items-center justify-between gap-2 border-b border-white/[0.08] light:border-gray-200 p-3">
+        <div class="flex items-center justify-between gap-2 border-b border-white/[0.08] light:border-gray-200 p-3 shrink-0">
           <span class="text-sm font-medium">{{ $t(COLUMN_DEFS.find(c => c.key === col.key)!.labelKey) }}</span>
-          <span class="text-xs text-muted-foreground" data-board-column-count>{{ col.items.length }}</span>
+          <span class="text-xs text-muted-foreground" data-board-column-count>{{ col.total }}</span>
         </div>
 
-        <div class="flex flex-1 flex-col gap-2 p-2 min-h-24">
+        <!-- Fixed column height, own scrollbar — the board (and the page
+             around it) no longer grows with the column's content. -->
+        <div class="flex flex-1 flex-col gap-2 p-2 min-h-24 max-h-[65vh] overflow-y-auto">
           <draggable
             v-model="col.items"
             :group="{ name: 'sales-opportunities' }"
@@ -199,7 +235,7 @@ defineExpose({ refresh: loadAll })
             :disabled="col.key === 'convertida' || col.key === 'perdida'"
             item-key="id"
             data-board-dropzone
-            class="flex flex-1 flex-col gap-2 min-h-16"
+            class="flex flex-col gap-2"
             @start="onDragStart(col, $event)"
             @change="onColumnChange(col, $event)"
             @end="dragOrigin = null"
@@ -223,6 +259,19 @@ defineExpose({ refresh: loadAll })
           <p v-else-if="col.items.length === 0" class="p-3 text-center text-xs text-muted-foreground">
             {{ $t('sales.columnEmpty') }}
           </p>
+
+          <Button
+            v-if="col.hasMore"
+            data-board-load-more
+            variant="ghost"
+            size="sm"
+            class="w-full text-xs shrink-0"
+            :disabled="col.loadingMore"
+            @click="loadMore(col)"
+          >
+            <Spinner v-if="col.loadingMore" class="h-3 w-3 mr-1.5" />
+            {{ $t('sales.loadMore') }} ({{ col.total - col.items.length }})
+          </Button>
         </div>
       </div>
     </template>

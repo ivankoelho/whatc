@@ -78,6 +78,11 @@ async function onRegistered() {
           </template>
         </dl>
         <p v-if="link?.pending_review" class="text-sm text-amber-600">{{ t('xprocessLink.pendingReview') }}</p>
+        <!-- Bug: expanding used to render nothing at all here for a closed
+             opportunity that never had a pedido registered (no dl, since no
+             link; no button, since editable is status==='aberta' only) —
+             the ▾ just flipped and nothing else happened. -->
+        <p v-if="!link" class="text-sm text-muted-foreground">{{ t('xprocessLink.notRegistered') }}</p>
 
         <Button v-if="editable" size="sm" variant="outline" class="w-full" @click="dialogOpen = true">
           {{ link && !link.resolved_at ? t('xprocessLink.editButton') : t('xprocessLink.register') }}
