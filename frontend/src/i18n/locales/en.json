@@ -3492,6 +3492,8 @@
     "statusCancelada": "Cancelled",
     "conversionSourceManual": "Manually recorded",
     "conversionSourceXProcess": "Confirmed by X2",
+    "xprocessCandidateHint": "This customer bought recently ({date}), after this quote",
+    "xprocessCandidateLink": "Link",
     "createOpportunity": "Create opportunity",
     "createDialogTitle": "Create opportunity",
     "createDialogDesc": "Creates a sales opportunity linked to this contact, using the same fields the chatbot flow uses.",

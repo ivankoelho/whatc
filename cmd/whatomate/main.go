@@ -802,6 +802,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/sales-opportunities/{id}/lose", app.LoseSalesOpportunity)
 	g.GET("/api/sales-opportunities/{id}/xprocess-link", app.GetSalesOpportunityXProcessLink)
 	g.PUT("/api/sales-opportunities/{id}/xprocess-link", app.UpsertSalesOpportunityXProcessLink)
+	g.GET("/api/sales-opportunities/{id}/xprocess-candidates", app.ListSalesOpportunityXProcessCandidates)
 
 	// CRM — integração X2 ERP
 	g.GET("/api/xprocess-integration", app.GetXProcessIntegration)

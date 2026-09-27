@@ -1542,7 +1542,7 @@ export interface SalesOpportunity {
   sla_breached_at?: string
   // Populated only where the handler preloads the association — neither
   // list nor get does today, so these are typically undefined.
-  contact?: { id: string; profile_name?: string; phone_number?: string }
+  contact?: { id: string; profile_name?: string; phone_number?: string; cpf_cnpj?: string }
   assigned_user?: { id: string; full_name: string }
 }
 
@@ -1594,6 +1594,23 @@ export const salesOpportunityXProcessLinkService = {
     api.get<ApiEnvelope<SalesOpportunityXProcessLink>>(`/sales-opportunities/${opportunityId}/xprocess-link`),
   upsert: (opportunityId: string, payload: { num_pedido: string; documento: string }) =>
     api.put<ApiEnvelope<SalesOpportunityXProcessLink>>(`/sales-opportunities/${opportunityId}/xprocess-link`, payload),
+}
+
+// Spec item G: X2 pedidos found live for the opportunity's contact, placed
+// after the opportunity was opened and not yet linked to anything —
+// "esse cliente comprou recentemente" hint. Identification is automatic
+// (this call), linking is always a separate manual action.
+export interface SalesOpportunityXProcessCandidate {
+  num_pedido: string
+  cod_empresa: string
+  status: string
+  valor_vendido: number
+  data_venda: string
+}
+
+export const salesOpportunityXProcessCandidatesService = {
+  list: (opportunityId: string) =>
+    api.get<ApiEnvelope<{ candidates: SalesOpportunityXProcessCandidate[] }>>(`/sales-opportunities/${opportunityId}/xprocess-candidates`),
 }
 
 // Units / Departments / Occurrence categories — Fase 3 of the Ocorrências

@@ -90,3 +90,71 @@ func TestSummarizePedido_Empty(t *testing.T) {
 	_, err := SummarizePedido(nil)
 	assert.Error(t, err)
 }
+
+func TestClient_ConsultarClientePorDocumento_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/clientes", r.URL.Path)
+		assert.Equal(t, "07378783000190", r.URL.Query().Get("documento"))
+		assert.Equal(t, "test-key", r.Header.Get("x-api-key"))
+		_, _ = w.Write([]byte(`{"ok":true,"total":1,"clientes":[{"cod_cliente":"3","nome":"CERAMICA SERRA AZUL LTDA","cpf_cnpj":"07.378.783/0001-90"}]}`))
+	}))
+	defer srv.Close()
+
+	c := New(testLog(), srv.URL)
+	codCliente, err := c.ConsultarClientePorDocumento(context.Background(), "test-key", "07378783000190")
+	require.NoError(t, err)
+	assert.Equal(t, "3", codCliente)
+}
+
+func TestClient_ConsultarClientePorDocumento_NotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true,"total":0,"clientes":[]}`))
+	}))
+	defer srv.Close()
+
+	c := New(testLog(), srv.URL)
+	_, err := c.ConsultarClientePorDocumento(context.Background(), "test-key", "00000000000")
+	assert.True(t, errors.Is(err, ErrClienteNaoEncontrado))
+}
+
+func TestClient_ListarVendasPorCliente_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/vendas", r.URL.Path)
+		assert.Equal(t, "3", r.URL.Query().Get("cod_cliente"))
+		assert.Equal(t, "50", r.URL.Query().Get("limit"))
+		_, _ = w.Write([]byte(`{"ok":true,"total":1,"vendas":[
+			{"cod_empresa":"23","num_pedido":"20101","cod_cliente":"3","cod_vendedor":null,"status":"FECHADO","data_venda":"2022-05-23T00:00:00","total":"10392,8064"}
+		]}`))
+	}))
+	defer srv.Close()
+
+	c := New(testLog(), srv.URL)
+	items, err := c.ListarVendasPorCliente(context.Background(), "test-key", "3", 50)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	assert.Equal(t, "20101", items[0].NumPedido)
+	assert.Equal(t, "FECHADO", items[0].Status)
+}
+
+func TestGroupPedidos_GroupsByEmpresaAndNumPedido(t *testing.T) {
+	// Two lines of pedido 20101/empresa 23, one line of a different pedido
+	// (2/empresa 1) — mirrors GET /api/vendas' real one-row-per-item shape.
+	items := []PedidoItem{
+		{CodEmpresa: "23", NumPedido: "20101", CodCliente: "3", Status: "FECHADO", Total: "100,0"},
+		{CodEmpresa: "23", NumPedido: "20101", CodCliente: "3", Status: "FECHADO", Total: "50,0"},
+		{CodEmpresa: "1", NumPedido: "2", CodCliente: "19", Status: "CANCELADO", Total: "61,6"},
+	}
+	resumos, err := GroupPedidos(items)
+	require.NoError(t, err)
+	require.Len(t, resumos, 2)
+
+	assert.Equal(t, "20101", resumos[0].NumPedido)
+	assert.Equal(t, "23", resumos[0].CodEmpresa)
+	assert.InDelta(t, 150.0, resumos[0].ValorTotal, 0.0001)
+	assert.Len(t, resumos[0].Itens, 2)
+
+	assert.Equal(t, "2", resumos[1].NumPedido)
+	assert.Equal(t, "1", resumos[1].CodEmpresa)
+	assert.InDelta(t, 61.6, resumos[1].ValorTotal, 0.0001)
+}

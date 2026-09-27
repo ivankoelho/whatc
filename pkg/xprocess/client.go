@@ -30,6 +30,11 @@ const DefaultTimeout = 15 * time.Second
 // this as "invalid" on its own — see the design's §5/§8 wording rule.
 var ErrPedidoNaoEncontrado = errors.New("xprocess: pedido nao encontrado")
 
+// ErrClienteNaoEncontrado is returned when GET /api/clientes finds no
+// customer for the given documento — the customer has never bought
+// anything at this store, or the documento was typed wrong.
+var ErrClienteNaoEncontrado = errors.New("xprocess: cliente nao encontrado")
+
 // Client talks to one organization's X2 API instance.
 type Client struct {
 	HTTPClient *http.Client
@@ -113,6 +118,95 @@ func (c *Client) ConsultarPedido(ctx context.Context, apiKey, numPedido, documen
 	return parsed.Pedido, nil
 }
 
+// ClienteItem is one row of GET /api/clientes. Only cod_cliente is read —
+// the caller already knows the documento it searched by.
+type ClienteItem struct {
+	CodCliente string `json:"cod_cliente"`
+}
+
+type clientesResponse struct {
+	OK       bool          `json:"ok"`
+	Clientes []ClienteItem `json:"clientes"`
+}
+
+// ConsultarClientePorDocumento resolves a CPF/CNPJ to X2's internal
+// cod_cliente — GET /api/vendas has no documento filter of its own (design
+// doc's documented two-step lookup: GET /api/clientes?documento= ->
+// cod_cliente -> GET /api/vendas?cod_cliente=). documento is sent as
+// digits-only; the API normalizes internally (verified live: matches a
+// cpf_cnpj stored with punctuation).
+func (c *Client) ConsultarClientePorDocumento(ctx context.Context, apiKey, documento string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		c.baseURL+"/api/clientes?documento="+documento, nil)
+	if err != nil {
+		return "", fmt.Errorf("xprocess: failed to build request: %w", err)
+	}
+	req.Header.Set("x-api-key", apiKey)
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("xprocess: request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", fmt.Errorf("xprocess: failed to read response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("xprocess: unexpected status %d: %s", resp.StatusCode, truncate(string(body), 300))
+	}
+
+	var parsed clientesResponse
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return "", fmt.Errorf("xprocess: failed to parse response: %w", err)
+	}
+	if len(parsed.Clientes) == 0 {
+		return "", ErrClienteNaoEncontrado
+	}
+	return parsed.Clientes[0].CodCliente, nil
+}
+
+type vendasResponse struct {
+	OK     bool         `json:"ok"`
+	Vendas []PedidoItem `json:"vendas"`
+}
+
+// ListarVendasPorCliente returns recent order LINE ITEMS for a customer
+// (GET /api/vendas?cod_cliente=, one row per pedido item, not per pedido —
+// group with GroupPedidos). limit is capped at 1000 by the X2 API itself;
+// this does not re-validate it. There is no date filter — the API doesn't
+// offer one (design doc's documented limitation) — so callers filter by
+// date client-side after grouping.
+func (c *Client) ListarVendasPorCliente(ctx context.Context, apiKey, codCliente string, limit int) ([]PedidoItem, error) {
+	url := fmt.Sprintf("%s/api/vendas?cod_cliente=%s&limit=%d", c.baseURL, codCliente, limit)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("xprocess: failed to build request: %w", err)
+	}
+	req.Header.Set("x-api-key", apiKey)
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("xprocess: request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, fmt.Errorf("xprocess: failed to read response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("xprocess: unexpected status %d: %s", resp.StatusCode, truncate(string(body), 300))
+	}
+
+	var parsed vendasResponse
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return nil, fmt.Errorf("xprocess: failed to parse response: %w", err)
+	}
+	return parsed.Vendas, nil
+}
+
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
@@ -129,6 +223,8 @@ func ParseDecimalBR(s string) (float64, error) {
 // PedidoResumo aggregates a pedido's line items into the summary the
 // reconciliation job actually needs: one status, one seller, one total.
 type PedidoResumo struct {
+	NumPedido   string
+	CodCliente  string
 	CodEmpresa  string
 	CodVendedor string
 	Status      string
@@ -146,6 +242,8 @@ func SummarizePedido(items []PedidoItem) (PedidoResumo, error) {
 		return PedidoResumo{}, errors.New("xprocess: cannot summarize an empty pedido")
 	}
 	resumo := PedidoResumo{
+		NumPedido:   items[0].NumPedido,
+		CodCliente:  items[0].CodCliente,
 		CodEmpresa:  items[0].CodEmpresa,
 		CodVendedor: items[0].CodVendedor,
 		Status:      items[0].Status,
@@ -160,4 +258,31 @@ func SummarizePedido(items []PedidoItem) (PedidoResumo, error) {
 		resumo.ValorTotal += v
 	}
 	return resumo, nil
+}
+
+// GroupPedidos buckets ListarVendasPorCliente's flat, one-row-per-item
+// result by (CodEmpresa, NumPedido) — the same key /api/vendas' own docs
+// say to group by, since num_pedido alone repeats across lojas — and
+// summarizes each group with SummarizePedido. Order of the returned slice
+// follows first appearance in items, not sorted.
+func GroupPedidos(items []PedidoItem) ([]PedidoResumo, error) {
+	order := make([]string, 0)
+	groups := make(map[string][]PedidoItem)
+	for _, item := range items {
+		key := item.CodEmpresa + "|" + item.NumPedido
+		if _, ok := groups[key]; !ok {
+			order = append(order, key)
+		}
+		groups[key] = append(groups[key], item)
+	}
+
+	resumos := make([]PedidoResumo, 0, len(order))
+	for _, key := range order {
+		resumo, err := SummarizePedido(groups[key])
+		if err != nil {
+			return nil, err
+		}
+		resumos = append(resumos, resumo)
+	}
+	return resumos, nil
 }

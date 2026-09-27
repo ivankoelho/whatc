@@ -14,7 +14,15 @@ import { Loader2 } from 'lucide-vue-next'
 // compact summary — the two-field form needs real width (design §6's "agent
 // corrects a typo" flow needs both fields fully visible, not squeezed into a
 // ~250px card column), which a Dialog gives it without widening the card.
-const props = defineProps<{ open: boolean; opportunityId: string; link: SalesOpportunityXProcessLink | null }>()
+const props = defineProps<{
+  open: boolean
+  opportunityId: string
+  link: SalesOpportunityXProcessLink | null
+  // Spec item G: prefills from a discovered "esse cliente comprou
+  // recentemente" candidate instead of an existing link — takes priority
+  // over `link` when set, since a candidate is a fresh find, not an edit.
+  prefill?: { numPedido: string; documento: string } | null
+}>()
 const emit = defineEmits<{ 'update:open': [value: boolean]; registered: [] }>()
 
 const { t } = useI18n()
@@ -28,7 +36,10 @@ const saving = ref(false)
 // historical data as if it were still editable.
 watch(() => props.open, isOpen => {
   if (!isOpen) return
-  if (props.link && !props.link.resolved_at) {
+  if (props.prefill) {
+    numPedido.value = props.prefill.numPedido
+    documento.value = props.prefill.documento
+  } else if (props.link && !props.link.resolved_at) {
     numPedido.value = props.link.num_pedido ?? ''
     documento.value = props.link.documento ?? ''
   } else {

@@ -3481,6 +3481,8 @@
     "statusCancelada": "Cancelada",
     "conversionSourceManual": "Registro manual",
     "conversionSourceXProcess": "Confirmado pelo X2",
+    "xprocessCandidateHint": "Esse cliente comprou recentemente ({date}), após esse orçamento",
+    "xprocessCandidateLink": "Vincular",
     "createOpportunity": "Criar oportunidade",
     "createDialogTitle": "Criar oportunidade",
     "createDialogDesc": "Cria uma oportunidade de venda vinculada a este contato, com os mesmos campos usados pelo fluxo do chatbot.",

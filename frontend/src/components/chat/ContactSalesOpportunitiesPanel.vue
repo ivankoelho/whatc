@@ -3,23 +3,64 @@ import { ref, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Plus } from 'lucide-vue-next'
-import { salesOpportunitiesService, type SalesOpportunity, type SalesOpportunityStage } from '@/services/api'
+import { Plus, Sparkles } from 'lucide-vue-next'
+import {
+  salesOpportunitiesService,
+  salesOpportunityXProcessCandidatesService,
+  type SalesOpportunity,
+  type SalesOpportunityStage,
+  type SalesOpportunityXProcessCandidate,
+} from '@/services/api'
 import { formatCurrency } from '@/lib/currency'
+import { formatDate } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth'
 import CreateSalesOpportunityDialog from '@/components/sales/CreateSalesOpportunityDialog.vue'
+import XProcessLinkDialog from '@/components/sales/XProcessLinkDialog.vue'
 
 const props = defineProps<{ contactId: string }>()
 
 const { t } = useI18n()
 const authStore = useAuthStore()
 const canCreate = authStore.hasPermission('sales_opportunities', 'write')
+const canLinkXProcess = authStore.hasPermission('sales_opportunities', 'write')
 const opportunities = ref<SalesOpportunity[]>([])
 const loading = ref(false)
 const createDialogOpen = ref(false)
 
+// Spec item G: "esse cliente comprou recentemente" — one candidate list per
+// open opportunity, fetched automatically (no extra click) but only for
+// opportunities that could plausibly have one (status aberta), since it's a
+// live X2 call. Never auto-links anything.
+const candidatesByOpportunity = ref<Record<string, SalesOpportunityXProcessCandidate[]>>({})
+const linkDialogOpen = ref(false)
+const linkDialogOpportunityId = ref('')
+const linkDialogPrefill = ref<{ numPedido: string; documento: string } | null>(null)
+
+async function loadCandidates(opp: SalesOpportunity) {
+  if (opp.status !== 'aberta') return
+  try {
+    const res = await salesOpportunityXProcessCandidatesService.list(opp.id)
+    candidatesByOpportunity.value[opp.id] = res.data.data.candidates
+  } catch {
+    // Best-effort hint — a failure here must never break the panel.
+    candidatesByOpportunity.value[opp.id] = []
+  }
+}
+
+function openLinkDialog(opp: SalesOpportunity, candidate: SalesOpportunityXProcessCandidate) {
+  linkDialogOpportunityId.value = opp.id
+  linkDialogPrefill.value = { numPedido: candidate.num_pedido, documento: opp.contact?.cpf_cnpj ?? '' }
+  linkDialogOpen.value = true
+}
+
+function onLinked() {
+  candidatesByOpportunity.value[linkDialogOpportunityId.value] = []
+  load()
+}
+
 function onCreated(opp: SalesOpportunity) {
   opportunities.value = [opp, ...opportunities.value.filter(o => o.id !== opp.id)]
+  loadCandidates(opp)
 }
 
 const STAGE_LABEL_KEY: Record<SalesOpportunityStage, string> = {
@@ -58,6 +99,7 @@ async function load() {
   try {
     const res = await salesOpportunitiesService.list({ contact_id: props.contactId })
     opportunities.value = res.data.data.opportunities
+    for (const opp of opportunities.value) loadCandidates(opp)
   } finally {
     loading.value = false
   }
@@ -95,6 +137,25 @@ defineExpose({ refresh: load })
         <p class="text-sm mt-1 font-semibold">{{ formatCurrency(opp.estimated_value) }}</p>
         <p v-if="opp.interest" class="text-xs mt-0.5 truncate text-muted-foreground">{{ opp.interest }}</p>
         <p v-if="conversionSourceLabel(opp)" class="text-xs mt-0.5 text-muted-foreground">{{ conversionSourceLabel(opp) }}</p>
+
+        <!-- Spec item G: purchase found for this customer after the
+             opportunity was opened, not yet linked to anything. Linking is
+             always this explicit manual click — never automatic. -->
+        <div
+          v-for="candidate in candidatesByOpportunity[opp.id] || []"
+          :key="candidate.num_pedido"
+          class="mt-2 p-2 rounded-md border border-amber-500/30 bg-amber-500/10 text-xs"
+          @click.stop.prevent
+        >
+          <p class="flex items-center gap-1 text-amber-600 dark:text-amber-400 font-medium">
+            <Sparkles class="h-3 w-3 shrink-0" />
+            {{ t('sales.xprocessCandidateHint', { date: formatDate(candidate.data_venda) }) }}
+          </p>
+          <p class="text-muted-foreground mt-0.5">{{ t('xprocessLink.numPedido') }} {{ candidate.num_pedido }} · {{ formatCurrency(candidate.valor_vendido) }}</p>
+          <Button v-if="canLinkXProcess" variant="outline" size="sm" class="h-6 px-2 mt-1 text-xs" @click="openLinkDialog(opp, candidate)">
+            {{ t('sales.xprocessCandidateLink') }}
+          </Button>
+        </div>
       </RouterLink>
 
       <p v-if="!loading && opportunities.length === 0" class="text-sm text-muted-foreground text-center py-6">
@@ -106,6 +167,14 @@ defineExpose({ refresh: load })
       v-model:open="createDialogOpen"
       :contact-id="contactId"
       @created="onCreated"
+    />
+
+    <XProcessLinkDialog
+      v-model:open="linkDialogOpen"
+      :opportunity-id="linkDialogOpportunityId"
+      :link="null"
+      :prefill="linkDialogPrefill"
+      @registered="onLinked"
     />
   </div>
 </template>
