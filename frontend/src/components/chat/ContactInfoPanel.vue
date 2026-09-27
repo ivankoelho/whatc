@@ -27,6 +27,8 @@ import { TagBadge } from '@/components/ui/tag-badge'
 import { IconButton } from '@/components/shared'
 import { Input } from '@/components/ui/input'
 import MetadataSection from '@/components/chat/MetadataSection.vue'
+import ContactSalesOpportunitiesPanel from '@/components/chat/ContactSalesOpportunitiesPanel.vue'
+import ContactOccurrencesPanel from '@/components/chat/ContactOccurrencesPanel.vue'
 import { getInitials, getAvatarGradient, formatLabel } from '@/lib/utils'
 import { getTagColorClass } from '@/lib/constants'
 import { useTagsStore } from '@/stores/tags'
@@ -70,6 +72,7 @@ interface SessionData {
 const props = defineProps<{
   contact: Contact
   sessionData?: SessionData | null
+  sourceTransferId?: string
 }>()
 
 const emit = defineEmits<{
@@ -95,6 +98,11 @@ const isResizing = ref(false)
 const canEditTags = computed(() => authStore.hasPermission('contacts', 'write'))
 
 const canRenameContact = computed(() => authStore.hasPermission('contacts.name', 'write'))
+
+// Spec item 4: Oportunidades/Ocorrências render as sections of this same
+// column instead of their own separate toggleable side panels.
+const canReadSalesOpportunities = computed(() => authStore.hasPermission('sales_opportunities', 'read'))
+const canReadOccurrences = computed(() => authStore.hasPermission('occurrences', 'read'))
 
 const isEditingName = ref(false)
 const nameDraft = ref('')
@@ -567,6 +575,19 @@ async function updateContactTags(tags: string[]) {
             </div>
           </div>
         </template>
+
+        <ContactSalesOpportunitiesPanel
+          v-if="canReadSalesOpportunities"
+          :contact-id="contact.id"
+        />
+
+        <ContactOccurrencesPanel
+          v-if="canReadOccurrences"
+          :contact-id="contact.id"
+          :contact-phone="contact.phone_number"
+          :contact-name="contact.profile_name || contact.name"
+          :source-transfer-id="sourceTransferId"
+        />
       </div>
     </ScrollArea>
   </div>

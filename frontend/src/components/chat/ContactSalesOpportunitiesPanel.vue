@@ -3,7 +3,6 @@ import { ref, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { Plus } from 'lucide-vue-next'
 import { salesOpportunitiesService, type SalesOpportunity, type SalesOpportunityStage } from '@/services/api'
 import { formatCurrency } from '@/lib/currency'
@@ -71,37 +70,37 @@ defineExpose({ refresh: load })
 </script>
 
 <template>
-  <div id="sales-opportunities-panel" class="w-80 border-l border-white/[0.08] light:border-gray-200 bg-[#111113] light:bg-white flex flex-col h-full min-h-0">
-    <div class="flex items-center justify-between px-4 py-3 border-b border-white/[0.08] light:border-gray-200 shrink-0">
-      <h3 class="text-sm font-medium text-white light:text-gray-900">{{ t('chat.salesOpportunities') }}</h3>
-      <Button v-if="canCreate" variant="ghost" size="sm" @click="createDialogOpen = true">
-        <Plus class="h-4 w-4 mr-1" />
+  <!-- Section inside ContactInfoPanel's own scrollable column (spec item 4)
+       — same semantic tokens as its other sections, no own width/scroll. -->
+  <div id="sales-opportunities-panel" class="border-t pt-4">
+    <div class="flex items-center justify-between py-2">
+      <h5 class="text-sm font-medium">{{ t('chat.salesOpportunities') }}</h5>
+      <Button v-if="canCreate" variant="ghost" size="sm" class="h-7 px-2" @click="createDialogOpen = true">
+        <Plus class="h-3.5 w-3.5 mr-1" />
         {{ t('sales.createOpportunity') }}
       </Button>
     </div>
 
-    <ScrollArea orientation="vertical" class="flex-1 min-h-0">
-      <div class="p-4 space-y-2">
-        <RouterLink
-          v-for="opp in opportunities"
-          :key="opp.id"
-          to="/sales/operation"
-          class="block p-3 rounded-md border border-white/[0.08] light:border-gray-200 hover:bg-white/[0.04] light:hover:bg-gray-50 transition-colors"
-        >
-          <div class="flex items-center justify-between gap-2">
-            <span class="font-mono text-xs text-white/50 light:text-muted-foreground">{{ opp.opportunity_number }}</span>
-            <Badge :variant="statusVariant(opp)" class="shrink-0 text-xs">{{ statusLabel(opp) }}</Badge>
-          </div>
-          <p class="text-sm mt-1 text-white light:text-gray-900">{{ formatCurrency(opp.estimated_value) }}</p>
-          <p v-if="opp.interest" class="text-xs mt-0.5 truncate text-white/50 light:text-muted-foreground">{{ opp.interest }}</p>
-          <p v-if="conversionSourceLabel(opp)" class="text-xs mt-0.5 text-white/40 light:text-muted-foreground">{{ conversionSourceLabel(opp) }}</p>
-        </RouterLink>
+    <div class="space-y-2">
+      <RouterLink
+        v-for="opp in opportunities"
+        :key="opp.id"
+        to="/sales/operation"
+        class="block p-3 rounded-md border bg-muted/50 hover:bg-muted transition-colors"
+      >
+        <div class="flex items-center justify-between gap-2">
+          <span class="font-mono text-xs text-muted-foreground">{{ opp.opportunity_number }}</span>
+          <Badge :variant="statusVariant(opp)" class="shrink-0 text-xs">{{ statusLabel(opp) }}</Badge>
+        </div>
+        <p class="text-sm mt-1 font-semibold">{{ formatCurrency(opp.estimated_value) }}</p>
+        <p v-if="opp.interest" class="text-xs mt-0.5 truncate text-muted-foreground">{{ opp.interest }}</p>
+        <p v-if="conversionSourceLabel(opp)" class="text-xs mt-0.5 text-muted-foreground">{{ conversionSourceLabel(opp) }}</p>
+      </RouterLink>
 
-        <p v-if="!loading && opportunities.length === 0" class="text-sm text-white/40 light:text-muted-foreground text-center py-6">
-          {{ t('chat.noSalesOpportunities') }}
-        </p>
-      </div>
-    </ScrollArea>
+      <p v-if="!loading && opportunities.length === 0" class="text-sm text-muted-foreground text-center py-6">
+        {{ t('chat.noSalesOpportunities') }}
+      </p>
+    </div>
 
     <CreateSalesOpportunityDialog
       v-model:open="createDialogOpen"

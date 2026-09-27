@@ -84,7 +84,6 @@ import {
   Loader2,
   Zap,
   Ticket,
-  TrendingUp,
   BarChart,
   Link,
   Mail,
@@ -107,8 +106,6 @@ import TemplatePicker from '@/components/chat/TemplatePicker.vue'
 import MediaViewerDialog from '@/components/chat/MediaViewerDialog.vue'
 import ContactInfoPanel from '@/components/chat/ContactInfoPanel.vue'
 import ConversationNotes from '@/components/chat/ConversationNotes.vue'
-import ContactOccurrencesPanel from '@/components/chat/ContactOccurrencesPanel.vue'
-import ContactSalesOpportunitiesPanel from '@/components/chat/ContactSalesOpportunitiesPanel.vue'
 import CallButton from '@/components/calling/CallButton.vue'
 import { useNotesStore } from '@/stores/notes'
 import { useHeaderMedia } from '@/composables/useHeaderMedia'
@@ -132,12 +129,6 @@ const { isDark } = useColorMode()
 
 const canWriteContacts = authStore.hasPermission('contacts', 'write')
 
-// Mirror the server's gate on GET /api/contacts/{id}/occurrences, which requires
-// occurrences:read. The CRM route used to be gated on 'chat' so the ticket icon
-// was implicitly consistent with it; now the module has its own permission.
-const canReadOccurrences = computed(() => authStore.hasPermission('occurrences', 'read'))
-const canReadSalesOpportunities = computed(() => authStore.hasPermission('sales_opportunities', 'read'))
-
 const messageInput = ref('')
 const messagesEndRef = ref<HTMLElement | null>(null)
 const messageInputRef = ref<HTMLTextAreaElement | null>(null)
@@ -156,8 +147,6 @@ const isAtBottom = ref(true)
 const SCROLL_BOTTOM_THRESHOLD = 80
 const isInfoPanelOpen = ref(true)
 const isNotesPanelOpen = ref(false)
-const isOccurrencesPanelOpen = ref(false)
-const isSalesPanelOpen = ref(false)
 const contactSessionData = ref<any>(null)
 
 // Resizable contacts column — drag the right edge; width persists across
@@ -2149,36 +2138,6 @@ async function sendMediaMessage() {
               </TooltipTrigger>
               <TooltipContent>{{ $t('chat.internalNotes') }}</TooltipContent>
             </Tooltip>
-            <Tooltip v-if="canReadOccurrences">
-              <TooltipTrigger as-child>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  id="occurrences-button"
-                  class="h-8 w-8 text-white/50 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100"
-                  :class="isOccurrencesPanelOpen && 'bg-blue-500/10 text-blue-400 light:bg-blue-50 light:text-blue-600'"
-                  @click="isOccurrencesPanelOpen = !isOccurrencesPanelOpen"
-                >
-                  <Ticket class="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{{ $t('chat.occurrences') }}</TooltipContent>
-            </Tooltip>
-            <Tooltip v-if="canReadSalesOpportunities">
-              <TooltipTrigger as-child>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  id="sales-opportunities-button"
-                  class="h-8 w-8 text-white/50 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100"
-                  :class="isSalesPanelOpen && 'bg-blue-500/10 text-blue-400 light:bg-blue-50 light:text-blue-600'"
-                  @click="isSalesPanelOpen = !isSalesPanelOpen"
-                >
-                  <TrendingUp class="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{{ $t('chat.salesOpportunities') }}</TooltipContent>
-            </Tooltip>
             <Tooltip>
               <TooltipTrigger as-child>
                 <Button
@@ -2799,26 +2758,13 @@ async function sendMediaMessage() {
       @close="isNotesPanelOpen = false"
     />
 
-    <!-- Occurrences Side Panel -->
-    <ContactOccurrencesPanel
-      v-if="contactsStore.currentContact && isOccurrencesPanelOpen && canReadOccurrences"
-      :contact-id="contactsStore.currentContact.id"
-      :contact-phone="contactsStore.currentContact.phone_number"
-      :contact-name="contactsStore.currentContact.profile_name || contactsStore.currentContact.name"
-      :source-transfer-id="activeTransferId ?? undefined"
-    />
-
-    <!-- Sales Opportunities Side Panel -->
-    <ContactSalesOpportunitiesPanel
-      v-if="contactsStore.currentContact && isSalesPanelOpen && canReadSalesOpportunities"
-      :contact-id="contactsStore.currentContact.id"
-    />
-
-    <!-- Contact Info Panel -->
+    <!-- Contact Info Panel — Oportunidades/Ocorrências render as sections of
+         this same column (spec item 4), not separate side panels. -->
     <ContactInfoPanel
       v-if="contactsStore.currentContact && isInfoPanelOpen"
       :contact="contactsStore.currentContact"
       :session-data="contactSessionData"
+      :source-transfer-id="activeTransferId ?? undefined"
       @close="isInfoPanelOpen = false"
       @tags-updated="(tags) => contactsStore.updateContactTags(contactsStore.currentContact!.id, tags)"
       @name-updated="(name) => contactsStore.updateContactName(contactsStore.currentContact!.id, name)"
