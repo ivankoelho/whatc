@@ -8,6 +8,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/handlers"
 	"github.com/shridarpatil/whatomate/internal/middleware"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/test/testutil"
@@ -300,4 +301,94 @@ func TestApp_RefreshToken_FromCookie(t *testing.T) {
 
 	require.NoError(t, app.RefreshToken(req))
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+}
+
+// --- Switched-org sessions (multi-tenant scoping) ---
+
+func parseAccessClaims(t *testing.T, token string) *middleware.JWTClaims {
+	t.Helper()
+	parsed, err := jwt.ParseWithClaims(token, &middleware.JWTClaims{}, func(*jwt.Token) (any, error) {
+		return []byte(testutil.TestJWTSecret), nil
+	})
+	require.NoError(t, err)
+	return parsed.Claims.(*middleware.JWTClaims)
+}
+
+// refreshAsSwitchedSession refreshes a token whose org claim is targetOrgID (a
+// session created by SwitchOrg) and returns the org/role on the new access token.
+func refreshAsSwitchedSession(t *testing.T, app *handlers.App, user *models.User, targetOrgID uuid.UUID) *middleware.JWTClaims {
+	t.Helper()
+	jti := uuid.New().String()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, app.Redis.Set(ctx, "refresh:"+jti, user.ID.String(), time.Hour).Err())
+
+	switched := *user
+	switched.OrganizationID = targetOrgID
+	token := generateRefreshTokenWithJTI(t, testutil.TestJWTSecret, &switched, jti, time.Hour)
+
+	req := testutil.NewJSONRequest(t, map[string]string{"refresh_token": token})
+	require.NoError(t, app.RefreshToken(req))
+	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+	return parseAccessClaims(t, testutil.GetResponseCookie(req, "whm_access"))
+}
+
+func TestApp_RefreshToken_KeepsSwitchedOrgWhileMember(t *testing.T) {
+	app := newTestApp(t)
+	homeOrg := testutil.CreateTestOrganization(t, app.DB)
+	targetOrg := testutil.CreateTestOrganization(t, app.DB)
+	user := testutil.CreateTestUser(t, app.DB, homeOrg.ID)
+	targetRole := testutil.CreateTestRole(t, app.DB, targetOrg.ID, "agent", nil)
+	require.NoError(t, app.DB.Create(&models.UserOrganization{
+		BaseModel: models.BaseModel{ID: uuid.New()}, UserID: user.ID, OrganizationID: targetOrg.ID, RoleID: &targetRole.ID,
+	}).Error)
+
+	claims := refreshAsSwitchedSession(t, app, user, targetOrg.ID)
+	assert.Equal(t, targetOrg.ID, claims.OrganizationID, "refresh must not revert a switched session to the home org")
+	require.NotNil(t, claims.RoleID)
+	assert.Equal(t, targetRole.ID, *claims.RoleID)
+}
+
+func TestApp_RefreshToken_DropsToHomeOrgWhenMembershipRemoved(t *testing.T) {
+	app := newTestApp(t)
+	homeOrg := testutil.CreateTestOrganization(t, app.DB)
+	otherOrg := testutil.CreateTestOrganization(t, app.DB) // user was never (or is no longer) a member
+	user := testutil.CreateTestUser(t, app.DB, homeOrg.ID)
+
+	claims := refreshAsSwitchedSession(t, app, user, otherOrg.ID)
+	assert.Equal(t, homeOrg.ID, claims.OrganizationID, "removed member must not keep the foreign org on refresh")
+}
+
+func TestApp_GetWSToken_UsesActiveOrgFromHeader(t *testing.T) {
+	app := newTestApp(t)
+	homeOrg := testutil.CreateTestOrganization(t, app.DB)
+	targetOrg := testutil.CreateTestOrganization(t, app.DB)
+	user := testutil.CreateTestUser(t, app.DB, homeOrg.ID)
+	targetRole := testutil.CreateTestRole(t, app.DB, targetOrg.ID, "agent", nil)
+	require.NoError(t, app.DB.Create(&models.UserOrganization{
+		BaseModel: models.BaseModel{ID: uuid.New()}, UserID: user.ID, OrganizationID: targetOrg.ID, RoleID: &targetRole.ID,
+	}).Error)
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, homeOrg.ID, user.ID)
+	req.RequestCtx.Request.Header.Set("X-Organization-ID", targetOrg.ID.String())
+	require.NoError(t, app.GetWSToken(req))
+	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var resp struct {
+		Data struct {
+			Token string `json:"token"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &resp))
+	assert.Equal(t, targetOrg.ID, parseAccessClaims(t, resp.Data.Token).OrganizationID)
+
+	// A non-member org in the header must be ignored, not honoured.
+	foreign := testutil.CreateTestOrganization(t, app.DB)
+	req2 := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req2, homeOrg.ID, user.ID)
+	req2.RequestCtx.Request.Header.Set("X-Organization-ID", foreign.ID.String())
+	require.NoError(t, app.GetWSToken(req2))
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req2), &resp))
+	assert.Equal(t, homeOrg.ID, parseAccessClaims(t, resp.Data.Token).OrganizationID)
 }
