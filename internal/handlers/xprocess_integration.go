@@ -106,7 +106,10 @@ func (a *App) TestXProcessIntegrationConnection(r *fastglue.Request) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	livenessReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, req.BaseURL+"/liveness", nil)
+	livenessReq, err := http.NewRequestWithContext(ctx, http.MethodGet, req.BaseURL+"/liveness", nil)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadGateway, "Could not reach base_url", nil, "")
+	}
 	livenessResp, err := a.HTTPClient.Do(livenessReq)
 	if err != nil || livenessResp.StatusCode >= 300 {
 		return r.SendErrorEnvelope(fasthttp.StatusBadGateway, "Could not reach base_url", nil, "")

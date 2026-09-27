@@ -125,3 +125,19 @@ func TestApp_TestXProcessIntegrationConnection_Unreachable(t *testing.T) {
 	require.NoError(t, app.TestXProcessIntegrationConnection(req))
 	testutil.AssertErrorResponse(t, req, fasthttp.StatusBadGateway, "")
 }
+
+// TestApp_TestXProcessIntegrationConnection_MalformedBaseURL guards against
+// a nil *http.Request panic: http.NewRequestWithContext rejects a base_url
+// containing a raw control character (net/url: invalid control character in
+// URL), and that error must not be discarded before the request is used.
+func TestApp_TestXProcessIntegrationConnection_MalformedBaseURL(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "admin", []string{"xprocess_integration:write"})
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
+
+	req := testutil.NewJSONRequest(t, map[string]any{"base_url": "http://exa\nmple.com", "api_key": "the-key"})
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	require.NoError(t, app.TestXProcessIntegrationConnection(req))
+	testutil.AssertErrorResponse(t, req, fasthttp.StatusBadGateway, "")
+}
