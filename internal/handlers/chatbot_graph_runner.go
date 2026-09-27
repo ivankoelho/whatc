@@ -450,7 +450,13 @@ func (a *App) handleChatPromptInvalid(node *ChatNode, ctx *chatNodeCtx) (nodeOut
 //	  "message_template": "Hello {{customer_id}}!"
 //	}
 func (a *App) execChatAPICall(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, error) {
-	cfgJSONB := models.JSONB(node.Config)
+	resolvedConfig, err := a.resolveIntegrationSecrets(ctx.account.OrganizationID, node.Config)
+	if err != nil {
+		a.Log.Error("api_call node failed to resolve integration secret",
+			"node", node.ID, "session", ctx.session.ID, "error", err)
+		return nodeOutcome{outcome: "http:non2xx"}, nil
+	}
+	cfgJSONB := models.JSONB(resolvedConfig)
 
 	if ctx.session.SessionData == nil {
 		ctx.session.SessionData = models.JSONB{}

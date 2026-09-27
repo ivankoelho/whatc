@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/config"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/shridarpatil/whatomate/test/testutil"
@@ -34,6 +35,11 @@ func newProcessorTestApp(t *testing.T) *App {
 	t.Cleanup(waServer.Close)
 
 	app := &App{
+		Config: &config.Config{
+			App: config.AppConfig{
+				EncryptionKey: "test-encryption-key-for-handlers-longer-than-32-chars",
+			},
+		},
 		DB:         db,
 		Log:        log,
 		WhatsApp:   whatsapp.NewWithBaseURL(log, waServer.URL),
