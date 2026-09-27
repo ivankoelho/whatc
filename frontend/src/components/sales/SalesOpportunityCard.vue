@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { salesOpportunitiesService } from '@/services/api'
 import type { SalesOpportunity, SalesDirecionamento } from '@/services/api'
 import { getErrorMessage } from '@/lib/api-utils'
+import XProcessLinkForm from '@/components/sales/XProcessLinkForm.vue'
 
 const props = defineProps<{ opportunity: SalesOpportunity; disabled?: boolean }>()
 
@@ -134,6 +135,9 @@ async function saveValue() {
     >
       {{ formatCurrency(opportunity.estimated_value) }}
     </p>
+    <div class="mt-2" @click.stop @mousedown.stop>
+      <XProcessLinkForm :opportunity-id="opportunity.id" :editable="opportunity.status === 'aberta'" />
+    </div>
     <div v-if="opportunity.status === 'aberta'" class="mt-2" @click.stop @mousedown.stop>
       <Select
         data-testid="sales-opportunity-direcionamento-select"

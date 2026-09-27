@@ -3562,5 +3562,14 @@
     "saveFailed": "Could not save the document",
     "validationEmpty": "Fill in the number, a product or attach the file.",
     "noNumber": "No number"
+  },
+  "xprocessLink": {
+    "title": "X2 order",
+    "numPedido": "Order number",
+    "documento": "Customer CPF/CNPJ",
+    "register": "Register",
+    "registered": "Registered — automatic confirmation runs tomorrow morning.",
+    "pendingReview": "Order not yet located in X2 after 5 checks — the number or document may need a second look.",
+    "status": "X2 status"
   }
 }

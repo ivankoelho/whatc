@@ -3551,5 +3551,14 @@
     "saveFailed": "Não foi possível salvar o documento",
     "validationEmpty": "Preencha o número, um produto ou anexe o arquivo.",
     "noNumber": "Sem número"
+  },
+  "xprocessLink": {
+    "title": "Pedido X2",
+    "numPedido": "Número do pedido",
+    "documento": "CPF/CNPJ do cliente",
+    "register": "Registrar",
+    "registered": "Registrado — a confirmação automática roda amanhã de manhã.",
+    "pendingReview": "Pedido ainda não localizado no X2 após 5 consultas — vale conferir número ou documento.",
+    "status": "Status no X2"
   }
 }

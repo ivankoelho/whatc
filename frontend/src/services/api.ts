@@ -1575,6 +1575,25 @@ export const salesOpportunitiesService = {
     api.get<ApiEnvelope<{ events: SalesOpportunityEvent[] }>>(`/sales-opportunities/${id}/events`),
 }
 
+// X2 (XProcess) pedido/documento link on a sales opportunity — Task 8's
+// GET/PUT /sales-opportunities/{id}/xprocess-link.
+export interface SalesOpportunityXProcessLink {
+  num_pedido: string
+  documento: string
+  status_xprocess?: string
+  valor_vendido?: number
+  last_checked_at?: string
+  resolved_at?: string
+  pending_review: boolean
+}
+
+export const salesOpportunityXProcessLinkService = {
+  get: (opportunityId: string) =>
+    api.get<ApiEnvelope<SalesOpportunityXProcessLink>>(`/sales-opportunities/${opportunityId}/xprocess-link`),
+  upsert: (opportunityId: string, payload: { num_pedido: string; documento: string }) =>
+    api.put<ApiEnvelope<SalesOpportunityXProcessLink>>(`/sales-opportunities/${opportunityId}/xprocess-link`, payload),
+}
+
 // Units / Departments / Occurrence categories — Fase 3 of the Ocorrências
 // backend (see docs/superpowers/specs/2026-09-04-helpdesk-unidade-departamento-sla-design.md).
 // List-only: this MVP only needs them to populate the "Abrir protocolo" form
