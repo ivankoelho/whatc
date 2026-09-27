@@ -40,9 +40,12 @@ A Entrega 1 (`docs/superpowers/specs/2026-09-17-central-vendas-funil-entrega1-de
 | `FECHADO` sem conversão prévia | Também converte (mesma regra de `SEPARACAO`) | Pode acontecer de o job nunca ter visto o pedido em `SEPARACAO` (ex.: atraso no registro do agente); `FECHADO` é estritamente "mais confirmado" que `SEPARACAO` |
 | `CANCELADO` sem conversão prévia | Marca **perdida** | Do ponto de vista do Whatc, nunca houve venda confirmada — é uma oportunidade que não vingou |
 | `CANCELADO` após já ter convertido | Marca **cancelada**, grava evento novo, não apaga o `converted` original | Histórico preserva que a venda existiu e foi revertida depois (mesma regra já prevista na Entrega 1 §3) |
-| Quando o job para de checar um vínculo | `CANCELADO`/`perdida` imediatamente; `FECHADO` após mais 7 dias de graça (cobre cancelamento pós-fatura); nunca encontrado, sinaliza após 5 tentativas mas continua tentando | Evita checar pra sempre um vínculo já resolvido, sem fechar cedo demais a janela de cancelamento |
+| Quando o job para de checar um vínculo | `CANCELADO`/`perdida` imediatamente; `FECHADO` após mais 7 dias corridos de graça a partir da **primeira vez** que o job viu `FECHADO` (cobre cancelamento pós-fatura); nunca encontrado, sinaliza após 5 **rodadas do job** mas continua tentando | Evita checar pra sempre um vínculo já resolvido, sem fechar cedo demais a janela de cancelamento |
 | Onde fica a credencial do X2 | Nova aba "ERP X2" em Configurações → Integrações, por organização, criptografada em repouso | Mesmo padrão já usado por `WhatsAppAccount.AccessToken`; nenhuma aba existente hoje serve pra "credencial que o Whatc usa pra chamar outro sistema" |
 | Chave do X2 dentro de fluxos do bot | Nunca digitada no fluxo — nó `api_call` referencia uma variável especial resolvida só no backend | Evita duplicar o segredo em JSONB sem criptografia, espalhado por N fluxos |
+| Trocar número/documento depois de registrado | Enquanto o vínculo não resolveu (`resolved_at` nulo), o formulário sobrescreve os mesmos campos. Depois de resolvido, não pode ser sobrescrito — só "registrar novo vínculo", que cria uma linha nova em `sales_opportunity_xprocess_links` (a antiga fica intacta) | Sobrescrever um vínculo já resolvido apagaria o rastro de uma conciliação que já aconteceu; a oportunidade em si só permite editar `xprocess_num_pedido`/`xprocess_documento` de novo depois que o vínculo anterior chegou a um estado terminal |
+| Validação do documento no cadastro | Estrutural apenas: normaliza pra só dígitos, exige exatamente 11 (CPF) ou 14 (CNPJ); qualquer outro tamanho é rejeitado antes de salvar | Não consulta Receita nem X2 — coerente com "nenhuma chamada ao X2 no momento do registro" (linha acima); só pega erro de digitação óbvio |
+| Números 5 (rodadas) / 7 (dias) / 1x-dia | Ponto de partida bom, mas tratados como parâmetros nomeados no código (constantes/config), não espalhados feito números mágicos | Facilita ajustar depois de operar por um tempo, sem virar uma tela de configuração nova agora (YAGNI) |
 
 ## 4. Modelo de dados
 
@@ -59,37 +62,54 @@ A Entrega 1 (`docs/superpowers/specs/2026-09-17-central-vendas-funil-entrega1-de
 
 | Campo | Tipo | Notas |
 |---|---|---|
-| `xprocess_num_pedido` | string, nulo | Preenchido pelo agente |
-| `xprocess_documento` | string, nulo | CPF ou CNPJ informado pelo agente junto com o número — dígitos, sem máscara, mesmo padrão de `Contact.CPFCNPJ` |
+| `xprocess_num_pedido` | string, nulo | Sempre reflete o vínculo mais recente (§6) — conveniência de leitura, a fonte de verdade é `sales_opportunity_xprocess_links` |
+| `xprocess_documento` | string, nulo | CPF ou CNPJ informado pelo agente junto com o número — dígitos, sem máscara; validado estruturalmente (11 ou 14 dígitos) antes de salvar, tanto aqui quanto no link |
 
 ### `sales_opportunity_xprocess_links` (nova tabela — histórico/estado da conciliação)
 
+**Não é 1:1 com a oportunidade** — é 1-para-muitos, mas com no máximo uma linha "em aberto" (`resolved_at` nulo) por oportunidade a qualquer momento. Enquanto essa linha está em aberto, registrar de novo no formulário **atualiza a mesma linha** (mesmo `id`, `num_pedido`/`documento` sobrescritos). Depois que ela resolve (`resolved_at` preenchido), registrar de novo cria uma **linha nova**, preservando a anterior intacta — nunca sobrescreve um vínculo já conciliado.
+
 | Campo | Tipo | Notas |
 |---|---|---|
-| `sales_opportunity_id` | uuid, índice | 1:1 com a oportunidade (criado junto quando o agente registra o número) |
-| `num_pedido` / `documento` | string | Cópia do que foi registrado, para auditoria mesmo se o campo na oportunidade mudar depois |
+| `sales_opportunity_id` | uuid, índice | Uma oportunidade pode ter várias linhas ao longo do tempo, mas só uma com `resolved_at` nulo por vez |
+| `num_pedido` / `documento` | string | `documento` normalizado só-dígitos, validado como CPF (11) ou CNPJ (14) antes de gravar |
 | `cod_empresa` / `cod_vendedor` | string, nulo | Preenchidos a partir da primeira resposta 200 do X2 |
 | `status_xprocess` | string, nulo | Último status visto (`SEPARACAO`/`SEPARADO`/`FECHADO`/`CANCELADO`) |
 | `valor_vendido` / `itens` (JSONB) | numeric / JSONB, nulo | Dados reais do pedido, nunca sobrescrevem `estimated_value`/`estimated_quantity` da oportunidade |
-| `last_checked_at` | timestamp | Atualizado a cada rodada do job |
-| `consecutive_not_found` | int, default 0 | Zera a cada resposta 200; incrementa a cada 404 |
+| `last_checked_at` | timestamp | Atualizado a cada rodada do job, mesmo quando o resultado não muda |
+| `first_closed_at` | timestamp, nulo | Gravado **uma única vez**, na primeira rodada em que o job vê `status=FECHADO` para este vínculo. Nunca reescrito nas rodadas seguintes — é a partir dele, não de `last_checked_at`, que se contam os 7 dias de carência (§5) |
+| `consecutive_not_found` | int, default 0 | Conta **rodadas do job em que este vínculo respondeu 404**, não dias corridos desde o registro — um pedido registrado numa sexta só bate 404 nas rodadas diárias seguintes, então "5" normalmente significa ~5 dias úteis do job, não 5 dias desde o cadastro. Zera a cada resposta 200 |
 | `resolved_at` | timestamp, nulo | Nulo = job continua checando; preenchido quando o vínculo chega a um estado terminal (§3) |
 
 ## 5. Job diário de conciliação
 
 Roda uma vez por dia, depois das ~2h. Para cada `sales_opportunity_xprocess_links` com `resolved_at` nulo, chama `POST /api/pedido {numero_pedido: num_pedido, documento: documento}` com a credencial da organização (`xprocess_integrations`).
 
-- **404** → `consecutive_not_found += 1`. A partir de 5, aparece numa lista de pendências (ver §8) — não para de tentar sozinho, só sinaliza pra revisão humana (número ou documento possivelmente errados). Deliberadamente sem teto de tentativas: o custo de continuar checando é uma chamada por dia por vínculo pendente, e um pedido registrado cedo demais (antes do pagamento) é um caso legítimo, não um erro.
+- **404** → `consecutive_not_found += 1`. A partir de 5 **rodadas** (não 5 dias corridos desde o cadastro — se o pedido foi registrado numa sexta à tarde, a 1ª checagem só acontece no sábado de madrugada, então o contador avança uma vez por rodada do job, não por dia desde o registro), aparece numa lista de pendências (§8) com o texto **"Pedido ainda não localizado no X2 após 5 consultas"** — nunca "pedido inválido": o desenho já reconhece que 404 tem duas causas possíveis (número/documento errado, ou pedido legítimo que ainda não chegou na carga D-1), e o texto não deve induzir o agente a "corrigir" um dado que pode estar certo. Não para de tentar sozinho, sem teto de tentativas — o custo é uma chamada por dia por vínculo pendente.
 - **200, `status` ∈ {`SEPARACAO`, `SEPARADO`}** → se a oportunidade ainda está `aberta`, converte (`conversion_source=xprocess`, grava `SalesOpportunityEvent{type: converted, source: xprocess}`); atualiza o link com valor/itens/`cod_vendedor`; continua checando.
-- **200, `status = FECHADO`** → mesma regra de conversão se ainda não convertida; atualiza o link; se já resolvido antes por `SEPARACAO`, apenas atualiza os dados. Marca `resolved_at` **7 dias depois** deste primeiro `FECHADO` (grace period pra cancelamento pós-fatura), não imediatamente.
+- **200, `status = FECHADO`** → mesma regra de conversão se ainda não convertida; atualiza o link. Se `first_closed_at` ainda está nulo, grava-o com o horário desta rodada (só na primeira vez — rodadas seguintes não o reescrevem). Marca `resolved_at = first_closed_at + 7 dias` (grace period pra cancelamento pós-fatura) — calculado a partir de `first_closed_at`, nunca de `last_checked_at`, pra não empurrar o prazo a cada consulta.
 - **200, `status = CANCELADO`** → se a oportunidade nunca convertida, marca **perdida** (`loss_reason` fixo, ex. `outro`, com `loss_notes` explicando "cancelado no X2"); se já convertida, marca **cancelada** com evento novo. Marca `resolved_at` imediatamente — não há mais transição possível depois de cancelado.
 
 Valores numéricos do X2 vêm como string com vírgula decimal (ex. `"230,0418"`) — parsear trocando `,` por `.` antes de converter pra `float64`.
 
+Resumo de `resolved_at` por situação:
+
+| Situação | `resolved_at` |
+|---|---|
+| 404 (não encontrado) | `NULL` (continua tentando, sem teto) |
+| `SEPARACAO` / `SEPARADO` | `NULL` (converteu, mas continua acompanhando até fechar ou cancelar) |
+| `FECHADO` | `first_closed_at` + 7 dias |
+| `CANCELADO` (nunca convertida → perdida) | Imediato |
+| `CANCELADO` (já convertida → cancelada) | Imediato |
+
 ## 6. Agente registra o pedido
 
-Na tela da oportunidade, formulário inline (mesmo padrão de edição de `estimated_value` via `PUT .../details`, `internal/handlers/sales_opportunities.go`): dois campos, número do pedido e documento (CPF/CNPJ). Só habilitado enquanto `status=aberta`. Ao salvar:
-- Cria (ou atualiza, se já existia) a linha em `sales_opportunity_xprocess_links`.
+Na tela da oportunidade, formulário inline (mesmo padrão de edição de `estimated_value` via `PUT .../details`, `internal/handlers/sales_opportunities.go`): dois campos, número do pedido e documento (CPF/CNPJ). Só habilitado enquanto `status=aberta`. Validação **estrutural** do documento antes de salvar — normaliza pra só dígitos, exige 11 (CPF) ou 14 (CNPJ) dígitos exatos, rejeita qualquer outro tamanho com 400. Não valida na Receita nem no X2 (coerente com "nenhuma chamada ao X2 no momento do registro", abaixo).
+
+Ao salvar:
+- **Sem vínculo em aberto para esta oportunidade:** cria a linha em `sales_opportunity_xprocess_links`.
+- **Já existe um vínculo em aberto (`resolved_at` nulo):** atualiza essa mesma linha (o agente corrigindo um número/documento digitado errado antes de qualquer conciliação acontecer).
+- **O único vínculo existente já está resolvido (`resolved_at` preenchido):** o formulário não sobrescreve — oferece "registrar novo vínculo", que cria uma linha nova (§4), preservando a resolvida.
 - Se `Contact.CPFCNPJ` da oportunidade estiver vazio, preenche com o documento informado.
 - **Nenhuma chamada ao X2 acontece nesse momento.** Mensagem de confirmação: "Registrado — a confirmação automática roda amanhã de manhã."
 
@@ -106,17 +126,19 @@ Toda resposta menciona a data de referência (D-1: "dados até o fechamento de o
 
 - Novo recurso `xprocess_integration` (`ResourceXProcessIntegration`), ações `read`/`write`, mesmo padrão de `accounts`/`api_keys`. **Precisa de backfill** pra organizações existentes (lição da Fase 3 — `DefaultPermissions()` sozinho não alcança orgs já criadas).
 - Leitura/escrita do vínculo (`sales_opportunity_xprocess_links`) segue a mesma permissão de `sales_opportunities` já existente — não é um recurso novo.
-- Lista de pendências (vínculos com `consecutive_not_found >= 5`) exposta na própria tela da oportunidade ou como um widget novo no dashboard de vendas — a decidir na hora da implementação, sem impacto no modelo de dados acima.
+- Lista de pendências (vínculos com `consecutive_not_found >= 5`) **decidida para esta entrega: exposta na própria tela da oportunidade**, não um widget de dashboard novo — o agente já está olhando o pedido pendente ali, com todo o contexto. Um painel centralizado de exceções fica pra depois, só se o volume de casos justificar (YAGNI).
 
 ## 9. Verificação
 
 **Go**
-- Registrar número+documento cria o link; registrar de novo (mesma oportunidade) atualiza em vez de duplicar.
-- Job: 404 incrementa contador sem mudar estado da oportunidade; 5º 404 seguido aparece na lista de pendências.
+- Registrar número+documento sem vínculo prévio cria o link; registrar de novo com o vínculo ainda em aberto atualiza a mesma linha (mesmo `id`); registrar de novo com o único vínculo já resolvido cria uma linha **nova**, sem tocar na antiga.
+- Documento com 10 ou 12 dígitos (nem CPF nem CNPJ) é rejeitado com 400 antes de gravar; com máscara (pontos/traço/barra) é normalizado e aceito.
+- Job: 404 incrementa `consecutive_not_found` sem mudar estado da oportunidade; na 5ª rodada seguida com 404 (não no 5º dia corrido — simular rodadas não-diárias-consecutivas do teste pra confirmar que é por rodada) aparece na lista de pendências com o texto "não localizado... após 5 consultas", nunca "inválido".
 - Job: `SEPARACAO` converte oportunidade `aberta`; não reconverte uma já `convertida`; grava evento com `source=xprocess`.
 - Job: `FECHADO` sem conversão prévia também converte; com conversão prévia, só atualiza o link.
+- Job: `first_closed_at` é gravado só na primeira rodada que vê `FECHADO`; uma segunda rodada vendo `FECHADO` de novo (antes do vínculo resolver) não reescreve `first_closed_at`, e `resolved_at` continua calculado a partir do valor original, não do `last_checked_at` da segunda rodada.
 - Job: `CANCELADO` sem conversão prévia → perdida; com conversão prévia → cancelada, evento novo, `converted` original preservado.
-- Job: `resolved_at` fica nulo até o estado terminal certo (imediato pra cancelado/perdida, +7 dias pra fechado, nunca pra "ainda não encontrado").
+- Job: `resolved_at` fica nulo até o estado terminal certo (imediato pra cancelado/perdida, `first_closed_at`+7 dias pra fechado, sem teto pra "ainda não encontrado").
 - Parsing de valores com vírgula decimal do X2.
 - `/api/pedido` chamado sempre com `documento`; nunca chamado só com `num_pedido`.
 - Permissão: usuário sem `xprocess_integration:write` não consegue salvar a credencial; sem `sales_opportunities:write` não consegue registrar número/documento.
@@ -131,7 +153,8 @@ Toda resposta menciona a data de referência (D-1: "dados até o fechamento de o
 
 | Risco | Mitigação |
 |---|---|
-| Agente digita número ou documento errado | Contador `consecutive_not_found` sinaliza depois de 5 tentativas diárias (5 dias) |
+| Agente digita número ou documento errado | Contador `consecutive_not_found` sinaliza depois de 5 rodadas do job (não necessariamente 5 dias corridos desde o registro), com texto neutro ("não localizado", não "inválido") já que 404 também é esperado pra pedido legítimo ainda não pago |
+| Agente troca o número/documento depois do vínculo já ter conciliado | Vínculo resolvido é imutável; trocar cria um vínculo novo, o antigo fica no histórico |
 | `/api/vendas` sem paginação/filtro de data (limite 1000) | Não é usada por este desenho (só `/api/pedido`, consulta exata); só voltaria a importar numa eventual varredura por aproximação, fora de escopo |
 | Documento sensível exposto na conversa do WhatsApp | Bot nunca ecoa o documento inteiro de volta, só os últimos dígitos |
 | Job perde uma rodada (servidor fora do ar às 2h) | Cada vínculo mantém seu próprio estado (`resolved_at` nulo); a próxima rodada simplesmente pega de onde parou, sem lógica de "recuperar dia perdido" necessária |
