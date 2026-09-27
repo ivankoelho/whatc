@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import { salesOpportunityXProcessLinkService, type SalesOpportunityXProcessLink } from '@/services/api'
@@ -15,12 +15,30 @@ const numPedido = ref('')
 const documento = ref('')
 const saving = ref(false)
 
+// Collapsed by default: a board can render up to 100 cards at once, and this
+// section's GET is only useful once the user actually looks at it. `loaded`
+// makes sure toggling open/closed repeatedly doesn't refetch every time.
+const expanded = ref(false)
+const loading = ref(false)
+const loaded = ref(false)
+
 async function load() {
+  loading.value = true
   try {
     const res = await salesOpportunityXProcessLinkService.get(props.opportunityId)
     link.value = res.data.data
   } catch {
     link.value = null
+  } finally {
+    loading.value = false
+  }
+}
+
+function toggle() {
+  expanded.value = !expanded.value
+  if (expanded.value && !loaded.value) {
+    loaded.value = true
+    load()
   }
 }
 
@@ -39,32 +57,42 @@ async function register() {
     saving.value = false
   }
 }
-
-onMounted(load)
 </script>
 
 <template>
   <div class="space-y-2 rounded-lg border p-3">
-    <h4 class="text-sm font-medium">{{ t('xprocessLink.title') }}</h4>
+    <button
+      type="button"
+      class="flex w-full items-center justify-between text-sm font-medium"
+      @click="toggle"
+    >
+      <span>{{ t('xprocessLink.title') }}</span>
+      <span class="text-xs text-muted-foreground">{{ expanded ? '▾' : '▸' }}</span>
+    </button>
 
-    <div v-if="link" class="text-sm text-muted-foreground">
-      <p>{{ t('xprocessLink.numPedido') }}: {{ link.num_pedido }}</p>
-      <p v-if="link.status_xprocess">{{ t('xprocessLink.status') }}: {{ link.status_xprocess }}</p>
-      <p v-if="link.pending_review" class="text-amber-600">{{ t('xprocessLink.pendingReview') }}</p>
-    </div>
+    <template v-if="expanded">
+      <p v-if="loading" class="text-sm text-muted-foreground">{{ t('common.loading') }}</p>
+      <template v-else>
+        <div v-if="link" class="text-sm text-muted-foreground">
+          <p>{{ t('xprocessLink.numPedido') }}: {{ link.num_pedido }}</p>
+          <p v-if="link.status_xprocess">{{ t('xprocessLink.status') }}: {{ link.status_xprocess }}</p>
+          <p v-if="link.pending_review" class="text-amber-600">{{ t('xprocessLink.pendingReview') }}</p>
+        </div>
 
-    <div v-if="editable && (!link || link.resolved_at)" class="flex flex-col gap-2 sm:flex-row">
-      <div class="flex-1 space-y-1">
-        <Label>{{ t('xprocessLink.numPedido') }}</Label>
-        <Input v-model="numPedido" />
-      </div>
-      <div class="flex-1 space-y-1">
-        <Label>{{ t('xprocessLink.documento') }}</Label>
-        <Input v-model="documento" />
-      </div>
-      <Button class="self-end" :disabled="saving || !numPedido || !documento" @click="register">
-        {{ t('xprocessLink.register') }}
-      </Button>
-    </div>
+        <div v-if="editable && (!link || link.resolved_at)" class="flex flex-col gap-2 sm:flex-row">
+          <div class="flex-1 space-y-1">
+            <Label>{{ t('xprocessLink.numPedido') }}</Label>
+            <Input v-model="numPedido" />
+          </div>
+          <div class="flex-1 space-y-1">
+            <Label>{{ t('xprocessLink.documento') }}</Label>
+            <Input v-model="documento" />
+          </div>
+          <Button class="self-end" :disabled="saving || !numPedido || !documento" @click="register">
+            {{ t('xprocessLink.register') }}
+          </Button>
+        </div>
+      </template>
+    </template>
   </div>
 </template>
