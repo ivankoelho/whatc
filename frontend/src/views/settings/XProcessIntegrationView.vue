@@ -45,6 +45,8 @@ async function save() {
     apiKey.value = ''
     isConfigured.value = true
     toast.success(t('common.saved'))
+  } catch {
+    toast.error(t('xprocessIntegration.saveFailure'))
   } finally {
     saving.value = false
   }

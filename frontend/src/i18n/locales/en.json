@@ -1383,7 +1383,8 @@
     "testConnection": "Test connection",
     "testSuccess": "Connection successful",
     "testFailure": "Could not connect — check the URL and key",
-    "save": "Save"
+    "save": "Save",
+    "saveFailure": "Could not save the credential — try again"
   },
   "errors": {
     "generic": "Something went wrong. Please try again.",
