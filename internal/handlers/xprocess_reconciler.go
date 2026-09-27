@@ -270,7 +270,13 @@ func (p *XProcessReconciler) Stop() {
 	}
 }
 
+// maybeRun compares against the deployment's real local time (appLocation,
+// America/Bahia by default), not the server's bare wall clock. The
+// deployment environment runs with TZ=UTC, so a naive time.Now().Hour()
+// read as "2" is actually ~23:00 in the operation's real local time — well
+// before X2's own ~2h local reload (helpers.go's appLocation doc, design §3).
 func (p *XProcessReconciler) maybeRun(now time.Time) {
+	now = now.In(appLocation)
 	today := now.Format("2006-01-02")
 	if now.Hour() < p.triggerHour || p.lastRunDate == today {
 		return

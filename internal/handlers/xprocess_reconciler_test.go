@@ -333,15 +333,23 @@ func TestXProcessReconciler_RunsOnceAtTriggerHourNotBefore(t *testing.T) {
 	var runs int
 	reconciler := handlers.NewXProcessReconcilerForTest(app, func() { runs++ })
 
-	reconciler.MaybeRunForTest(time.Date(2026, 9, 27, 1, 59, 0, 0, time.UTC))
+	// maybeRun compares against the deployment's real local time
+	// (America/Bahia by default, see helpers.go's appLocation), not the
+	// server's bare wall clock (the deployment runs with TZ=UTC). These
+	// timestamps are expressed directly in that location so the test
+	// asserts real-world trigger-hour behavior, not UTC clock time.
+	bahia, err := time.LoadLocation("America/Bahia")
+	require.NoError(t, err)
+
+	reconciler.MaybeRunForTest(time.Date(2026, 9, 27, 1, 59, 0, 0, bahia))
 	assert.Equal(t, 0, runs, "must not run before the trigger hour")
 
-	reconciler.MaybeRunForTest(time.Date(2026, 9, 27, 2, 5, 0, 0, time.UTC))
+	reconciler.MaybeRunForTest(time.Date(2026, 9, 27, 2, 5, 0, 0, bahia))
 	assert.Equal(t, 1, runs)
 
-	reconciler.MaybeRunForTest(time.Date(2026, 9, 27, 3, 0, 0, 0, time.UTC))
+	reconciler.MaybeRunForTest(time.Date(2026, 9, 27, 3, 0, 0, 0, bahia))
 	assert.Equal(t, 1, runs, "must not run twice on the same calendar day")
 
-	reconciler.MaybeRunForTest(time.Date(2026, 9, 28, 2, 5, 0, 0, time.UTC))
+	reconciler.MaybeRunForTest(time.Date(2026, 9, 28, 2, 5, 0, 0, bahia))
 	assert.Equal(t, 2, runs, "must run again the next day")
 }
