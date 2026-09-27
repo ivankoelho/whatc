@@ -6,6 +6,10 @@ import { xprocessIntegrationService } from '@/services/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { PageHeader } from '@/components/shared'
+import { Plug, Loader2 } from 'lucide-vue-next'
 
 const { t } = useI18n()
 
@@ -44,7 +48,7 @@ async function save() {
     await xprocessIntegrationService.upsert({ base_url: baseUrl.value, api_key: apiKey.value })
     apiKey.value = ''
     isConfigured.value = true
-    toast.success(t('common.saved'))
+    toast.success(t('xprocessIntegration.saveSuccess'))
   } catch {
     toast.error(t('xprocessIntegration.saveFailure'))
   } finally {
@@ -56,30 +60,51 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="max-w-lg space-y-4">
-    <div>
-      <h3 class="text-lg font-medium">{{ t('xprocessIntegration.title') }}</h3>
-      <p class="text-sm text-muted-foreground">{{ t('xprocessIntegration.description') }}</p>
-    </div>
+  <div class="flex flex-col h-full">
+    <PageHeader
+      :title="t('xprocessIntegration.title')"
+      :description="t('xprocessIntegration.description')"
+      :icon="Plug"
+      icon-gradient="bg-gradient-to-br from-teal-500 to-cyan-600 shadow-teal-500/20"
+      back-link="/settings/integrations"
+    />
 
-    <div class="space-y-2">
-      <Label for="xprocess-base-url">{{ t('xprocessIntegration.baseUrl') }}</Label>
-      <Input id="xprocess-base-url" v-model="baseUrl" />
-    </div>
+    <ScrollArea class="flex-1">
+      <div class="p-6">
+        <Card class="max-w-lg">
+          <CardHeader>
+            <CardTitle>{{ t('xprocessIntegration.credentialTitle') }}</CardTitle>
+            <CardDescription>{{ t('xprocessIntegration.credentialDescription') }}</CardDescription>
+          </CardHeader>
+          <CardContent class="space-y-4">
+            <div class="space-y-2">
+              <Label for="xprocess-base-url">{{ t('xprocessIntegration.baseUrl') }}</Label>
+              <Input id="xprocess-base-url" v-model="baseUrl" />
+            </div>
 
-    <div class="space-y-2">
-      <Label for="xprocess-api-key">{{ t('xprocessIntegration.apiKey') }}</Label>
-      <Input id="xprocess-api-key" v-model="apiKey" type="password"
-        :placeholder="isConfigured ? t('xprocessIntegration.apiKeyConfigured') : ''" />
-    </div>
+            <div class="space-y-2">
+              <Label for="xprocess-api-key">{{ t('xprocessIntegration.apiKey') }}</Label>
+              <Input
+                id="xprocess-api-key"
+                v-model="apiKey"
+                type="password"
+                :placeholder="isConfigured ? t('xprocessIntegration.apiKeyConfigured') : ''"
+              />
+            </div>
 
-    <div class="flex gap-2">
-      <Button variant="outline" :disabled="testing" @click="testConnection">
-        {{ t('xprocessIntegration.testConnection') }}
-      </Button>
-      <Button :disabled="saving || !apiKey" @click="save">
-        {{ t('xprocessIntegration.save') }}
-      </Button>
-    </div>
+            <div class="flex gap-2 pt-2">
+              <Button variant="outline" :disabled="testing" @click="testConnection">
+                <Loader2 v-if="testing" class="h-4 w-4 mr-2 animate-spin" />
+                {{ t('xprocessIntegration.testConnection') }}
+              </Button>
+              <Button :disabled="saving || !apiKey" @click="save">
+                <Loader2 v-if="saving" class="h-4 w-4 mr-2 animate-spin" />
+                {{ t('xprocessIntegration.save') }}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </ScrollArea>
   </div>
 </template>

@@ -1,19 +1,15 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { toast } from 'vue-sonner'
-import { salesOpportunityXProcessLinkService, type SalesOpportunityXProcessLink } from '@/services/api'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { salesOpportunityXProcessLinkService, type SalesOpportunityXProcessLink } from '@/services/api'
+import { formatCurrency } from '@/lib/currency'
+import XProcessLinkDialog from '@/components/sales/XProcessLinkDialog.vue'
 
 const props = defineProps<{ opportunityId: string; editable: boolean }>()
 
 const { t } = useI18n()
 const link = ref<SalesOpportunityXProcessLink | null>(null)
-const numPedido = ref('')
-const documento = ref('')
-const saving = ref(false)
 
 // Collapsed by default: a board can render up to 100 cards at once, and this
 // section's GET is only useful once the user actually looks at it. `loaded`
@@ -21,23 +17,13 @@ const saving = ref(false)
 const expanded = ref(false)
 const loading = ref(false)
 const loaded = ref(false)
+const dialogOpen = ref(false)
 
 async function load() {
   loading.value = true
   try {
     const res = await salesOpportunityXProcessLinkService.get(props.opportunityId)
     link.value = res.data.data
-    // An open link (resolved_at nulo) is editable in place (design §6) — show
-    // the agent what's already registered instead of an empty form. A
-    // resolved link is immutable, so registering again is a NEW vínculo:
-    // leave the fields blank rather than pre-filling historical data.
-    if (link.value && !link.value.resolved_at) {
-      numPedido.value = link.value.num_pedido ?? ''
-      documento.value = link.value.documento ?? ''
-    } else {
-      numPedido.value = ''
-      documento.value = ''
-    }
   } catch {
     link.value = null
   } finally {
@@ -53,22 +39,14 @@ function toggle() {
   }
 }
 
-async function register() {
-  if (!numPedido.value || !documento.value) return
-  saving.value = true
-  try {
-    await salesOpportunityXProcessLinkService.upsert(props.opportunityId, {
-      num_pedido: numPedido.value, documento: documento.value,
-    })
-    toast.success(t('xprocessLink.registered'))
-    numPedido.value = ''
-    documento.value = ''
-    await load()
-  } catch {
-    toast.error(t('xprocessLink.registerFailure'))
-  } finally {
-    saving.value = false
-  }
+// The Kanban card is ~250px wide — nowhere near enough for two labeled
+// inputs side by side (Tailwind's sm: breakpoint reacts to the page
+// viewport, not this card's own width, so it used to force a cramped
+// two-column layout even on a wide desktop screen). The registration form
+// now lives in its own Dialog, which has real width to work with; this
+// component only ever shows a compact, always-legible summary line.
+async function onRegistered() {
+  await load()
 }
 </script>
 
@@ -87,25 +65,30 @@ async function register() {
     <template v-if="expanded">
       <p v-if="loading" class="text-sm text-muted-foreground">{{ t('common.loading') }}</p>
       <template v-else>
-        <div v-if="link" class="text-sm text-muted-foreground">
-          <p>{{ t('xprocessLink.numPedido') }}: {{ link.num_pedido }}</p>
-          <p v-if="link.status_xprocess">{{ t('xprocessLink.status') }}: {{ link.status_xprocess }}</p>
-          <p v-if="link.pending_review" class="text-amber-600">{{ t('xprocessLink.pendingReview') }}</p>
-        </div>
+        <dl v-if="link" class="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 text-sm">
+          <dt class="text-muted-foreground">{{ t('xprocessLink.numPedido') }}</dt>
+          <dd>{{ link.num_pedido }}</dd>
+          <template v-if="link.status_xprocess">
+            <dt class="text-muted-foreground">{{ t('xprocessLink.status') }}</dt>
+            <dd>{{ link.status_xprocess }}</dd>
+          </template>
+          <template v-if="link.valor_vendido != null">
+            <dt class="text-muted-foreground">{{ t('xprocessLink.valorConfirmado') }}</dt>
+            <dd>{{ formatCurrency(link.valor_vendido) }}</dd>
+          </template>
+        </dl>
+        <p v-if="link?.pending_review" class="text-sm text-amber-600">{{ t('xprocessLink.pendingReview') }}</p>
 
-        <div v-if="editable" class="flex flex-col gap-2 sm:flex-row">
-          <div class="flex-1 space-y-1">
-            <Label>{{ link && link.resolved_at ? t('xprocessLink.numPedidoNew') : t('xprocessLink.numPedido') }}</Label>
-            <Input v-model="numPedido" />
-          </div>
-          <div class="flex-1 space-y-1">
-            <Label>{{ t('xprocessLink.documento') }}</Label>
-            <Input v-model="documento" />
-          </div>
-          <Button class="self-end" :disabled="saving || !numPedido || !documento" @click="register">
-            {{ link && link.resolved_at ? t('xprocessLink.registerNew') : t('xprocessLink.register') }}
-          </Button>
-        </div>
+        <Button v-if="editable" size="sm" variant="outline" class="w-full" @click="dialogOpen = true">
+          {{ link && !link.resolved_at ? t('xprocessLink.editButton') : t('xprocessLink.register') }}
+        </Button>
+
+        <XProcessLinkDialog
+          v-model:open="dialogOpen"
+          :opportunity-id="opportunityId"
+          :link="link"
+          @registered="onRegistered"
+        />
       </template>
     </template>
   </div>

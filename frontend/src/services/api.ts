@@ -1561,6 +1561,8 @@ export interface SalesOpportunityEvent {
 export const salesOpportunitiesService = {
   list: (params?: Record<string, string>) =>
     api.get<ApiEnvelope<{ opportunities: SalesOpportunity[]; total: number; has_more: boolean }>>('/sales-opportunities', { params }),
+  create: (data: { contact_id: string; interest?: string; estimated_value?: number }) =>
+    api.post<ApiEnvelope<SalesOpportunity>>('/sales-opportunities', data),
   get: (id: string) => api.get<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}`),
   changeStage: (id: string, stage: SalesOpportunityStage) =>
     api.put<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/stage`, { stage }),

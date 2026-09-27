@@ -22,7 +22,11 @@ import (
 // fails with a unique_violation, which this function treats identically to
 // "found an existing open one" — reload and append retriggered — so the
 // caller never sees a race error, only the idempotent result (spec §5.3).
-func (a *App) createOrRetriggerSalesOpportunity(contact *models.Contact, sourceTransferID *uuid.UUID) (*models.SalesOpportunity, error) {
+// source/interest/estimatedValue let a manual creation (CreateSalesOpportunity,
+// source=manual, agent-supplied interest/value) and the chatbot's automatic
+// one (source=system, both blank) share this exact idempotency/counter/event
+// logic instead of duplicating it (spec's "mesmo modelo" requirement).
+func (a *App) createOrRetriggerSalesOpportunity(contact *models.Contact, sourceTransferID *uuid.UUID, source models.SalesOpportunityEventSource, interest string, estimatedValue *float64) (*models.SalesOpportunity, error) {
 	var existing models.SalesOpportunity
 	err := a.DB.Where("organization_id = ? AND contact_id = ? AND status = ?",
 		contact.OrganizationID, contact.ID, models.SalesOpportunityStatusAberta).
@@ -32,7 +36,7 @@ func (a *App) createOrRetriggerSalesOpportunity(contact *models.Contact, sourceT
 			OrganizationID:     contact.OrganizationID,
 			SalesOpportunityID: existing.ID,
 			Type:               models.SalesOpportunityEventRetriggered,
-			Source:             models.SalesOpportunityEventSourceSystem,
+			Source:             source,
 		}).Error; err != nil {
 			return nil, err
 		}
@@ -49,6 +53,8 @@ func (a *App) createOrRetriggerSalesOpportunity(contact *models.Contact, sourceT
 		AssignedUserID:   contact.AssignedUserID,
 		Stage:            models.SalesOpportunityStagePotencial,
 		Status:           models.SalesOpportunityStatusAberta,
+		Interest:         interest,
+		EstimatedValue:   estimatedValue,
 		StageChangedAt:   time.Now(),
 	}
 
@@ -65,7 +71,7 @@ func (a *App) createOrRetriggerSalesOpportunity(contact *models.Contact, sourceT
 			OrganizationID:     contact.OrganizationID,
 			SalesOpportunityID: opp.ID,
 			Type:               models.SalesOpportunityEventOpened,
-			Source:             models.SalesOpportunityEventSourceSystem,
+			Source:             source,
 		}).Error
 	})
 
@@ -83,7 +89,7 @@ func (a *App) createOrRetriggerSalesOpportunity(contact *models.Contact, sourceT
 				OrganizationID:     contact.OrganizationID,
 				SalesOpportunityID: winner.ID,
 				Type:               models.SalesOpportunityEventRetriggered,
-				Source:             models.SalesOpportunityEventSourceSystem,
+				Source:             source,
 			}).Error; err != nil {
 				return nil, err
 			}
@@ -93,6 +99,50 @@ func (a *App) createOrRetriggerSalesOpportunity(contact *models.Contact, sourceT
 	}
 
 	return &opp, nil
+}
+
+type createSalesOpportunityRequest struct {
+	ContactID      uuid.UUID `json:"contact_id"`
+	Interest       string    `json:"interest"`
+	EstimatedValue *float64  `json:"estimated_value"`
+}
+
+// CreateSalesOpportunity lets an agent open a funnel entry by hand from the
+// contact's panel, instead of waiting for the chatbot's create_opportunity
+// button (spec item E). Reuses createOrRetriggerSalesOpportunity so a manual
+// creation is governed by the exact same one-open-opportunity-per-contact
+// rule and event log as the automatic path — if the contact already has an
+// open opportunity, this returns that one (with a "retriggered" event)
+// instead of erroring, same as the chatbot would.
+func (a *App) CreateSalesOpportunity(r *fastglue.Request) error {
+	// userID is only needed for the permission check here — the opportunity's
+	// assignee stays contact.AssignedUserID (spec §3's existing rule), not
+	// whoever clicked "create".
+	orgID, _, err := a.requireAuth(r, models.ResourceSalesOpportunities, models.ActionWrite)
+	if err != nil {
+		return nil
+	}
+
+	var req createSalesOpportunityRequest
+	if err := a.decodeRequest(r, &req); err != nil {
+		return nil
+	}
+	if req.ContactID == uuid.Nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "contact_id is required", nil, "")
+	}
+
+	contact, err := findByIDAndOrg[models.Contact](a.DB, r, req.ContactID, orgID, "Contact")
+	if err != nil {
+		return nil
+	}
+
+	opp, err := a.createOrRetriggerSalesOpportunity(contact, nil, models.SalesOpportunityEventSourceManual, req.Interest, req.EstimatedValue)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create opportunity", nil, "")
+	}
+
+	a.DB.Preload("Contact").First(opp, "id = ?", opp.ID)
+	return r.SendEnvelope(opp)
 }
 
 // assignOpenSalesOpportunityToAgent mirrors, for a contact's open funnel
@@ -195,6 +245,9 @@ func (a *App) ListSalesOpportunities(r *fastglue.Request) error {
 	}
 	if assignedUserID := string(r.RequestCtx.QueryArgs().Peek("assigned_user_id")); assignedUserID != "" {
 		query = query.Where("sales_opportunities.assigned_user_id = ?", assignedUserID)
+	}
+	if contactID := string(r.RequestCtx.QueryArgs().Peek("contact_id")); contactID != "" {
+		query = query.Where("sales_opportunities.contact_id = ?", contactID)
 	}
 
 	var total int64

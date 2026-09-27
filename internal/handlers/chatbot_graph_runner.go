@@ -301,7 +301,7 @@ func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 				// duplicate, no stage change (spec §5.2). Log-and-continue:
 				// a failure here must never block the bot from advancing.
 				if create, _ := b["create_opportunity"].(bool); create {
-					if _, err := a.createOrRetriggerSalesOpportunity(ctx.contact, nil); err != nil {
+					if _, err := a.createOrRetriggerSalesOpportunity(ctx.contact, nil, models.SalesOpportunityEventSourceSystem, "", nil); err != nil {
 						a.Log.Error("buttons node failed to create sales opportunity",
 							"node", node.ID, "contact", ctx.contact.ID, "error", err)
 					}

@@ -791,6 +791,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/occurrences/{id}/documents/{docId}/attachment", app.ServeOccurrenceDocumentAttachment)
 
 	// CRM — central de vendas
+	g.POST("/api/sales-opportunities", app.CreateSalesOpportunity)
 	g.GET("/api/sales-opportunities", app.ListSalesOpportunities)
 	g.GET("/api/sales-opportunities/{id}", app.GetSalesOpportunity)
 	g.GET("/api/sales-opportunities/{id}/events", app.ListSalesOpportunityEvents)

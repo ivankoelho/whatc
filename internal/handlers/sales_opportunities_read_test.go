@@ -49,6 +49,45 @@ func TestListSalesOpportunities_AgentSeesOnlyOwn(t *testing.T) {
 	assert.Equal(t, contactMine.ProfileName, resp.Data.Opportunities[0].Contact.ProfileName)
 }
 
+// TestListSalesOpportunities_FilterByContactID covers the filter the
+// contact-side panel (ChatView) uses to show "this contact's opportunities"
+// — added alongside the panel itself, since the endpoint had no contact_id
+// filter before (only stage/status/assigned_user_id).
+func TestListSalesOpportunities_FilterByContactID(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agentRole := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "agent", []string{"sales_opportunities:read", "sales_opportunities:write", "sales_opportunities:view_all"})
+	agent := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&agentRole.ID))
+	contactA := testutil.CreateTestContact(t, app.DB, org.ID)
+	contactB := testutil.CreateTestContact(t, app.DB, org.ID)
+
+	require.NoError(t, app.DB.Create(&models.SalesOpportunity{
+		OrganizationID: org.ID, ContactID: contactA.ID, OpportunityNumber: "OPP-20260917-000010",
+		Stage: models.SalesOpportunityStagePotencial, Status: models.SalesOpportunityStatusAberta,
+		AssignedUserID: &agent.ID, StageChangedAt: time.Now(),
+	}).Error)
+	require.NoError(t, app.DB.Create(&models.SalesOpportunity{
+		OrganizationID: org.ID, ContactID: contactB.ID, OpportunityNumber: "OPP-20260917-000011",
+		Stage: models.SalesOpportunityStagePotencial, Status: models.SalesOpportunityStatusAberta,
+		AssignedUserID: &agent.ID, StageChangedAt: time.Now(),
+	}).Error)
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, agent.ID)
+	testutil.SetQueryParam(req, "contact_id", contactA.ID.String())
+	require.NoError(t, app.ListSalesOpportunities(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var resp struct {
+		Data struct {
+			Opportunities []models.SalesOpportunity `json:"opportunities"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &resp))
+	require.Len(t, resp.Data.Opportunities, 1)
+	assert.Equal(t, contactA.ID, resp.Data.Opportunities[0].ContactID)
+}
+
 func TestListSalesOpportunities_ManagerWithViewAllSeesEverything(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)

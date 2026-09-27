@@ -69,6 +69,7 @@ const closedColumns = computed<Column<SalesOpportunity>[]>(() => [
   { key: 'contact', label: t('sales.columnContact') },
   { key: 'estimated_value', label: t('sales.columnEstimatedValue') },
   { key: 'status', label: t('sales.columnStatus') },
+  { key: 'conversion_source', label: t('sales.columnConversionSource') },
   { key: 'closed_at', label: t('sales.columnClosedDate') },
   { key: 'loss_reason', label: t('sales.columnLossReason') },
 ])
@@ -254,6 +255,12 @@ onMounted(fetchWallet)
                   <Badge :variant="item.status === 'convertida' ? 'success' : 'destructive'">
                     {{ item.status === 'convertida' ? $t('sales.statusConvertida') : $t('sales.statusPerdida') }}
                   </Badge>
+                </template>
+                <template #cell-conversion_source="{ item }">
+                  <span v-if="item.status === 'convertida' && item.conversion_source">
+                    {{ item.conversion_source === 'xprocess' ? $t('sales.conversionSourceXProcess') : $t('sales.conversionSourceManual') }}
+                  </span>
+                  <span v-else>—</span>
                 </template>
                 <template #cell-closed_at="{ item }">
                   {{ formatDate(item.converted_at || item.lost_at || item.stage_changed_at) }}
