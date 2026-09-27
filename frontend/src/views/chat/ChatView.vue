@@ -84,6 +84,7 @@ import {
   Loader2,
   Zap,
   Ticket,
+  ArrowLeft,
   BarChart,
   Link,
   Mail,
@@ -98,6 +99,7 @@ import {
 import { getInitials, getAvatarGradient } from '@/lib/utils'
 import { useColorMode } from '@/composables/useColorMode'
 import { useInfiniteScroll } from '@/composables/useInfiniteScroll'
+import { useIsMobile } from '@/composables/useIsMobile'
 import CannedResponsePicker from '@/components/chat/CannedResponsePicker.vue'
 import ConversationStatusFilter from '@/components/chat/ConversationStatusFilter.vue'
 import ConversationListItem from '@/components/chat/ConversationListItem.vue'
@@ -145,7 +147,20 @@ const newMessagesCount = ref(0)
 const firstUnreadId = ref<string | null>(null)
 const isAtBottom = ref(true)
 const SCROLL_BOTTOM_THRESHOLD = 80
-const isInfoPanelOpen = ref(true)
+// Below md (768px): one pane at a time (list -> conversation -> info) with
+// a back button, instead of the desktop's fixed-width 3-column layout —
+// the columns' own widths (contactsWidth, ContactInfoPanel's own
+// panelWidth) are inline `style`s a `md:` class can't override, so this
+// drives which pane is visible via v-if/class instead of pure CSS.
+// Declared before isInfoPanelOpen below, which needs its initial value.
+const isMobile = useIsMobile()
+
+// Desktop: default open, and auto-reopens per contact when that contact has
+// configured panel sections (line ~800). Mobile: default closed — opening
+// it there means fully replacing the conversation pane, not a bonus 3rd
+// column, so it must be an explicit tap, never an automatic side effect of
+// switching contacts.
+const isInfoPanelOpen = ref(!isMobile.value)
 const isNotesPanelOpen = ref(false)
 const contactSessionData = ref<any>(null)
 
@@ -781,7 +796,10 @@ async function selectContact(id: string) {
     ])
     if (sessionResult) {
       contactSessionData.value = sessionResult.data.data || sessionResult.data
-      if (contactSessionData.value?.panel_config?.sections?.length > 0) {
+      // Mobile: never auto-open (see isInfoPanelOpen's declaration) — it
+      // would hijack navigation, jumping straight past the conversation
+      // the agent just tapped into.
+      if (!isMobile.value && contactSessionData.value?.panel_config?.sections?.length > 0) {
         isInfoPanelOpen.value = true
       }
     } else {
@@ -847,6 +865,13 @@ function handleContactClick(contact: Contact) {
   // watcher above, which fires for every route into this view (this click,
   // the WS toast's "View" action, agent-transfer navigation, deep links).
   router.push(`/chat/${contact.id}`)
+}
+
+// Mobile back button (Chat Area's header): returns to the full-width
+// Contacts List pane, same as clearing the route the desktop layout never
+// needed to.
+function handleMobileBack() {
+  router.push('/chat')
 }
 
 async function sendMessage() {
@@ -1875,13 +1900,17 @@ async function sendMediaMessage() {
 
 <template>
   <div class="flex h-full bg-[#0a0a0b] light:bg-gray-50">
-    <!-- Contacts List -->
+    <!-- Contacts List — on mobile, this pane takes the full screen and
+         hides once a contact is selected (Chat Area below takes over). -->
     <div
+      v-if="!isMobile || !contactsStore.currentContact"
       class="relative shrink-0 border-r border-white/[0.08] light:border-gray-200 flex flex-col bg-[#0a0a0b] light:bg-white"
-      :style="{ width: contactsWidth + 'px' }"
+      :class="isMobile && 'w-full'"
+      :style="!isMobile && { width: contactsWidth + 'px' }"
     >
-      <!-- Drag-to-resize handle (right edge) -->
+      <!-- Drag-to-resize handle (right edge) — desktop only, the mobile pane is always full-width -->
       <div
+        v-if="!isMobile"
         class="absolute top-0 right-0 z-20 h-full w-1 cursor-col-resize select-none transition-colors hover:bg-emerald-500/40"
         :class="{ 'bg-emerald-500/50': isResizingContacts }"
         role="separator"
@@ -2017,8 +2046,14 @@ async function sendMediaMessage() {
       </ScrollArea>
     </div>
 
-    <!-- Chat Area -->
-    <div class="flex-1 flex flex-col bg-[#0f0f10] light:bg-gray-50">
+    <!-- Chat Area — on mobile, only rendered once a contact is picked (the
+         Contacts List above takes the full screen otherwise), and hidden in
+         turn once isInfoPanelOpen hands the screen to ContactInfoPanel. -->
+    <div
+      v-if="!isMobile || contactsStore.currentContact"
+      class="flex-1 flex flex-col bg-[#0f0f10] light:bg-gray-50"
+      :class="isMobile && contactsStore.currentContact && isInfoPanelOpen && 'hidden'"
+    >
       <!-- No Contact Selected -->
       <div
         v-if="!contactsStore.currentContact"
@@ -2038,6 +2073,16 @@ async function sendMediaMessage() {
         <!-- Chat Header -->
         <div class="h-14 flex-shrink-0 px-4 border-b border-white/[0.08] light:border-gray-200 flex items-center justify-between bg-[#0f0f10] light:bg-white">
           <div class="flex items-center gap-2">
+            <Button
+              v-if="isMobile"
+              variant="ghost"
+              size="icon"
+              class="h-8 w-8 -ml-2 shrink-0 text-white/50 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100"
+              :aria-label="$t('common.back')"
+              @click="handleMobileBack"
+            >
+              <ArrowLeft class="h-4 w-4" />
+            </Button>
             <Avatar class="h-8 w-8 ring-2 ring-white/[0.1] light:ring-gray-200">
               <AvatarImage :src="contactsStore.currentContact.avatar_url" />
               <AvatarFallback :class="'text-xs bg-gradient-to-br text-white ' + getAvatarGradient(contactsStore.currentContact.name || contactsStore.currentContact.phone_number)">
