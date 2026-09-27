@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"fmt"
 	"maps"
 	"strings"
 
@@ -46,6 +47,24 @@ func (a *App) resolveIntegrationSecrets(orgID uuid.UUID, config map[string]any) 
 	if err := a.DB.Where("organization_id = ? AND is_active = ?", orgID, true).First(&integ).Error; err != nil {
 		return nil, errors.New("xprocess integration is not configured for this organization")
 	}
+
+	// Fail closed: only substitute the key into a request that actually
+	// targets the integration's own base_url. Without this, anyone who can
+	// edit a flow (a much lower bar than xprocess_integration:write, which
+	// gates the credential itself) could point an api_call node at a server
+	// they control, put the placeholder in a header, and have the decrypted
+	// key handed to them. Checked against the RAW, pre-template url — never
+	// a rendered one — and the boundary requires the trailing "/"
+	// specifically: a naive strings.HasPrefix against "https://host.com"
+	// (no trailing slash) would also accept the userinfo trick
+	// "https://host.com@evil.com/...", which requiring ".../" as the
+	// boundary closes off.
+	rawURL, _ := config["url"].(string)
+	allowedPrefix := strings.TrimRight(integ.BaseURL, "/") + "/"
+	if !strings.HasPrefix(rawURL, allowedPrefix) {
+		return nil, fmt.Errorf("xprocess: api_call url %q does not target the configured integration base_url", rawURL)
+	}
+
 	integ.DecryptSecrets(a.Config.App.EncryptionKey)
 
 	resolvedHeaders := make(map[string]any, len(headers))

