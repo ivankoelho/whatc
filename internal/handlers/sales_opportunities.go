@@ -26,7 +26,16 @@ import (
 // source=manual, agent-supplied interest/value) and the chatbot's automatic
 // one (source=system, both blank) share this exact idempotency/counter/event
 // logic instead of duplicating it (spec's "mesmo modelo" requirement).
-func (a *App) createOrRetriggerSalesOpportunity(contact *models.Contact, sourceTransferID *uuid.UUID, source models.SalesOpportunityEventSource, interest string, estimatedValue *float64) (*models.SalesOpportunity, error) {
+//
+// assignedUserIDOverride, when non-nil, wins over contact.AssignedUserID for
+// a genuinely NEW opportunity only — spec item E's approved answer was
+// "responsável = usuário que criou" for manual creation, deliberately
+// different from the chatbot's own "inherits the contact's current agent"
+// rule. It is never applied on the retrigger path: retriggering an
+// already-open opportunity must not reassign it away from whoever already
+// owns it (same "reassigning the contact never moves this opportunity"
+// invariant the chatbot path already relies on).
+func (a *App) createOrRetriggerSalesOpportunity(contact *models.Contact, sourceTransferID *uuid.UUID, source models.SalesOpportunityEventSource, interest string, estimatedValue *float64, assignedUserIDOverride *uuid.UUID) (*models.SalesOpportunity, error) {
 	var existing models.SalesOpportunity
 	err := a.DB.Where("organization_id = ? AND contact_id = ? AND status = ?",
 		contact.OrganizationID, contact.ID, models.SalesOpportunityStatusAberta).
@@ -46,11 +55,15 @@ func (a *App) createOrRetriggerSalesOpportunity(contact *models.Contact, sourceT
 		return nil, err
 	}
 
+	assignedUserID := contact.AssignedUserID
+	if assignedUserIDOverride != nil {
+		assignedUserID = assignedUserIDOverride
+	}
 	opp := models.SalesOpportunity{
 		OrganizationID:   contact.OrganizationID,
 		ContactID:        contact.ID,
 		SourceTransferID: sourceTransferID,
-		AssignedUserID:   contact.AssignedUserID,
+		AssignedUserID:   assignedUserID,
 		Stage:            models.SalesOpportunityStagePotencial,
 		Status:           models.SalesOpportunityStatusAberta,
 		Interest:         interest,
@@ -115,10 +128,7 @@ type createSalesOpportunityRequest struct {
 // open opportunity, this returns that one (with a "retriggered" event)
 // instead of erroring, same as the chatbot would.
 func (a *App) CreateSalesOpportunity(r *fastglue.Request) error {
-	// userID is only needed for the permission check here — the opportunity's
-	// assignee stays contact.AssignedUserID (spec §3's existing rule), not
-	// whoever clicked "create".
-	orgID, _, err := a.requireAuth(r, models.ResourceSalesOpportunities, models.ActionWrite)
+	orgID, userID, err := a.requireAuth(r, models.ResourceSalesOpportunities, models.ActionWrite)
 	if err != nil {
 		return nil
 	}
@@ -136,7 +146,7 @@ func (a *App) CreateSalesOpportunity(r *fastglue.Request) error {
 		return nil
 	}
 
-	opp, err := a.createOrRetriggerSalesOpportunity(contact, nil, models.SalesOpportunityEventSourceManual, req.Interest, req.EstimatedValue)
+	opp, err := a.createOrRetriggerSalesOpportunity(contact, nil, models.SalesOpportunityEventSourceManual, req.Interest, req.EstimatedValue, &userID)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create opportunity", nil, "")
 	}
