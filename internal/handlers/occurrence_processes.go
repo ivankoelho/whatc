@@ -107,11 +107,11 @@ var defaultOccurrenceProcesses = []occurrenceProcessSeed{
 			"A definição depende da análise, por isso não conseguimos antecipar o resultado neste momento. Nossa equipe acompanhará todas as etapas e manterá você informado.",
 	},
 	{
-		name:         "Avaria — comunicação e abertura",
+		name:         "Avaria: comunicação e abertura",
 		category:     "Troca de Produto",
 		whatHappened: "Produto com Avaria", // existing default — exact match
 		guidance: "Registrar sem classificar a causa e informar o número do ticket ao cliente.\n" +
-			"Aplicar apenas a triagem de exclusão — o atendente NÃO classifica a causa.\n" +
+			"Aplicar apenas a triagem de exclusão. O atendente NÃO classifica a causa.\n" +
 			"Abrir o ticket e informar o número ao cliente.\n" +
 			"Solicitar as fotos e a descrição.\n" +
 			"Puxar as imagens da entrega registradas no app do motorista.",

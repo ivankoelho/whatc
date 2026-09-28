@@ -35,14 +35,14 @@ func TestOccurrenceProcesses_SeedsFiveRealProcessesOnFirstRead(t *testing.T) {
 		"Devolução após 24h",
 		"Material já separado ou em romaneio",
 		"Divergência no ato do recebimento",
-		"Avaria — comunicação e abertura",
+		"Avaria: comunicação e abertura",
 		"Desistência sem avaria",
 	}, names)
 
 	// The avaria process must carry its real restrictions/guidance text, not a
 	// placeholder — proof the transcription from the validated HTML landed.
 	var avaria models.OccurrenceProcess
-	require.NoError(t, app.DB.Where("organization_id = ? AND name = ?", org.ID, "Avaria — comunicação e abertura").
+	require.NoError(t, app.DB.Where("organization_id = ? AND name = ?", org.ID, "Avaria: comunicação e abertura").
 		First(&avaria).Error)
 	assert.Contains(t, avaria.Restrictions, "Vamos trocar seu produto.")
 	assert.NotNil(t, avaria.ResponseMinutes)

@@ -40,7 +40,7 @@ func TestCreateOccurrence_WithProcessID_OverridesSLAAndIsReturnedInResponse(t *t
 	require.NoError(t, app.EnsureDefaultOccurrenceProcessesForTest(org.ID))
 
 	var process models.OccurrenceProcess
-	require.NoError(t, app.DB.Where("organization_id = ? AND name = ?", org.ID, "Avaria — comunicação e abertura").First(&process).Error)
+	require.NoError(t, app.DB.Where("organization_id = ? AND name = ?", org.ID, "Avaria: comunicação e abertura").First(&process).Error)
 	require.NotNil(t, process.ResponseMinutes)
 
 	req := createOccurrenceWith(t, app, org.ID, user.ID, contact.ID, map[string]any{"process_id": process.ID.String()})
