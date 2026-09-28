@@ -138,15 +138,9 @@ const initiateSSO = (provider: string) => {
               <MessageSquare v-else class="h-7 w-7 text-white" />
             </div>
           </div>
-          <h2 class="text-2xl font-bold text-white light:text-gray-900">
-            {{ systemName ? `${$t('auth.welcomeTitle')} — ${systemName}` : $t('auth.welcomeTitle') }}
+          <h2 class="text-2xl font-bold text-white light:text-gray-900 leading-snug">
+            {{ $t('auth.welcomeTitle') }}<template v-if="systemName"><br />{{ systemName }}</template>
           </h2>
-          <p class="text-sm text-white/50 light:text-gray-500">
-            {{ $t('auth.noAccount') }}
-            <RouterLink to="/register" class="text-emerald-400 light:text-emerald-600 hover:underline">
-              {{ $t('auth.signUp') }}
-            </RouterLink>
-          </p>
         </div>
 
         <form @submit.prevent="handleLogin">
@@ -193,7 +187,7 @@ const initiateSSO = (provider: string) => {
         </form>
 
         <!-- SSO Section -->
-        <div v-if="ssoProviders.length > 0" class="px-8 pb-8 space-y-3">
+        <div v-if="ssoProviders.length > 0" class="px-8 pt-4 space-y-3">
           <div class="relative my-2">
             <Separator class="bg-white/[0.08] light:bg-gray-200" />
             <span class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-[#161b18] light:bg-white px-2 text-xs text-white/40 light:text-gray-500">
@@ -215,7 +209,16 @@ const initiateSSO = (provider: string) => {
             {{ provider.name }}
           </Button>
         </div>
-        <div v-else class="pb-8" />
+
+        <!-- Cadastro fica no rodapé do card, não junto ao título -->
+        <div class="px-8 pb-8 pt-4">
+          <p class="text-sm text-center text-white/40 light:text-gray-500">
+            {{ $t('auth.noAccount') }}
+            <RouterLink to="/register" class="text-emerald-400 light:text-emerald-600 hover:underline">
+              {{ $t('auth.signUp') }}
+            </RouterLink>
+          </p>
+        </div>
         </div>
         </div>
       </div>

@@ -460,7 +460,7 @@ async function save() {
   if (!isAuthentication.value
     && ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(form.value.header_type)
     && !form.value.header_content) {
-    const fallback = `Upload a sample ${form.value.header_type.toLowerCase()} before saving — Meta requires it for template approval.`
+    const fallback = `Upload a sample ${form.value.header_type.toLowerCase()} before saving. Meta requires it for template approval.`
     toast.error(t('templates.headerMediaRequired', fallback))
     return
   }

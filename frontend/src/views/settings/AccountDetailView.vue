@@ -321,7 +321,7 @@ onMounted(async () => {
           <div class="flex items-center gap-2 text-green-400 light:text-green-600">
             <CheckCircle2 class="h-4 w-4" />
             <span class="text-sm font-medium">{{ $t('accounts.connected', 'Connected') }}</span>
-            <span v-if="testResult.display_phone_number" class="text-sm text-muted-foreground">— {{ testResult.display_phone_number }}</span>
+            <span v-if="testResult.display_phone_number" class="text-sm text-muted-foreground">· {{ testResult.display_phone_number }}</span>
             <Badge v-if="testResult.is_test_number" variant="outline" class="border-amber-600 text-amber-600">
               <TestTube2 class="h-3 w-3 mr-1" /> {{ $t('accounts.testNumber', 'Test Number') }}
             </Badge>
