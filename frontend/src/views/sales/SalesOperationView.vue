@@ -1,14 +1,17 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Skeleton } from '@/components/ui/skeleton'
-import { PageHeader, DataTable, ErrorState, type Column } from '@/components/shared'
-import { TrendingUp, Briefcase, Target, CheckCircle2, XCircle, Percent, AlertTriangle, Wallet, PiggyBank, TrendingDown } from 'lucide-vue-next'
+import { PageHeader, DataTable, ErrorState, DeleteConfirmDialog, type Column } from '@/components/shared'
+import { TrendingUp, Briefcase, Target, CheckCircle2, XCircle, Percent, AlertTriangle, Wallet, PiggyBank, TrendingDown, Trash2 } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { salesOpportunitiesService } from '@/services/api'
 import type { SalesOpportunity } from '@/services/api'
@@ -89,19 +92,85 @@ const valueChartOptions = {
   },
 }
 
-const closedOpportunities = computed(() =>
-  wallet.value.filter(o => o.status === 'convertida' || o.status === 'perdida')
+// This tab used to only show convertida/perdida. Now shows every phase —
+// wallet already fetches every status, statusFilter just narrows the view —
+// with a status selector, so it doubles as the one place to browse the
+// whole carteira instead of only closed deals.
+const isSuperAdmin = computed(() => authStore.user?.is_super_admin ?? false)
+const STATUS_FILTERS = ['all', 'aberta', 'convertida', 'perdida', 'cancelada'] as const
+type StatusFilter = typeof STATUS_FILTERS[number]
+const STATUS_FILTER_LABEL_KEY: Record<StatusFilter, string> = {
+  all: 'sales.statusFilterAll',
+  aberta: 'sales.statusAberta',
+  convertida: 'sales.statusConvertida',
+  perdida: 'sales.statusPerdida',
+  cancelada: 'sales.statusCancelada',
+}
+const statusFilter = ref<StatusFilter>('all')
+
+const filteredOpportunities = computed(() =>
+  statusFilter.value === 'all' ? wallet.value : wallet.value.filter(o => o.status === statusFilter.value)
 )
 
-const closedColumns = computed<Column<SalesOpportunity>[]>(() => [
-  { key: 'opportunity_number', label: t('sales.columnOpportunityNumber') },
-  { key: 'contact', label: t('sales.columnContact') },
-  { key: 'estimated_value', label: t('sales.columnEstimatedValue') },
-  { key: 'status', label: t('sales.columnStatus') },
-  { key: 'conversion_source', label: t('sales.columnConversionSource') },
-  { key: 'closed_at', label: t('sales.columnClosedDate') },
-  { key: 'loss_reason', label: t('sales.columnLossReason') },
-])
+const allColumns = computed<Column<SalesOpportunity>[]>(() => {
+  const cols: Column<SalesOpportunity>[] = []
+  if (isSuperAdmin.value) cols.push({ key: 'select', label: '', width: 'w-10' })
+  cols.push(
+    { key: 'opportunity_number', label: t('sales.columnOpportunityNumber') },
+    { key: 'contact', label: t('sales.columnContact') },
+    { key: 'stage', label: t('sales.columnStage') },
+    { key: 'estimated_value', label: t('sales.columnEstimatedValue') },
+    { key: 'status', label: t('sales.columnStatus') },
+    { key: 'conversion_source', label: t('sales.columnConversionSource') },
+    { key: 'closed_at', label: t('sales.columnClosedDate') },
+    { key: 'loss_reason', label: t('sales.columnLossReason') },
+  )
+  return cols
+})
+
+const STAGE_LABEL_KEY: Record<string, string> = {
+  potencial: 'sales.stagePotencial',
+  abrir_orcamento: 'sales.stageAbrirOrcamento',
+  direcionada: 'sales.stageDirecionada',
+}
+
+// Bulk delete (super admin only, mirrors the backend's own gate) — checkbox
+// selection lives here instead of on each Kanban card, so the card stays
+// visually clean and this list is the one deliberate "admin" surface.
+const selectedIds = ref<Set<string>>(new Set())
+const allSelected = computed(() =>
+  filteredOpportunities.value.length > 0 && filteredOpportunities.value.every(o => selectedIds.value.has(o.id))
+)
+function toggleSelectAll() {
+  selectedIds.value = allSelected.value ? new Set() : new Set(filteredOpportunities.value.map(o => o.id))
+}
+function toggleSelect(id: string) {
+  const next = new Set(selectedIds.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  selectedIds.value = next
+}
+watch(statusFilter, () => { selectedIds.value = new Set() })
+
+const bulkDeleteDialogOpen = ref(false)
+const bulkDeleting = ref(false)
+
+async function confirmBulkDelete() {
+  bulkDeleting.value = true
+  const ids = Array.from(selectedIds.value)
+  try {
+    await Promise.all(ids.map(id => salesOpportunitiesService.delete(id)))
+    toast.success(t('sales.opportunitiesDeleted', { count: ids.length }))
+    selectedIds.value = new Set()
+  } catch (e) {
+    toast.error(getErrorMessage(e, t('sales.opportunityDeleteFailed')))
+  } finally {
+    bulkDeleting.value = false
+    bulkDeleteDialogOpen.value = false
+    fetchWallet()
+    boardRef.value?.refresh()
+  }
+}
 
 const LOSS_REASON_LABEL_KEY: Record<string, string> = {
   cliente_desistiu: 'sales.lossReasonClienteDesistiu',
@@ -161,7 +230,7 @@ onMounted(fetchWallet)
       <div class="px-6 pt-4">
         <TabsList>
           <TabsTrigger value="wallet">{{ $t('sales.tabMyWallet') }}</TabsTrigger>
-          <TabsTrigger value="closed">{{ $t('sales.tabMyClosedSales') }}</TabsTrigger>
+          <TabsTrigger value="closed">{{ $t('sales.tabAllOpportunities') }}</TabsTrigger>
         </TabsList>
       </div>
 
@@ -305,26 +374,63 @@ onMounted(fetchWallet)
 
       <TabsContent value="closed" class="flex-1 min-h-0">
         <ScrollArea orientation="vertical" class="flex-1 h-full">
-          <div class="p-6">
-            <p class="text-sm text-white/50 light:text-gray-500 mb-4">{{ $t('sales.manualConversionNotice') }}</p>
+          <div class="p-6 space-y-4">
+            <div class="flex items-center justify-end gap-3 flex-wrap">
+              <Select v-model="statusFilter">
+                <SelectTrigger class="w-48">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem v-for="s in STATUS_FILTERS" :key="s" :value="s">
+                    {{ $t(STATUS_FILTER_LABEL_KEY[s]) }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <!-- Bulk selection/delete — super admin only, mirrors the
+                 backend's own gate; this is the one deliberate admin
+                 surface for it, keeping the Kanban card itself uncluttered. -->
+            <div v-if="isSuperAdmin" class="flex items-center gap-3">
+              <label class="flex items-center gap-2 text-sm cursor-pointer select-none">
+                <Checkbox :checked="allSelected" @update:checked="toggleSelectAll" />
+                {{ $t('sales.selectAll') }}
+              </label>
+              <Button
+                v-if="selectedIds.size > 0"
+                variant="destructive"
+                size="sm"
+                @click="bulkDeleteDialogOpen = true"
+              >
+                <Trash2 class="h-4 w-4 mr-2" />
+                {{ $t('sales.deleteSelected', { count: selectedIds.size }) }}
+              </Button>
+            </div>
+
             <Card>
               <DataTable
-                :items="closedOpportunities"
-                :columns="closedColumns"
+                :items="filteredOpportunities"
+                :columns="allColumns"
                 :is-loading="walletLoading"
                 :empty-icon="TrendingUp"
-                :empty-title="$t('sales.noClosedSales')"
-                item-name="closedSales"
+                :empty-title="$t('sales.noOpportunitiesFound')"
+                item-name="opportunities"
               >
+                <template #cell-select="{ item }">
+                  <Checkbox :checked="selectedIds.has(item.id)" @update:checked="toggleSelect(item.id)" />
+                </template>
                 <template #cell-contact="{ item }">
                   {{ item.contact?.profile_name || item.contact_id }}
+                </template>
+                <template #cell-stage="{ item }">
+                  {{ $t(STAGE_LABEL_KEY[item.stage]) }}
                 </template>
                 <template #cell-estimated_value="{ item }">
                   {{ formatCurrency(item.estimated_value) }}
                 </template>
                 <template #cell-status="{ item }">
-                  <Badge :variant="item.status === 'convertida' ? 'success' : 'destructive'">
-                    {{ item.status === 'convertida' ? $t('sales.statusConvertida') : $t('sales.statusPerdida') }}
+                  <Badge :variant="item.status === 'convertida' ? 'success' : item.status === 'aberta' ? 'outline' : 'destructive'">
+                    {{ $t(STATUS_FILTER_LABEL_KEY[item.status]) }}
                   </Badge>
                 </template>
                 <template #cell-conversion_source="{ item }">
@@ -334,7 +440,7 @@ onMounted(fetchWallet)
                   <span v-else>—</span>
                 </template>
                 <template #cell-closed_at="{ item }">
-                  {{ formatDate(item.converted_at || item.lost_at || item.stage_changed_at) }}
+                  {{ item.status === 'aberta' ? '—' : formatDate(item.converted_at || item.lost_at || item.cancelled_at || item.stage_changed_at) }}
                 </template>
                 <template #cell-loss_reason="{ item }">
                   {{ item.loss_reason ? $t(LOSS_REASON_LABEL_KEY[item.loss_reason]) : '—' }}
@@ -351,5 +457,16 @@ onMounted(fetchWallet)
       :opportunity="loseTarget"
       @lost="handleLost"
     />
+
+    <DeleteConfirmDialog
+      v-model:open="bulkDeleteDialogOpen"
+      :title="$t('sales.deleteSelectedTitle')"
+      :is-submitting="bulkDeleting"
+      @confirm="confirmBulkDelete"
+    >
+      <template #description>
+        <p class="text-sm text-muted-foreground">{{ $t('sales.deleteSelectedWarning', { count: selectedIds.size }) }}</p>
+      </template>
+    </DeleteConfirmDialog>
   </div>
 </template>

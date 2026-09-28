@@ -606,3 +606,50 @@ func (a *App) ListSalesOpportunityEvents(r *fastglue.Request) error {
 	}
 	return r.SendEnvelope(map[string]any{"events": events})
 }
+
+// DeleteSalesOpportunity permanently removes an opportunity regardless of its
+// stage/status — mirrors DeleteOccurrence's own super-admin-only pattern
+// exactly (sales_opportunities:delete is deliberately absent from every
+// system role's default permission list except "admin", which gets it only
+// because it's granted every permission — the real gate is IsSuperAdmin,
+// which HasPermission already treats as "every permission" anyway, so
+// loadAuthorizedSalesOpportunity's own ownership/view_all check is a no-op
+// for a super admin and this never 403s on a colleague's opportunity).
+func (a *App) DeleteSalesOpportunity(r *fastglue.Request) error {
+	orgID, userID, err := a.requireAuth(r, models.ResourceSalesOpportunities, models.ActionDelete)
+	if err != nil {
+		return nil
+	}
+	if !a.IsSuperAdmin(userID) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Only super admins can permanently delete sales opportunities", nil, "")
+	}
+
+	opp, err := a.loadAuthorizedSalesOpportunity(r, orgID, userID)
+	if err != nil {
+		return nil
+	}
+
+	snapshot := map[string]any{
+		"opportunity_number": opp.OpportunityNumber,
+		"contact_id":         opp.ContactID,
+		"status":             opp.Status,
+		"stage":              opp.Stage,
+	}
+
+	txErr := a.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Unscoped().Where("sales_opportunity_id = ?", opp.ID).Delete(&models.SalesOpportunityEvent{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Unscoped().Where("sales_opportunity_id = ?", opp.ID).Delete(&models.SalesOpportunityXProcessLink{}).Error; err != nil {
+			return err
+		}
+		return tx.Unscoped().Delete(&models.SalesOpportunity{}, "id = ?", opp.ID).Error
+	})
+	if txErr != nil {
+		a.Log.Error("Failed to delete sales opportunity", "error", txErr)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to delete sales opportunity", nil, "")
+	}
+
+	a.logAudit(orgID, userID, "sales_opportunity", opp.ID, models.AuditActionDeleted, snapshot, nil)
+	return r.SendEnvelope(map[string]bool{"deleted": true})
+}

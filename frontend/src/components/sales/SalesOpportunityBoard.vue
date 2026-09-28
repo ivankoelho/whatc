@@ -228,6 +228,14 @@ defineExpose({ refresh: loadAll })
         <!-- Fixed column height, own scrollbar — the board (and the page
              around it) no longer grows with the column's content. -->
         <div class="flex flex-1 flex-col gap-2 p-2 min-h-24 max-h-[65vh] overflow-y-auto">
+          <!-- flex-1 so the drop target always fills the column's free
+               height, even with 0 items — it used to collapse to 0px tall
+               when empty (a bare v-for renders no natural height), leaving
+               "Nenhuma oportunidade" floating below it as plain text, not
+               inside the actual dropzone, so a card could only be dropped
+               right at the very top edge next to the header. The empty
+               message now lives in the #footer slot, inside this same
+               sortable root, instead of as a sibling. -->
           <draggable
             v-model="col.items"
             :group="{ name: 'sales-opportunities' }"
@@ -235,7 +243,7 @@ defineExpose({ refresh: loadAll })
             :disabled="col.key === 'convertida' || col.key === 'perdida'"
             item-key="id"
             data-board-dropzone
-            class="flex flex-col gap-2"
+            class="flex flex-1 flex-col gap-2"
             @start="onDragStart(col, $event)"
             @change="onColumnChange(col, $event)"
             @end="dragOrigin = null"
@@ -250,15 +258,15 @@ defineExpose({ refresh: loadAll })
                 @details-change="onDetailsChange"
               />
             </template>
+            <template #footer>
+              <div v-if="loading" class="flex justify-center p-3">
+                <Spinner class="h-4 w-4" />
+              </div>
+              <p v-else-if="col.items.length === 0" class="p-3 text-center text-xs text-muted-foreground">
+                {{ $t('sales.columnEmpty') }}
+              </p>
+            </template>
           </draggable>
-
-          <div v-if="loading" class="flex justify-center p-3">
-            <Spinner class="h-4 w-4" />
-          </div>
-
-          <p v-else-if="col.items.length === 0" class="p-3 text-center text-xs text-muted-foreground">
-            {{ $t('sales.columnEmpty') }}
-          </p>
 
           <Button
             v-if="col.hasMore"

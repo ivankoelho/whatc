@@ -1563,6 +1563,9 @@ export const salesOpportunitiesService = {
     api.get<ApiEnvelope<{ opportunities: SalesOpportunity[]; total: number; has_more: boolean }>>('/sales-opportunities', { params }),
   create: (data: { contact_id: string; interest?: string; estimated_value?: number }) =>
     api.post<ApiEnvelope<SalesOpportunity>>('/sales-opportunities', data),
+  // Permanent delete, regardless of stage/status — super admin only, the
+  // backend 403s anyone else even with sales_opportunities:delete granted.
+  delete: (id: string) => api.delete<ApiEnvelope<{ deleted: boolean }>>(`/sales-opportunities/${id}`),
   get: (id: string) => api.get<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}`),
   changeStage: (id: string, stage: SalesOpportunityStage) =>
     api.put<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/stage`, { stage }),
