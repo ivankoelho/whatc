@@ -139,6 +139,8 @@
     "confirmPassword": "Confirmar senha",
     "password": "Senha",
     "passwordPlaceholder": "Digite sua senha",
+    "showPassword": "Mostrar senha",
+    "hidePassword": "Ocultar senha",
     "username": "Usuário",
     "rememberMe": "Lembrar de mim",
     "loginSuccess": "Login realizado com sucesso",
