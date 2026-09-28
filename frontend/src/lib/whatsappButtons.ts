@@ -97,7 +97,7 @@ export function validateWhatsAppButtons(
   if (voiceCall.length > 0 && buttons.length > voiceCall.length) {
     return t(
       'whatsappButtons.errorVoiceCallExclusive',
-      'A Call button cannot be combined with other button types — remove the other buttons or the Call button.'
+      'A Call button cannot be combined with other button types. Remove the other buttons or the Call button.'
     )
   }
   if (voiceCall.length === 1) {
@@ -116,7 +116,7 @@ export function validateWhatsAppButtons(
   if (flow.length > 0 && buttons.length > flow.length) {
     return t(
       'whatsappButtons.errorFlowExclusive',
-      'A Flow button cannot be combined with other button types — remove the other buttons or the Flow button.'
+      'A Flow button cannot be combined with other button types. Remove the other buttons or the Flow button.'
     )
   }
   if (flow.length === 1 && !flow[0].flow_id) {
@@ -126,7 +126,7 @@ export function validateWhatsAppButtons(
   if (phone.length > 0) {
     return t(
       'whatsappButtons.errorPhoneUnsupported',
-      'Phone buttons cannot be sent in free-form WhatsApp messages — only in approved templates. Remove the phone button or convert it to a URL.'
+      'Phone buttons cannot be sent in free-form WhatsApp messages, only in approved templates. Remove the phone button or convert it to a URL.'
     )
   }
 

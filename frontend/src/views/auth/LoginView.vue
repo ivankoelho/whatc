@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { toast } from 'vue-sonner'
-import { MessageSquare, Loader2 } from 'lucide-vue-next'
+import { MessageSquare, Loader2, Eye, EyeOff } from 'lucide-vue-next'
 
 const { t } = useI18n()
 
@@ -26,6 +26,7 @@ const { loginBackgroundUrl, logoUrl, systemName, footerText, footerVersion, load
 
 const email = ref('')
 const password = ref('')
+const showPassword = ref(false)
 const isLoading = ref(false)
 const ssoProviders = ref<SSOProvider[]>([])
 const currentYear = new Date().getFullYear()
@@ -99,45 +100,47 @@ const initiateSSO = (provider: string) => {
 </script>
 
 <template>
-  <div class="min-h-screen flex flex-col bg-[#0a0a0b] light:bg-gray-50">
-    <div class="flex-1 flex">
-    <!-- Painel de marca -->
+  <div class="min-h-screen relative overflow-hidden bg-[#0a0a0b]">
+    <!-- Hero de fundo, ocupando a tela inteira — o card de login flutua por cima,
+         em vez do antigo layout de dois painéis 50/50. -->
     <div
-      class="hidden lg:flex lg:w-1/2 relative flex-col justify-between p-12 bg-gradient-to-br from-emerald-600 to-green-800"
+      class="absolute inset-0 bg-gradient-to-br from-emerald-600 to-green-900"
       :style="loginBackgroundUrl ? { backgroundImage: `url(${loginBackgroundUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' } : {}"
     >
-      <div v-if="loginBackgroundUrl" class="absolute inset-0 bg-black/40" />
-      <div class="relative flex items-center gap-3">
+      <div class="absolute inset-0 bg-gradient-to-r from-black/70 via-black/40 to-black/10" />
+    </div>
+
+    <div class="relative z-10 min-h-screen flex flex-col">
+      <!-- Marca, canto superior esquerdo (telas grandes) -->
+      <div class="hidden lg:flex items-center gap-3 p-10">
         <div class="h-10 w-10 rounded-xl bg-white/10 backdrop-blur flex items-center justify-center overflow-hidden">
           <img v-if="logoUrl" :src="logoUrl" alt="" class="h-full w-full object-cover" />
           <MessageSquare v-else class="h-6 w-6 text-white" />
         </div>
         <span class="text-white font-semibold text-lg">{{ systemName || 'Whatomate' }}</span>
       </div>
-      <div class="relative">
-        <p class="text-3xl font-bold text-white leading-tight whitespace-pre-line">
-          {{ $t('auth.brandTagline') }}
-        </p>
-      </div>
-    </div>
 
-    <!-- Painel de formulário -->
-    <div class="flex-1 flex flex-col p-4">
-      <div class="flex-1 flex items-center justify-center">
-      <div class="w-full max-w-md rounded-2xl border border-white/[0.08] bg-white/[0.02] backdrop-blur light:bg-white light:border-gray-200 light:shadow-xl">
-        <div class="p-8 space-y-1 text-center">
+      <div class="flex-1 flex flex-col lg:flex-row lg:items-center">
+        <!-- Tagline sobre o hero (telas grandes) -->
+        <div class="hidden lg:flex flex-1 flex-col justify-center px-16 max-w-2xl">
+          <p class="text-4xl font-bold text-white leading-tight whitespace-pre-line drop-shadow-sm">
+            {{ $t('auth.brandTagline') }}
+          </p>
+        </div>
+
+        <!-- Card de login flutuante -->
+        <div class="w-full flex justify-center lg:justify-end px-4 lg:pr-20 py-8 lg:py-0">
+        <div class="w-full max-w-md rounded-2xl border border-white/[0.1] bg-white/[0.04] backdrop-blur-xl shadow-2xl light:bg-white light:border-gray-200">
+        <div class="p-8 space-y-1">
           <div class="flex justify-center mb-4 lg:hidden">
             <div class="h-12 w-12 rounded-xl bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center shadow-lg shadow-emerald-500/20 overflow-hidden">
               <img v-if="logoUrl" :src="logoUrl" alt="" class="h-full w-full object-cover" />
               <MessageSquare v-else class="h-7 w-7 text-white" />
             </div>
           </div>
-          <h2 class="text-2xl font-bold text-white light:text-gray-900">
-            {{ systemName ? `${$t('auth.welcomeTitle')} — ${systemName}` : $t('auth.welcomeTitle') }}
+          <h2 class="text-2xl font-bold text-white light:text-gray-900 leading-snug">
+            {{ $t('auth.welcomeTitle') }}<template v-if="systemName"><br />{{ systemName }}</template>
           </h2>
-          <p class="text-white/50 light:text-gray-500">
-            {{ $t('auth.welcomeSubtitle') }}
-          </p>
         </div>
 
         <form @submit.prevent="handleLogin">
@@ -155,14 +158,26 @@ const initiateSSO = (provider: string) => {
             </div>
             <div class="space-y-2">
               <Label for="password" class="text-white/70 light:text-gray-700">{{ $t('auth.password') }}</Label>
-              <Input
-                id="password"
-                v-model="password"
-                type="password"
-                :placeholder="$t('auth.passwordPlaceholder')"
-                :disabled="isLoading"
-                autocomplete="current-password"
-              />
+              <div class="relative">
+                <Input
+                  id="password"
+                  v-model="password"
+                  :type="showPassword ? 'text' : 'password'"
+                  :placeholder="$t('auth.passwordPlaceholder')"
+                  :disabled="isLoading"
+                  autocomplete="current-password"
+                  class="pr-10"
+                />
+                <button
+                  type="button"
+                  class="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/70 light:text-gray-400 light:hover:text-gray-600"
+                  :aria-label="showPassword ? $t('auth.hidePassword') : $t('auth.showPassword')"
+                  @click="showPassword = !showPassword"
+                >
+                  <EyeOff v-if="showPassword" class="h-4 w-4" />
+                  <Eye v-else class="h-4 w-4" />
+                </button>
+              </div>
             </div>
             <Button type="submit" class="w-full bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 text-white shadow-lg shadow-emerald-500/20" :disabled="isLoading">
               <Loader2 v-if="isLoading" class="mr-2 h-4 w-4 animate-spin" />
@@ -172,10 +187,10 @@ const initiateSSO = (provider: string) => {
         </form>
 
         <!-- SSO Section -->
-        <div v-if="ssoProviders.length > 0" class="px-8 pb-4 space-y-3">
+        <div v-if="ssoProviders.length > 0" class="px-8 pt-4 space-y-3">
           <div class="relative my-2">
             <Separator class="bg-white/[0.08] light:bg-gray-200" />
-            <span class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-[#0a0a0b] light:bg-white px-2 text-xs text-white/40 light:text-gray-500">
+            <span class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-[#161b18] light:bg-white px-2 text-xs text-white/40 light:text-gray-500">
               {{ $t('auth.orContinueWith') }}
             </span>
           </div>
@@ -195,7 +210,8 @@ const initiateSSO = (provider: string) => {
           </Button>
         </div>
 
-        <div class="px-8 pb-8">
+        <!-- Cadastro fica no rodapé do card, não junto ao título -->
+        <div class="px-8 pb-8 pt-4">
           <p class="text-sm text-center text-white/40 light:text-gray-500">
             {{ $t('auth.noAccount') }}
             <RouterLink to="/register" class="text-emerald-400 light:text-emerald-600 hover:underline">
@@ -203,18 +219,18 @@ const initiateSSO = (provider: string) => {
             </RouterLink>
           </p>
         </div>
-      </div>
+        </div>
+        </div>
       </div>
 
       <footer
         v-if="footerText || footerVersion"
-        class="pt-4 text-center text-xs text-white/30 light:text-gray-400"
+        class="relative z-10 pb-6 pt-2 text-center text-xs text-white/40"
       >
         <span v-if="footerText">© {{ currentYear }} {{ footerText }}</span>
         <span v-if="footerText && footerVersion"> · </span>
         <span v-if="footerVersion">v{{ footerVersion }}</span>
       </footer>
     </div>
-  </div>
   </div>
 </template>
