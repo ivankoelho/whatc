@@ -86,6 +86,15 @@ const valueChartData = computed(() => ({
 const valueChartOptions = {
   responsive: true,
   maintainAspectRatio: false,
+  // The global Chart.js defaults set in lib/charts.ts (mode: 'index',
+  // intersect: false) are meant for line/bar charts, where "index" means
+  // an x-axis category. On a Doughnut those defaults make Chart.js treat
+  // every slice sharing the same data-array index as "hovered" together —
+  // hovering the Convertido arc could surface Perdido's tooltip too (even
+  // showing R$ 0,00) since they're neighboring indexes in the same
+  // dataset. A pie/doughnut needs point-level hit testing instead: only
+  // the slice the cursor is actually over.
+  interaction: { mode: 'nearest' as const, intersect: true },
   plugins: {
     legend: { position: 'bottom' as const },
     tooltip: { callbacks: { label: (ctx: { label: string; raw: unknown }) => `${ctx.label}: ${formatCurrency(ctx.raw as number)}` } },
@@ -93,24 +102,44 @@ const valueChartOptions = {
 }
 
 // This tab used to only show convertida/perdida. Now shows every phase —
-// wallet already fetches every status, statusFilter just narrows the view —
-// with a status selector, so it doubles as the one place to browse the
+// wallet already fetches every status, the filter just narrows the view —
+// with a filter selector, so it doubles as the one place to browse the
 // whole carteira instead of only closed deals.
+//
+// The filter is keyed by stage for open opportunities and by status for
+// closed ones (not just status=aberta/convertida/perdida/cancelada) —
+// "Aberta" alone used to lump Potencial+Abrir orçamento+Direcionada
+// together, so selecting/deleting just one stage meant doing it one row at
+// a time. Matches the Kanban's own 5 columns + a "Todos" catch-all.
 const isSuperAdmin = computed(() => authStore.user?.is_super_admin ?? false)
-const STATUS_FILTERS = ['all', 'aberta', 'convertida', 'perdida', 'cancelada'] as const
-type StatusFilter = typeof STATUS_FILTERS[number]
-const STATUS_FILTER_LABEL_KEY: Record<StatusFilter, string> = {
+const FILTER_KEYS = ['all', 'potencial', 'abrir_orcamento', 'direcionada', 'convertida', 'perdida', 'cancelada'] as const
+type FilterKey = typeof FILTER_KEYS[number]
+const FILTER_LABEL_KEY: Record<FilterKey, string> = {
   all: 'sales.statusFilterAll',
+  potencial: 'sales.stagePotencial',
+  abrir_orcamento: 'sales.stageAbrirOrcamento',
+  direcionada: 'sales.stageDirecionada',
+  convertida: 'sales.statusConvertida',
+  perdida: 'sales.statusPerdida',
+  cancelada: 'sales.statusCancelada',
+}
+// Status-only labels for the table's own Status badge column — distinct
+// from FILTER_LABEL_KEY, which breaks "aberta" down by stage instead.
+const STATUS_BADGE_LABEL_KEY: Record<SalesOpportunity['status'], string> = {
   aberta: 'sales.statusAberta',
   convertida: 'sales.statusConvertida',
   perdida: 'sales.statusPerdida',
   cancelada: 'sales.statusCancelada',
 }
-const statusFilter = ref<StatusFilter>('all')
+const opportunityFilter = ref<FilterKey>('all')
 
-const filteredOpportunities = computed(() =>
-  statusFilter.value === 'all' ? wallet.value : wallet.value.filter(o => o.status === statusFilter.value)
-)
+function matchesFilter(o: SalesOpportunity, key: FilterKey): boolean {
+  if (key === 'all') return true
+  if (key === 'convertida' || key === 'perdida' || key === 'cancelada') return o.status === key
+  return o.status === 'aberta' && o.stage === key
+}
+
+const filteredOpportunities = computed(() => wallet.value.filter(o => matchesFilter(o, opportunityFilter.value)))
 
 const allColumns = computed<Column<SalesOpportunity>[]>(() => {
   const cols: Column<SalesOpportunity>[] = []
@@ -150,7 +179,7 @@ function toggleSelect(id: string) {
   else next.add(id)
   selectedIds.value = next
 }
-watch(statusFilter, () => { selectedIds.value = new Set() })
+watch(opportunityFilter, () => { selectedIds.value = new Set() })
 
 const bulkDeleteDialogOpen = ref(false)
 const bulkDeleting = ref(false)
@@ -375,36 +404,38 @@ onMounted(fetchWallet)
       <TabsContent value="closed" class="flex-1 min-h-0">
         <ScrollArea orientation="vertical" class="flex-1 h-full">
           <div class="p-6 space-y-4">
-            <div class="flex items-center justify-end gap-3 flex-wrap">
-              <Select v-model="statusFilter">
-                <SelectTrigger class="w-48">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem v-for="s in STATUS_FILTERS" :key="s" :value="s">
-                    {{ $t(STATUS_FILTER_LABEL_KEY[s]) }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <!-- Bulk selection/delete — super admin only, mirrors the
-                 backend's own gate; this is the one deliberate admin
-                 surface for it, keeping the Kanban card itself uncluttered. -->
-            <div v-if="isSuperAdmin" class="flex items-center gap-3">
-              <label class="flex items-center gap-2 text-sm cursor-pointer select-none">
+            <!-- One row, aligned to the same left edge as the table below —
+                 filter and bulk-selection controls used to be two separate
+                 rows (filter right-aligned, select-all left-aligned),
+                 misaligned with each other and with the Card/table. -->
+            <div class="flex items-center justify-between gap-3 flex-wrap">
+              <label v-if="isSuperAdmin" class="flex items-center gap-2 text-sm cursor-pointer select-none">
                 <Checkbox :checked="allSelected" @update:checked="toggleSelectAll" />
                 {{ $t('sales.selectAll') }}
               </label>
-              <Button
-                v-if="selectedIds.size > 0"
-                variant="destructive"
-                size="sm"
-                @click="bulkDeleteDialogOpen = true"
-              >
-                <Trash2 class="h-4 w-4 mr-2" />
-                {{ $t('sales.deleteSelected', { count: selectedIds.size }) }}
-              </Button>
+              <div v-else />
+
+              <div class="flex items-center gap-3">
+                <Button
+                  v-if="isSuperAdmin && selectedIds.size > 0"
+                  variant="destructive"
+                  size="sm"
+                  @click="bulkDeleteDialogOpen = true"
+                >
+                  <Trash2 class="h-4 w-4 mr-2" />
+                  {{ $t('sales.deleteSelected', { count: selectedIds.size }) }}
+                </Button>
+                <Select v-model="opportunityFilter">
+                  <SelectTrigger class="w-48">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="k in FILTER_KEYS" :key="k" :value="k">
+                      {{ $t(FILTER_LABEL_KEY[k]) }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             <Card>
@@ -430,7 +461,7 @@ onMounted(fetchWallet)
                 </template>
                 <template #cell-status="{ item }">
                   <Badge :variant="item.status === 'convertida' ? 'success' : item.status === 'aberta' ? 'outline' : 'destructive'">
-                    {{ $t(STATUS_FILTER_LABEL_KEY[item.status]) }}
+                    {{ $t(STATUS_BADGE_LABEL_KEY[item.status]) }}
                   </Badge>
                 </template>
                 <template #cell-conversion_source="{ item }">
