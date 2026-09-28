@@ -474,19 +474,19 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 		}
 	}
 
-	// Derive the title when the agent didn't type one: "Categoria — Produto",
-	// or "Categoria — Atendimento SAC" without a product, per the SAC MVP
-	// spec (§8) — the product asked not to ask for a title when it can be
+	// Derive the title when the agent didn't type one: "Categoria: Produto",
+	// or "Categoria: Atendimento SAC" without a product, per the SAC MVP
+	// spec (§8): the product asked not to ask for a title when it can be
 	// derived from fields already on the form. Without a category either,
-	// there's nothing meaningful to prefix — just the product (or the
-	// generic fallback alone), rather than a literal "Ocorrência —" filler.
+	// there's nothing meaningful to prefix, just the product (or the
+	// generic fallback alone), rather than a literal "Ocorrência:" filler.
 	if occ.Title == "" {
 		product := occ.ProductDescription
 		if product == "" {
 			product = "Atendimento SAC"
 		}
 		if category != nil {
-			occ.Title = category.Name + " — " + product
+			occ.Title = category.Name + ": " + product
 		} else {
 			occ.Title = product
 		}
