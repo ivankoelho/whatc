@@ -324,7 +324,7 @@ func (a *App) LogOccurrenceProcessMessageUse(r *fastglue.Request) error {
 	if occ.ProcessID != nil {
 		var process models.OccurrenceProcess
 		if a.DB.Where("id = ? AND organization_id = ?", *occ.ProcessID, orgID).First(&process).Error == nil {
-			content = "Mensagem de " + req.Stage + " utilizada — processo: " + process.Name + "."
+			content = "Mensagem de " + req.Stage + " utilizada. Processo: " + process.Name + "."
 		}
 	}
 

@@ -14,7 +14,7 @@ import (
 	"github.com/zerodha/fastglue"
 )
 
-const avariaProcessName = "Avaria — comunicação e abertura"
+const avariaProcessName = "Avaria: comunicação e abertura"
 
 // seededAdmin returns an org and an admin user, with the default processes seeded.
 func seededAdmin(t *testing.T, app *handlers.App) (*models.Organization, *models.User) {
