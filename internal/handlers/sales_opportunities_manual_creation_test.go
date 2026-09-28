@@ -37,7 +37,7 @@ func TestCreateSalesOpportunity_CreatesManualOpportunity(t *testing.T) {
 	assert.Equal(t, models.SalesOpportunityStagePotencial, opp.Stage)
 	assert.Equal(t, models.SalesOpportunityStatusAberta, opp.Status)
 	require.NotNil(t, opp.AssignedUserID)
-	assert.Equal(t, agent.ID, *opp.AssignedUserID, "assignee stays the contact's own assigned user, not necessarily the creator")
+	assert.Equal(t, agent.ID, *opp.AssignedUserID, "assignee is the creating agent")
 
 	var events []models.SalesOpportunityEvent
 	require.NoError(t, app.DB.Where("sales_opportunity_id = ?", opp.ID).Find(&events).Error)
@@ -93,4 +93,58 @@ func TestCreateSalesOpportunity_RetriggersExistingOpenOpportunity(t *testing.T) 
 	var opp models.SalesOpportunity
 	require.NoError(t, app.DB.First(&opp, "id = ?", existing.ID).Error)
 	assert.NotEqual(t, "novo pedido", opp.Interest, "retrigger must not overwrite the existing opportunity's fields")
+}
+
+// Regression test: an earlier build inherited contact.AssignedUserID (the
+// chatbot automatic-creation rule) for manual creation too, so an agent who
+// created an opportunity from a colleague's contact never saw it on their
+// own board — it silently went to the colleague instead. Spec item E's
+// approved answer is "responsável = usuário que criou".
+func TestCreateSalesOpportunity_AssigneeIsCreatorNotContactsExistingAgent(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "agent", []string{"sales_opportunities:read", "sales_opportunities:write"})
+	colleague := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
+	creator := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(contact).Update("assigned_user_id", colleague.ID).Error)
+
+	req := testutil.NewJSONRequest(t, map[string]any{"contact_id": contact.ID.String(), "interest": "teste"})
+	testutil.SetAuthContext(req, org.ID, creator.ID)
+	require.NoError(t, app.CreateSalesOpportunity(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var opp models.SalesOpportunity
+	require.NoError(t, app.DB.Where("contact_id = ?", contact.ID).First(&opp).Error)
+	require.NotNil(t, opp.AssignedUserID)
+	assert.Equal(t, creator.ID, *opp.AssignedUserID, "must belong to the creating agent, not the contact's own assignee")
+}
+
+// The creator override must never apply to a retrigger — that would let
+// anyone steal an existing open opportunity away from its real owner just
+// by clicking "Criar oportunidade" on someone else's contact.
+func TestCreateSalesOpportunity_RetriggerDoesNotReassignOwnership(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "agent", []string{"sales_opportunities:read", "sales_opportunities:write"})
+	owner := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
+	otherAgent := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(contact).Update("assigned_user_id", owner.ID).Error)
+	contact.AssignedUserID = &owner.ID
+
+	existing, err := app.CreateOrRetriggerSalesOpportunityForTest(contact, nil)
+	require.NoError(t, err)
+	require.NotNil(t, existing.AssignedUserID)
+	require.Equal(t, owner.ID, *existing.AssignedUserID)
+
+	req := testutil.NewJSONRequest(t, map[string]any{"contact_id": contact.ID.String()})
+	testutil.SetAuthContext(req, org.ID, otherAgent.ID)
+	require.NoError(t, app.CreateSalesOpportunity(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var opp models.SalesOpportunity
+	require.NoError(t, app.DB.First(&opp, "id = ?", existing.ID).Error)
+	require.NotNil(t, opp.AssignedUserID)
+	assert.Equal(t, owner.ID, *opp.AssignedUserID, "retriggering an existing open opportunity must not reassign it")
 }

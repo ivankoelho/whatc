@@ -26,7 +26,16 @@ import (
 // source=manual, agent-supplied interest/value) and the chatbot's automatic
 // one (source=system, both blank) share this exact idempotency/counter/event
 // logic instead of duplicating it (spec's "mesmo modelo" requirement).
-func (a *App) createOrRetriggerSalesOpportunity(contact *models.Contact, sourceTransferID *uuid.UUID, source models.SalesOpportunityEventSource, interest string, estimatedValue *float64) (*models.SalesOpportunity, error) {
+//
+// assignedUserIDOverride, when non-nil, wins over contact.AssignedUserID for
+// a genuinely NEW opportunity only — spec item E's approved answer was
+// "responsável = usuário que criou" for manual creation, deliberately
+// different from the chatbot's own "inherits the contact's current agent"
+// rule. It is never applied on the retrigger path: retriggering an
+// already-open opportunity must not reassign it away from whoever already
+// owns it (same "reassigning the contact never moves this opportunity"
+// invariant the chatbot path already relies on).
+func (a *App) createOrRetriggerSalesOpportunity(contact *models.Contact, sourceTransferID *uuid.UUID, source models.SalesOpportunityEventSource, interest string, estimatedValue *float64, assignedUserIDOverride *uuid.UUID) (*models.SalesOpportunity, error) {
 	var existing models.SalesOpportunity
 	err := a.DB.Where("organization_id = ? AND contact_id = ? AND status = ?",
 		contact.OrganizationID, contact.ID, models.SalesOpportunityStatusAberta).
@@ -46,11 +55,15 @@ func (a *App) createOrRetriggerSalesOpportunity(contact *models.Contact, sourceT
 		return nil, err
 	}
 
+	assignedUserID := contact.AssignedUserID
+	if assignedUserIDOverride != nil {
+		assignedUserID = assignedUserIDOverride
+	}
 	opp := models.SalesOpportunity{
 		OrganizationID:   contact.OrganizationID,
 		ContactID:        contact.ID,
 		SourceTransferID: sourceTransferID,
-		AssignedUserID:   contact.AssignedUserID,
+		AssignedUserID:   assignedUserID,
 		Stage:            models.SalesOpportunityStagePotencial,
 		Status:           models.SalesOpportunityStatusAberta,
 		Interest:         interest,
@@ -115,10 +128,7 @@ type createSalesOpportunityRequest struct {
 // open opportunity, this returns that one (with a "retriggered" event)
 // instead of erroring, same as the chatbot would.
 func (a *App) CreateSalesOpportunity(r *fastglue.Request) error {
-	// userID is only needed for the permission check here — the opportunity's
-	// assignee stays contact.AssignedUserID (spec §3's existing rule), not
-	// whoever clicked "create".
-	orgID, _, err := a.requireAuth(r, models.ResourceSalesOpportunities, models.ActionWrite)
+	orgID, userID, err := a.requireAuth(r, models.ResourceSalesOpportunities, models.ActionWrite)
 	if err != nil {
 		return nil
 	}
@@ -136,7 +146,7 @@ func (a *App) CreateSalesOpportunity(r *fastglue.Request) error {
 		return nil
 	}
 
-	opp, err := a.createOrRetriggerSalesOpportunity(contact, nil, models.SalesOpportunityEventSourceManual, req.Interest, req.EstimatedValue)
+	opp, err := a.createOrRetriggerSalesOpportunity(contact, nil, models.SalesOpportunityEventSourceManual, req.Interest, req.EstimatedValue, &userID)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create opportunity", nil, "")
 	}
@@ -595,4 +605,51 @@ func (a *App) ListSalesOpportunityEvents(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list events", nil, "")
 	}
 	return r.SendEnvelope(map[string]any{"events": events})
+}
+
+// DeleteSalesOpportunity permanently removes an opportunity regardless of its
+// stage/status — mirrors DeleteOccurrence's own super-admin-only pattern
+// exactly (sales_opportunities:delete is deliberately absent from every
+// system role's default permission list except "admin", which gets it only
+// because it's granted every permission — the real gate is IsSuperAdmin,
+// which HasPermission already treats as "every permission" anyway, so
+// loadAuthorizedSalesOpportunity's own ownership/view_all check is a no-op
+// for a super admin and this never 403s on a colleague's opportunity).
+func (a *App) DeleteSalesOpportunity(r *fastglue.Request) error {
+	orgID, userID, err := a.requireAuth(r, models.ResourceSalesOpportunities, models.ActionDelete)
+	if err != nil {
+		return nil
+	}
+	if !a.IsSuperAdmin(userID) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Only super admins can permanently delete sales opportunities", nil, "")
+	}
+
+	opp, err := a.loadAuthorizedSalesOpportunity(r, orgID, userID)
+	if err != nil {
+		return nil
+	}
+
+	snapshot := map[string]any{
+		"opportunity_number": opp.OpportunityNumber,
+		"contact_id":         opp.ContactID,
+		"status":             opp.Status,
+		"stage":              opp.Stage,
+	}
+
+	txErr := a.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Unscoped().Where("sales_opportunity_id = ?", opp.ID).Delete(&models.SalesOpportunityEvent{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Unscoped().Where("sales_opportunity_id = ?", opp.ID).Delete(&models.SalesOpportunityXProcessLink{}).Error; err != nil {
+			return err
+		}
+		return tx.Unscoped().Delete(&models.SalesOpportunity{}, "id = ?", opp.ID).Error
+	})
+	if txErr != nil {
+		a.Log.Error("Failed to delete sales opportunity", "error", txErr)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to delete sales opportunity", nil, "")
+	}
+
+	a.logAudit(orgID, userID, "sales_opportunity", opp.ID, models.AuditActionDeleted, snapshot, nil)
+	return r.SendEnvelope(map[string]bool{"deleted": true})
 }
