@@ -2089,7 +2089,12 @@
     "aiSettingsSaved": "AI settings saved",
     "slaSettingsSaved": "SLA settings saved",
     "aiSaveFailed": "Failed to save AI settings",
-    "slaSaveFailed": "Failed to save SLA settings"
+    "slaSaveFailed": "Failed to save SLA settings",
+    "loadModels": "Load models",
+    "modelsLoaded": "{count} models loaded from the provider",
+    "failedLoadModels": "Could not load models from the provider",
+    "apiKeySaved": "An API key is saved. It is never shown again; type a new one to replace it.",
+    "loadModelsHint": "Enter the API key and click \"Load models\" to see this provider's models."
   },
   "agentTransfers": {
     "title": "Transfers",

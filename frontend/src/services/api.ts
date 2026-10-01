@@ -414,6 +414,10 @@ export const chatbotService = {
   // Settings
   getSettings: () => api.get('/chatbot/settings'),
   updateSettings: (data: any) => api.put('/chatbot/settings', data),
+  // Models offered by the provider itself. apiKey is optional: without it the
+  // saved key is used (server side, only for the provider it belongs to).
+  listAIModels: (provider: string, apiKey?: string) =>
+    api.post('/chatbot/ai/models', { provider, ...(apiKey ? { api_key: apiKey } : {}) }),
 
   // Keywords
   listKeywords: (params?: { search?: string; page?: number; limit?: number }) =>

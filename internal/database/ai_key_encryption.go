@@ -6,6 +6,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/crypto"
 	"github.com/zerodha/logf"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 // EncryptChatbotAIKeys encrypts, in place, every AI provider API key that is
@@ -23,6 +24,10 @@ import (
 //
 // Returns how many rows were encrypted and how many plaintext rows remain.
 func EncryptChatbotAIKeys(db *gorm.DB, encryptionKey string, log logf.Logger) (encrypted, remaining int, err error) {
+	// With debug logging on, GORM prints statements with their arguments. These
+	// statements carry plaintext keys, so they never go through the logger.
+	db = db.Session(&gorm.Session{Logger: logger.Discard})
+
 	var rows []struct {
 		ID       string `gorm:"column:id"`
 		AIAPIKey string `gorm:"column:ai_api_key"`
