@@ -219,7 +219,7 @@ export const accountsService = {
 }
 
 export const contactsService = {
-  list: (params?: { search?: string; page?: number; limit?: number; tags?: string; status?: string }) =>
+  list: (params?: { search?: string; page?: number; limit?: number; tags?: string; status?: string; contact_type?: string; unit_id?: string; department_id?: string }) =>
     api.get('/contacts', { params }),
   statusCounts: () => api.get('/contacts/counts'),
   updateStatus: (id: string, status: 'new' | 'in_progress' | 'resolved') =>

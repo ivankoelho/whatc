@@ -26,6 +26,8 @@ export interface User {
   created_at: string
   updated_at: string
   xprocess_seller_code?: string
+  unit_id?: string
+  department_id?: string
 }
 
 export interface CreateUserData {
