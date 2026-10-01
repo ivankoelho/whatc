@@ -67,30 +67,55 @@ func (a *Assigner) GetAvailableAgents(teamID, orgID uuid.UUID, excludeAgentIDs [
 
 // assignRoundRobin selects the available agent with the oldest last_assigned_at
 // from the cached member list and updates their timestamp.
+//
+// Selection and the timestamp update run in one transaction behind a per-team
+// advisory lock. Without it two simultaneous assignments both read the same
+// "oldest" member before either wrote last_assigned_at, and the same agent
+// received both chats. The lock is transaction-scoped (released on commit or
+// rollback) and only serializes assignments within one team.
 func (a *Assigner) assignRoundRobin(teamID, orgID uuid.UUID, memberIDs []uuid.UUID, excludeAgentIDs []uuid.UUID) *uuid.UUID {
-	available := a.filterAvailable(orgID, memberIDs, excludeAgentIDs)
-	if len(available) == 0 {
-		a.log.Debug("No available agents for round-robin", "team_id", teamID)
+	var selected *uuid.UUID
+	err := a.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))", "team_rr:"+teamID.String()).Error; err != nil {
+			return err
+		}
+
+		// Evaluated under the lock so the answer cannot go stale before use.
+		available := a.filterAvailable(orgID, memberIDs, excludeAgentIDs)
+		if len(available) == 0 {
+			a.log.Debug("No available agents for round-robin", "team_id", teamID)
+			return nil
+		}
+
+		// Among available agents, pick the one with oldest last_assigned_at
+		var members []models.TeamMember
+		if err := tx.
+			Where("team_id = ? AND user_id IN ?", teamID, available).
+			Order("last_assigned_at ASC NULLS FIRST, user_id ASC").
+			Limit(1).
+			Find(&members).Error; err != nil {
+			return err
+		}
+		if len(members) == 0 {
+			a.log.Debug("No team members found for round-robin", "team_id", teamID)
+			return nil
+		}
+
+		if err := tx.Model(&members[0]).Update("last_assigned_at", time.Now()).Error; err != nil {
+			return err
+		}
+		id := members[0].UserID
+		selected = &id
+		return nil
+	})
+	if err != nil {
+		a.log.Error("Round-robin assignment failed", "error", err, "team_id", teamID)
 		return nil
 	}
-
-	// Among available agents, pick the one with oldest last_assigned_at
-	var members []models.TeamMember
-	err := a.db.
-		Where("team_id = ? AND user_id IN ?", teamID, available).
-		Order("last_assigned_at ASC NULLS FIRST").
-		Find(&members).Error
-	if err != nil || len(members) == 0 {
-		a.log.Debug("No team members found for round-robin", "team_id", teamID)
-		return nil
+	if selected != nil {
+		a.log.Debug("Round-robin assigned to agent", "team_id", teamID, "user_id", *selected)
 	}
-
-	selected := members[0]
-	now := time.Now()
-	a.db.Model(&selected).Update("last_assigned_at", now)
-
-	a.log.Debug("Round-robin assigned to agent", "team_id", teamID, "user_id", selected.UserID)
-	return &selected.UserID
+	return selected
 }
 
 // assignLoadBalanced selects the available agent with the fewest active items

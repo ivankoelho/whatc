@@ -3,6 +3,7 @@ package assignment_test
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 
@@ -552,4 +553,62 @@ func TestIsAgentEligible_AvailabilityAndPresenceAreIndependent(t *testing.T) {
 	a.SetPresence(presenceOf(u.ID))
 	setInactive(t, db, u.ID)
 	assert.False(t, a.IsAgentEligible(org.ID, u.ID), "inactive user")
+}
+
+// --- Round-robin concurrency ---
+
+func TestAssignToTeam_RoundRobin_ConcurrentAssignmentsAreSpreadEvenly(t *testing.T) {
+	a, db := newAssigner(t)
+	org := testutil.CreateTestOrganization(t, db)
+	const agentCount, calls = 4, 40
+	team, agents := createTeam(t, db, org.ID, models.AssignmentStrategyRoundRobin, agentCount, 0)
+
+	picked := make(chan uuid.UUID, calls)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for range calls {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			if got := a.AssignToTeam(team.ID, org.ID, nil, nil); got != nil {
+				picked <- *got
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(picked)
+
+	counts := map[uuid.UUID]int{}
+	total := 0
+	for id := range picked {
+		counts[id]++
+		total++
+	}
+	assert.Equal(t, calls, total, "every concurrent assignment must resolve to an agent")
+	for _, ag := range agents {
+		assert.Equal(t, calls/agentCount, counts[ag.ID],
+			"simultaneous assignments must not pile onto the same 'oldest' agent")
+	}
+}
+
+func TestAssignToTeam_RoundRobin_ConcurrentWithOneConnectedAgentNeverDropsAssignment(t *testing.T) {
+	a, db := newAssigner(t)
+	org := testutil.CreateTestOrganization(t, db)
+	team, agents := createTeam(t, db, org.ID, models.AssignmentStrategyRoundRobin, 3, 0)
+	a.SetPresence(presenceOf(agents[2].ID))
+
+	var wg sync.WaitGroup
+	results := make(chan *uuid.UUID, 10)
+	for range 10 {
+		wg.Add(1)
+		go func() { defer wg.Done(); results <- a.AssignToTeam(team.ID, org.ID, nil, nil) }()
+	}
+	wg.Wait()
+	close(results)
+	for r := range results {
+		require.NotNil(t, r)
+		assert.Equal(t, agents[2].ID, *r)
+	}
 }
