@@ -936,6 +936,8 @@ func (a *App) UpdateAvailability(r *fastglue.Request) error {
 		return nil
 	}
 
+	wasAvailable := user.IsAvailable
+
 	// Only log if status is actually changing
 	if user.IsAvailable != req.IsAvailable {
 		now := time.Now()
@@ -963,6 +965,12 @@ func (a *App) UpdateAvailability(r *fastglue.Request) error {
 	if err := a.DB.Save(&user).Error; err != nil {
 		a.Log.Error("Failed to update availability", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update availability", nil, "")
+	}
+
+	if wasAvailable != req.IsAvailable {
+		a.logAudit(orgID, userID, models.ResourceUsers, userID, models.AuditActionUpdated, nil, nil,
+			map[string]any{"field": "is_available", "old_value": wasAvailable, "new_value": req.IsAvailable})
+		a.broadcastAgentAvailability(orgID, userID, req.IsAvailable)
 	}
 
 	status := "available"

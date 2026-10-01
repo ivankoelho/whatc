@@ -143,7 +143,7 @@ func (r *PresenceReaper) Sweep(now time.Time) int {
 		if r.isConnected(k.org, k.user) {
 			continue
 		}
-		released += r.app.ReturnAgentTransfersToQueue(k.user, k.org)
+		released += r.app.returnAgentTransfers(k.user, k.org, distEventReturnedOffline)
 		r.mu.Lock()
 		delete(r.disconnected, k)
 		r.mu.Unlock()

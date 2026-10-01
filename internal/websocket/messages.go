@@ -35,6 +35,12 @@ const (
 	TypeTransferExpired     = "transfer_expired"
 	TypeTransferEscalated   = "transfer_escalated"
 
+	// Agent state: carry AgentPresencePayload / AgentAvailabilityPayload.
+	// Presence is "has a live connection"; availability is the manual
+	// available/away toggle. They are separate on purpose.
+	TypeAgentPresence     = "agent_presence"
+	TypeAgentAvailability = "agent_availability"
+
 	// Campaign types
 	TypeCampaignStatsUpdate = "campaign_stats_update"
 

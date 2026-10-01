@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/google/uuid"
 	"net/http"
 	"os"
 	"os/signal"
@@ -283,7 +284,10 @@ func runServer(args []string) {
 	// Presence reaper: releases an agent's attendances only after they stay
 	// disconnected past the grace period (reconnects within it change nothing).
 	presenceReaper := handlers.NewPresenceReaper(app, handlers.DefaultPresenceGrace, 10*time.Second)
-	wsHub.SetPresenceListener(presenceReaper.OnPresenceChange)
+	wsHub.SetPresenceListener(func(orgID, userID uuid.UUID, online bool) {
+		presenceReaper.OnPresenceChange(orgID, userID, online)
+		app.BroadcastAgentPresence(orgID, userID, online)
+	})
 
 	// Initialize S3 client for call recordings (optional)
 	var s3Client *storage.S3Client

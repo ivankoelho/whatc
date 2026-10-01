@@ -5,7 +5,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/shridarpatil/whatomate/internal/audit"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/internal/websocket"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
 	"gorm.io/gorm"
@@ -154,8 +156,10 @@ func (a *App) ensureAgentOwnsConversation(account *models.WhatsAppAccount, conta
 				return err
 			}
 			if !claimed {
+				a.auditDistribution(orgID, &userID, t.ID, distEventConflict, nil, nil, "claim on send lost the race")
 				continue // taken or closed meanwhile; re-read
 			}
+			a.auditDistribution(orgID, &userID, t.ID, distEventClaimed, nil, &userID, "claimed by sending a message")
 			a.pinCarteiraOnClaim(contact, userID)
 			a.broadcastTransferAssigned(&t)
 			return nil
@@ -165,6 +169,7 @@ func (a *App) ensureAgentOwnsConversation(account *models.WhatsAppAccount, conta
 			if allowOtherOwner || a.canOverrideConversationOwner(userID, orgID) {
 				return nil
 			}
+			a.auditDistribution(orgID, &userID, t.ID, distEventConflict, t.AgentID, nil, "send refused: conversation owned by another agent")
 			return ErrConversationOwned
 		}
 	}
@@ -186,7 +191,8 @@ func (a *App) pinCarteiraOnClaim(contact *models.Contact, agentID uuid.UUID) {
 // sendTransferConflict answers 409 with the transfer's current owner so the
 // client can refresh its state instead of showing an assignment that no longer
 // exists. The body carries only ids; names come from the normal listing.
-func (a *App) sendTransferConflict(r *fastglue.Request, orgID, transferID uuid.UUID) error {
+func (a *App) sendTransferConflict(r *fastglue.Request, orgID, userID, transferID uuid.UUID) error {
+	a.auditDistribution(orgID, &userID, transferID, distEventConflict, nil, nil, "assignment changed concurrently")
 	data := map[string]any{"transfer_id": transferID.String()}
 	var t models.AgentTransfer
 	if err := a.DB.Where("id = ? AND organization_id = ?", transferID, orgID).First(&t).Error; err == nil {
@@ -198,4 +204,82 @@ func (a *App) sendTransferConflict(r *fastglue.Request, orgID, transferID uuid.U
 		}
 	}
 	return r.SendErrorEnvelope(fasthttp.StatusConflict, "Transfer was changed by someone else", data, "")
+}
+
+// Distribution audit events, written to the existing audit log (resource type
+// "transfers", resource id = the transfer) so there is a single trail.
+const (
+	distEventClaimed         = "claimed"          // an agent took an unassigned attendance (reply, self-assign, queue pick)
+	distEventAssigned        = "assigned"         // a supervisor or the system set/changed the responsible agent
+	distEventReleased        = "released"         // returned to the queue by a person
+	distEventReturnedAway    = "returned_away"    // returned because the agent went away
+	distEventReturnedOffline = "returned_offline" // returned because the agent stayed disconnected past the grace
+	distEventAutoAssigned    = "auto_assigned"    // chosen by the distribution strategy
+	distEventQueued          = "queued"           // no eligible agent: left in the queue
+	distEventConflict        = "conflict"         // an attempt lost a race or was refused ownership
+)
+
+// auditDistribution records a distribution event. actor == nil means the system
+// (strategy, reaper). from/to are the responsible agent before/after.
+func (a *App) auditDistribution(orgID uuid.UUID, actor *uuid.UUID, transferID uuid.UUID, event string, from, to *uuid.UUID, detail string) {
+	changes := []map[string]any{
+		{"field": "event", "old_value": nil, "new_value": event},
+		{"field": "agent_id", "old_value": uuidString(from), "new_value": uuidString(to)},
+	}
+	if detail != "" {
+		changes = append(changes, map[string]any{"field": "detail", "old_value": nil, "new_value": detail})
+	}
+	actorID, actorName := uuid.Nil, "System"
+	if actor != nil {
+		actorID, actorName = *actor, audit.GetUserName(a.DB, *actor)
+	}
+	audit.LogAudit(a.DB, orgID, actorID, actorName, models.ResourceTransfers, transferID,
+		models.AuditActionUpdated, nil, nil, changes...)
+}
+
+func uuidString(id *uuid.UUID) any {
+	if id == nil {
+		return nil
+	}
+	return id.String()
+}
+
+// BroadcastAgentPresence tells the organization an agent connected or
+// disconnected. Called from the hub listener, so it must not block the hub.
+func (a *App) BroadcastAgentPresence(orgID, userID uuid.UUID, online bool) {
+	if a.WSHub == nil {
+		return
+	}
+	a.WSHub.BroadcastToOrg(orgID, websocket.WSMessage{
+		Type:    websocket.TypeAgentPresence,
+		Payload: map[string]any{"user_id": userID.String(), "online": online},
+	})
+}
+
+// broadcastAgentAvailability tells the organization an agent toggled
+// available/away.
+func (a *App) broadcastAgentAvailability(orgID, userID uuid.UUID, available bool) {
+	if a.WSHub == nil {
+		return
+	}
+	a.WSHub.BroadcastToOrg(orgID, websocket.WSMessage{
+		Type:    websocket.TypeAgentAvailability,
+		Payload: map[string]any{"user_id": userID.String(), "is_available": available},
+	})
+}
+
+// auditNewTransfer records how a freshly created attendance was first routed:
+// opened by the agent who messaged first, chosen by the strategy, or left in
+// the queue because no eligible agent was found.
+func (a *App) auditNewTransfer(t *models.AgentTransfer) {
+	switch {
+	case t.Source == models.TransferSourceAgentInitiated && t.AgentID != nil:
+		a.auditDistribution(t.OrganizationID, t.AgentID, t.ID, distEventClaimed, nil, t.AgentID, "agent-initiated attendance")
+	case t.AgentID != nil && t.TransferredByUserID != nil:
+		a.auditDistribution(t.OrganizationID, t.TransferredByUserID, t.ID, distEventAssigned, nil, t.AgentID, "assigned at creation")
+	case t.AgentID != nil:
+		a.auditDistribution(t.OrganizationID, nil, t.ID, distEventAutoAssigned, nil, t.AgentID, "chosen by the distribution strategy")
+	default:
+		a.auditDistribution(t.OrganizationID, nil, t.ID, distEventQueued, nil, nil, "no agent assigned; waiting in the queue")
+	}
 }

@@ -515,6 +515,7 @@ func (a *App) CreateAgentTransfer(r *fastglue.Request) error {
 		a.Log.Error("Failed to create agent transfer", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create transfer", nil, "")
 	}
+	a.auditNewTransfer(&transfer)
 
 	// When AssignToSameAgent is enabled and no agent is already assigned,
 	// set the contact's assigned agent for future chat routing.
@@ -899,7 +900,7 @@ func (a *App) AssignAgentTransfer(r *fastglue.Request) error {
 		// already theirs); taking one from another agent is a conflict, not a
 		// silent overwrite.
 		if transfer.AgentID != nil && *transfer.AgentID != userID {
-			return a.sendTransferConflict(r, orgID, transferID)
+			return a.sendTransferConflict(r, orgID, userID, transferID)
 		}
 		targetAgentID = &userID
 	}
@@ -954,9 +955,17 @@ func (a *App) AssignAgentTransfer(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to assign transfer", nil, "")
 	}
 	if !moved {
-		return a.sendTransferConflict(r, orgID, transfer.ID)
+		return a.sendTransferConflict(r, orgID, userID, transfer.ID)
 	}
 	transfer.AgentID = targetAgentID
+	switch {
+	case targetAgentID == nil:
+		a.auditDistribution(orgID, &userID, transfer.ID, distEventReleased, previousAgentID, nil, "returned to the queue")
+	case previousAgentID == nil && *targetAgentID == userID:
+		a.auditDistribution(orgID, &userID, transfer.ID, distEventClaimed, nil, targetAgentID, "self-assigned")
+	default:
+		a.auditDistribution(orgID, &userID, transfer.ID, distEventAssigned, previousAgentID, targetAgentID, "")
+	}
 
 	// Update contact assignment using the same rule as pickup / auto-assign:
 	// only pin the relationship manager when AssignToSameAgent is enabled and
@@ -1063,9 +1072,10 @@ func (a *App) UnassignTransfer(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to unassign transfer", nil, "")
 	}
 	if !moved {
-		return a.sendTransferConflict(r, orgID, transfer.ID)
+		return a.sendTransferConflict(r, orgID, userID, transfer.ID)
 	}
 	transfer.AgentID = nil
+	a.auditDistribution(orgID, &userID, transfer.ID, distEventReleased, previousAgentID, nil, "unassigned")
 
 	if previousAgentID != nil {
 		a.DB.Model(&models.Contact{}).
@@ -1220,6 +1230,8 @@ func (a *App) PickNextTransfer(r *fastglue.Request) error {
 		a.Log.Error("Failed to complete pickup", "error", err, "transfer_id", transfer.ID)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to complete pickup", nil, "")
 	}
+
+	a.auditDistribution(orgID, &userID, transfer.ID, distEventClaimed, nil, &userID, "picked from queue")
 
 	// Load related data for response (outside transaction)
 	a.DB.Where("id = ?", transfer.ContactID).First(&transfer.Contact)
@@ -1438,6 +1450,7 @@ func (a *App) saveAndFinalizeTransfer(transfer *models.AgentTransfer, account *m
 	if err := a.createTransferRow(transfer); err != nil {
 		return err
 	}
+	a.auditNewTransfer(transfer)
 
 	// Update contact assignment if agent assigned, but only when AssignToSameAgent
 	// is enabled and no relationship manager is already set. Active transfers
@@ -1673,6 +1686,12 @@ func (a *App) createTransferToTeam(account *models.WhatsAppAccount, contact *mod
 // supervisor) is skipped and never counted or broadcast twice. The result is
 // the number of transfers THIS call actually released.
 func (a *App) ReturnAgentTransfersToQueue(userID, orgID uuid.UUID) int {
+	return a.returnAgentTransfers(userID, orgID, distEventReturnedAway)
+}
+
+// returnAgentTransfers is ReturnAgentTransfersToQueue with the audit reason
+// (distEventReturnedAway or distEventReturnedOffline).
+func (a *App) returnAgentTransfers(userID, orgID uuid.UUID, reason string) int {
 	var transfers []models.AgentTransfer
 	if err := a.DB.Where("agent_id = ? AND organization_id = ? AND status = ?", userID, orgID, models.TransferStatusActive).
 		Preload("Contact").Find(&transfers).Error; err != nil {
@@ -1695,6 +1714,7 @@ func (a *App) ReturnAgentTransfersToQueue(userID, orgID uuid.UUID) int {
 		}
 		transfer.AgentID = nil
 		returned++
+		a.auditDistribution(orgID, nil, transfer.ID, reason, previousAgentID, nil, "")
 
 		// Clear the contact's relationship-manager pointer only if it was
 		// pointing at the agent we just removed. Don't blow away a manually

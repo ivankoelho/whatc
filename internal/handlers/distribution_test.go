@@ -6,10 +6,12 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/handlers"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/internal/websocket"
 	"github.com/shridarpatil/whatomate/test/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -289,4 +291,179 @@ func TestApp_AssignAgentTransfer_ConcurrentSelfAssignOneWinner(t *testing.T) {
 
 	assert.EqualValues(t, 1, ok.Load())
 	assert.EqualValues(t, n-1, conflict.Load())
+}
+
+// --- Audit trail and realtime ---
+
+// hubWithClients starts a real hub and registers n clients in orgID.
+func hubWithClients(t *testing.T, orgID uuid.UUID, n int) (*websocket.Hub, []*websocket.Client) {
+	t.Helper()
+	hub := websocket.NewHub(testutil.NopLogger())
+	go hub.Run()
+	clients := make([]*websocket.Client, n)
+	for i := range clients {
+		clients[i] = websocket.NewClient(hub, nil, uuid.New(), orgID)
+		hub.Register(clients[i])
+	}
+	require.Eventually(t, func() bool { return hub.GetClientCount() == n }, 2*time.Second, 5*time.Millisecond)
+	return hub, clients
+}
+
+// distributionAudit returns the audit changes for a transfer as event -> entry.
+func distributionAudit(t *testing.T, app *handlers.App, transferID uuid.UUID, wantEvent string) map[string]any {
+	t.Helper()
+	var found map[string]any
+	require.Eventually(t, func() bool {
+		var logs []models.AuditLog
+		app.DB.Where("resource_type = ? AND resource_id = ?", models.ResourceTransfers, transferID).Find(&logs)
+		for _, l := range logs {
+			fields := map[string]any{}
+			for _, c := range l.Changes {
+				m := c.(map[string]any)
+				fields[m["field"].(string)] = m["new_value"]
+			}
+			fields["_user_name"] = l.UserName
+			fields["_user_id"] = l.UserID.String()
+			fields["_old_agent"] = nil
+			for _, c := range l.Changes {
+				if m := c.(map[string]any); m["field"] == "agent_id" {
+					fields["_old_agent"] = m["old_value"]
+				}
+			}
+			if fields["event"] == wantEvent {
+				found = fields
+				return true
+			}
+		}
+		return false
+	}, 3*time.Second, 25*time.Millisecond, "audit event %q not recorded", wantEvent)
+	return found
+}
+
+func TestDistributionAudit_ClaimOnSendIsRecordedWithActor(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+	agent := createTestAgent(t, app, org.ID)
+	c := testutil.CreateTestContact(t, app.DB, org.ID)
+	tr := createTestTransfer(t, app, org.ID, c.ID, account.Name, models.TransferStatusActive, nil)
+
+	require.NoError(t, app.EnsureAgentOwnsConversationForTest(account, c, agent.ID))
+
+	got := distributionAudit(t, app, tr.ID, "claimed")
+	assert.Equal(t, agent.ID.String(), got["agent_id"])
+	assert.Equal(t, agent.ID.String(), got["_user_id"])
+}
+
+func TestDistributionAudit_RefusedSendIsRecordedAsConflict(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+	owner, intruder := twoAgents(t, app, org.ID)
+	c := testutil.CreateTestContact(t, app.DB, org.ID)
+	tr := createTestTransfer(t, app, org.ID, c.ID, account.Name, models.TransferStatusActive, &owner.ID)
+
+	require.ErrorIs(t, app.EnsureAgentOwnsConversationForTest(account, c, intruder.ID), handlers.ErrConversationOwned)
+
+	got := distributionAudit(t, app, tr.ID, "conflict")
+	assert.Equal(t, intruder.ID.String(), got["_user_id"], "the actor is the refused agent")
+	assert.Equal(t, owner.ID.String(), got["_old_agent"], "the current owner is recorded")
+}
+
+func TestDistributionAudit_ReaperReleaseIsASystemEvent(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+	agent := createTestAgent(t, app, org.ID)
+	tr := createTestTransfer(t, app, org.ID, testutil.CreateTestContact(t, app.DB, org.ID).ID, account.Name, models.TransferStatusActive, &agent.ID)
+
+	presence := newFakePresence()
+	presence.set(agent.ID, false)
+	reaper := handlers.NewPresenceReaper(app, 60*time.Second, time.Second)
+	reaper.SetConnectedForTest(presence.is)
+	t0 := time.Now()
+	reaper.Sweep(t0)
+	require.Equal(t, 1, reaper.Sweep(t0.Add(61*time.Second)))
+
+	got := distributionAudit(t, app, tr.ID, "returned_offline")
+	assert.Equal(t, "System", got["_user_name"])
+	assert.Equal(t, agent.ID.String(), got["_old_agent"])
+	assert.Nil(t, got["agent_id"])
+}
+
+func TestDistributionRealtime_ClaimAndReleaseReachEveryClient(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+	hub, clients := hubWithClients(t, org.ID, 3)
+	app.WSHub = hub
+	agent := createTestAgent(t, app, org.ID)
+	c := testutil.CreateTestContact(t, app.DB, org.ID)
+	createTestTransfer(t, app, org.ID, c.ID, account.Name, models.TransferStatusActive, nil)
+
+	require.NoError(t, app.EnsureAgentOwnsConversationForTest(account, c, agent.ID))
+	for _, cl := range clients {
+		msg := readBroadcast(t, cl, websocket.TypeAgentTransferAssign)
+		assert.Equal(t, agent.ID.String(), msg.Payload.(map[string]any)["agent_id"])
+	}
+
+	// Released by the reaper: every client sees the attendance back in the queue.
+	presence := newFakePresence()
+	presence.set(agent.ID, false)
+	reaper := handlers.NewPresenceReaper(app, 60*time.Second, time.Second)
+	reaper.SetConnectedForTest(presence.is)
+	t0 := time.Now()
+	reaper.Sweep(t0)
+	require.Equal(t, 1, reaper.Sweep(t0.Add(61*time.Second)))
+	for _, cl := range clients {
+		msg := readBroadcast(t, cl, websocket.TypeAgentTransferAssign)
+		assert.Nil(t, msg.Payload.(map[string]any)["agent_id"])
+	}
+}
+
+func TestDistributionRealtime_PresenceAndAvailabilityEvents(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	hub, clients := hubWithClients(t, org.ID, 2)
+	app.WSHub = hub
+	agent := createTestAgent(t, app, org.ID)
+
+	app.BroadcastAgentPresence(org.ID, agent.ID, false)
+	for _, cl := range clients {
+		p := readBroadcast(t, cl, websocket.TypeAgentPresence).Payload.(map[string]any)
+		assert.Equal(t, agent.ID.String(), p["user_id"])
+		assert.Equal(t, false, p["online"])
+	}
+
+	req := testutil.NewJSONRequest(t, map[string]any{"is_available": false})
+	testutil.SetAuthContext(req, org.ID, agent.ID)
+	require.NoError(t, app.UpdateAvailability(req))
+	for _, cl := range clients {
+		p := readBroadcast(t, cl, websocket.TypeAgentAvailability).Payload.(map[string]any)
+		assert.Equal(t, agent.ID.String(), p["user_id"])
+		assert.Equal(t, false, p["is_available"])
+	}
+
+	// Setting the same value again is not a change: no event, no audit entry.
+	req = testutil.NewJSONRequest(t, map[string]any{"is_available": false})
+	testutil.SetAuthContext(req, org.ID, agent.ID)
+	require.NoError(t, app.UpdateAvailability(req))
+	assertNoBroadcast(t, clients[0])
+}
+
+func TestDistributionAudit_AvailabilityChangeIsRecorded(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	agent := createTestAgent(t, app, org.ID)
+
+	req := testutil.NewJSONRequest(t, map[string]any{"is_available": false})
+	testutil.SetAuthContext(req, org.ID, agent.ID)
+	require.NoError(t, app.UpdateAvailability(req))
+
+	require.Eventually(t, func() bool {
+		var n int64
+		app.DB.Model(&models.AuditLog{}).Where("resource_type = ? AND resource_id = ? AND user_id = ?",
+			models.ResourceUsers, agent.ID, agent.ID).Count(&n)
+		return n == 1
+	}, 3*time.Second, 25*time.Millisecond)
 }
