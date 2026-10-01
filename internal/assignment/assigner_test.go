@@ -369,32 +369,24 @@ func TestChatLoadCounter_CountsActiveTransfersPerAgent(t *testing.T) {
 	org := testutil.CreateTestOrganization(t, db)
 	a1 := testutil.CreateTestUser(t, db, org.ID)
 	a2 := testutil.CreateTestUser(t, db, org.ID)
-	contact := testutil.CreateTestContact(t, db, org.ID)
 
-	// 2 active transfers for a1, 1 for a2, 1 completed for a1 (must not count).
-	for range 2 {
+	// One active attendance per contact is a database invariant, so each
+	// transfer gets its own contact. 2 active for a1, 1 for a2, 1 completed
+	// for a1 (must not count).
+	mk := func(agent uuid.UUID, status models.TransferStatus) {
+		contact := testutil.CreateTestContact(t, db, org.ID)
 		require.NoError(t, db.Create(&models.AgentTransfer{
 			BaseModel:      models.BaseModel{ID: uuid.New()},
 			OrganizationID: org.ID,
 			ContactID:      contact.ID,
-			AgentID:        &a1.ID,
-			Status:         models.TransferStatusActive,
+			AgentID:        &agent,
+			Status:         status,
 		}).Error)
 	}
-	require.NoError(t, db.Create(&models.AgentTransfer{
-		BaseModel:      models.BaseModel{ID: uuid.New()},
-		OrganizationID: org.ID,
-		ContactID:      contact.ID,
-		AgentID:        &a2.ID,
-		Status:         models.TransferStatusActive,
-	}).Error)
-	require.NoError(t, db.Create(&models.AgentTransfer{
-		BaseModel:      models.BaseModel{ID: uuid.New()},
-		OrganizationID: org.ID,
-		ContactID:      contact.ID,
-		AgentID:        &a1.ID,
-		Status:         models.TransferStatusResumed, // not "active" → must NOT count
-	}).Error)
+	mk(a1.ID, models.TransferStatusActive)
+	mk(a1.ID, models.TransferStatusActive)
+	mk(a2.ID, models.TransferStatusActive)
+	mk(a1.ID, models.TransferStatusResumed) // not "active" → must NOT count
 
 	loads := assignment.ChatLoadCounter(db, org.ID, []uuid.UUID{a1.ID, a2.ID})
 	assert.Equal(t, int64(2), loads[a1.ID])
