@@ -80,3 +80,18 @@ func (r *PresenceReaper) SetConnectedForTest(fn func(orgID, userID uuid.UUID) bo
 func (a *App) ValidateStickyAgentForTest(agentID, orgID uuid.UUID) *uuid.UUID {
 	return a.validateStickyAgent(agentID, orgID)
 }
+
+// ResolveAIAPIKeyForTest exposes resolveAIAPIKey.
+func (a *App) ResolveAIAPIKeyForTest(settings *models.ChatbotSettings) (string, error) {
+	return a.resolveAIAPIKey(settings)
+}
+
+// GenerateAIResponseForTest exposes generateAIResponse.
+func (a *App) GenerateAIResponseForTest(settings *models.ChatbotSettings, session *models.ChatbotSession, userMessage string) (string, error) {
+	return a.generateAIResponse(settings, session, userMessage, aiFeatureChatbotReply)
+}
+
+// GetChatbotSettingsCachedForTest exposes getChatbotSettingsCached.
+func (a *App) GetChatbotSettingsCachedForTest(orgID uuid.UUID, account string) (*models.ChatbotSettings, error) {
+	return a.getChatbotSettingsCached(orgID, account)
+}

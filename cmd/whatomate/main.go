@@ -229,6 +229,13 @@ func runServer(args []string) {
 		if err := database.EnsureBrandingSettingsRow(db); err != nil {
 			lo.Fatal("Branding settings seed failed", "error", err)
 		}
+
+		// Encrypt AI provider API keys that were stored in plaintext. Idempotent,
+		// verified, never logs a key; with an empty app.encryption_key it changes
+		// nothing and says so.
+		if _, _, err := database.EncryptChatbotAIKeys(db, cfg.App.EncryptionKey, lo); err != nil {
+			lo.Fatal("AI API key encryption failed", "error", err)
+		}
 	}
 
 	// Connect to Redis
@@ -237,6 +244,14 @@ func runServer(args []string) {
 		lo.Fatal("Failed to connect to Redis", "error", err)
 	}
 	lo.Info("Connected to Redis")
+
+	// Drop cached chatbot settings once per start: entries written by an older
+	// version held the AI API key in plaintext, and must not outlive the upgrade.
+	if n, err := handlers.FlushChatbotSettingsCache(context.Background(), rdb); err != nil {
+		lo.Warn("Failed to flush chatbot settings cache", "error", err)
+	} else if n > 0 {
+		lo.Info("Flushed cached chatbot settings", "entries", n)
+	}
 
 	// Initialize job queue
 	jobQueue := queue.NewRedisQueue(rdb, lo)
@@ -932,6 +947,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/chatbot/import", app.ChatbotImport)
 
 	// AI Contexts
+	g.POST("/api/chatbot/ai/models", app.ListAIModels)
 	g.GET("/api/chatbot/ai-contexts", app.ListAIContexts)
 	g.POST("/api/chatbot/ai-contexts", app.CreateAIContext)
 	g.GET("/api/chatbot/ai-contexts/{id}", app.GetAIContext)

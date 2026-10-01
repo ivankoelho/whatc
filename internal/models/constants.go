@@ -79,6 +79,7 @@ const (
 	AIProviderOpenAI    AIProvider = "openai"
 	AIProviderAnthropic AIProvider = "anthropic"
 	AIProviderGoogle    AIProvider = "google"
+	AIProviderGroq      AIProvider = "groq"
 )
 
 // MatchType represents keyword matching strategies

@@ -84,6 +84,7 @@ func GetMigrationModels() []MigrationModel {
 
 		// Chatbot models
 		{"ChatbotSettings", &models.ChatbotSettings{}},
+		{"AIUsageLog", &models.AIUsageLog{}},
 		{"KeywordRule", &models.KeywordRule{}},
 		{"ChatbotFlow", &models.ChatbotFlow{}},
 		// ChatbotFlowStep table is no longer managed by AutoMigrate — the

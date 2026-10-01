@@ -2078,7 +2078,13 @@
     "aiSettingsSaved": "Configurações de IA salvas",
     "slaSettingsSaved": "Configurações de SLA salvas",
     "aiSaveFailed": "Falha ao salvar configurações de IA",
-    "slaSaveFailed": "Falha ao salvar configurações de SLA"
+    "aiEncryptionKeyMissing": "O servidor não tem app.encryption_key configurada, então a chave de API de IA não foi salva. Peça a um administrador para configurá-la.",
+    "slaSaveFailed": "Falha ao salvar configurações de SLA",
+    "loadModels": "Carregar modelos",
+    "modelsLoaded": "{count} modelos carregados do provedor",
+    "failedLoadModels": "Não foi possível carregar os modelos do provedor",
+    "apiKeySaved": "Há uma chave de API salva. Ela nunca é exibida novamente; digite uma nova para substituí-la.",
+    "loadModelsHint": "Informe a chave de API e clique em \"Carregar modelos\" para ver os modelos deste provedor."
   },
   "agentTransfers": {
     "title": "Transferências",
