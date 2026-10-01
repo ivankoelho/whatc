@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -682,6 +683,9 @@ func (a *App) SendMessage(r *fastglue.Request) error {
 	ctx := context.Background()
 	message, err := a.SendOutgoingMessage(ctx, msgReq, opts)
 	if err != nil {
+		if errors.Is(err, ErrConversationOwned) {
+			return r.SendErrorEnvelope(fasthttp.StatusConflict, "This conversation is assigned to another agent", nil, "")
+		}
 		a.Log.Error("Failed to send message", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to send message", nil, "")
 	}
@@ -870,6 +874,9 @@ func (a *App) SendMediaMessage(r *fastglue.Request) error {
 	ctx := context.Background()
 	message, err := a.SendOutgoingMessage(ctx, msgReq, opts)
 	if err != nil {
+		if errors.Is(err, ErrConversationOwned) {
+			return r.SendErrorEnvelope(fasthttp.StatusConflict, "This conversation is assigned to another agent", nil, "")
+		}
 		a.Log.Error("Failed to send message", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to send message", nil, "")
 	}

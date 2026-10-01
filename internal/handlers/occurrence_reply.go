@@ -57,6 +57,7 @@ func (a *App) ReplyToOccurrence(r *fastglue.Request) error {
 	// reaches a person instead of the chatbot.
 	opts := DefaultSendOptions()
 	opts.SentByUserID = &userID
+	opts.AllowOtherOwner = true // a protocol reply never takes over, nor is blocked by, the chat owner
 	if _, err := a.SendOutgoingMessage(context.Background(), OutgoingMessageRequest{
 		Account: &account,
 		Contact: contact,

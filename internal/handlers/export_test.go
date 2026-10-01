@@ -29,9 +29,20 @@ func SenderNameForTest(m *models.Message) string {
 	return senderName(m)
 }
 
-// CreateAgentInitiatedTransferForTest exposes createAgentInitiatedTransfer.
+// CreateAgentInitiatedTransferForTest exposes openAgentInitiatedTransfer. An
+// existing active transfer is not an error here (idempotent, like the original).
 func (a *App) CreateAgentInitiatedTransferForTest(account *models.WhatsAppAccount, contact *models.Contact, agentID uuid.UUID) {
-	a.createAgentInitiatedTransfer(account, contact, agentID)
+	_ = a.openAgentInitiatedTransfer(account, contact, agentID)
+}
+
+// EnsureAgentOwnsConversationForTest exposes ensureAgentOwnsConversation.
+func (a *App) EnsureAgentOwnsConversationForTest(account *models.WhatsAppAccount, contact *models.Contact, userID uuid.UUID) error {
+	return a.ensureAgentOwnsConversation(account, contact, userID, false)
+}
+
+// ClaimTransferForTest exposes claimTransfer on the app's DB.
+func (a *App) ClaimTransferForTest(t *models.AgentTransfer, agentID uuid.UUID) (bool, error) {
+	return a.claimTransfer(a.DB, t, agentID)
 }
 
 // ReleaseContactForTest exposes releaseContact.

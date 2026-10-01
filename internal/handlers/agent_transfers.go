@@ -508,7 +508,10 @@ func (a *App) CreateAgentTransfer(r *fastglue.Request) error {
 		a.UpdateSLAOnPickup(&transfer)
 	}
 
-	if err := a.DB.Create(&transfer).Error; err != nil {
+	if err := a.createTransferRow(&transfer); err != nil {
+		if errors.Is(err, ErrTransferAlreadyActive) {
+			return r.SendErrorEnvelope(fasthttp.StatusConflict, "Contact already has an active transfer", nil, "")
+		}
 		a.Log.Error("Failed to create agent transfer", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create transfer", nil, "")
 	}
@@ -891,7 +894,13 @@ func (a *App) AssignAgentTransfer(r *fastglue.Request) error {
 		}
 		targetAgentID = &parsedAgentID
 	} else if req.AgentID == nil && !hasWriteAccess {
-		// User without write permission self-assigning (null means "assign to me")
+		// User without write permission self-assigning (null means "assign to me").
+		// They may only take an unassigned attendance (or confirm one that is
+		// already theirs); taking one from another agent is a conflict, not a
+		// silent overwrite.
+		if transfer.AgentID != nil && *transfer.AgentID != userID {
+			return a.sendTransferConflict(r, orgID, transferID)
+		}
 		targetAgentID = &userID
 	}
 
@@ -924,18 +933,30 @@ func (a *App) AssignAgentTransfer(r *fastglue.Request) error {
 	// pointer was pointing at the agent we're removing.
 	previousAgentID := transfer.AgentID
 
-	// Update transfer
-	transfer.AgentID = targetAgentID
-
-	// Update SLA tracking if being assigned
+	// Compare-and-set against the agent we read: if anything changed the
+	// assignment since then, nothing is overwritten and the caller gets a 409.
+	updates := map[string]any{"agent_id": targetAgentID}
+	if req.TeamID != nil {
+		updates["team_id"] = transfer.TeamID
+	}
 	if targetAgentID != nil && transfer.SLA.PickedUpAt == nil {
 		a.UpdateSLAOnPickup(&transfer)
+		updates["picked_up_at"] = transfer.SLA.PickedUpAt
+		if transfer.SLA.Breached {
+			updates["sla_breached"] = true
+			updates["sla_breached_at"] = transfer.SLA.BreachedAt
+		}
 	}
 
-	if err := a.DB.Save(&transfer).Error; err != nil {
+	moved, err := a.moveTransfer(a.DB, transfer.ID, previousAgentID, updates)
+	if err != nil {
 		a.Log.Error("Failed to assign transfer", "error", err, "transfer_id", transfer.ID)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to assign transfer", nil, "")
 	}
+	if !moved {
+		return a.sendTransferConflict(r, orgID, transfer.ID)
+	}
+	transfer.AgentID = targetAgentID
 
 	// Update contact assignment using the same rule as pickup / auto-assign:
 	// only pin the relationship manager when AssignToSameAgent is enabled and
@@ -1036,9 +1057,13 @@ func (a *App) UnassignTransfer(r *fastglue.Request) error {
 	}
 
 	previousAgentID := transfer.AgentID
-	if err := a.DB.Model(transfer).Update("agent_id", nil).Error; err != nil {
+	moved, err := a.moveTransfer(a.DB, transfer.ID, previousAgentID, map[string]any{"agent_id": nil})
+	if err != nil {
 		a.Log.Error("Failed to unassign transfer", "error", err, "transfer_id", transfer.ID)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to unassign transfer", nil, "")
+	}
+	if !moved {
+		return a.sendTransferConflict(r, orgID, transfer.ID)
 	}
 	transfer.AgentID = nil
 
@@ -1410,7 +1435,7 @@ func (a *App) saveAndFinalizeTransfer(transfer *models.AgentTransfer, account *m
 		a.UpdateSLAOnPickup(transfer)
 	}
 
-	if err := a.DB.Create(transfer).Error; err != nil {
+	if err := a.createTransferRow(transfer); err != nil {
 		return err
 	}
 
@@ -1472,6 +1497,10 @@ func (a *App) createTransferToQueue(account *models.WhatsAppAccount, contact *mo
 	}
 
 	if err := a.saveAndFinalizeTransfer(&transfer, account, contact, settings, false); err != nil {
+		if errors.Is(err, ErrTransferAlreadyActive) {
+			a.Log.Debug("Contact already has active transfer (concurrent create), skipping", "contact_id", contact.ID)
+			return
+		}
 		a.Log.Error("Failed to create transfer to queue", "error", err, "contact_id", contact.ID, "source", string(source))
 		return
 	}
@@ -1479,7 +1508,7 @@ func (a *App) createTransferToQueue(account *models.WhatsAppAccount, contact *mo
 	a.Log.Info("Transfer created to agent queue", "transfer_id", transfer.ID, "contact_id", contact.ID, "source", source)
 }
 
-// createAgentInitiatedTransfer opens an attendance when an agent messages a
+// openAgentInitiatedTransfer opens an attendance when an agent messages a
 // contact that has none. The system models "a human owns this conversation"
 // solely as an active AgentTransfer, and no send path used to create one — so
 // the chatbot hijacked the customer's reply.
@@ -1487,11 +1516,7 @@ func (a *App) createTransferToQueue(account *models.WhatsAppAccount, contact *mo
 // Deliberately does NOT suppress outside business hours, unlike
 // createTransferToQueue: an agent messaging a customer at 11pm is a human
 // choosing to work, not an automated handoff.
-func (a *App) createAgentInitiatedTransfer(account *models.WhatsAppAccount, contact *models.Contact, agentID uuid.UUID) {
-	if a.hasActiveAgentTransfer(account.OrganizationID, contact.ID) {
-		return
-	}
-
+func (a *App) openAgentInitiatedTransfer(account *models.WhatsAppAccount, contact *models.Contact, agentID uuid.UUID) error {
 	settings, _ := a.getChatbotSettingsCached(account.OrganizationID, account.Name)
 
 	transfer := models.AgentTransfer{
@@ -1507,10 +1532,14 @@ func (a *App) createAgentInitiatedTransfer(account *models.WhatsAppAccount, cont
 	}
 
 	// endChatbotSession = true: human intervention wins over the bot.
-	if err := a.saveAndFinalizeTransfer(&transfer, account, contact, settings, true); err != nil {
+	// ErrTransferAlreadyActive is returned as is: the caller lost a race and
+	// must re-read the winner, not treat it as a failure.
+	err := a.saveAndFinalizeTransfer(&transfer, account, contact, settings, true)
+	if err != nil && !errors.Is(err, ErrTransferAlreadyActive) {
 		a.Log.Error("Failed to open agent-initiated attendance",
 			"error", err, "contact_id", contact.ID, "agent_id", agentID)
 	}
+	return err
 }
 
 // createTransferFromKeyword creates an agent transfer triggered by a keyword rule
@@ -1554,6 +1583,10 @@ func (a *App) createTransferFromKeyword(account *models.WhatsAppAccount, contact
 	}
 
 	if err := a.saveAndFinalizeTransfer(&transfer, account, contact, settings, true); err != nil {
+		if errors.Is(err, ErrTransferAlreadyActive) {
+			a.Log.Debug("Contact already has active transfer (concurrent create), skipping", "contact_id", contact.ID)
+			return
+		}
 		a.Log.Error("Failed to create keyword-triggered transfer", "error", err, "contact_id", contact.ID)
 		return
 	}
@@ -1610,6 +1643,10 @@ func (a *App) createTransferToTeam(account *models.WhatsAppAccount, contact *mod
 	}
 
 	if err := a.saveAndFinalizeTransfer(&transfer, account, contact, settings, true); err != nil {
+		if errors.Is(err, ErrTransferAlreadyActive) {
+			a.Log.Debug("Contact already has active transfer (concurrent create), skipping", "contact_id", contact.ID)
+			return
+		}
 		a.Log.Error("Failed to create team transfer", "error", err, "contact_id", contact.ID, "team_id", teamID)
 		return
 	}
