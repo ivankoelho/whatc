@@ -71,12 +71,14 @@ func (a *App) reconcileXProcessLink(client *xprocess.Client, apiKey string, link
 		if opp.Status == models.SalesOpportunityStatusAberta {
 			a.convertXProcessOpportunity(&opp, link)
 		}
+		a.setRealizedValueFromXProcess(&opp, resumo.ValorTotal)
 		// resolved_at stays nil — keep checking until FECHADO or CANCELADO.
 
 	case "FECHADO":
 		if opp.Status == models.SalesOpportunityStatusAberta {
 			a.convertXProcessOpportunity(&opp, link)
 		}
+		a.setRealizedValueFromXProcess(&opp, resumo.ValorTotal)
 		firstClosedAt := link.FirstClosedAt
 		if firstClosedAt == nil {
 			updates["first_closed_at"] = now
@@ -96,6 +98,25 @@ func (a *App) reconcileXProcessLink(client *xprocess.Client, apiKey string, link
 	}
 
 	a.DB.Model(link).Updates(updates)
+}
+
+// setRealizedValueFromXProcess records X2's order total as the opportunity's
+// realized_value. X2 is the official source of what was actually sold, so on a
+// valid reconciliation (order found, not cancelled, positive total) it replaces
+// a manually entered realized_value. Only a converted opportunity is touched,
+// and never estimated_value or realized_quantity (X2 does not return quantities
+// yet). A manual edit made while the link is still being re-checked is
+// overwritten on the next round, by design.
+func (a *App) setRealizedValueFromXProcess(opp *models.SalesOpportunity, total float64) {
+	if total <= 0 {
+		return
+	}
+	if err := a.DB.Model(&models.SalesOpportunity{}).
+		Where("id = ? AND organization_id = ? AND status = ?", opp.ID, opp.OrganizationID, models.SalesOpportunityStatusConvertida).
+		Where("realized_value IS DISTINCT FROM ?", total).
+		Update("realized_value", total).Error; err != nil {
+		a.Log.Error("xprocess reconciliation: failed to record realized value", "opportunity_id", opp.ID, "error", err)
+	}
 }
 
 // convertXProcessOpportunity mirrors ConvertSalesOpportunity's own DB

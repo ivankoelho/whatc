@@ -1533,6 +1533,10 @@ export interface SalesOpportunity {
   interest?: string
   estimated_value?: number
   estimated_quantity?: number
+  unit_of_measure?: 'UN' | 'M' | 'M2' | 'KG' | 'PCT' | 'CX'
+  // What actually happened. realized_value is overwritten by X2 when the order is reconciled.
+  realized_value?: number
+  realized_quantity?: number
   direcionamento?: SalesDirecionamento
   conversion_source?: SalesConversionSource
   loss_reason?: SalesLossReason
@@ -1565,7 +1569,7 @@ export interface SalesOpportunityEvent {
 export const salesOpportunitiesService = {
   list: (params?: Record<string, string>) =>
     api.get<ApiEnvelope<{ opportunities: SalesOpportunity[]; total: number; has_more: boolean }>>('/sales-opportunities', { params }),
-  create: (data: { contact_id: string; interest?: string; estimated_value?: number }) =>
+  create: (data: { contact_id: string; interest?: string; estimated_value?: number; estimated_quantity?: number; unit_of_measure?: string }) =>
     api.post<ApiEnvelope<SalesOpportunity>>('/sales-opportunities', data),
   // Permanent delete, regardless of stage/status — super admin only, the
   // backend 403s anyone else even with sales_opportunities:delete granted.
@@ -1575,9 +1579,10 @@ export const salesOpportunitiesService = {
     api.put<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/stage`, { stage }),
   changeDirecionamento: (id: string, direcionamento: SalesDirecionamento) =>
     api.put<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/direcionamento`, { direcionamento }),
-  updateDetails: (id: string, details: { interest?: string; estimated_value?: number; estimated_quantity?: number }) =>
+  updateDetails: (id: string, details: { interest?: string; estimated_value?: number; estimated_quantity?: number; unit_of_measure?: string; realized_value?: number; realized_quantity?: number }) =>
     api.put<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/details`, details),
-  convert: (id: string) => api.post<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/convert`),
+  convert: (id: string, realized?: { realized_value?: number; realized_quantity?: number }) =>
+    api.post<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/convert`, realized),
   lose: (id: string, lossReason: SalesLossReason, lossNotes?: string) =>
     api.post<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/lose`, { loss_reason: lossReason, loss_notes: lossNotes }),
   listEvents: (id: string) =>
