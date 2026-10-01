@@ -293,6 +293,11 @@ func getIndexes() []string {
 				CHECK (contact_status IN ('new','in_progress','resolved'));
 		EXCEPTION WHEN duplicate_object THEN NULL;
 		END $$`,
+		`DO $$ BEGIN
+			ALTER TABLE contacts ADD CONSTRAINT chk_contacts_contact_type
+				CHECK (contact_type IN ('cliente','fornecedor','colaborador'));
+		EXCEPTION WHEN duplicate_object THEN NULL;
+		END $$`,
 		// Composite index matching the ListContacts filter + ordering exactly
 		`CREATE INDEX IF NOT EXISTS idx_contacts_org_status_lastmsg ON contacts(organization_id, contact_status, last_message_at DESC NULLS LAST)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_phone_status ON chatbot_sessions(organization_id, phone_number, status)`,

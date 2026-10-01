@@ -107,10 +107,8 @@ func (a *App) DeleteDepartment(r *fastglue.Request) error {
 		return nil
 	}
 
-	var inUse int64
-	a.DB.Model(&models.Team{}).Where("department_id = ?", departmentID).Count(&inUse)
-	if inUse > 0 {
-		return r.SendErrorEnvelope(fasthttp.StatusConflict, "Department is in use by an existing team", nil, "")
+	if a.isPlacementInUse("department_id", departmentID) {
+		return r.SendErrorEnvelope(fasthttp.StatusConflict, "Department is in use by a team, contact or user", nil, "")
 	}
 
 	if err := a.DB.Delete(department).Error; err != nil {

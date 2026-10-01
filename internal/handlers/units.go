@@ -49,7 +49,7 @@ func (a *App) CreateUnit(r *fastglue.Request) error {
 	if req.Name == "" {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "name is required", nil, "")
 	}
-	cnpj := normalizeDocument(req.CNPJ)
+	cnpj := contactutil.NormalizePhone(req.CNPJ) // digits only
 	if cnpj != "" && !contactutil.ValidCNPJ(cnpj) {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid CNPJ", nil, "")
 	}
@@ -98,7 +98,7 @@ func (a *App) UpdateUnit(r *fastglue.Request) error {
 	if req.Name == "" {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "name is required", nil, "")
 	}
-	cnpj := normalizeDocument(req.CNPJ)
+	cnpj := contactutil.NormalizePhone(req.CNPJ) // digits only
 	if cnpj != "" && !contactutil.ValidCNPJ(cnpj) {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid CNPJ", nil, "")
 	}
@@ -136,10 +136,8 @@ func (a *App) DeleteUnit(r *fastglue.Request) error {
 		return nil
 	}
 
-	var inUse int64
-	a.DB.Model(&models.Team{}).Where("unit_id = ?", unitID).Count(&inUse)
-	if inUse > 0 {
-		return r.SendErrorEnvelope(fasthttp.StatusConflict, "Unit is in use by an existing team", nil, "")
+	if a.isPlacementInUse("unit_id", unitID) {
+		return r.SendErrorEnvelope(fasthttp.StatusConflict, "Unit is in use by a team, contact or user", nil, "")
 	}
 
 	if err := a.DB.Delete(unit).Error; err != nil {
