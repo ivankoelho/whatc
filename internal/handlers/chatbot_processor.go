@@ -966,6 +966,10 @@ func (a *App) fetchAPIContext(apiConfig models.JSONB, session *models.ChatbotSes
 // generateOpenAIResponse generates a response using OpenAI API
 func (a *App) generateOpenAIResponse(settings *models.ChatbotSettings, session *models.ChatbotSession, userMessage string, contextData string) (string, error) {
 	url := "https://api.openai.com/v1/chat/completions"
+	apiKey, err := a.resolveAIAPIKey(settings)
+	if err != nil {
+		return "", err
+	}
 
 	// Build messages array
 	messages := []map[string]string{}
@@ -1030,7 +1034,7 @@ func (a *App) generateOpenAIResponse(settings *models.ChatbotSettings, session *
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+settings.AI.APIKey)
+	req.Header.Set("Authorization", "Bearer "+apiKey)
 
 	resp, err := a.HTTPClient.Do(req)
 	if err != nil {
@@ -1071,6 +1075,10 @@ func (a *App) generateOpenAIResponse(settings *models.ChatbotSettings, session *
 // generateAnthropicResponse generates a response using Anthropic API
 func (a *App) generateAnthropicResponse(settings *models.ChatbotSettings, session *models.ChatbotSession, userMessage string, contextData string) (string, error) {
 	url := "https://api.anthropic.com/v1/messages"
+	apiKey, err := a.resolveAIAPIKey(settings)
+	if err != nil {
+		return "", err
+	}
 
 	// Build messages array
 	messages := []map[string]string{}
@@ -1132,7 +1140,7 @@ func (a *App) generateAnthropicResponse(settings *models.ChatbotSettings, sessio
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", settings.AI.APIKey)
+	req.Header.Set("x-api-key", apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
 
 	resp, err := a.HTTPClient.Do(req)
@@ -1174,8 +1182,13 @@ func (a *App) generateAnthropicResponse(settings *models.ChatbotSettings, sessio
 
 // generateGoogleResponse generates a response using Google Gemini API
 func (a *App) generateGoogleResponse(settings *models.ChatbotSettings, session *models.ChatbotSession, userMessage string, contextData string) (string, error) {
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
-		settings.AI.Model, settings.AI.APIKey)
+	apiKey, err := a.resolveAIAPIKey(settings)
+	if err != nil {
+		return "", err
+	}
+	// The key travels in a header, not in the URL, so it cannot end up in
+	// request logs or proxies' access logs.
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent", settings.AI.Model)
 
 	// Build contents array
 	contents := []map[string]any{}
@@ -1246,6 +1259,7 @@ func (a *App) generateGoogleResponse(settings *models.ChatbotSettings, session *
 	}
 
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-goog-api-key", apiKey)
 
 	resp, err := a.HTTPClient.Do(req)
 	if err != nil {

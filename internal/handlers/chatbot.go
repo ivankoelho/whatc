@@ -33,6 +33,9 @@ type ChatbotSettingsResponse struct {
 	AIModel                      string            `json:"ai_model"`
 	AIMaxTokens                  int               `json:"ai_max_tokens"`
 	AISystemPrompt               string            `json:"ai_system_prompt"`
+	// AIAPIKeyConfigured says whether a key is stored. The key itself is never
+	// returned, not even masked: the UI only needs to know there is one.
+	AIAPIKeyConfigured bool `json:"ai_api_key_configured"`
 	// SLA Settings
 	SLAEnabled             bool     `json:"sla_enabled"`
 	SLAResponseMinutes     int      `json:"sla_response_minutes"`
@@ -184,11 +187,12 @@ func (a *App) GetChatbotSettings(r *fastglue.Request) error {
 		StrictConversationVisibility: settings.AgentAssignment.StrictConversationVisibility,
 		SignWithAgentName:            settings.AgentAssignment.SignWithAgentName,
 		// AI
-		AIEnabled:      settings.AI.Enabled,
-		AIProvider:     settings.AI.Provider,
-		AIModel:        settings.AI.Model,
-		AIMaxTokens:    settings.AI.MaxTokens,
-		AISystemPrompt: settings.AI.SystemPrompt,
+		AIEnabled:          settings.AI.Enabled,
+		AIProvider:         settings.AI.Provider,
+		AIModel:            settings.AI.Model,
+		AIMaxTokens:        settings.AI.MaxTokens,
+		AISystemPrompt:     settings.AI.SystemPrompt,
+		AIAPIKeyConfigured: settings.AI.APIKey != "",
 		// SLA Settings
 		SLAEnabled:                 settings.SLA.Enabled,
 		SLAResponseMinutes:         settings.SLA.ResponseMinutes,
@@ -478,7 +482,12 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		settings.AI.Provider = *req.AIProvider
 	}
 	if req.AIAPIKey != nil && *req.AIAPIKey != "" {
-		settings.AI.APIKey = *req.AIAPIKey
+		enc, err := a.encryptAIKey(*req.AIAPIKey)
+		if err != nil {
+			a.Log.Error("Failed to encrypt AI API key", "error", err)
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to store AI API key", nil, "")
+		}
+		settings.AI.APIKey = enc
 	}
 	if req.AIModel != nil {
 		settings.AI.Model = *req.AIModel
