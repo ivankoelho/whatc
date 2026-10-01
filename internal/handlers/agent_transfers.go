@@ -1665,7 +1665,13 @@ func (a *App) createTransferToTeam(account *models.WhatsAppAccount, contact *mod
 }
 
 // ReturnAgentTransfersToQueue returns all active transfers assigned to an agent back to their team queues
-// Called when an agent goes offline/unavailable
+// Called when an agent goes away, or stays disconnected past the grace period.
+//
+// Idempotent and safe to run concurrently with itself or with a reassignment:
+// each transfer is released with a compare-and-set on the agent, so a transfer
+// that was already returned (by a previous run, another instance, or a
+// supervisor) is skipped and never counted or broadcast twice. The result is
+// the number of transfers THIS call actually released.
 func (a *App) ReturnAgentTransfersToQueue(userID, orgID uuid.UUID) int {
 	var transfers []models.AgentTransfer
 	if err := a.DB.Where("agent_id = ? AND organization_id = ? AND status = ?", userID, orgID, models.TransferStatusActive).
@@ -1674,20 +1680,21 @@ func (a *App) ReturnAgentTransfersToQueue(userID, orgID uuid.UUID) int {
 		return 0
 	}
 
-	if len(transfers) == 0 {
-		return 0
-	}
-
-	// Return each transfer to its team queue (or general queue)
+	returned := 0
 	for i := range transfers {
 		transfer := &transfers[i]
 		previousAgentID := transfer.AgentID
-		transfer.AgentID = nil
 
-		if err := a.DB.Save(transfer).Error; err != nil {
+		moved, err := a.moveTransfer(a.DB, transfer.ID, previousAgentID, map[string]any{"agent_id": nil})
+		if err != nil {
 			a.Log.Error("Failed to return transfer to queue", "error", err, "transfer_id", transfer.ID)
 			continue
 		}
+		if !moved {
+			continue // already released or reassigned by someone else
+		}
+		transfer.AgentID = nil
+		returned++
 
 		// Clear the contact's relationship-manager pointer only if it was
 		// pointing at the agent we just removed. Don't blow away a manually
@@ -1701,10 +1708,12 @@ func (a *App) ReturnAgentTransfersToQueue(userID, orgID uuid.UUID) int {
 		a.broadcastTransferAssigned(transfer)
 	}
 
-	a.Log.Info("Returned agent transfers to queue",
-		"user_id", userID,
-		"count", len(transfers),
-	)
+	if returned > 0 {
+		a.Log.Info("Returned agent transfers to queue",
+			"user_id", userID,
+			"count", returned,
+		)
+	}
 
-	return len(transfers)
+	return returned
 }

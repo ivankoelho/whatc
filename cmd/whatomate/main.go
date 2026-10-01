@@ -280,6 +280,11 @@ func runServer(args []string) {
 	// delivery — without it the hub would fall back to legacy (insecure) behaviour.
 	wsHub.SetConversationAuthorizer(app.CanViewConversationByID)
 
+	// Presence reaper: releases an agent's attendances only after they stay
+	// disconnected past the grace period (reconnects within it change nothing).
+	presenceReaper := handlers.NewPresenceReaper(app, handlers.DefaultPresenceGrace, 10*time.Second)
+	wsHub.SetPresenceListener(presenceReaper.OnPresenceChange)
+
 	// Initialize S3 client for call recordings (optional)
 	var s3Client *storage.S3Client
 	if cfg.Calling.RecordingEnabled && cfg.Storage.S3Bucket != "" {
@@ -356,6 +361,10 @@ func runServer(args []string) {
 	go slaProcessor.Start(slaCtx)
 	lo.Info("SLA processor started")
 
+	// Start presence reaper (sweeps every 10s; grace is 60s)
+	presenceCtx, presenceCancel := context.WithCancel(context.Background())
+	go presenceReaper.Start(presenceCtx)
+
 	// Start XProcess reconciler (checks once daily, first tick after 2am)
 	xprocessReconciler := handlers.NewXProcessReconciler(app, 15*time.Minute, 2)
 	xprocessCtx, xprocessCancel := context.WithCancel(context.Background())
@@ -405,6 +414,8 @@ func runServer(args []string) {
 	lo.Info("Stopping SLA processor...")
 	slaCancel()
 	slaProcessor.Stop()
+	presenceCancel()
+	presenceReaper.Stop()
 	lo.Info("SLA processor stopped")
 
 	// Stop XProcess reconciler

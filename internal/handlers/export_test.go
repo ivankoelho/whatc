@@ -70,3 +70,8 @@ func (a *App) ScopeVisibleConversationsForTest(q *gorm.DB, userID, orgID uuid.UU
 func (a *App) CanViewTeamMemberForTest(viewerID, ownerID uuid.UUID) bool {
 	return a.canViewTeamMember(viewerID, ownerID)
 }
+
+// SetConnectedForTest replaces the reaper's connectivity source.
+func (r *PresenceReaper) SetConnectedForTest(fn func(orgID, userID uuid.UUID) bool) {
+	r.isConnected = fn
+}
