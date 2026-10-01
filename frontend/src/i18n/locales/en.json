@@ -2089,6 +2089,7 @@
     "aiSettingsSaved": "AI settings saved",
     "slaSettingsSaved": "SLA settings saved",
     "aiSaveFailed": "Failed to save AI settings",
+    "aiEncryptionKeyMissing": "The server has no app.encryption_key configured, so the AI API key was not saved. Ask an administrator to set it.",
     "slaSaveFailed": "Failed to save SLA settings",
     "loadModels": "Load models",
     "modelsLoaded": "{count} models loaded from the provider",

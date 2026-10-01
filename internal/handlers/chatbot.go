@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -495,6 +496,10 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 	}
 	if req.AIAPIKey != nil && *req.AIAPIKey != "" {
 		enc, err := a.encryptAIKey(*req.AIAPIKey)
+		if errors.Is(err, ErrAIEncryptionKeyUnavailable) {
+			return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable,
+				"AI API keys cannot be stored: app.encryption_key is not configured on the server", nil, aiEncryptionKeyErrorType)
+		}
 		if err != nil {
 			a.Log.Error("Failed to encrypt AI API key", "error", err)
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to store AI API key", nil, "")

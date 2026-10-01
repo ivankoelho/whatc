@@ -83,3 +83,30 @@ test('Groq is offered, has no built-in models, loads them from the provider and 
   await expect(page.getByTestId('ai-key-saved')).toBeVisible()
   await expect(page.locator('body')).not.toContainText(KEY)
 })
+
+test('a server without app.encryption_key says so, keeps the typed key hidden and does not mark it saved', async ({ page }) => {
+  const NEW_KEY = `sk-e2e-new-${Date.now()}-DO-NOT-LEAK`
+  await loginAsAdmin(page)
+  const settingsPage = new ChatbotSettingsPage(page)
+  await settingsPage.goto()
+  await settingsPage.switchToAITab()
+
+  const toggle = page.locator('button[role="switch"]').first()
+  if ((await toggle.getAttribute('data-state')) === 'unchecked') await toggle.click()
+
+  await page.route('**/api/chatbot/settings', async (route) => {
+    if (route.request().method() !== 'PUT') return route.fallback()
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ status: 'error', message: 'AI API keys cannot be stored', error_type: 'AIEncryptionKeyUnavailable' }),
+    })
+  })
+
+  await page.locator('input[type="password"]').fill(NEW_KEY)
+  await page.getByRole('button', { name: /save changes/i }).last().click()
+
+  await expect(page.getByText(/app\.encryption_key/i).first()).toBeVisible({ timeout: 10_000 })
+  await expect(page.locator('body')).not.toContainText(NEW_KEY)
+  await expect(page.locator('input[type="password"]')).toHaveAttribute('type', 'password')
+})

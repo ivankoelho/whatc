@@ -194,3 +194,55 @@ func TestAIKey_GoogleKeyIsSentInHeaderNotInTheURL(t *testing.T) {
 	assert.Empty(t, rt.requests[0].URL.RawQuery)
 	assert.Equal(t, "g-key-123", rt.requests[0].Header.Get("x-goog-api-key"))
 }
+
+func TestAIKey_NoEncryptionKeyRefusesToStorePlaintext(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	user := aiAdmin(t, app, org.ID)
+	app.Config.App.EncryptionKey = ""
+
+	req := testutil.NewJSONRequest(t, map[string]any{
+		"ai_enabled": true, "ai_provider": "openai", "ai_model": "gpt-4o-mini", "ai_api_key": secretKey,
+	})
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	require.NoError(t, app.UpdateChatbotSettings(req))
+
+	assert.Equal(t, fasthttp.StatusServiceUnavailable, testutil.GetResponseStatusCode(req))
+	body := string(testutil.GetResponseBody(req))
+	assert.Contains(t, body, "AIEncryptionKeyUnavailable", "the frontend can tell this from a bad key")
+	assert.NotContains(t, body, secretKey)
+
+	var count int64
+	require.NoError(t, app.DB.Raw("SELECT count(*) FROM chatbot_settings WHERE organization_id = ?", org.ID).Scan(&count).Error)
+	assert.Zero(t, count, "nothing was persisted, not even the other fields")
+}
+
+func TestAIKey_NoEncryptionKeyLeavesExistingKeyIntact(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	user := aiAdmin(t, app, org.ID)
+	saveAIKeyViaAPI(t, app, org.ID, user.ID, secretKey)
+	before := storedAIKey(t, app, org.ID)
+	require.True(t, crypto.IsEncrypted(before))
+
+	app.Config.App.EncryptionKey = ""
+	req := testutil.NewJSONRequest(t, map[string]any{"ai_provider": "anthropic", "ai_model": "other", "ai_api_key": "sk-new-REPLACEMENT"})
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	require.NoError(t, app.UpdateChatbotSettings(req))
+
+	assert.Equal(t, fasthttp.StatusServiceUnavailable, testutil.GetResponseStatusCode(req))
+	assert.NotContains(t, string(testutil.GetResponseBody(req)), "sk-new-REPLACEMENT")
+	assert.Equal(t, before, storedAIKey(t, app, org.ID), "neither replaced by plaintext nor erased")
+	var provider string
+	require.NoError(t, app.DB.Raw("SELECT ai_provider FROM chatbot_settings WHERE organization_id = ? AND whats_app_account = ''", org.ID).Scan(&provider).Error)
+	assert.Equal(t, "openai", provider, "other fields of the rejected request were not applied")
+}
+
+func TestAIKey_ResolveWithValidKeyReturnsPlaintext(t *testing.T) {
+	app := newTestApp(t)
+	enc, err := crypto.Encrypt(secretKey, app.Config.App.EncryptionKey)
+	require.NoError(t, err)
+	got, err := app.ResolveAIAPIKeyForTest(&models.ChatbotSettings{AI: models.AIConfig{APIKey: enc}})
+	require.NoError(t, err)
+	assert.Equal(t, secretKey, got)
+}

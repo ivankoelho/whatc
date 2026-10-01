@@ -11,12 +11,21 @@ import (
 // credential (no key, or it is encrypted and cannot be decrypted).
 var ErrAIKeyUnavailable = errors.New("AI API key is not available")
 
-// encryptAIKey encrypts a key supplied by an admin before it is stored. With no
-// app.encryption_key configured the value is stored unencrypted (same behaviour
-// as the other secrets) and a warning is logged so it is not silent.
+// ErrAIEncryptionKeyUnavailable means app.encryption_key is not configured, so a
+// new AI API key cannot be stored. It is a server configuration problem, not a
+// bad key from the user.
+var ErrAIEncryptionKeyUnavailable = errors.New("app.encryption_key is not configured")
+
+// aiEncryptionKeyErrorType is the error_type the settings endpoint returns for
+// ErrAIEncryptionKeyUnavailable so the frontend can tell it from a bad key.
+const aiEncryptionKeyErrorType = "AIEncryptionKeyUnavailable"
+
+// encryptAIKey encrypts a key supplied by an admin before it is stored. It fails
+// closed: with no app.encryption_key the key is refused, never stored as plaintext.
 func (a *App) encryptAIKey(plain string) (string, error) {
 	if a.Config.App.EncryptionKey == "" {
-		a.Log.Warn("app.encryption_key is empty: the AI API key is being stored unencrypted")
+		a.Log.Error("Refusing to store AI API key: app.encryption_key is not configured")
+		return "", ErrAIEncryptionKeyUnavailable
 	}
 	return crypto.Encrypt(plain, a.Config.App.EncryptionKey)
 }

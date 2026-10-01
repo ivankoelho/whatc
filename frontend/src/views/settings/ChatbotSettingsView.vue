@@ -388,8 +388,10 @@ async function saveAISettings() {
     if (aiSettings.value.ai_api_key) aiSettings.value.ai_api_key_configured = true
     aiSettings.value.ai_api_key = ''
     refreshActivityLog(aiLogKey)
-  } catch (error) {
-    toast.error(t('chatbotSettings.aiSaveFailed'))
+  } catch (error: any) {
+    toast.error(error?.response?.data?.error_type === 'AIEncryptionKeyUnavailable'
+      ? t('chatbotSettings.aiEncryptionKeyMissing')
+      : t('chatbotSettings.aiSaveFailed'))
   } finally {
     isSubmitting.value = false
   }

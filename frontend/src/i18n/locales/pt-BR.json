@@ -2078,6 +2078,7 @@
     "aiSettingsSaved": "Configurações de IA salvas",
     "slaSettingsSaved": "Configurações de SLA salvas",
     "aiSaveFailed": "Falha ao salvar configurações de IA",
+    "aiEncryptionKeyMissing": "O servidor não tem app.encryption_key configurada, então a chave de API de IA não foi salva. Peça a um administrador para configurá-la.",
     "slaSaveFailed": "Falha ao salvar configurações de SLA",
     "loadModels": "Carregar modelos",
     "modelsLoaded": "{count} modelos carregados do provedor",
