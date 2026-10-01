@@ -1118,6 +1118,14 @@ func (a *App) PickNextTransfer(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You don't have permission to pick up transfers", nil, "")
 	}
 
+	// Operational eligibility (the shared Phase 6 rule: active, available AND
+	// connected). Authorization above is unchanged; this only stops an agent
+	// who is away, offline or inactive from taking an attendance.
+	if !a.isAgentEligible(orgID, userID) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You must be active, available and connected to pick up transfers", nil, "")
+	}
+
 	// Get optional team filter
 	teamIDStr := string(r.RequestCtx.QueryArgs().Peek("team_id"))
 

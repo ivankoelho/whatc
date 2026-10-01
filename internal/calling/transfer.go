@@ -97,37 +97,12 @@ func (m *Manager) initiateTransfer(session *CallSession, waAccount string, teamT
 
 	// Pick which specific agent (if any) to ring first. Sticky routing from
 	// a voice_call button takes precedence — its eligibility was already
-	// validated when the webhook handler set StickyAgentID on the session,
-	// so we don't re-query is_available here. Otherwise fall back to the
-	// contact's assigned-user (relationship manager) rule; if neither
+	// validated when the webhook handler set StickyAgentID on the session
+	// (via the shared Assigner rule), so it is not re-checked here. Otherwise
+	// fall back to the contact's assigned-user (relationship manager), which
+	// goes through the same Assigner rule; if neither
 	// matches, the call goes through team rotation / broadcast below.
-	var assignedAgentID *uuid.UUID
-	switch {
-	case session.StickyAgentID != nil:
-		if !assignment.IsAgentOnActiveCall(m.db, *session.StickyAgentID) {
-			assignedAgentID = session.StickyAgentID
-			m.log.Info("Routing call to sticky agent (voice_call payload)",
-				"call_id", session.ID, "agent_id", assignedAgentID)
-		} else {
-			m.log.Info("Sticky agent is currently on another call, falling back to team/broadcast",
-				"call_id", session.ID, "agent_id", session.StickyAgentID)
-		}
-	case session.ContactID != uuid.Nil:
-		var contact models.Contact
-		if m.db.Select("assigned_user_id").Where("id = ?", session.ContactID).First(&contact).Error == nil && contact.AssignedUserID != nil {
-			var agent models.User
-			if m.db.Where("id = ? AND is_available = ?", contact.AssignedUserID, true).First(&agent).Error == nil {
-				if !assignment.IsAgentOnActiveCall(m.db, agent.ID) {
-					assignedAgentID = contact.AssignedUserID
-					m.log.Info("Routing call to assigned agent (relationship manager)",
-						"call_id", session.ID, "agent_id", assignedAgentID, "contact_id", session.ContactID)
-				} else {
-					m.log.Info("Assigned agent is currently on another call, falling back to team/broadcast",
-						"call_id", session.ID, "agent_id", agent.ID)
-				}
-			}
-		}
-	}
+	assignedAgentID := m.pickDirectAgent(session)
 
 	if assignedAgentID != nil {
 		// Ring the assigned agent first, then fall back to team/broadcast
@@ -256,6 +231,9 @@ func (m *Manager) InitiateAgentTransfer(callLogID, initiatingAgentID uuid.UUID, 
 	// Load org settings outside lock (DB query)
 	orgSettings := m.getOrgCallingSettings(session.OrganizationID)
 
+	if targetAgentID != nil && !m.agentEligible(session.OrganizationID, *targetAgentID) {
+		return fmt.Errorf("target agent is not available to receive calls")
+	}
 	if targetAgentID != nil && assignment.IsAgentOnActiveCall(m.db, *targetAgentID) {
 		return fmt.Errorf("target agent is currently on another call")
 	}
@@ -905,14 +883,8 @@ func (m *Manager) runTransferRotation(session *CallSession, transfer models.Call
 
 		triedAgents = append(triedAgents, *agentID)
 
-		// Skip agents who are not online (no active WebSocket connection)
-		if !m.wsHub.IsUserOnline(orgID, *agentID) {
-			m.log.Debug("Rotation: skipping offline agent",
-				"transfer_id", transfer.ID,
-				"agent_id", *agentID,
-			)
-			continue
-		}
+		// AssignToTeam only returns eligible agents (active, available and
+		// connected), so no separate presence check is needed here.
 
 		// Skip agents who are currently on an active call
 		if assignment.IsAgentOnActiveCall(m.db, *agentID) {
@@ -1493,4 +1465,54 @@ func (m *Manager) ResumeCall(callLogID uuid.UUID) error {
 	go bridge.Start(callerRemote, agentLocal, agentRemote, callerLocal)
 
 	return nil
+}
+
+// agentEligible is the single eligibility rule for ringing a specific agent,
+// delegated to the shared Assigner (active AND available AND connected). It
+// does not include the call-specific "already on a call" condition; callers
+// apply assignment.IsAgentOnActiveCall separately. With no Assigner wired the
+// agent is treated as not eligible, so the call falls back to team/broadcast.
+func (m *Manager) agentEligible(orgID, agentID uuid.UUID) bool {
+	return m.assigner != nil && m.assigner.IsAgentEligible(orgID, agentID)
+}
+
+// pickDirectAgent decides which specific agent (if any) to ring first, before
+// team rotation: the voice_call sticky agent, else the contact's assigned user
+// (relationship manager). nil means "no direct agent": the call goes through
+// team rotation / broadcast. The assigned-user path goes through the shared
+// Assigner eligibility rule; the sticky agent was validated by the same rule
+// when the webhook set StickyAgentID.
+func (m *Manager) pickDirectAgent(session *CallSession) *uuid.UUID {
+	var assignedAgentID *uuid.UUID
+	switch {
+	case session.StickyAgentID != nil:
+		if !assignment.IsAgentOnActiveCall(m.db, *session.StickyAgentID) {
+			assignedAgentID = session.StickyAgentID
+			m.log.Info("Routing call to sticky agent (voice_call payload)",
+				"call_id", session.ID, "agent_id", assignedAgentID)
+		} else {
+			m.log.Info("Sticky agent is currently on another call, falling back to team/broadcast",
+				"call_id", session.ID, "agent_id", session.StickyAgentID)
+		}
+	case session.ContactID != uuid.Nil:
+		var contact models.Contact
+		if m.db.Select("assigned_user_id").Where("id = ?", session.ContactID).First(&contact).Error == nil && contact.AssignedUserID != nil {
+			agentID := *contact.AssignedUserID
+			// Same eligibility rule as every other distribution path (active,
+			// available AND connected), then the call-specific condition.
+			switch {
+			case !m.agentEligible(session.OrganizationID, agentID):
+				m.log.Info("Assigned agent is not eligible (away, inactive or offline), falling back to team/broadcast",
+					"call_id", session.ID, "agent_id", agentID, "contact_id", session.ContactID)
+			case assignment.IsAgentOnActiveCall(m.db, agentID):
+				m.log.Info("Assigned agent is currently on another call, falling back to team/broadcast",
+					"call_id", session.ID, "agent_id", agentID)
+			default:
+				assignedAgentID = contact.AssignedUserID
+				m.log.Info("Routing call to assigned agent (relationship manager)",
+					"call_id", session.ID, "agent_id", assignedAgentID, "contact_id", session.ContactID)
+			}
+		}
+	}
+	return assignedAgentID
 }

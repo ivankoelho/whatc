@@ -514,3 +514,112 @@ func TestApp_ListUsers_ReportsPresenceSeparatelyFromAvailability(t *testing.T) {
 	assert.False(t, *byID[offline.ID].online)
 	assert.True(t, byID[offline.ID].available, "available flag set, yet offline")
 }
+
+// --- PickNextTransfer: operational eligibility ---
+
+func pickAs(t *testing.T, app *handlers.App, orgID, userID uuid.UUID) int {
+	t.Helper()
+	req := testutil.NewJSONRequest(t, nil)
+	testutil.SetAuthContext(req, orgID, userID)
+	require.NoError(t, app.PickNextTransfer(req))
+	return testutil.GetResponseStatusCode(req)
+}
+
+func activeFor(app *handlers.App, agentID uuid.UUID) int64 {
+	var n int64
+	app.DB.Model(&models.AgentTransfer{}).Where("agent_id = ? AND status = ?", agentID, models.TransferStatusActive).Count(&n)
+	return n
+}
+
+func TestPickNextTransfer_RequiresOperationalEligibility(t *testing.T) {
+	online := map[uuid.UUID]bool{}
+	app := newTestApp(t, withPresence(&online))
+	org := testutil.CreateTestOrganization(t, app.DB)
+	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+	seedQueued := func() {
+		createTestTransfer(t, app, org.ID, testutil.CreateTestContact(t, app.DB, org.ID).ID, account.Name, models.TransferStatusActive, nil)
+	}
+
+	t.Run("connected and available: pickup allowed", func(t *testing.T) {
+		agent := createTestAgent(t, app, org.ID)
+		online[agent.ID] = true
+		seedQueued()
+		assert.Equal(t, fasthttp.StatusOK, pickAs(t, app, org.ID, agent.ID))
+		assert.EqualValues(t, 1, activeFor(app, agent.ID), "the agent received exactly one attendance")
+	})
+
+	t.Run("connected but away: refused", func(t *testing.T) {
+		agent := createTestAgent(t, app, org.ID)
+		online[agent.ID] = true
+		require.NoError(t, app.DB.Model(agent).Update("is_available", false).Error)
+		seedQueued()
+		assert.Equal(t, fasthttp.StatusForbidden, pickAs(t, app, org.ID, agent.ID))
+		assert.Zero(t, activeFor(app, agent.ID))
+	})
+
+	t.Run("offline: refused", func(t *testing.T) {
+		agent := createTestAgent(t, app, org.ID) // is_available=true in the DB, no live connection
+		seedQueued()
+		assert.Equal(t, fasthttp.StatusForbidden, pickAs(t, app, org.ID, agent.ID))
+		assert.Zero(t, activeFor(app, agent.ID))
+	})
+
+	t.Run("inactive: refused", func(t *testing.T) {
+		agent := createTestAgent(t, app, org.ID)
+		online[agent.ID] = true
+		require.NoError(t, app.DB.Model(agent).Update("is_active", false).Error)
+		seedQueued()
+		assert.Equal(t, fasthttp.StatusForbidden, pickAs(t, app, org.ID, agent.ID))
+		assert.Zero(t, activeFor(app, agent.ID))
+	})
+
+	t.Run("a refused pickup leaves the queue untouched", func(t *testing.T) {
+		agent := createTestAgent(t, app, org.ID) // offline
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		tr := createTestTransfer(t, app, org.ID, contact.ID, account.Name, models.TransferStatusActive, nil)
+		assert.Equal(t, fasthttp.StatusForbidden, pickAs(t, app, org.ID, agent.ID))
+		assert.Nil(t, assignedTo(t, app, tr.ID), "still waiting in the queue")
+	})
+}
+
+func TestPickNextTransfer_EligibilityDoesNotReplaceAuthorization(t *testing.T) {
+	online := map[uuid.UUID]bool{}
+	app := newTestApp(t, withPresence(&online))
+	org := testutil.CreateTestOrganization(t, app.DB)
+	// Connected and available, but without any transfers permission: still a 403 from authorization.
+	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "no-transfers", []string{"chat:read"})
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
+	online[user.ID] = true
+
+	assert.Equal(t, fasthttp.StatusForbidden, pickAs(t, app, org.ID, user.ID))
+}
+
+// --- Sticky call agent uses the shared rule ---
+
+func TestValidateStickyAgent_UsesSharedEligibilityRule(t *testing.T) {
+	online := map[uuid.UUID]bool{}
+	app := newTestApp(t, withPresence(&online))
+	org := testutil.CreateTestOrganization(t, app.DB)
+	otherOrg := testutil.CreateTestOrganization(t, app.DB)
+
+	eligible := createTestAgent(t, app, org.ID)
+	online[eligible.ID] = true
+	got := app.ValidateStickyAgentForTest(eligible.ID, org.ID)
+	require.NotNil(t, got)
+	assert.Equal(t, eligible.ID, *got)
+
+	offline := createTestAgent(t, app, org.ID)
+	assert.Nil(t, app.ValidateStickyAgentForTest(offline.ID, org.ID), "offline")
+
+	away := createTestAgent(t, app, org.ID)
+	online[away.ID] = true
+	require.NoError(t, app.DB.Model(away).Update("is_available", false).Error)
+	assert.Nil(t, app.ValidateStickyAgentForTest(away.ID, org.ID), "away")
+
+	inactive := createTestAgent(t, app, org.ID)
+	online[inactive.ID] = true
+	require.NoError(t, app.DB.Model(inactive).Update("is_active", false).Error)
+	assert.Nil(t, app.ValidateStickyAgentForTest(inactive.ID, org.ID), "inactive")
+
+	assert.Nil(t, app.ValidateStickyAgentForTest(eligible.ID, otherOrg.ID), "different organization")
+}

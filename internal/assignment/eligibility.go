@@ -31,12 +31,31 @@ func (a *Assigner) IsConnected(orgID, userID uuid.UUID) bool {
 // new attendance or call: active, marked available AND connected. Chat and
 // call distribution both go through it so the two cannot drift apart.
 func (a *Assigner) IsAgentEligible(orgID, userID uuid.UUID) bool {
-	if !a.IsConnected(orgID, userID) {
-		return false
+	return len(a.FilterEligible(orgID, []uuid.UUID{userID})) == 1
+}
+
+// FilterEligible returns the subset of userIDs that satisfy the eligibility
+// rule. It is the one place the rule is evaluated (IsAgentEligible and the
+// team strategies both use it), so the persisted conditions and the presence
+// condition can never be changed in one path and forgotten in another.
+func (a *Assigner) FilterEligible(orgID uuid.UUID, userIDs []uuid.UUID) []uuid.UUID {
+	if len(userIDs) == 0 {
+		return nil
 	}
-	var count int64
+
+	var eligible []uuid.UUID
 	a.db.Model(&models.User{}).
-		Where("id = ? AND is_available = ? AND is_active = ?", userID, true, true).
-		Count(&count)
-	return count > 0
+		Where("id IN ? AND is_available = ? AND is_active = ?", userIDs, true, true).
+		Pluck("id", &eligible)
+
+	if a.presence == nil {
+		return eligible
+	}
+	connected := eligible[:0:0]
+	for _, id := range eligible {
+		if a.presence(orgID, id) {
+			connected = append(connected, id)
+		}
+	}
+	return connected
 }

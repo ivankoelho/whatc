@@ -170,23 +170,8 @@ func (a *Assigner) filterAvailable(orgID uuid.UUID, memberIDs []uuid.UUID, exclu
 		return nil
 	}
 
-	// Query DB for availability (this changes frequently, not cached)
-	var availableIDs []uuid.UUID
-	a.db.Model(&models.User{}).
-		Select("id").
-		Where("id IN ? AND is_available = ? AND is_active = ?", candidates, true, true).
-		Pluck("id", &availableIDs)
-
-	if a.presence == nil {
-		return availableIDs
-	}
-	connected := availableIDs[:0:0]
-	for _, id := range availableIDs {
-		if a.presence(orgID, id) {
-			connected = append(connected, id)
-		}
-	}
-	return connected
+	// Availability and presence change frequently: never cached.
+	return a.FilterEligible(orgID, candidates)
 }
 
 // ResolvePerAgentTimeout returns the per-agent timeout in seconds using the

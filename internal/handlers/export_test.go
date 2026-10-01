@@ -75,3 +75,8 @@ func (a *App) CanViewTeamMemberForTest(viewerID, ownerID uuid.UUID) bool {
 func (r *PresenceReaper) SetConnectedForTest(fn func(orgID, userID uuid.UUID) bool) {
 	r.isConnected = fn
 }
+
+// ValidateStickyAgentForTest exposes validateStickyAgent.
+func (a *App) ValidateStickyAgentForTest(agentID, orgID uuid.UUID) *uuid.UUID {
+	return a.validateStickyAgent(agentID, orgID)
+}
