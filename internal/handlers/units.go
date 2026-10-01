@@ -2,9 +2,9 @@ package handlers
 
 import (
 	"errors"
-	"strings"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/shridarpatil/whatomate/internal/contactutil"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -50,7 +50,7 @@ func (a *App) CreateUnit(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "name is required", nil, "")
 	}
 	cnpj := normalizeDocument(req.CNPJ)
-	if cnpj != "" && !validCNPJ(cnpj) {
+	if cnpj != "" && !contactutil.ValidCNPJ(cnpj) {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid CNPJ", nil, "")
 	}
 
@@ -99,7 +99,7 @@ func (a *App) UpdateUnit(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "name is required", nil, "")
 	}
 	cnpj := normalizeDocument(req.CNPJ)
-	if cnpj != "" && !validCNPJ(cnpj) {
+	if cnpj != "" && !contactutil.ValidCNPJ(cnpj) {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid CNPJ", nil, "")
 	}
 
@@ -147,26 +147,6 @@ func (a *App) DeleteUnit(r *fastglue.Request) error {
 	}
 
 	return r.SendEnvelope(map[string]any{"deleted": true})
-}
-
-// validCNPJ checks a digits-only CNPJ: 14 digits, not all equal, and both
-// check digits correct.
-func validCNPJ(c string) bool {
-	if len(c) != 14 || strings.Count(c, c[:1]) == 14 {
-		return false
-	}
-	digit := func(n int) byte {
-		weights := []int{6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2}[13-n:]
-		sum := 0
-		for i := 0; i < n; i++ {
-			sum += int(c[i]-'0') * weights[i]
-		}
-		if r := sum % 11; r >= 2 {
-			return byte('0' + 11 - r)
-		}
-		return '0'
-	}
-	return c[12] == digit(12) && c[13] == digit(13)
 }
 
 // isUniqueCNPJViolation tells a duplicate CNPJ apart from a duplicate name:

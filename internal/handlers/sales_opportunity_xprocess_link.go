@@ -39,6 +39,10 @@ func (a *App) UpsertSalesOpportunityXProcessLink(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "num_pedido is required", nil, "")
 	}
 	documento, err := contactutil.NormalizeDocumento(req.Documento)
+	if err == nil && documento == "" {
+		// The document is optional on a contact, but a link to an X2 order needs it.
+		err = contactutil.ErrInvalidDocumento
+	}
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, err.Error(), nil, "")
 	}
