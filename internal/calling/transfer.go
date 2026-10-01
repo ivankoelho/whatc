@@ -1006,8 +1006,9 @@ func (m *Manager) runTransferRotation(session *CallSession, transfer models.Call
 	}
 
 	// Fallback: broadcast to all remaining available AND online team members
-	remaining := m.assigner.GetAvailableAgents(teamID, triedAgents)
-	remaining = m.wsHub.FilterOnlineUsers(orgID, remaining)
+	// GetAvailableAgents already applies the shared eligibility rule (active,
+	// available, connected).
+	remaining := m.assigner.GetAvailableAgents(teamID, orgID, triedAgents)
 
 	// Exclude agents who are currently on an active call
 	availableRemaining := make([]uuid.UUID, 0, len(remaining))

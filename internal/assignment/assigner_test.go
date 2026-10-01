@@ -330,14 +330,14 @@ func TestGetAvailableAgents_ReturnsAvailableMinusExcluded(t *testing.T) {
 
 	setUnavailable(t, db, agents[1].ID)
 
-	got := a.GetAvailableAgents(team.ID, []uuid.UUID{agents[2].ID})
+	got := a.GetAvailableAgents(team.ID, org.ID, []uuid.UUID{agents[2].ID})
 	// agents[0] available, [1] unavailable, [2] excluded, [3] available → expect [0] and [3].
 	assert.ElementsMatch(t, []uuid.UUID{agents[0].ID, agents[3].ID}, got)
 }
 
 func TestGetAvailableAgents_NonexistentTeamReturnsNil(t *testing.T) {
 	a, _ := newAssigner(t)
-	assert.Nil(t, a.GetAvailableAgents(uuid.New(), nil))
+	assert.Nil(t, a.GetAvailableAgents(uuid.New(), uuid.New(), nil))
 }
 
 // --- ResolvePerAgentTimeout ---
@@ -481,4 +481,83 @@ func TestIsAgentOnActiveCall_IgnoresCallLogsOrphanedByARestart(t *testing.T) {
 	// Same row, but left behind by a restart hours ago: must not block the agent forever.
 	require.NoError(t, db.Model(&log).UpdateColumn("created_at", time.Now().Add(-4*time.Hour)).Error)
 	assert.False(t, assignment.IsAgentOnActiveCall(db, agent.ID))
+}
+
+// --- Presence-aware eligibility ---
+
+func presenceOf(online ...uuid.UUID) assignment.PresenceFunc {
+	set := make(map[uuid.UUID]bool, len(online))
+	for _, id := range online {
+		set[id] = true
+	}
+	return func(_, userID uuid.UUID) bool { return set[userID] }
+}
+
+func TestAssignToTeam_RoundRobin_SkipsDisconnectedAgents(t *testing.T) {
+	a, db := newAssigner(t)
+	org := testutil.CreateTestOrganization(t, db)
+	team, agents := createTeam(t, db, org.ID, models.AssignmentStrategyRoundRobin, 2, 0)
+	// Both flagged available in the DB, but only agents[1] has a live connection.
+	a.SetPresence(presenceOf(agents[1].ID))
+
+	for range 3 {
+		got := a.AssignToTeam(team.ID, org.ID, nil, nil)
+		require.NotNil(t, got)
+		assert.Equal(t, agents[1].ID, *got, "an agent with no live connection must never be picked")
+	}
+}
+
+func TestAssignToTeam_AllDisconnectedReturnsNil(t *testing.T) {
+	a, db := newAssigner(t)
+	org := testutil.CreateTestOrganization(t, db)
+	team, _ := createTeam(t, db, org.ID, models.AssignmentStrategyRoundRobin, 2, 0)
+	a.SetPresence(presenceOf())
+
+	assert.Nil(t, a.AssignToTeam(team.ID, org.ID, nil, nil))
+}
+
+func TestAssignToTeam_LoadBalanced_SkipsDisconnectedAgents(t *testing.T) {
+	a, db := newAssigner(t)
+	org := testutil.CreateTestOrganization(t, db)
+	team, agents := createTeam(t, db, org.ID, models.AssignmentStrategyLoadBalanced, 2, 0)
+	a.SetPresence(presenceOf(agents[1].ID))
+	// agents[0] has the lowest load but is disconnected.
+	counter := func(_ *gorm.DB, _ uuid.UUID, ids []uuid.UUID) map[uuid.UUID]int64 {
+		return map[uuid.UUID]int64{agents[0].ID: 0, agents[1].ID: 5}
+	}
+
+	got := a.AssignToTeam(team.ID, org.ID, nil, counter)
+	require.NotNil(t, got)
+	assert.Equal(t, agents[1].ID, *got)
+}
+
+func TestGetAvailableAgents_ExcludesDisconnected(t *testing.T) {
+	a, db := newAssigner(t)
+	org := testutil.CreateTestOrganization(t, db)
+	team, agents := createTeam(t, db, org.ID, models.AssignmentStrategyRoundRobin, 3, 0)
+	a.SetPresence(presenceOf(agents[0].ID, agents[2].ID))
+
+	got := a.GetAvailableAgents(team.ID, org.ID, nil)
+	assert.ElementsMatch(t, []uuid.UUID{agents[0].ID, agents[2].ID}, got)
+}
+
+func TestIsAgentEligible_AvailabilityAndPresenceAreIndependent(t *testing.T) {
+	a, db := newAssigner(t)
+	org := testutil.CreateTestOrganization(t, db)
+	u := testutil.CreateTestUser(t, db, org.ID)
+
+	a.SetPresence(presenceOf(u.ID))
+	assert.True(t, a.IsAgentEligible(org.ID, u.ID), "connected + available")
+
+	setUnavailable(t, db, u.ID)
+	assert.True(t, a.IsConnected(org.ID, u.ID), "away does not mean disconnected")
+	assert.False(t, a.IsAgentEligible(org.ID, u.ID), "connected but away")
+
+	require.NoError(t, db.Model(&models.User{}).Where("id = ?", u.ID).Update("is_available", true).Error)
+	a.SetPresence(presenceOf())
+	assert.False(t, a.IsAgentEligible(org.ID, u.ID), "available flag but no live connection")
+
+	a.SetPresence(presenceOf(u.ID))
+	setInactive(t, db, u.ID)
+	assert.False(t, a.IsAgentEligible(org.ID, u.ID), "inactive user")
 }

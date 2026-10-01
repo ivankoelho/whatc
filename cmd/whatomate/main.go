@@ -294,6 +294,9 @@ func runServer(args []string) {
 
 	// Initialize shared assignment engine (used by both chat and call transfers)
 	assigner := assignment.New(db, rdb, lo)
+	// Presence-aware eligibility: an agent without a live WebSocket never
+	// receives new attendances or calls, whatever their persisted flag says.
+	assigner.SetPresence(wsHub.IsUserOnline)
 	app.Assigner = assigner
 
 	// Initialize CallManager (per-org calling_enabled DB setting controls access)

@@ -460,8 +460,8 @@ func (a *App) CreateAgentTransfer(r *fastglue.Request) error {
 		if err != nil {
 			return nil
 		}
-		if !agent.IsAvailable {
-			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Agent is currently away", nil, "")
+		if reason := a.agentIneligibleReason(orgID, agent); reason != "" {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, reason, nil, "")
 		}
 		agentID = &parsedAgentID
 	} else if teamID != nil && a.Assigner != nil {
@@ -469,8 +469,7 @@ func (a *App) CreateAgentTransfer(r *fastglue.Request) error {
 		agentID = a.Assigner.AssignToTeam(*teamID, orgID, nil, assignment.ChatLoadCounter)
 	} else if settings != nil && settings.AgentAssignment.AssignToSameAgent && contact.AssignedUserID != nil {
 		// Auto-assign to contact's existing assigned agent (if setting enabled and agent is available)
-		var assignedAgent models.User
-		if a.DB.Where("id = ?", contact.AssignedUserID).First(&assignedAgent).Error == nil && assignedAgent.IsAvailable {
+		if a.isAgentEligible(orgID, *contact.AssignedUserID) {
 			agentID = contact.AssignedUserID
 		}
 		// If agent is not available, falls through to queue (agentID remains nil)
@@ -887,8 +886,8 @@ func (a *App) AssignAgentTransfer(r *fastglue.Request) error {
 		if err != nil {
 			return nil
 		}
-		if !agent.IsAvailable {
-			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Agent is currently away", nil, "")
+		if reason := a.agentIneligibleReason(orgID, agent); reason != "" {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, reason, nil, "")
 		}
 		targetAgentID = &parsedAgentID
 	} else if req.AgentID == nil && !hasWriteAccess {
@@ -1537,8 +1536,7 @@ func (a *App) createTransferFromKeyword(account *models.WhatsAppAccount, contact
 	// Determine agent assignment
 	var agentID *uuid.UUID
 	if settings != nil && settings.AgentAssignment.AssignToSameAgent && contact.AssignedUserID != nil {
-		var assignedAgent models.User
-		if a.DB.Where("id = ?", contact.AssignedUserID).First(&assignedAgent).Error == nil && assignedAgent.IsAvailable {
+		if a.isAgentEligible(account.OrganizationID, *contact.AssignedUserID) {
 			agentID = contact.AssignedUserID
 		}
 	}
