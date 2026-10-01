@@ -43,3 +43,35 @@ GROUP BY organization_id, contact_id
 HAVING COUNT(*) > 1
 ORDER BY active_count DESC, oldest_at;
 ```
+
+## Desconexao e reconexao
+
+- O agente deixa de ser elegivel para NOVA distribuicao no instante em que perde a conexao.
+- Os atendimentos ja atribuidos a ele ficam por 60 s (`DefaultPresenceGrace`). Reconectar nesse prazo nao muda nada.
+- `PresenceReaper` varre a cada 10 s; passados 60 s chama `ReturnAgentTransfersToQueue`
+  (compare-and-set por transfer: idempotente, nunca devolve nem notifica duas vezes).
+  Cobre tambem reinicio do servidor: o primeiro sweep inicia o relogio de todo agente atribuido.
+
+## API e eventos
+
+| Item | Mudanca |
+|---|---|
+| `PUT /api/chatbot/transfers/{id}/assign`, `.../unassign` | `409` com `{transfer_id, status, agent_id}` quando outra pessoa mudou a atribuicao |
+| `POST /api/chatbot/transfers` | `409` quando o contato ja tem atendimento ativo (antes: possivel duplicata) |
+| Envio de mensagem por agente (`SendMessage`, midia, template) | `409` em conversa de outro agente; claim atomico no envio quando sem dono |
+| `GET /api/users` | cada usuario traz `is_online` (presenca), separado de `is_available` |
+| WS `agent_presence` | `{user_id, online}`: primeira conexao / ultima desconexao |
+| WS `agent_availability` | `{user_id, is_available}` |
+| WS `agent_transfer`, `agent_transfer_assign` | inalterados; agora emitidos tambem nos claims e na devolucao por desconexao |
+
+Auditoria (`audit_logs`, resource `transfers`): `claimed`, `assigned`, `released`, `auto_assigned`, `queued`,
+`returned_away`, `returned_offline`, `conflict`. Acoes do sistema aparecem como "System".
+Mudanca de disponibilidade: resource `users`, campo `is_available`.
+
+## Limites conhecidos
+
+- Presenca vem do hub em memoria: valido para o deploy atual de um unico processo. Com varias instancias seria
+  preciso um estado compartilhado (nao introduzido nesta fase).
+- `load_balanced` continua sendo uma aproximacao: duas atribuicoes simultaneas podem ver a mesma carga.
+  Nunca gera dupla atribuicao (o indice unico e o claim atomico garantem), apenas desequilibrio momentaneo.
+- Respostas de protocolo (ocorrencia) nao sao bloqueadas por outro dono, para nao quebrar o fluxo de SAC.

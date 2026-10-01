@@ -16,6 +16,10 @@ export interface User {
   role_id?: string
   role?: UserRole
   is_active: boolean
+  // Availability is the manual available/away toggle; presence (is_online) is
+  // whether the user has a live connection. Only the user list reports presence.
+  is_available?: boolean
+  is_online?: boolean
   is_super_admin?: boolean
   is_member?: boolean
   organization_id: string
@@ -83,6 +87,18 @@ export const useUsersStore = defineStore('users', () => {
     } finally {
       loading.value = false
     }
+  }
+
+  // Realtime: agent_presence / agent_availability events. The backend is the
+  // source of truth; these only keep an already-loaded list in sync.
+  function applyPresence(userId: string, online: boolean) {
+    const user = users.value.find(u => u.id === userId)
+    if (user) user.is_online = online
+  }
+
+  function applyAvailability(userId: string, available: boolean) {
+    const user = users.value.find(u => u.id === userId)
+    if (user) user.is_available = available
   }
 
   async function fetchUser(id: string): Promise<User> {
@@ -154,6 +170,8 @@ export const useUsersStore = defineStore('users', () => {
     error,
     fetchUsers,
     fetchUser,
+    applyPresence,
+    applyAvailability,
     createUser,
     updateUser,
     deleteUser

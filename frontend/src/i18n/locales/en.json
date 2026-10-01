@@ -521,7 +521,8 @@
     "generalSection": "General",
     "serviceWindowExpired": "The 24-hour messaging window has expired. Only template messages can be sent until the customer replies.",
     "sendTemplateAction": "Send Template",
-    "retrySending": "Retry sending"
+    "retrySending": "Retry sending",
+    "conversationOwnedByAnother": "This conversation is assigned to another agent. Your message was not sent."
   },
   "contacts": {
     "title": "Contacts",
@@ -781,7 +782,10 @@
     "updateMemberRole": "Update Role",
     "updateMemberRoleTitle": "Update Member Role",
     "updateMemberRoleDesc": "Change the role for this member in this organization.",
-    "memberRoleUpdated": "Member role updated"
+    "memberRoleUpdated": "Member role updated",
+    "presenceOffline": "Offline",
+    "presenceAway": "Online, away",
+    "presenceAvailable": "Online, available"
   },
   "roles": {
     "title": "Roles & Permissions",
@@ -2168,7 +2172,8 @@
     "fetchError": "Failed to load transfers. Please try again.",
     "confirmResumeTitle": "Resume Chatbot",
     "confirmResumeDescription": "Are you sure you want to resume the chatbot for this contact? The agent transfer will end and the chatbot will take over.",
-    "confirmResumeLabel": "Resume"
+    "confirmResumeLabel": "Resume",
+    "changedByAnother": "Someone else already took or changed this transfer. The list was refreshed."
   },
   "occurrences": {
     "title": "Occurrences",

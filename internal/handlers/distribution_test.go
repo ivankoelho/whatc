@@ -467,3 +467,50 @@ func TestDistributionAudit_AvailabilityChangeIsRecorded(t *testing.T) {
 		return n == 1
 	}, 3*time.Second, 25*time.Millisecond)
 }
+
+func TestApp_ListUsers_ReportsPresenceSeparatelyFromAvailability(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	admin := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+	connected, offline := twoAgents(t, app, org.ID)
+	require.NoError(t, app.DB.Model(connected).Update("is_available", false).Error) // online but away
+
+	hub := websocket.NewHub(testutil.NopLogger())
+	go hub.Run()
+	hub.Register(websocket.NewClient(hub, nil, connected.ID, org.ID))
+	require.Eventually(t, func() bool { return hub.IsUserOnline(org.ID, connected.ID) }, 2*time.Second, 5*time.Millisecond)
+	app.WSHub = hub
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, admin.ID)
+	require.NoError(t, app.ListUsers(req))
+	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var resp struct {
+		Data struct {
+			Users []struct {
+				ID          uuid.UUID `json:"id"`
+				IsOnline    *bool     `json:"is_online"`
+				IsAvailable bool      `json:"is_available"`
+			} `json:"users"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &resp))
+	byID := map[uuid.UUID]struct {
+		online    *bool
+		available bool
+	}{}
+	for _, u := range resp.Data.Users {
+		byID[u.ID] = struct {
+			online    *bool
+			available bool
+		}{u.IsOnline, u.IsAvailable}
+	}
+	require.NotNil(t, byID[connected.ID].online)
+	assert.True(t, *byID[connected.ID].online)
+	assert.False(t, byID[connected.ID].available, "online but away: the two states are independent")
+	require.NotNil(t, byID[offline.ID].online)
+	assert.False(t, *byID[offline.ID].online)
+	assert.True(t, byID[offline.ID].available, "available flag set, yet offline")
+}

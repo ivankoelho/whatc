@@ -81,6 +81,15 @@ export function unwrapItemResponse<T>(
 }
 
 /**
+ * True when the backend answered 409 Conflict. Distribution uses it for
+ * "someone else already took/changed this": the caller should refresh its
+ * state from the server instead of retrying.
+ */
+export function isConflictError(error: unknown): boolean {
+  return isAxiosError(error) && error.response?.status === 409
+}
+
+/**
  * Extracts error message from various error formats.
  * Handles Axios errors, standard errors, and string errors.
  */

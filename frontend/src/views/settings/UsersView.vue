@@ -263,6 +263,14 @@ async function copyInviteLink() {
                     </div>
                     <div class="min-w-0">
                       <div class="flex items-center gap-2">
+                        <span
+                          v-if="user.is_online !== undefined"
+                          class="inline-block h-2 w-2 rounded-full flex-shrink-0"
+                          :class="!user.is_online ? 'bg-muted-foreground/40' : user.is_available === false ? 'bg-amber-500' : 'bg-emerald-500'"
+                          :title="!user.is_online ? $t('users.presenceOffline') : user.is_available === false ? $t('users.presenceAway') : $t('users.presenceAvailable')"
+                          role="img"
+                          :aria-label="!user.is_online ? $t('users.presenceOffline') : user.is_available === false ? $t('users.presenceAway') : $t('users.presenceAvailable')"
+                        />
                         <p class="font-medium truncate">{{ user.full_name }}</p>
                         <Badge v-if="user.id === currentUserId" variant="outline" class="text-xs">{{ $t('users.you') }}</Badge>
                         <Badge v-if="user.is_super_admin" variant="default" class="text-xs">{{ $t('users.superAdmin') }}</Badge>
