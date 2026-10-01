@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { campaignsService, templatesService, api } from '@/services/api'
+import { campaignsService, templatesService, unitsService, departmentsService, api, type Unit, type Department } from '@/services/api'
 import { wsService } from '@/services/websocket'
 import { toast } from 'vue-sonner'
 import { useUnsavedChangesGuard } from '@/composables/useUnsavedChangesGuard'
@@ -581,11 +581,28 @@ async function deleteRecipient(recipientId: string) {
 }
 
 const dddInput = ref('')
+// Segment filters besides DDD. 'all' = no filter (the Select cannot hold an empty value).
+const ALL = 'all'
+const CONTACT_TYPES = ['cliente', 'fornecedor', 'colaborador'] as const
+const segmentType = ref<string>(ALL)
+const segmentUnit = ref<string>(ALL)
+const segmentDepartment = ref<string>(ALL)
+const segmentUnits = ref<Unit[]>([])
+const segmentDepartments = ref<Department[]>([])
 const dddPreview = ref<{ added: number; skipped: number } | null>(null)
 
 const parsedDDDs = computed(() =>
   [...new Set(dddInput.value.split(/[^0-9]+/).filter(d => /^[1-9][0-9]$/.test(d)))]
 )
+
+const segmentFilters = computed(() => ({
+  ...(parsedDDDs.value.length ? { ddds: parsedDDDs.value } : {}),
+  ...(segmentType.value !== ALL ? { contact_type: segmentType.value } : {}),
+  ...(segmentUnit.value !== ALL ? { unit_id: segmentUnit.value } : {}),
+  ...(segmentDepartment.value !== ALL ? { department_id: segmentDepartment.value } : {}),
+}))
+const hasSegmentFilter = computed(() => Object.keys(segmentFilters.value).length > 0)
+watch(segmentFilters, () => { dddPreview.value = null })
 
 // Contacts carry no per-recipient template values, so bulk-by-DDD only works
 // for templates without variables; those still go through CSV.
@@ -619,10 +636,10 @@ function warnSkipped(result: any) {
 }
 
 async function previewDDD() {
-  if (!campaign.value || parsedDDDs.value.length === 0) return
+  if (!campaign.value || !hasSegmentFilter.value) return
   isAddingRecipients.value = true
   try {
-    const response = await campaignsService.addRecipientsFromContacts(campaign.value.id, parsedDDDs.value, true)
+    const response = await campaignsService.addRecipientsFromContacts(campaign.value.id, segmentFilters.value, true)
     const result = (response.data as any).data
     dddPreview.value = { added: result.added_count, skipped: result.skipped_active_occurrence?.length || 0 }
   } catch (err: unknown) {
@@ -633,10 +650,10 @@ async function previewDDD() {
 }
 
 async function addRecipientsByDDD() {
-  if (!campaign.value || parsedDDDs.value.length === 0) return
+  if (!campaign.value || !hasSegmentFilter.value) return
   isAddingRecipients.value = true
   try {
-    const response = await campaignsService.addRecipientsFromContacts(campaign.value.id, parsedDDDs.value)
+    const response = await campaignsService.addRecipientsFromContacts(campaign.value.id, segmentFilters.value)
     const result = (response.data as any).data
     toast.success(t('campaigns.addedRecipients', { count: result?.added_count || 0 }, `Added ${result?.added_count || 0} recipients`))
     warnSkipped(result)
@@ -650,10 +667,24 @@ async function addRecipientsByDDD() {
   }
 }
 
+async function loadSegmentOptions() {
+  // Optional context: without units/departments access the selects just stay empty.
+  try {
+    const res = await unitsService.list()
+    segmentUnits.value = ((res.data as any).data || res.data).units || []
+  } catch { /* no access */ }
+  try {
+    const res = await departmentsService.list()
+    segmentDepartments.value = ((res.data as any).data || res.data).departments || []
+  } catch { /* no access */ }
+}
+
 async function openAddRecipientsDialog() {
+  loadSegmentOptions()
   recipientsInput.value = ''
   csvFile.value = null
   dddInput.value = ''
+  segmentType.value = segmentUnit.value = segmentDepartment.value = ALL
   dddPreview.value = null
   addRecipientsTab.value = 'manual'
 
@@ -1459,7 +1490,7 @@ onUnmounted(() => {
           </TabsTrigger>
           <TabsTrigger value="ddd" class="flex-1">
             <MapPin class="h-4 w-4 mr-1" />
-            {{ $t('campaigns.byDDD', 'By area code') }}
+            {{ $t('campaigns.bySegment') }}
           </TabsTrigger>
         </TabsList>
 
@@ -1555,9 +1586,41 @@ onUnmounted(() => {
           </p>
           <div class="space-y-1.5">
             <Label for="ddd-input" class="text-xs text-muted-foreground">
-              {{ $t('campaigns.dddHint', 'Area codes (DDD), separated by commas. All contacts with these codes are added.') }}
+              {{ $t('campaigns.dddHint', 'Filters combine: a contact must match all of them. Area codes (DDD) are separated by commas.') }}
             </Label>
             <Input id="ddd-input" v-model="dddInput" placeholder="71, 75, 11" @input="dddPreview = null" />
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div class="space-y-1.5">
+              <Label class="text-xs text-muted-foreground">{{ $t('contacts.type') }}</Label>
+              <Select v-model="segmentType">
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem :value="ALL">{{ $t('campaigns.segmentAny') }}</SelectItem>
+                  <SelectItem v-for="ct in CONTACT_TYPES" :key="ct" :value="ct">{{ $t('contacts.types.' + ct) }}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div class="space-y-1.5">
+              <Label class="text-xs text-muted-foreground">{{ $t('contacts.unit') }}</Label>
+              <Select v-model="segmentUnit">
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem :value="ALL">{{ $t('campaigns.segmentAny') }}</SelectItem>
+                  <SelectItem v-for="u in segmentUnits" :key="u.id" :value="u.id">{{ u.name }}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div class="space-y-1.5">
+              <Label class="text-xs text-muted-foreground">{{ $t('contacts.department') }}</Label>
+              <Select v-model="segmentDepartment">
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem :value="ALL">{{ $t('campaigns.segmentAny') }}</SelectItem>
+                  <SelectItem v-for="d in segmentDepartments" :key="d.id" :value="d.id">{{ d.name }}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           <p v-if="dddPreview" class="text-xs">
             {{ $t('campaigns.dddPreview', { added: dddPreview.added, skipped: dddPreview.skipped }, `${dddPreview.added} contacts will be added; ${dddPreview.skipped} with an open occurrence will be left out.`) }}
@@ -1565,11 +1628,14 @@ onUnmounted(() => {
           <p class="text-[11px] text-muted-foreground">
             {{ $t('campaigns.activeOccurrenceNote', 'Contacts with an open occurrence are never added to campaigns.') }}
           </p>
+          <p v-if="templateCategory === 'MARKETING'" class="text-[11px] text-muted-foreground">
+            {{ $t('campaigns.optOutNote') }}
+          </p>
           <DialogFooter class="gap-2">
-            <Button variant="outline" :disabled="isAddingRecipients || parsedDDDs.length === 0 || templateHasParams" @click="previewDDD">
+            <Button variant="outline" :disabled="isAddingRecipients || !hasSegmentFilter || templateHasParams" @click="previewDDD">
               {{ $t('campaigns.dddCheck', 'Check') }}
             </Button>
-            <Button :disabled="isAddingRecipients || parsedDDDs.length === 0 || templateHasParams" @click="addRecipientsByDDD">
+            <Button :disabled="isAddingRecipients || !hasSegmentFilter || templateHasParams" @click="addRecipientsByDDD">
               <MapPin class="h-4 w-4 mr-1" />
               {{ isAddingRecipients ? $t('common.adding', 'Adding...') : $t('campaigns.addRecipients', 'Add Recipients') }}
             </Button>
