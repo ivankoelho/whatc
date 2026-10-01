@@ -70,8 +70,8 @@ type ClientInactivityConfig struct {
 // AIConfig holds AI provider settings
 type AIConfig struct {
 	Enabled        bool       `gorm:"column:ai_enabled;default:false" json:"ai_enabled"`
-	Provider       AIProvider `gorm:"column:ai_provider;size:20" json:"ai_provider"` // openai, anthropic, google
-	APIKey         string     `gorm:"column:ai_api_key;type:text" json:"-"`          // encrypted
+	Provider       AIProvider `gorm:"column:ai_provider;size:20" json:"ai_provider"` // openai, anthropic, google, groq
+	APIKey         string     `gorm:"column:ai_api_key;type:text" json:"-"`          // ciphertext ("enc:..."); decrypted only by handlers.resolveAIAPIKey
 	Model          string     `gorm:"column:ai_model;size:100" json:"ai_model"`
 	MaxTokens      int        `gorm:"column:ai_max_tokens;default:500" json:"ai_max_tokens"`
 	Temperature    float64    `gorm:"column:ai_temperature;type:decimal(3,2);default:0.7" json:"ai_temperature"`

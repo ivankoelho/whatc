@@ -412,6 +412,18 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 	aiTouched := req.AIEnabled != nil || req.AIProvider != nil || req.AIAPIKey != nil ||
 		req.AIModel != nil || req.AIMaxTokens != nil || req.AISystemPrompt != nil
 
+	// The AI provider, model and above all the API key are credentials-level
+	// configuration: changing them needs settings.chatbot:write. (The rest of
+	// this endpoint keeps its existing access rules.)
+	if aiTouched {
+		if !a.HasPermission(userID, models.ResourceSettingsChatbot, models.ActionWrite, orgID) {
+			return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Insufficient permissions", nil, "")
+		}
+		if req.AIProvider != nil && *req.AIProvider != "" && !isSupportedAIProvider(string(*req.AIProvider)) {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Unsupported AI provider", nil, "")
+		}
+	}
+
 	// Update fields if provided
 	if req.Enabled != nil {
 		settings.IsEnabled = *req.Enabled

@@ -47,6 +47,13 @@ func (rt *recordingTransport) count() int {
 	return len(rt.requests)
 }
 
+// aiAdmin is a user allowed to change AI settings (settings.chatbot:write).
+func aiAdmin(t *testing.T, app *handlers.App, orgID uuid.UUID) *models.User {
+	t.Helper()
+	role := testutil.CreateAdminRole(t, app.DB, orgID)
+	return testutil.CreateTestUser(t, app.DB, orgID, testutil.WithRoleID(&role.ID))
+}
+
 func saveAIKeyViaAPI(t *testing.T, app *handlers.App, orgID, userID uuid.UUID, key string) {
 	t.Helper()
 	req := testutil.NewJSONRequest(t, map[string]any{
@@ -67,7 +74,7 @@ func storedAIKey(t *testing.T, app *handlers.App, orgID uuid.UUID) string {
 func TestAIKey_IsEncryptedAtRestAndNeverReturned(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID)
+	user := aiAdmin(t, app, org.ID)
 
 	saveAIKeyViaAPI(t, app, org.ID, user.ID, secretKey)
 
@@ -94,7 +101,7 @@ func TestAIKey_IsEncryptedAtRestAndNeverReturned(t *testing.T) {
 func TestAIKey_SavingOtherSettingsDoesNotWipeOrReEncryptTheKey(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID)
+	user := aiAdmin(t, app, org.ID)
 	saveAIKeyViaAPI(t, app, org.ID, user.ID, secretKey)
 	before := storedAIKey(t, app, org.ID)
 
@@ -108,7 +115,7 @@ func TestAIKey_SavingOtherSettingsDoesNotWipeOrReEncryptTheKey(t *testing.T) {
 func TestAIKey_RedisCacheHoldsCiphertextNeverPlaintext(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID)
+	user := aiAdmin(t, app, org.ID)
 	saveAIKeyViaAPI(t, app, org.ID, user.ID, secretKey)
 
 	settings, err := app.GetChatbotSettingsCachedForTest(org.ID, "") // populates the cache
@@ -131,7 +138,7 @@ func TestAIKey_ProviderCallUsesDecryptedKeyOnlyAtCallTime(t *testing.T) {
 	rt := &recordingTransport{}
 	app := newTestApp(t, withHTTPClient(&http.Client{Transport: rt, Timeout: 5 * time.Second}))
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID)
+	user := aiAdmin(t, app, org.ID)
 	saveAIKeyViaAPI(t, app, org.ID, user.ID, secretKey)
 	settings, err := app.GetChatbotSettingsCachedForTest(org.ID, "")
 	require.NoError(t, err)
@@ -148,7 +155,7 @@ func TestAIKey_UndecryptableKeyNeverReachesTheProvider(t *testing.T) {
 	rt := &recordingTransport{}
 	app := newTestApp(t, withHTTPClient(&http.Client{Transport: rt, Timeout: 5 * time.Second}))
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID)
+	user := aiAdmin(t, app, org.ID)
 	saveAIKeyViaAPI(t, app, org.ID, user.ID, secretKey)
 	settings, err := app.GetChatbotSettingsCachedForTest(org.ID, "")
 	require.NoError(t, err)

@@ -720,7 +720,7 @@ func (a *App) execChatAIResponse(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome,
 		userMessage = processTemplate(tmpl, ctx.session.SessionData)
 	}
 
-	answer, err := a.generateAIResponse(settings, ctx.session, userMessage)
+	answer, err := a.generateAIResponse(settings, ctx.session, userMessage, aiFeatureChatbotNode)
 	if err != nil {
 		a.Log.Error("ai_response node generateAIResponse failed",
 			"node", node.ID, "session", ctx.session.ID, "error", err)

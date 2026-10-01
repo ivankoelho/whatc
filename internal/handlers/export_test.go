@@ -88,7 +88,7 @@ func (a *App) ResolveAIAPIKeyForTest(settings *models.ChatbotSettings) (string, 
 
 // GenerateAIResponseForTest exposes generateAIResponse.
 func (a *App) GenerateAIResponseForTest(settings *models.ChatbotSettings, session *models.ChatbotSession, userMessage string) (string, error) {
-	return a.generateAIResponse(settings, session, userMessage)
+	return a.generateAIResponse(settings, session, userMessage, aiFeatureChatbotReply)
 }
 
 // GetChatbotSettingsCachedForTest exposes getChatbotSettingsCached.
