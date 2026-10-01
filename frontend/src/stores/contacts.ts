@@ -17,6 +17,7 @@ function normalizeContactSearch(raw: string): string {
   return trimmed
 }
 
+export type ContactType = 'cliente' | 'fornecedor' | 'colaborador'
 export type ContactStatus = 'new' | 'in_progress' | 'resolved'
 export type ContactStatusFilter = 'all' | ContactStatus
 
@@ -26,6 +27,9 @@ export interface Contact {
   name: string
   profile_name?: string
   cpf_cnpj?: string
+  contact_type?: ContactType
+  unit_id?: string
+  department_id?: string
   avatar_url?: string
   // `status` is legacy and always "active"; contact_status is the real
   // service state of the conversation.

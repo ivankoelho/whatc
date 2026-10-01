@@ -120,6 +120,11 @@ type User struct {
 	// Entrega 2 reconciliation job — unset has no effect in this delivery.
 	XProcessSellerCode *string `gorm:"column:xprocess_seller_code;size:20" json:"xprocess_seller_code,omitempty"`
 
+	// UnitID/DepartmentID: where the user works. Optional; informational and
+	// used as context, they do not change permissions or routing.
+	UnitID       *uuid.UUID `gorm:"type:uuid;index" json:"unit_id,omitempty"`
+	DepartmentID *uuid.UUID `gorm:"type:uuid;index" json:"department_id,omitempty"`
+
 	// SSO fields
 	SSOProvider   string `gorm:"size:50" json:"sso_provider,omitempty"`     // google, microsoft, github, facebook, custom
 	SSOProviderID string `gorm:"size:255" json:"sso_provider_id,omitempty"` // External user ID from provider
@@ -127,6 +132,8 @@ type User struct {
 	// Relations
 	Organization      *Organization      `gorm:"foreignKey:OrganizationID" json:"organization,omitempty"`
 	Role              *CustomRole        `gorm:"foreignKey:RoleID" json:"role,omitempty"`
+	Unit              *Unit              `gorm:"foreignKey:UnitID" json:"unit,omitempty"`
+	Department        *Department        `gorm:"foreignKey:DepartmentID" json:"department,omitempty"`
 	UserOrganizations []UserOrganization `gorm:"foreignKey:UserID" json:"user_organizations,omitempty"`
 }
 
@@ -366,10 +373,18 @@ type Contact struct {
 	PhoneNumber     string    `gorm:"size:50;not null" json:"phone_number"`
 	ProfileName     string    `gorm:"size:255" json:"profile_name"`
 	WhatsAppAccount string    `gorm:"size:100;index" json:"whatsapp_account"` // References WhatsAppAccount.Name
-	// CPFCNPJ is cadastral only in this phase — no format validation, no
-	// uniqueness constraint, no ERP lookup. It exists so the future ERP D-1
-	// integration has a column to key off of without a migration.
+	// CPFCNPJ holds a CPF or CNPJ, digits only, validated by contactutil.NormalizeDocumento.
+	// Optional and NOT unique: one person may have several contacts (phones).
+	// Physical column is "cpfcnpj" (GORM snake_case of the acronym): map-based
+	// Updates() must use that name, never "cpf_cnpj".
 	CPFCNPJ        string     `gorm:"size:20;index" json:"cpf_cnpj,omitempty"`
+
+	// ContactType defaults to "cliente" (existing rows were backfilled by the column default).
+	ContactType ContactType `gorm:"size:20;not null;default:'cliente'" json:"contact_type"`
+	// UnitID/DepartmentID place the contact (typically a colaborador) in the
+	// organisation's official units and departments; both are optional.
+	UnitID       *uuid.UUID `gorm:"type:uuid;index" json:"unit_id,omitempty"`
+	DepartmentID *uuid.UUID `gorm:"type:uuid;index" json:"department_id,omitempty"`
 	AssignedUserID *uuid.UUID `gorm:"type:uuid;index" json:"assigned_user_id,omitempty"`
 
 	// TeamID is the conversation's effective team during triage — set by the
@@ -402,6 +417,8 @@ type Contact struct {
 	// Relations
 	Organization *Organization `gorm:"foreignKey:OrganizationID" json:"organization,omitempty"`
 	AssignedUser *User         `gorm:"foreignKey:AssignedUserID" json:"assigned_user,omitempty"`
+	Unit         *Unit         `gorm:"foreignKey:UnitID" json:"unit,omitempty"`
+	Department   *Department   `gorm:"foreignKey:DepartmentID" json:"department,omitempty"`
 	Messages     []Message     `gorm:"foreignKey:ContactID" json:"messages,omitempty"`
 }
 

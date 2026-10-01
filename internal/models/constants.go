@@ -247,3 +247,22 @@ const (
 	ActionTypeURL        ActionType = "url"
 	ActionTypeJavascript ActionType = "javascript"
 )
+
+// ContactType says what a contact is to the company. New types are added here
+// and to the chk_contacts_contact_type constraint in database/postgres.go.
+type ContactType string
+
+const (
+	ContactTypeCliente     ContactType = "cliente"
+	ContactTypeFornecedor  ContactType = "fornecedor"
+	ContactTypeColaborador ContactType = "colaborador"
+)
+
+// IsValid reports whether t is one of the known contact types.
+func (t ContactType) IsValid() bool {
+	switch t {
+	case ContactTypeCliente, ContactTypeFornecedor, ContactTypeColaborador:
+		return true
+	}
+	return false
+}

@@ -22,7 +22,7 @@ func TestUpsertSalesOpportunityXProcessLink_CreatesLinkAndFillsContactCPF(t *tes
 	opp := newOpenOpportunity(t, app, org.ID, agent.ID, contact.ID)
 
 	req := testutil.NewJSONRequest(t, map[string]any{
-		"num_pedido": "666", "documento": "123.456.789-00",
+		"num_pedido": "666", "documento": "529.982.247-25",
 	})
 	testutil.SetAuthContext(req, org.ID, agent.ID)
 	req.RequestCtx.SetUserValue("id", opp.ID.String())
@@ -32,7 +32,7 @@ func TestUpsertSalesOpportunityXProcessLink_CreatesLinkAndFillsContactCPF(t *tes
 	var link models.SalesOpportunityXProcessLink
 	require.NoError(t, app.DB.Where("sales_opportunity_id = ?", opp.ID).First(&link).Error)
 	assert.Equal(t, "666", link.NumPedido)
-	assert.Equal(t, "12345678900", link.Documento)
+	assert.Equal(t, "52998224725", link.Documento)
 	assert.Nil(t, link.ResolvedAt)
 
 	var updatedOpp models.SalesOpportunity
@@ -42,7 +42,7 @@ func TestUpsertSalesOpportunityXProcessLink_CreatesLinkAndFillsContactCPF(t *tes
 
 	var updatedContact models.Contact
 	require.NoError(t, app.DB.First(&updatedContact, "id = ?", contact.ID).Error)
-	assert.Equal(t, "12345678900", updatedContact.CPFCNPJ)
+	assert.Equal(t, "52998224725", updatedContact.CPFCNPJ)
 }
 
 func TestUpsertSalesOpportunityXProcessLink_DoesNotOverwriteExistingContactCPF(t *testing.T) {
@@ -57,7 +57,7 @@ func TestUpsertSalesOpportunityXProcessLink_DoesNotOverwriteExistingContactCPF(t
 	require.NoError(t, app.DB.Model(contact).Update("cpfcnpj", "99999999999").Error)
 	opp := newOpenOpportunity(t, app, org.ID, agent.ID, contact.ID)
 
-	req := testutil.NewJSONRequest(t, map[string]any{"num_pedido": "1", "documento": "12345678900"})
+	req := testutil.NewJSONRequest(t, map[string]any{"num_pedido": "1", "documento": "52998224725"})
 	testutil.SetAuthContext(req, org.ID, agent.ID)
 	req.RequestCtx.SetUserValue("id", opp.ID.String())
 	require.NoError(t, app.UpsertSalesOpportunityXProcessLink(req))
@@ -94,12 +94,12 @@ func TestUpsertSalesOpportunityXProcessLink_UpdatesOpenLinkInPlace(t *testing.T)
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
 	opp := newOpenOpportunity(t, app, org.ID, agent.ID, contact.ID)
 
-	first := testutil.NewJSONRequest(t, map[string]any{"num_pedido": "111", "documento": "12345678900"})
+	first := testutil.NewJSONRequest(t, map[string]any{"num_pedido": "111", "documento": "52998224725"})
 	testutil.SetAuthContext(first, org.ID, agent.ID)
 	first.RequestCtx.SetUserValue("id", opp.ID.String())
 	require.NoError(t, app.UpsertSalesOpportunityXProcessLink(first))
 
-	second := testutil.NewJSONRequest(t, map[string]any{"num_pedido": "222", "documento": "98765432100"})
+	second := testutil.NewJSONRequest(t, map[string]any{"num_pedido": "222", "documento": "11144477735"})
 	testutil.SetAuthContext(second, org.ID, agent.ID)
 	second.RequestCtx.SetUserValue("id", opp.ID.String())
 	require.NoError(t, app.UpsertSalesOpportunityXProcessLink(second))
@@ -118,7 +118,7 @@ func TestUpsertSalesOpportunityXProcessLink_ResolvedLinkIsImmutable_CreatesNewRo
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
 	opp := newOpenOpportunity(t, app, org.ID, agent.ID, contact.ID)
 
-	first := testutil.NewJSONRequest(t, map[string]any{"num_pedido": "111", "documento": "12345678900"})
+	first := testutil.NewJSONRequest(t, map[string]any{"num_pedido": "111", "documento": "52998224725"})
 	testutil.SetAuthContext(first, org.ID, agent.ID)
 	first.RequestCtx.SetUserValue("id", opp.ID.String())
 	require.NoError(t, app.UpsertSalesOpportunityXProcessLink(first))
@@ -127,7 +127,7 @@ func TestUpsertSalesOpportunityXProcessLink_ResolvedLinkIsImmutable_CreatesNewRo
 	require.NoError(t, app.DB.Model(&models.SalesOpportunityXProcessLink{}).
 		Where("sales_opportunity_id = ?", opp.ID).Update("resolved_at", now).Error)
 
-	second := testutil.NewJSONRequest(t, map[string]any{"num_pedido": "222", "documento": "98765432100"})
+	second := testutil.NewJSONRequest(t, map[string]any{"num_pedido": "222", "documento": "11144477735"})
 	testutil.SetAuthContext(second, org.ID, agent.ID)
 	second.RequestCtx.SetUserValue("id", opp.ID.String())
 	require.NoError(t, app.UpsertSalesOpportunityXProcessLink(second))
@@ -160,7 +160,7 @@ func TestUpsertSalesOpportunityXProcessLink_ResolvedBetweenReadAndWrite_FallsBac
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
 	opp := newOpenOpportunity(t, app, org.ID, agent.ID, contact.ID)
 
-	first := testutil.NewJSONRequest(t, map[string]any{"num_pedido": "111", "documento": "12345678900"})
+	first := testutil.NewJSONRequest(t, map[string]any{"num_pedido": "111", "documento": "52998224725"})
 	testutil.SetAuthContext(first, org.ID, agent.ID)
 	first.RequestCtx.SetUserValue("id", opp.ID.String())
 	require.NoError(t, app.UpsertSalesOpportunityXProcessLink(first))
@@ -181,7 +181,7 @@ func TestUpsertSalesOpportunityXProcessLink_ResolvedBetweenReadAndWrite_FallsBac
 	}))
 	defer app.DB.Callback().Query().Remove(hookName)
 
-	second := testutil.NewJSONRequest(t, map[string]any{"num_pedido": "222", "documento": "98765432100"})
+	second := testutil.NewJSONRequest(t, map[string]any{"num_pedido": "222", "documento": "11144477735"})
 	testutil.SetAuthContext(second, org.ID, agent.ID)
 	second.RequestCtx.SetUserValue("id", opp.ID.String())
 	require.NoError(t, app.UpsertSalesOpportunityXProcessLink(second))
@@ -204,7 +204,7 @@ func TestGetSalesOpportunityXProcessLink_ReturnsPendingReviewFlag(t *testing.T) 
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
 	opp := newOpenOpportunity(t, app, org.ID, agent.ID, contact.ID)
 
-	create := testutil.NewJSONRequest(t, map[string]any{"num_pedido": "666", "documento": "12345678900"})
+	create := testutil.NewJSONRequest(t, map[string]any{"num_pedido": "666", "documento": "52998224725"})
 	testutil.SetAuthContext(create, org.ID, agent.ID)
 	create.RequestCtx.SetUserValue("id", opp.ID.String())
 	require.NoError(t, app.UpsertSalesOpportunityXProcessLink(create))
