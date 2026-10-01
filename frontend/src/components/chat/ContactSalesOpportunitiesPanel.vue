@@ -12,6 +12,7 @@ import {
   type SalesOpportunityXProcessCandidate,
 } from '@/services/api'
 import { formatCurrency } from '@/lib/currency'
+import { formatQuantity } from '@/lib/salesUnits'
 import { formatDate } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth'
 import CreateSalesOpportunityDialog from '@/components/sales/CreateSalesOpportunityDialog.vue'
@@ -135,6 +136,12 @@ defineExpose({ refresh: load })
           <Badge :variant="statusVariant(opp)" class="shrink-0 text-xs">{{ statusLabel(opp) }}</Badge>
         </div>
         <p class="text-sm mt-1 font-semibold">{{ formatCurrency(opp.estimated_value) }}</p>
+        <p v-if="opp.estimated_quantity != null" class="text-xs mt-0.5 text-muted-foreground">
+          {{ formatQuantity(opp.estimated_quantity, opp.unit_of_measure) }}
+        </p>
+        <p v-if="opp.status === 'convertida' && (opp.realized_value != null || opp.realized_quantity != null)" class="text-xs mt-0.5 text-muted-foreground">
+          {{ t('sales.realizedLabel') }}: {{ formatCurrency(opp.realized_value) }}<span v-if="opp.realized_quantity != null"> · {{ formatQuantity(opp.realized_quantity, opp.unit_of_measure) }}</span>
+        </p>
         <p v-if="opp.interest" class="text-xs mt-0.5 truncate text-muted-foreground">{{ opp.interest }}</p>
         <p v-if="conversionSourceLabel(opp)" class="text-xs mt-0.5 text-muted-foreground">{{ conversionSourceLabel(opp) }}</p>
 

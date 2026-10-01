@@ -11,6 +11,9 @@ import type { SalesOpportunity, SalesDirecionamento } from '@/services/api'
 import { getErrorMessage } from '@/lib/api-utils'
 import { formatCurrency } from '@/lib/currency'
 import XProcessLinkForm from '@/components/sales/XProcessLinkForm.vue'
+import SalesOpportunityDetailsDialog from '@/components/sales/SalesOpportunityDetailsDialog.vue'
+import { formatQuantity } from '@/lib/salesUnits'
+import { Pencil } from 'lucide-vue-next'
 
 const props = defineProps<{ opportunity: SalesOpportunity; disabled?: boolean }>()
 
@@ -31,6 +34,7 @@ const DIRECIONAMENTO_LABEL_KEY: Record<SalesDirecionamento, string> = {
 }
 
 const changingDirecionamento = ref(false)
+const detailsOpen = ref(false)
 
 async function onDirecionamentoChange(value: unknown) {
   const direcionamento = value as SalesDirecionamento
@@ -100,6 +104,18 @@ async function saveValue() {
       <Badge v-if="opportunity.sla_breached" variant="destructive" class="shrink-0 text-xs">
         {{ $t('sales.slaBreached') }}
       </Badge>
+      <Button
+        v-if="opportunity.status === 'aberta'"
+        data-testid="sales-opportunity-edit-details"
+        variant="ghost"
+        size="icon"
+        class="h-6 w-6 shrink-0"
+        :title="$t('sales.editDetails')"
+        @click.stop="detailsOpen = true"
+        @mousedown.stop
+      >
+        <Pencil class="h-3 w-3" />
+      </Button>
     </div>
     <p class="text-xs mt-1 truncate text-white/50 light:text-muted-foreground">
       <span class="text-white/30 light:text-gray-400">{{ $t('sales.contactLabel') }}:</span>
@@ -127,6 +143,9 @@ async function saveValue() {
       @click.stop="startEditValue"
     >
       {{ formatCurrency(opportunity.estimated_value) }}
+    </p>
+    <p v-if="opportunity.estimated_quantity != null" data-testid="sales-opportunity-quantity" class="text-xs mt-0.5 text-white/60 light:text-muted-foreground">
+      {{ formatQuantity(opportunity.estimated_quantity, opportunity.unit_of_measure) }}
     </p>
     <p v-if="opportunity.status === 'convertida' && opportunity.conversion_source" class="text-xs mt-0.5 text-white/40 light:text-muted-foreground">
       {{ opportunity.conversion_source === 'xprocess' ? $t('sales.conversionSourceXProcess') : $t('sales.conversionSourceManual') }}
@@ -159,5 +178,6 @@ async function saveValue() {
         {{ $t('sales.markLostShort') }}
       </Button>
     </div>
+    <SalesOpportunityDetailsDialog v-model:open="detailsOpen" :opportunity="opportunity" @saved="$emit('details-change', $event)" />
   </div>
 </template>

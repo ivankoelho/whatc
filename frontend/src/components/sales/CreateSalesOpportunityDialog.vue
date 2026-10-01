@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { SALES_UNITS, parseDecimalInput } from '@/lib/salesUnits'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { salesOpportunitiesService } from '@/services/api'
 import type { SalesOpportunity } from '@/services/api'
@@ -19,12 +21,17 @@ const { t } = useI18n()
 
 const interest = ref('')
 const estimatedValue = ref('')
+const estimatedQuantity = ref('')
+const NONE = 'none' // the Select cannot hold an empty value
+const unit = ref<string>(NONE)
 const isSubmitting = ref(false)
 
 watch(() => props.open, isOpen => {
   if (isOpen) {
     interest.value = ''
     estimatedValue.value = ''
+    estimatedQuantity.value = ''
+    unit.value = NONE
   }
 })
 
@@ -42,12 +49,20 @@ async function submit() {
     }
   }
 
+  const quantity = parseDecimalInput(estimatedQuantity.value)
+  if (Number.isNaN(quantity)) {
+    toast.error(t('sales.quantityInvalid'))
+    return
+  }
+
   isSubmitting.value = true
   try {
     const { data } = await salesOpportunitiesService.create({
       contact_id: props.contactId,
       interest: interest.value.trim() || undefined,
       estimated_value: value,
+      estimated_quantity: quantity,
+      unit_of_measure: unit.value === NONE ? undefined : unit.value,
     })
     toast.success(t('sales.opportunityCreated'))
     emit('created', data.data)
@@ -75,6 +90,22 @@ async function submit() {
         <div class="space-y-2">
           <Label>{{ $t('sales.columnEstimatedValue') }}</Label>
           <Input v-model="estimatedValue" type="text" inputmode="decimal" :placeholder="$t('sales.estimatedValuePlaceholder')" />
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="space-y-2">
+            <Label>{{ $t('sales.estimatedQuantity') }}</Label>
+            <Input v-model="estimatedQuantity" type="text" inputmode="decimal" placeholder="0" />
+          </div>
+          <div class="space-y-2">
+            <Label>{{ $t('sales.unit') }}</Label>
+            <Select v-model="unit">
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem :value="NONE">{{ $t('sales.unitNone') }}</SelectItem>
+                <SelectItem v-for="u in SALES_UNITS" :key="u" :value="u">{{ $t('sales.units.' + u) }}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       </div>
       <div class="flex justify-end gap-2">
