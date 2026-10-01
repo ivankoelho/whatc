@@ -394,8 +394,8 @@ export const campaignsService = {
   getRecipients: (id: string) => api.get(`/campaigns/${id}/recipients`),
   addRecipients: (id: string, recipients: Array<{ phone_number: string; recipient_name?: string; template_params?: Record<string, any> }>) =>
     api.post(`/campaigns/${id}/recipients/import`, { recipients }),
-  addRecipientsFromContacts: (id: string, ddds: string[], dryRun = false) =>
-    api.post(`/campaigns/${id}/recipients/from-contacts`, { ddds, dry_run: dryRun }),
+  addRecipientsFromContacts: (id: string, filters: { ddds?: string[]; contact_type?: string; unit_id?: string; department_id?: string }, dryRun = false) =>
+    api.post(`/campaigns/${id}/recipients/from-contacts`, { ...filters, dry_run: dryRun }),
   deleteRecipient: (campaignId: string, recipientId: string) =>
     api.delete(`/campaigns/${campaignId}/recipients/${recipientId}`),
   // Media
