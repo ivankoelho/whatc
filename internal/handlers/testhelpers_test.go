@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/assignment"
 	"github.com/shridarpatil/whatomate/internal/config"
 	"github.com/shridarpatil/whatomate/internal/handlers"
 	"github.com/shridarpatil/whatomate/internal/queue"
@@ -19,6 +21,16 @@ type appOption func(*handlers.App)
 func withQueue(q queue.Queue) appOption {
 	return func(a *handlers.App) {
 		a.Queue = q
+	}
+}
+
+// withPresence wires a real Assigner whose presence source reports only the
+// given users as connected, standing in for the WebSocket hub.
+func withPresence(online *map[uuid.UUID]bool) appOption {
+	return func(a *handlers.App) {
+		asg := assignment.New(a.DB, a.Redis, a.Log)
+		asg.SetPresence(func(_, userID uuid.UUID) bool { return (*online)[userID] })
+		a.Assigner = asg
 	}
 }
 

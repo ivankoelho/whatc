@@ -200,6 +200,16 @@ func RunMigrationWithProgress(db *gorm.DB, adminCfg *config.DefaultAdminConfig) 
 		currentStep++
 	}
 
+	// One active transfer per contact. Never auto-fixes data: with duplicates
+	// present the index is skipped and the offending rows are reported.
+	if _, dups, err := EnsureActiveTransferUniqueness(silentDB); err != nil {
+		fmt.Printf("\n  \033[31m✗ Active transfer index failed\033[0m\n\n")
+		return err
+	} else if len(dups) > 0 {
+		fmt.Printf("\n  \033[33m! %s NOT created: %d contact(s) have more than one active transfer.\n    Resolve them manually (nothing was changed) and re-run the migration:\033[0m\n%s",
+			ActiveTransferIndexName, len(dups), FormatActiveTransferDuplicates(dups))
+	}
+
 	// Seed permissions (always run, will skip if already seeded)
 	printProgress(currentStep, totalSteps)
 	if err := SeedPermissionsAndRoles(silentDB); err != nil {
@@ -338,6 +348,12 @@ func CreateIndexes(db *gorm.DB) error {
 		if err := db.Exec(idx).Error; err != nil {
 			return fmt.Errorf("failed to create index: %w", err)
 		}
+	}
+	if _, dups, err := EnsureActiveTransferUniqueness(db); err != nil {
+		return err
+	} else if len(dups) > 0 {
+		fmt.Printf("WARNING: %s not created, %d contact(s) have duplicate active transfers:\n%s",
+			ActiveTransferIndexName, len(dups), FormatActiveTransferDuplicates(dups))
 	}
 	return nil
 }

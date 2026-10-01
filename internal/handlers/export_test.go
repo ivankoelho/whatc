@@ -29,9 +29,20 @@ func SenderNameForTest(m *models.Message) string {
 	return senderName(m)
 }
 
-// CreateAgentInitiatedTransferForTest exposes createAgentInitiatedTransfer.
+// CreateAgentInitiatedTransferForTest exposes openAgentInitiatedTransfer. An
+// existing active transfer is not an error here (idempotent, like the original).
 func (a *App) CreateAgentInitiatedTransferForTest(account *models.WhatsAppAccount, contact *models.Contact, agentID uuid.UUID) {
-	a.createAgentInitiatedTransfer(account, contact, agentID)
+	_ = a.openAgentInitiatedTransfer(account, contact, agentID)
+}
+
+// EnsureAgentOwnsConversationForTest exposes ensureAgentOwnsConversation.
+func (a *App) EnsureAgentOwnsConversationForTest(account *models.WhatsAppAccount, contact *models.Contact, userID uuid.UUID) error {
+	return a.ensureAgentOwnsConversation(account, contact, userID, false)
+}
+
+// ClaimTransferForTest exposes claimTransfer on the app's DB.
+func (a *App) ClaimTransferForTest(t *models.AgentTransfer, agentID uuid.UUID) (bool, error) {
+	return a.claimTransfer(a.DB, t, agentID)
 }
 
 // ReleaseContactForTest exposes releaseContact.
@@ -58,4 +69,14 @@ func (a *App) ScopeVisibleConversationsForTest(q *gorm.DB, userID, orgID uuid.UU
 // handlers_test package.
 func (a *App) CanViewTeamMemberForTest(viewerID, ownerID uuid.UUID) bool {
 	return a.canViewTeamMember(viewerID, ownerID)
+}
+
+// SetConnectedForTest replaces the reaper's connectivity source.
+func (r *PresenceReaper) SetConnectedForTest(fn func(orgID, userID uuid.UUID) bool) {
+	r.isConnected = fn
+}
+
+// ValidateStickyAgentForTest exposes validateStickyAgent.
+func (a *App) ValidateStickyAgentForTest(agentID, orgID uuid.UUID) *uuid.UUID {
+	return a.validateStickyAgent(agentID, orgID)
 }

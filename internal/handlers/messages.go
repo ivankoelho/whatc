@@ -94,6 +94,11 @@ type MessageSendOptions struct {
 	// SentByUserID sets the user who sent the message (for agent messages)
 	SentByUserID *uuid.UUID
 
+	// AllowOtherOwner lets a human send into a conversation owned by another
+	// agent without taking it over. Only protocol (occurrence) replies set it:
+	// their handler is rarely the chat owner by design.
+	AllowOtherOwner bool
+
 	// Async if true, sends in background goroutine and returns immediately
 	// Message is persisted before send, status updated after
 	Async bool
@@ -165,6 +170,15 @@ func (a *App) agentNamePrefix(userID uuid.UUID) string {
 // SendOutgoingMessage is the unified method for sending all types of WhatsApp messages.
 // It handles: text, media (image/video/audio/document), interactive (buttons/list/cta_url), and template messages.
 func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageRequest, opts MessageSendOptions) (*models.Message, error) {
+	// 0. Ownership gate for human sends: claim the attendance (or open one)
+	// BEFORE anything is created or sent, so the loser of a race, or an agent
+	// writing into another agent's conversation, never reaches the customer.
+	if opts.SentByUserID != nil && req.Contact != nil && req.Account != nil {
+		if err := a.ensureAgentOwnsConversation(req.Account, req.Contact, *opts.SentByUserID, opts.AllowOtherOwner); err != nil {
+			return nil, err
+		}
+	}
+
 	// 1. Create message record
 	msg := a.createOutgoingMessage(req, opts)
 
@@ -299,14 +313,6 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 	// Update contact's last message
 	preview := a.getMessagePreview(req)
 	a.updateContactLastMessage(req.Contact, preview)
-
-	// A human messaging the customer owns the conversation. Without an
-	// attendance record the chatbot takes over the customer's reply — the
-	// bug this fixes. Campaigns bypass this function entirely and chatbot
-	// sends leave SentByUserID nil, so neither opens an attendance.
-	if opts.SentByUserID != nil {
-		a.createAgentInitiatedTransfer(req.Account, req.Contact, *opts.SentByUserID)
-	}
 
 	// An agent replying is what starts the service, and the only thing that
 	// takes a conversation out of the 'new' queue. Chatbot sends carry no
@@ -1083,6 +1089,9 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 	ctx := context.Background()
 	message, err := a.SendOutgoingMessage(ctx, msgReq, opts)
 	if err != nil {
+		if errors.Is(err, ErrConversationOwned) {
+			return r.SendErrorEnvelope(fasthttp.StatusConflict, "This conversation is assigned to another agent", nil, "")
+		}
 		a.Log.Error("Failed to send template message", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to send template message", nil, "")
 	}

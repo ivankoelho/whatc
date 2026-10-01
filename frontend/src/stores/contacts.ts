@@ -2,6 +2,8 @@ import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import { contactsService, messagesService } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
+import { useTransfersStore } from '@/stores/transfers'
+import { isConflictError } from '@/lib/api-utils'
 
 // Phones are stored without leading + or whitespace (see CreateContact in
 // internal/handlers/contacts.go). Strip them from a digit-only query so a user
@@ -284,6 +286,11 @@ export const useContactsStore = defineStore('contacts', () => {
       return newMessage
     } catch (error) {
       console.error('Failed to send message:', error)
+      // 409: another agent owns this conversation (or won the claim). Nothing
+      // was sent; reload the queue/ownership so the UI shows the real state.
+      if (isConflictError(error)) {
+        useTransfersStore().fetchTransfers().catch(() => {})
+      }
       throw error
     }
   }

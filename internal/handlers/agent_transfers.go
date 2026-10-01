@@ -460,8 +460,8 @@ func (a *App) CreateAgentTransfer(r *fastglue.Request) error {
 		if err != nil {
 			return nil
 		}
-		if !agent.IsAvailable {
-			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Agent is currently away", nil, "")
+		if reason := a.agentIneligibleReason(orgID, agent); reason != "" {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, reason, nil, "")
 		}
 		agentID = &parsedAgentID
 	} else if teamID != nil && a.Assigner != nil {
@@ -469,8 +469,7 @@ func (a *App) CreateAgentTransfer(r *fastglue.Request) error {
 		agentID = a.Assigner.AssignToTeam(*teamID, orgID, nil, assignment.ChatLoadCounter)
 	} else if settings != nil && settings.AgentAssignment.AssignToSameAgent && contact.AssignedUserID != nil {
 		// Auto-assign to contact's existing assigned agent (if setting enabled and agent is available)
-		var assignedAgent models.User
-		if a.DB.Where("id = ?", contact.AssignedUserID).First(&assignedAgent).Error == nil && assignedAgent.IsAvailable {
+		if a.isAgentEligible(orgID, *contact.AssignedUserID) {
 			agentID = contact.AssignedUserID
 		}
 		// If agent is not available, falls through to queue (agentID remains nil)
@@ -509,10 +508,14 @@ func (a *App) CreateAgentTransfer(r *fastglue.Request) error {
 		a.UpdateSLAOnPickup(&transfer)
 	}
 
-	if err := a.DB.Create(&transfer).Error; err != nil {
+	if err := a.createTransferRow(&transfer); err != nil {
+		if errors.Is(err, ErrTransferAlreadyActive) {
+			return r.SendErrorEnvelope(fasthttp.StatusConflict, "Contact already has an active transfer", nil, "")
+		}
 		a.Log.Error("Failed to create agent transfer", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create transfer", nil, "")
 	}
+	a.auditNewTransfer(&transfer)
 
 	// When AssignToSameAgent is enabled and no agent is already assigned,
 	// set the contact's assigned agent for future chat routing.
@@ -887,12 +890,18 @@ func (a *App) AssignAgentTransfer(r *fastglue.Request) error {
 		if err != nil {
 			return nil
 		}
-		if !agent.IsAvailable {
-			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Agent is currently away", nil, "")
+		if reason := a.agentIneligibleReason(orgID, agent); reason != "" {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, reason, nil, "")
 		}
 		targetAgentID = &parsedAgentID
 	} else if req.AgentID == nil && !hasWriteAccess {
-		// User without write permission self-assigning (null means "assign to me")
+		// User without write permission self-assigning (null means "assign to me").
+		// They may only take an unassigned attendance (or confirm one that is
+		// already theirs); taking one from another agent is a conflict, not a
+		// silent overwrite.
+		if transfer.AgentID != nil && *transfer.AgentID != userID {
+			return a.sendTransferConflict(r, orgID, userID, transferID)
+		}
 		targetAgentID = &userID
 	}
 
@@ -925,17 +934,37 @@ func (a *App) AssignAgentTransfer(r *fastglue.Request) error {
 	// pointer was pointing at the agent we're removing.
 	previousAgentID := transfer.AgentID
 
-	// Update transfer
-	transfer.AgentID = targetAgentID
-
-	// Update SLA tracking if being assigned
+	// Compare-and-set against the agent we read: if anything changed the
+	// assignment since then, nothing is overwritten and the caller gets a 409.
+	updates := map[string]any{"agent_id": targetAgentID}
+	if req.TeamID != nil {
+		updates["team_id"] = transfer.TeamID
+	}
 	if targetAgentID != nil && transfer.SLA.PickedUpAt == nil {
 		a.UpdateSLAOnPickup(&transfer)
+		updates["picked_up_at"] = transfer.SLA.PickedUpAt
+		if transfer.SLA.Breached {
+			updates["sla_breached"] = true
+			updates["sla_breached_at"] = transfer.SLA.BreachedAt
+		}
 	}
 
-	if err := a.DB.Save(&transfer).Error; err != nil {
+	moved, err := a.moveTransfer(a.DB, transfer.ID, previousAgentID, updates)
+	if err != nil {
 		a.Log.Error("Failed to assign transfer", "error", err, "transfer_id", transfer.ID)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to assign transfer", nil, "")
+	}
+	if !moved {
+		return a.sendTransferConflict(r, orgID, userID, transfer.ID)
+	}
+	transfer.AgentID = targetAgentID
+	switch {
+	case targetAgentID == nil:
+		a.auditDistribution(orgID, &userID, transfer.ID, distEventReleased, previousAgentID, nil, "returned to the queue")
+	case previousAgentID == nil && *targetAgentID == userID:
+		a.auditDistribution(orgID, &userID, transfer.ID, distEventClaimed, nil, targetAgentID, "self-assigned")
+	default:
+		a.auditDistribution(orgID, &userID, transfer.ID, distEventAssigned, previousAgentID, targetAgentID, "")
 	}
 
 	// Update contact assignment using the same rule as pickup / auto-assign:
@@ -1037,11 +1066,16 @@ func (a *App) UnassignTransfer(r *fastglue.Request) error {
 	}
 
 	previousAgentID := transfer.AgentID
-	if err := a.DB.Model(transfer).Update("agent_id", nil).Error; err != nil {
+	moved, err := a.moveTransfer(a.DB, transfer.ID, previousAgentID, map[string]any{"agent_id": nil})
+	if err != nil {
 		a.Log.Error("Failed to unassign transfer", "error", err, "transfer_id", transfer.ID)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to unassign transfer", nil, "")
 	}
+	if !moved {
+		return a.sendTransferConflict(r, orgID, userID, transfer.ID)
+	}
 	transfer.AgentID = nil
+	a.auditDistribution(orgID, &userID, transfer.ID, distEventReleased, previousAgentID, nil, "unassigned")
 
 	if previousAgentID != nil {
 		a.DB.Model(&models.Contact{}).
@@ -1082,6 +1116,14 @@ func (a *App) PickNextTransfer(r *fastglue.Request) error {
 	// Users without full access need pickup permission
 	if !hasFullAccess && !hasPickupPermission {
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You don't have permission to pick up transfers", nil, "")
+	}
+
+	// Operational eligibility (the shared Phase 6 rule: active, available AND
+	// connected). Authorization above is unchanged; this only stops an agent
+	// who is away, offline or inactive from taking an attendance.
+	if !a.isAgentEligible(orgID, userID) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You must be active, available and connected to pick up transfers", nil, "")
 	}
 
 	// Get optional team filter
@@ -1196,6 +1238,8 @@ func (a *App) PickNextTransfer(r *fastglue.Request) error {
 		a.Log.Error("Failed to complete pickup", "error", err, "transfer_id", transfer.ID)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to complete pickup", nil, "")
 	}
+
+	a.auditDistribution(orgID, &userID, transfer.ID, distEventClaimed, nil, &userID, "picked from queue")
 
 	// Load related data for response (outside transaction)
 	a.DB.Where("id = ?", transfer.ContactID).First(&transfer.Contact)
@@ -1411,9 +1455,10 @@ func (a *App) saveAndFinalizeTransfer(transfer *models.AgentTransfer, account *m
 		a.UpdateSLAOnPickup(transfer)
 	}
 
-	if err := a.DB.Create(transfer).Error; err != nil {
+	if err := a.createTransferRow(transfer); err != nil {
 		return err
 	}
+	a.auditNewTransfer(transfer)
 
 	// Update contact assignment if agent assigned, but only when AssignToSameAgent
 	// is enabled and no relationship manager is already set. Active transfers
@@ -1473,6 +1518,10 @@ func (a *App) createTransferToQueue(account *models.WhatsAppAccount, contact *mo
 	}
 
 	if err := a.saveAndFinalizeTransfer(&transfer, account, contact, settings, false); err != nil {
+		if errors.Is(err, ErrTransferAlreadyActive) {
+			a.Log.Debug("Contact already has active transfer (concurrent create), skipping", "contact_id", contact.ID)
+			return
+		}
 		a.Log.Error("Failed to create transfer to queue", "error", err, "contact_id", contact.ID, "source", string(source))
 		return
 	}
@@ -1480,7 +1529,7 @@ func (a *App) createTransferToQueue(account *models.WhatsAppAccount, contact *mo
 	a.Log.Info("Transfer created to agent queue", "transfer_id", transfer.ID, "contact_id", contact.ID, "source", source)
 }
 
-// createAgentInitiatedTransfer opens an attendance when an agent messages a
+// openAgentInitiatedTransfer opens an attendance when an agent messages a
 // contact that has none. The system models "a human owns this conversation"
 // solely as an active AgentTransfer, and no send path used to create one — so
 // the chatbot hijacked the customer's reply.
@@ -1488,11 +1537,7 @@ func (a *App) createTransferToQueue(account *models.WhatsAppAccount, contact *mo
 // Deliberately does NOT suppress outside business hours, unlike
 // createTransferToQueue: an agent messaging a customer at 11pm is a human
 // choosing to work, not an automated handoff.
-func (a *App) createAgentInitiatedTransfer(account *models.WhatsAppAccount, contact *models.Contact, agentID uuid.UUID) {
-	if a.hasActiveAgentTransfer(account.OrganizationID, contact.ID) {
-		return
-	}
-
+func (a *App) openAgentInitiatedTransfer(account *models.WhatsAppAccount, contact *models.Contact, agentID uuid.UUID) error {
 	settings, _ := a.getChatbotSettingsCached(account.OrganizationID, account.Name)
 
 	transfer := models.AgentTransfer{
@@ -1508,10 +1553,14 @@ func (a *App) createAgentInitiatedTransfer(account *models.WhatsAppAccount, cont
 	}
 
 	// endChatbotSession = true: human intervention wins over the bot.
-	if err := a.saveAndFinalizeTransfer(&transfer, account, contact, settings, true); err != nil {
+	// ErrTransferAlreadyActive is returned as is: the caller lost a race and
+	// must re-read the winner, not treat it as a failure.
+	err := a.saveAndFinalizeTransfer(&transfer, account, contact, settings, true)
+	if err != nil && !errors.Is(err, ErrTransferAlreadyActive) {
 		a.Log.Error("Failed to open agent-initiated attendance",
 			"error", err, "contact_id", contact.ID, "agent_id", agentID)
 	}
+	return err
 }
 
 // createTransferFromKeyword creates an agent transfer triggered by a keyword rule
@@ -1537,8 +1586,7 @@ func (a *App) createTransferFromKeyword(account *models.WhatsAppAccount, contact
 	// Determine agent assignment
 	var agentID *uuid.UUID
 	if settings != nil && settings.AgentAssignment.AssignToSameAgent && contact.AssignedUserID != nil {
-		var assignedAgent models.User
-		if a.DB.Where("id = ?", contact.AssignedUserID).First(&assignedAgent).Error == nil && assignedAgent.IsAvailable {
+		if a.isAgentEligible(account.OrganizationID, *contact.AssignedUserID) {
 			agentID = contact.AssignedUserID
 		}
 	}
@@ -1556,6 +1604,10 @@ func (a *App) createTransferFromKeyword(account *models.WhatsAppAccount, contact
 	}
 
 	if err := a.saveAndFinalizeTransfer(&transfer, account, contact, settings, true); err != nil {
+		if errors.Is(err, ErrTransferAlreadyActive) {
+			a.Log.Debug("Contact already has active transfer (concurrent create), skipping", "contact_id", contact.ID)
+			return
+		}
 		a.Log.Error("Failed to create keyword-triggered transfer", "error", err, "contact_id", contact.ID)
 		return
 	}
@@ -1612,6 +1664,10 @@ func (a *App) createTransferToTeam(account *models.WhatsAppAccount, contact *mod
 	}
 
 	if err := a.saveAndFinalizeTransfer(&transfer, account, contact, settings, true); err != nil {
+		if errors.Is(err, ErrTransferAlreadyActive) {
+			a.Log.Debug("Contact already has active transfer (concurrent create), skipping", "contact_id", contact.ID)
+			return
+		}
 		a.Log.Error("Failed to create team transfer", "error", err, "contact_id", contact.ID, "team_id", teamID)
 		return
 	}
@@ -1630,8 +1686,20 @@ func (a *App) createTransferToTeam(account *models.WhatsAppAccount, contact *mod
 }
 
 // ReturnAgentTransfersToQueue returns all active transfers assigned to an agent back to their team queues
-// Called when an agent goes offline/unavailable
+// Called when an agent goes away, or stays disconnected past the grace period.
+//
+// Idempotent and safe to run concurrently with itself or with a reassignment:
+// each transfer is released with a compare-and-set on the agent, so a transfer
+// that was already returned (by a previous run, another instance, or a
+// supervisor) is skipped and never counted or broadcast twice. The result is
+// the number of transfers THIS call actually released.
 func (a *App) ReturnAgentTransfersToQueue(userID, orgID uuid.UUID) int {
+	return a.returnAgentTransfers(userID, orgID, distEventReturnedAway)
+}
+
+// returnAgentTransfers is ReturnAgentTransfersToQueue with the audit reason
+// (distEventReturnedAway or distEventReturnedOffline).
+func (a *App) returnAgentTransfers(userID, orgID uuid.UUID, reason string) int {
 	var transfers []models.AgentTransfer
 	if err := a.DB.Where("agent_id = ? AND organization_id = ? AND status = ?", userID, orgID, models.TransferStatusActive).
 		Preload("Contact").Find(&transfers).Error; err != nil {
@@ -1639,20 +1707,22 @@ func (a *App) ReturnAgentTransfersToQueue(userID, orgID uuid.UUID) int {
 		return 0
 	}
 
-	if len(transfers) == 0 {
-		return 0
-	}
-
-	// Return each transfer to its team queue (or general queue)
+	returned := 0
 	for i := range transfers {
 		transfer := &transfers[i]
 		previousAgentID := transfer.AgentID
-		transfer.AgentID = nil
 
-		if err := a.DB.Save(transfer).Error; err != nil {
+		moved, err := a.moveTransfer(a.DB, transfer.ID, previousAgentID, map[string]any{"agent_id": nil})
+		if err != nil {
 			a.Log.Error("Failed to return transfer to queue", "error", err, "transfer_id", transfer.ID)
 			continue
 		}
+		if !moved {
+			continue // already released or reassigned by someone else
+		}
+		transfer.AgentID = nil
+		returned++
+		a.auditDistribution(orgID, nil, transfer.ID, reason, previousAgentID, nil, "")
 
 		// Clear the contact's relationship-manager pointer only if it was
 		// pointing at the agent we just removed. Don't blow away a manually
@@ -1666,10 +1736,12 @@ func (a *App) ReturnAgentTransfersToQueue(userID, orgID uuid.UUID) int {
 		a.broadcastTransferAssigned(transfer)
 	}
 
-	a.Log.Info("Returned agent transfers to queue",
-		"user_id", userID,
-		"count", len(transfers),
-	)
+	if returned > 0 {
+		a.Log.Info("Returned agent transfers to queue",
+			"user_id", userID,
+			"count", returned,
+		)
+	}
 
-	return len(transfers)
+	return returned
 }

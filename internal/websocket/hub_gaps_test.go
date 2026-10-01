@@ -145,3 +145,77 @@ func TestHub_BroadcastToUsers_NilListIsNoop(t *testing.T) {
 
 	assert.Equal(t, 0, drainCount(c))
 }
+
+// --- Presence listener ---
+
+type presenceEvent struct {
+	org, user uuid.UUID
+	online    bool
+}
+
+func collectPresence(hub *websocket.Hub) <-chan presenceEvent {
+	ch := make(chan presenceEvent, 16)
+	hub.SetPresenceListener(func(o, u uuid.UUID, online bool) { ch <- presenceEvent{o, u, online} })
+	return ch
+}
+
+func expectPresence(t *testing.T, ch <-chan presenceEvent, want presenceEvent) {
+	t.Helper()
+	select {
+	case got := <-ch:
+		assert.Equal(t, want, got)
+	case <-time.After(2 * time.Second):
+		t.Fatalf("no presence event, wanted %+v", want)
+	}
+}
+
+func expectNoPresence(t *testing.T, ch <-chan presenceEvent) {
+	t.Helper()
+	select {
+	case got := <-ch:
+		t.Fatalf("unexpected presence event %+v", got)
+	case <-time.After(150 * time.Millisecond):
+	}
+}
+
+func TestHub_PresenceListener_FiresOnFirstConnectAndLastDisconnectOnly(t *testing.T) {
+	hub := newTestHub(t)
+	events := collectPresence(hub)
+	orgID, userID := uuid.New(), uuid.New()
+
+	tab1 := newTestClient(hub, userID, orgID)
+	hub.Register(tab1)
+	expectPresence(t, events, presenceEvent{orgID, userID, true})
+
+	// A second tab is not a presence change.
+	tab2 := newTestClient(hub, userID, orgID)
+	hub.Register(tab2)
+	waitForClientCount(t, hub, 2)
+	expectNoPresence(t, events)
+
+	// Closing one tab leaves the user online.
+	hub.Unregister(tab1)
+	waitForClientCount(t, hub, 1)
+	expectNoPresence(t, events)
+	assert.True(t, hub.IsUserOnline(orgID, userID))
+
+	// Closing the last one takes them offline.
+	hub.Unregister(tab2)
+	expectPresence(t, events, presenceEvent{orgID, userID, false})
+	assert.False(t, hub.IsUserOnline(orgID, userID))
+}
+
+func TestHub_PresenceListener_ReconnectAfterDropFiresOnlineAgain(t *testing.T) {
+	hub := newTestHub(t)
+	events := collectPresence(hub)
+	orgID, userID := uuid.New(), uuid.New()
+
+	c := newTestClient(hub, userID, orgID)
+	hub.Register(c)
+	expectPresence(t, events, presenceEvent{orgID, userID, true})
+	hub.Unregister(c)
+	expectPresence(t, events, presenceEvent{orgID, userID, false})
+
+	hub.Register(newTestClient(hub, userID, orgID))
+	expectPresence(t, events, presenceEvent{orgID, userID, true})
+}

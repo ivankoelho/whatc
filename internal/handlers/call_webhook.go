@@ -487,23 +487,27 @@ func (a *App) processCallPermissionReply(phoneNumberID, fromPhone string, reply 
 	a.broadcastCallEvent(account.OrganizationID, websocket.TypeCallPermissionUpdate, wsPayload)
 }
 
-// validateStickyAgent runs the per-call eligibility checks (same-org,
-// IsActive, IsAvailable, online) on a candidate agent. Returns the id on
-// pass, nil on fail (with the reason logged). Used by both sticky-agent
-// sources in resolveStickyAgent.
+// validateStickyAgent checks a candidate sticky agent: same organization, then
+// the shared eligibility rule (assignment.Assigner.IsAgentEligible: active,
+// available AND connected). Returns the id on pass, nil on fail (with the
+// reason logged). Used by both sticky-agent sources in resolveStickyAgent.
 func (a *App) validateStickyAgent(agentID, orgID uuid.UUID) *uuid.UUID {
-	var user models.User
-	if err := a.DB.Where(
-		"id = ? AND organization_id = ? AND is_active = ? AND is_available = ?",
-		agentID, orgID, true, true,
-	).First(&user).Error; err != nil {
-		a.Log.Info("Sticky-route skipped: agent not eligible",
-			"agent_id", agentID, "org_id", orgID, "reason", err.Error())
+	var inOrg int64
+	a.DB.Model(&models.User{}).Where("id = ? AND organization_id = ?", agentID, orgID).Count(&inOrg)
+	if inOrg == 0 {
+		a.Log.Info("Sticky-route skipped: agent not in organization",
+			"agent_id", agentID, "org_id", orgID)
 		return nil
 	}
-	if a.WSHub == nil || !a.WSHub.IsUserOnline(orgID, agentID) {
-		a.Log.Info("Sticky-route skipped: agent offline",
-			"agent_id", agentID)
+	if !a.isAgentEligible(orgID, agentID) {
+		a.Log.Info("Sticky-route skipped: agent not eligible (away, inactive or offline)",
+			"agent_id", agentID, "org_id", orgID)
+		return nil
+	}
+	// Without an Assigner (tests/tooling) presence is not part of the shared
+	// rule, so keep asking the hub directly.
+	if a.Assigner == nil && (a.WSHub == nil || !a.WSHub.IsUserOnline(orgID, agentID)) {
+		a.Log.Info("Sticky-route skipped: agent offline", "agent_id", agentID)
 		return nil
 	}
 	return &agentID

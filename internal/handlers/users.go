@@ -40,13 +40,16 @@ func parseSuperAdminField(r *fastglue.Request) *bool {
 
 // UserResponse represents the response for a user (without sensitive data)
 type UserResponse struct {
-	ID             uuid.UUID    `json:"id"`
-	Email          string       `json:"email"`
-	FullName       string       `json:"full_name"`
-	RoleID         *uuid.UUID   `json:"role_id,omitempty"`
-	Role           *RoleInfo    `json:"role,omitempty"`
-	IsActive       bool         `json:"is_active"`
-	IsAvailable    bool         `json:"is_available"`
+	ID          uuid.UUID  `json:"id"`
+	Email       string     `json:"email"`
+	FullName    string     `json:"full_name"`
+	RoleID      *uuid.UUID `json:"role_id,omitempty"`
+	Role        *RoleInfo  `json:"role,omitempty"`
+	IsActive    bool       `json:"is_active"`
+	IsAvailable bool       `json:"is_available"`
+	// IsOnline is the live-connection state (presence), reported by the user
+	// list only; nil elsewhere means "not reported", not "offline".
+	IsOnline       *bool        `json:"is_online,omitempty"`
 	IsSuperAdmin   bool         `json:"is_super_admin"`
 	IsMember       bool         `json:"is_member"`
 	OrganizationID uuid.UUID    `json:"organization_id"`
@@ -167,6 +170,11 @@ func (a *App) ListUsers(r *fastglue.Request) error {
 		homeOrgMap[u.ID] = u.OrganizationID
 	}
 
+	onlineSet := make(map[uuid.UUID]struct{}, len(onlineIDs))
+	for _, id := range onlineIDs {
+		onlineSet[id] = struct{}{}
+	}
+
 	// Convert to response format, using org-specific role
 	response := make([]UserResponse, len(users))
 	for i, user := range users {
@@ -177,6 +185,8 @@ func (a *App) ListUsers(r *fastglue.Request) error {
 		}
 		resp := userToResponse(user)
 		resp.IsMember = homeOrgMap[user.ID] != orgID
+		_, online := onlineSet[user.ID]
+		resp.IsOnline = &online
 		response[i] = resp
 	}
 
@@ -936,6 +946,8 @@ func (a *App) UpdateAvailability(r *fastglue.Request) error {
 		return nil
 	}
 
+	wasAvailable := user.IsAvailable
+
 	// Only log if status is actually changing
 	if user.IsAvailable != req.IsAvailable {
 		now := time.Now()
@@ -963,6 +975,12 @@ func (a *App) UpdateAvailability(r *fastglue.Request) error {
 	if err := a.DB.Save(&user).Error; err != nil {
 		a.Log.Error("Failed to update availability", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update availability", nil, "")
+	}
+
+	if wasAvailable != req.IsAvailable {
+		a.logAudit(orgID, userID, models.ResourceUsers, userID, models.AuditActionUpdated, nil, nil,
+			map[string]any{"field": "is_available", "old_value": wasAvailable, "new_value": req.IsAvailable})
+		a.broadcastAgentAvailability(orgID, userID, req.IsAvailable)
 	}
 
 	status := "available"

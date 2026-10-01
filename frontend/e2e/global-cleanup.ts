@@ -87,6 +87,11 @@ const CLEANUP_STATEMENTS: Array<{ label: string; sql: string }> = [
     label: 'user_organizations in E2E orgs',
     sql: `DELETE FROM user_organizations WHERE organization_id IN (SELECT id FROM organizations WHERE ${E2E_NAME_PREDICATE})`,
   },
+  // Availability history rows pin the user (fk_user_availability_logs_user).
+  {
+    label: 'user_availability_logs for E2E users',
+    sql: `DELETE FROM user_availability_logs WHERE user_id IN (SELECT id FROM users WHERE ${E2E_USER_EMAIL_PREDICATE})`,
+  },
   {
     label: 'team_members for E2E users',
     sql: `DELETE FROM team_members WHERE user_id IN (SELECT id FROM users WHERE ${E2E_USER_EMAIL_PREDICATE})`,

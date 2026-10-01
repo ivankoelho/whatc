@@ -508,7 +508,8 @@
     "generalSection": "Geral",
     "serviceWindowExpired": "A janela de mensagens de 24 horas expirou. Somente mensagens de modelo podem ser enviadas até o cliente responder.",
     "sendTemplateAction": "Enviar modelo",
-    "retrySending": "Tentar enviar novamente"
+    "retrySending": "Tentar enviar novamente",
+    "conversationOwnedByAnother": "Esta conversa está atribuída a outro agente. Sua mensagem não foi enviada."
   },
   "contacts": {
     "title": "Contatos",
@@ -768,7 +769,10 @@
     "updateMemberRole": "Atualizar função",
     "updateMemberRoleTitle": "Atualizar função do membro",
     "updateMemberRoleDesc": "Altere a função deste membro nesta organização.",
-    "memberRoleUpdated": "Função do membro atualizada"
+    "memberRoleUpdated": "Função do membro atualizada",
+    "presenceOffline": "Offline",
+    "presenceAway": "Online, ausente",
+    "presenceAvailable": "Online, disponível"
   },
   "roles": {
     "title": "Funções e permissões",
@@ -2157,7 +2161,8 @@
     "fetchError": "Falha ao carregar transferências. Tente novamente.",
     "confirmResumeTitle": "Retomar chatbot",
     "confirmResumeDescription": "Tem certeza de que deseja retomar o chatbot para este contato? A transferência para o agente será encerrada e o chatbot assumirá.",
-    "confirmResumeLabel": "Retomar"
+    "confirmResumeLabel": "Retomar",
+    "changedByAnother": "Outra pessoa já assumiu ou alterou este atendimento. A lista foi atualizada."
   },
   "occurrences": {
     "title": "Ocorrências",
