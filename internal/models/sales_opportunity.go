@@ -64,6 +64,36 @@ var ValidSalesLossReasons = map[SalesLossReason]bool{
 	SalesLossReasonOutro:              true,
 }
 
+// SalesUnitOfMeasure is the unit an opportunity's quantities are expressed in.
+// The list is closed and lives only here: the API validates against it and the
+// CHECK constraint on sales_opportunities.unit_of_measure is generated from it
+// (database/postgres.go), so adding a unit is one line below.
+type SalesUnitOfMeasure string
+
+const (
+	SalesUnitUnidade SalesUnitOfMeasure = "UN"  // Unidade
+	SalesUnitMetro   SalesUnitOfMeasure = "M"   // Metro
+	SalesUnitMetro2  SalesUnitOfMeasure = "M2"  // Metro quadrado
+	SalesUnitKg      SalesUnitOfMeasure = "KG"  // Quilograma
+	SalesUnitPacote  SalesUnitOfMeasure = "PCT" // Pacote
+	SalesUnitCaixa   SalesUnitOfMeasure = "CX"  // Caixa
+)
+
+// SalesUnitsOfMeasure is every valid unit, in display order.
+var SalesUnitsOfMeasure = []SalesUnitOfMeasure{
+	SalesUnitUnidade, SalesUnitMetro, SalesUnitMetro2, SalesUnitKg, SalesUnitPacote, SalesUnitCaixa,
+}
+
+// IsValid reports whether u is in the closed list.
+func (u SalesUnitOfMeasure) IsValid() bool {
+	for _, v := range SalesUnitsOfMeasure {
+		if u == v {
+			return true
+		}
+	}
+	return false
+}
+
 type SalesOpportunityEventType string
 
 const (
@@ -109,7 +139,15 @@ type SalesOpportunity struct {
 
 	Interest          string   `gorm:"type:text" json:"interest,omitempty"`
 	EstimatedValue    *float64 `gorm:"type:numeric" json:"estimated_value,omitempty"`
-	EstimatedQuantity *int     `json:"estimated_quantity,omitempty"`
+	// Quantities are numeric(14,3): metres, m² and kg are fractional. 3 decimals is
+	// the stored precision, and handlers reject finer input instead of rounding it.
+	// estimated_* is the commercial expectation; realized_* is what actually
+	// happened (X2 is the official source of realized_value when an order is
+	// reconciled; realized_quantity is manual until X2 exposes the items).
+	EstimatedQuantity *float64            `gorm:"type:numeric(14,3)" json:"estimated_quantity,omitempty"`
+	UnitOfMeasure     *SalesUnitOfMeasure `gorm:"column:unit_of_measure;size:10" json:"unit_of_measure,omitempty"`
+	RealizedValue     *float64            `gorm:"type:numeric" json:"realized_value,omitempty"`
+	RealizedQuantity  *float64            `gorm:"type:numeric(14,3)" json:"realized_quantity,omitempty"`
 
 	// Editable any time while status=aberta, in any stage — not itself a
 	// transition. Required before entering "direcionada" (spec §5).

@@ -38,7 +38,7 @@ func TestUpdateSalesOpportunityDetails_SetsFields(t *testing.T) {
 	require.NotNil(t, got.EstimatedValue)
 	assert.InDelta(t, 1234.56, *got.EstimatedValue, 0.001)
 	require.NotNil(t, got.EstimatedQuantity)
-	assert.Equal(t, 50, *got.EstimatedQuantity)
+	assert.Equal(t, 50.0, *got.EstimatedQuantity)
 
 	// Plain field edit, not a funnel transition — no event (spec has no such
 	// requirement for these fields, unlike direcionamento).
@@ -66,7 +66,7 @@ func TestUpdateSalesOpportunityDetails_PartialUpdateOnlyTouchesProvidedFields(t 
 	require.NoError(t, app.DB.First(&got, "id = ?", opp.ID).Error)
 	assert.Equal(t, "original interest", got.Interest, "untouched field must survive a partial update")
 	require.NotNil(t, got.EstimatedQuantity)
-	assert.Equal(t, 10, *got.EstimatedQuantity, "untouched field must survive a partial update")
+	assert.Equal(t, 10.0, *got.EstimatedQuantity, "untouched field must survive a partial update")
 	require.NotNil(t, got.EstimatedValue)
 	assert.InDelta(t, 500, *got.EstimatedValue, 0.001)
 }

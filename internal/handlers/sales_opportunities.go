@@ -35,7 +35,7 @@ import (
 // already-open opportunity must not reassign it away from whoever already
 // owns it (same "reassigning the contact never moves this opportunity"
 // invariant the chatbot path already relies on).
-func (a *App) createOrRetriggerSalesOpportunity(contact *models.Contact, sourceTransferID *uuid.UUID, source models.SalesOpportunityEventSource, interest string, estimatedValue *float64, assignedUserIDOverride *uuid.UUID) (*models.SalesOpportunity, error) {
+func (a *App) createOrRetriggerSalesOpportunity(contact *models.Contact, sourceTransferID *uuid.UUID, source models.SalesOpportunityEventSource, interest string, estimatedValue *float64, assignedUserIDOverride *uuid.UUID, apply ...func(*models.SalesOpportunity)) (*models.SalesOpportunity, error) {
 	var existing models.SalesOpportunity
 	err := a.DB.Where("organization_id = ? AND contact_id = ? AND status = ?",
 		contact.OrganizationID, contact.ID, models.SalesOpportunityStatusAberta).
@@ -69,6 +69,11 @@ func (a *App) createOrRetriggerSalesOpportunity(contact *models.Contact, sourceT
 		Interest:         interest,
 		EstimatedValue:   estimatedValue,
 		StageChangedAt:   time.Now(),
+	}
+	// apply fills extra fields of a genuinely NEW opportunity (quantity, unit); like
+	// interest and value, they are ignored when an open one is merely retriggered.
+	for _, fn := range apply {
+		fn(&opp)
 	}
 
 	txErr := a.DB.Transaction(func(tx *gorm.DB) error {
@@ -115,9 +120,13 @@ func (a *App) createOrRetriggerSalesOpportunity(contact *models.Contact, sourceT
 }
 
 type createSalesOpportunityRequest struct {
-	ContactID      uuid.UUID `json:"contact_id"`
-	Interest       string    `json:"interest"`
-	EstimatedValue *float64  `json:"estimated_value"`
+	ContactID         uuid.UUID `json:"contact_id"`
+	Interest          string    `json:"interest"`
+	EstimatedValue    *float64  `json:"estimated_value"`
+	EstimatedQuantity *float64  `json:"estimated_quantity"`
+	UnitOfMeasure     *string   `json:"unit_of_measure"`
+	// No realized_* here on purpose: nothing has been realized when an
+	// opportunity opens. They are set on conversion (or by X2 reconciliation).
 }
 
 // CreateSalesOpportunity lets an agent open a funnel entry by hand from the
@@ -146,7 +155,18 @@ func (a *App) CreateSalesOpportunity(r *fastglue.Request) error {
 		return nil
 	}
 
-	opp, err := a.createOrRetriggerSalesOpportunity(contact, nil, models.SalesOpportunityEventSourceManual, req.Interest, req.EstimatedValue, &userID)
+	if msg := validateSalesQuantities(req.EstimatedValue, req.EstimatedQuantity, nil, nil); msg != "" {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, msg, nil, "")
+	}
+	_, unit, unitOK := parseSalesUnit(req.UnitOfMeasure)
+	if !unitOK {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "unit_of_measure must be one of: UN, M, M2, KG, PCT, CX", nil, "")
+	}
+
+	opp, err := a.createOrRetriggerSalesOpportunity(contact, nil, models.SalesOpportunityEventSourceManual, req.Interest, req.EstimatedValue, &userID, func(o *models.SalesOpportunity) {
+		o.EstimatedQuantity = req.EstimatedQuantity
+		o.UnitOfMeasure = unit
+	})
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create opportunity", nil, "")
 	}
@@ -428,14 +448,39 @@ func (a *App) ChangeSalesOpportunityDirecionamento(r *fastglue.Request) error {
 type updateSalesOpportunityDetailsRequest struct {
 	Interest          *string  `json:"interest"`
 	EstimatedValue    *float64 `json:"estimated_value"`
-	EstimatedQuantity *int     `json:"estimated_quantity"`
+	EstimatedQuantity *float64 `json:"estimated_quantity"`
+	UnitOfMeasure     *string  `json:"unit_of_measure"` // "" clears it
+	// Realized values: what actually happened. Editable only once the
+	// opportunity is converted (see UpdateSalesOpportunityDetails).
+	RealizedValue    *float64 `json:"realized_value"`
+	RealizedQuantity *float64 `json:"realized_quantity"`
 }
 
-// UpdateSalesOpportunityDetails edits interest/estimated_value/estimated_quantity
-// — plain fields filled in by the agent (spec §4), not a funnel transition.
-// Unlike stage/direcionamento/convert/lose, this does NOT write a
-// SalesOpportunityEvent: the spec only requires an event for transitions and
-// direcionamento changes, not for editing these fields.
+// validateSalesQuantities checks the numeric fields of a request and returns the
+// message for a 400, or "" when they are fine.
+func validateSalesQuantities(estimatedValue, estimatedQty, realizedValue, realizedQty *float64) string {
+	for _, v := range []*float64{estimatedValue, realizedValue} {
+		if v != nil && !validSalesMoney(*v) {
+			return "values must be non-negative numbers"
+		}
+	}
+	for _, q := range []*float64{estimatedQty, realizedQty} {
+		if q != nil && !validSalesQuantity(*q) {
+			return "quantities must be non-negative with at most 3 decimal places"
+		}
+	}
+	return ""
+}
+
+// UpdateSalesOpportunityDetails edits plain fields filled in by the agent (spec
+// §4), not a funnel transition. It writes no SalesOpportunityEvent.
+//
+//   - Open opportunity: interest, estimated_value, estimated_quantity and
+//     unit_of_measure (the commercial expectation).
+//   - Converted opportunity: only realized_value and realized_quantity (what
+//     actually happened, filled by hand; when X2 has the order it overwrites
+//     realized_value on reconciliation, see reconcileXProcessLink).
+//   - Any other status, or fields that do not belong to the current status: 400.
 func (a *App) UpdateSalesOpportunityDetails(r *fastglue.Request) error {
 	orgID, userID, err := a.requireAuth(r, models.ResourceSalesOpportunities, models.ActionWrite)
 	if err != nil {
@@ -445,13 +490,34 @@ func (a *App) UpdateSalesOpportunityDetails(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
-	if opp.Status != models.SalesOpportunityStatusAberta {
-		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Only open opportunities can be edited", nil, "")
-	}
 
 	var req updateSalesOpportunityDetailsRequest
 	if err := a.decodeRequest(r, &req); err != nil {
 		return nil
+	}
+
+	touchesRealized := req.RealizedValue != nil || req.RealizedQuantity != nil
+	required := models.SalesOpportunityStatusAberta
+	switch {
+	case opp.Status == models.SalesOpportunityStatusAberta:
+		if touchesRealized {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Realized values can only be set on converted opportunities", nil, "")
+		}
+	case opp.Status == models.SalesOpportunityStatusConvertida && touchesRealized:
+		required = models.SalesOpportunityStatusConvertida
+		if req.Interest != nil || req.EstimatedValue != nil || req.EstimatedQuantity != nil || req.UnitOfMeasure != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Only open opportunities can be edited", nil, "")
+		}
+	default:
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Only open opportunities can be edited", nil, "")
+	}
+
+	if msg := validateSalesQuantities(req.EstimatedValue, req.EstimatedQuantity, req.RealizedValue, req.RealizedQuantity); msg != "" {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, msg, nil, "")
+	}
+	unitSet, unit, unitOK := parseSalesUnit(req.UnitOfMeasure)
+	if !unitOK {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "unit_of_measure must be one of: UN, M, M2, KG, PCT, CX", nil, "")
 	}
 
 	updates := map[string]any{}
@@ -464,16 +530,25 @@ func (a *App) UpdateSalesOpportunityDetails(r *fastglue.Request) error {
 	if req.EstimatedQuantity != nil {
 		updates["estimated_quantity"] = *req.EstimatedQuantity
 	}
+	if unitSet {
+		updates["unit_of_measure"] = unit // nil clears it
+	}
+	if req.RealizedValue != nil {
+		updates["realized_value"] = *req.RealizedValue
+	}
+	if req.RealizedQuantity != nil {
+		updates["realized_quantity"] = *req.RealizedQuantity
+	}
 	if len(updates) == 0 {
 		return r.SendEnvelope(opp)
 	}
 
 	// Same TOCTOU guard as the other mutating handlers (finding 8): re-check
-	// status=aberta atomically in the WHERE clause instead of trusting the Go
+	// the status atomically in the WHERE clause instead of trusting the Go
 	// read above, so a concurrent convert/lose landing between that read and
 	// this write can't silently let a closed opportunity's fields change.
 	result := a.DB.Model(&models.SalesOpportunity{}).
-		Where("id = ? AND status = ?", opp.ID, models.SalesOpportunityStatusAberta).
+		Where("id = ? AND status = ?", opp.ID, required).
 		Updates(updates)
 	if result.Error != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update opportunity", nil, "")
@@ -486,10 +561,18 @@ func (a *App) UpdateSalesOpportunityDetails(r *fastglue.Request) error {
 	return r.SendEnvelope(opp)
 }
 
+type convertSalesOpportunityRequest struct {
+	RealizedValue    *float64 `json:"realized_value"`
+	RealizedQuantity *float64 `json:"realized_quantity"`
+}
+
 // ConvertSalesOpportunity marks the opportunity converted. Manual only in
 // this delivery — conversion_source is always "manual" (spec §2, §9).
 // Validates the state machine (spec §5.1): only aberta -> convertida; stage
 // is left untouched, it freezes at whatever value it had on conversion.
+//
+// The body is optional. realized_value and realized_quantity may be given, but
+// are never required, and never touch estimated_value / estimated_quantity.
 func (a *App) ConvertSalesOpportunity(r *fastglue.Request) error {
 	orgID, userID, err := a.requireAuth(r, models.ResourceSalesOpportunities, models.ActionWrite)
 	if err != nil {
@@ -503,19 +586,36 @@ func (a *App) ConvertSalesOpportunity(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Only open opportunities can be converted", nil, "")
 	}
 
+	var req convertSalesOpportunityRequest
+	if len(r.RequestCtx.PostBody()) > 0 {
+		if err := a.decodeRequest(r, &req); err != nil {
+			return nil
+		}
+		if msg := validateSalesQuantities(nil, nil, req.RealizedValue, req.RealizedQuantity); msg != "" {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, msg, nil, "")
+		}
+	}
+
 	now := time.Now()
 	source := models.SalesConversionSourceManual
 	// Finding 8 (TOCTOU): re-check status=aberta atomically — this is the
 	// pair to LoseSalesOpportunity's own guard below; without it, two
 	// concurrent convert+lose (or convert+convert) requests on the same
 	// opportunity could both pass the Go-level check and both write.
+	updates := map[string]any{
+		"status":            models.SalesOpportunityStatusConvertida,
+		"conversion_source": source, "converted_at": now,
+		"sla_breached": false,
+	}
+	if req.RealizedValue != nil {
+		updates["realized_value"] = *req.RealizedValue
+	}
+	if req.RealizedQuantity != nil {
+		updates["realized_quantity"] = *req.RealizedQuantity
+	}
 	result := a.DB.Model(&models.SalesOpportunity{}).
 		Where("id = ? AND status = ?", opp.ID, models.SalesOpportunityStatusAberta).
-		Updates(map[string]any{
-			"status":            models.SalesOpportunityStatusConvertida,
-			"conversion_source": source, "converted_at": now,
-			"sla_breached": false,
-		})
+		Updates(updates)
 	if result.Error != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to convert opportunity", nil, "")
 	}

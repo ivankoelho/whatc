@@ -3,6 +3,7 @@ package database
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -298,6 +299,11 @@ func getIndexes() []string {
 				CHECK (contact_type IN ('cliente','fornecedor','colaborador'));
 		EXCEPTION WHEN duplicate_object THEN NULL;
 		END $$`,
+		// Opportunity unit of measure: nullable, closed list generated from
+		// models.SalesUnitsOfMeasure. Dropped and re-added so a longer list takes
+		// effect on the next start (existing rows only hold NULL or listed values).
+		`ALTER TABLE sales_opportunities DROP CONSTRAINT IF EXISTS chk_sales_opp_unit_of_measure`,
+		salesUnitCheckSQL(),
 		// Composite index matching the ListContacts filter + ordering exactly
 		`CREATE INDEX IF NOT EXISTS idx_contacts_org_status_lastmsg ON contacts(organization_id, contact_status, last_message_at DESC NULLS LAST)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_phone_status ON chatbot_sessions(organization_id, phone_number, status)`,
@@ -887,4 +893,15 @@ func SeedDefaultWidgetsForOrg(db *gorm.DB, orgID, userID uuid.UUID) error {
 	}
 
 	return nil
+}
+
+// salesUnitCheckSQL builds the CHECK for sales_opportunities.unit_of_measure from
+// the single list of valid units.
+func salesUnitCheckSQL() string {
+	quoted := make([]string, len(models.SalesUnitsOfMeasure))
+	for i, u := range models.SalesUnitsOfMeasure {
+		quoted[i] = "'" + string(u) + "'"
+	}
+	return "ALTER TABLE sales_opportunities ADD CONSTRAINT chk_sales_opp_unit_of_measure " +
+		"CHECK (unit_of_measure IS NULL OR unit_of_measure IN (" + strings.Join(quoted, ",") + "))"
 }
