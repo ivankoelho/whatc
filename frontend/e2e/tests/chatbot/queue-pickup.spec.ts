@@ -47,7 +47,35 @@ async function gotoTransfersAndWaitLoad(page: import('@playwright/test').Page): 
   await transfersListed
 }
 
+// A contact can have only one active attendance (unique index
+// idx_agent_transfers_one_active_per_contact), and several tests reuse one
+// shared contact. Close whatever a previous test left active before seeding.
+async function closeActiveTransfers(contactId: string): Promise<void> {
+  await execSQL(`UPDATE agent_transfers SET status = 'resumed' WHERE contact_id = '${contactId}' AND status = 'active'`)
+}
+
+// Explicitly assigning an attendance now requires the target agent to be
+// connected (presence-aware eligibility, see
+// docs/superpowers/specs/2026-10-01-fase-6-distribuicao-design.md). Open a
+// real session for the agent so its WebSocket is live, and keep it open until
+// the returned context is closed.
+async function connectAgent(
+  browser: import('@playwright/test').Browser,
+  agent: { email: string; password: string },
+): Promise<import('@playwright/test').BrowserContext> {
+  const context = await browser.newContext()
+  const page = await context.newPage()
+  await page.goto('/login')
+  await page.locator('input[type="email"]').fill(agent.email)
+  await page.locator('input[type="password"]').fill(agent.password)
+  await page.locator('button[type="submit"]').click()
+  await page.waitForURL((url) => !url.pathname.includes('/login'), { timeout: 10_000 })
+  await page.waitForTimeout(1_500) // let the WebSocket authenticate
+  return context
+}
+
 async function seedQueuedTransfer(orgId: string, contactId: string, phone: string, contactName: string, accountName: string): Promise<string> {
+  await closeActiveTransfers(contactId)
   const rows = await execSQL(`
     INSERT INTO agent_transfers (id, organization_id, contact_id, whats_app_account, phone_number, status, source, transferred_at, created_at, updated_at)
     VALUES (gen_random_uuid(), '${orgId}', '${contactId}', '${accountName}', '${phone}', 'active', 'manual', NOW(), NOW(), NOW())
@@ -281,15 +309,17 @@ test.describe('Pick from queue — admin assign flow', () => {
     }
   })
 
-  test('admin assigns a queued transfer to a specific agent', async ({ page }) => {
+  test('admin assigns a queued transfer to a specific agent', async ({ page, browser }) => {
+    const agentSession = await connectAgent(browser, assignee)
+    try {
     // Unique phone so the row stays identifiable even if other workers'
     // beforeEach clears nuke the entire general queue.
     const uniquePhone = scope.phone()
-    const seedRow = async () => execSQL(`
+    const seedRow = async () => closeActiveTransfers(contactId).then(() => execSQL(`
       INSERT INTO agent_transfers (id, organization_id, contact_id, whats_app_account, phone_number, status, source, transferred_at, created_at, updated_at)
       VALUES (gen_random_uuid(), '${orgId}', '${contactId}', '${accountName}', '${uniquePhone}', 'active', 'manual', NOW(), NOW(), NOW())
       RETURNING id::text AS id
-    `).then(r => r[0]!.id as string)
+    `)).then(r => r[0]!.id as string)
     let transferId = await seedRow()
 
     // Super admin sees the admin/manager view (tabs).
@@ -348,6 +378,9 @@ test.describe('Pick from queue — admin assign flow', () => {
       `SELECT agent_id::text AS agent_id FROM agent_transfers WHERE id = '${transferId}'`,
     )
     expect(rows[0]!.agent_id).toBe(assignee.user.id)
+    } finally {
+      await agentSession.close()
+    }
   })
 })
 
@@ -672,7 +705,9 @@ test.describe('Admin reassign and unassign flows', () => {
     }
   }
 
-  test('admin reassigns a transfer from agent A to agent B', async ({ page }) => {
+  test('admin reassigns a transfer from agent A to agent B', async ({ page, browser }) => {
+    const agentBSession = await connectAgent(browser, agentB) // target must be connected
+    try {
     // No clearQueueForOrg: this test seeds with agent_id set, so the row
     // isn't subject to clearQueueForOrg from sibling tests (which only
     // touches agent_id IS NULL). Conversely, calling it ourselves would
@@ -705,6 +740,9 @@ test.describe('Admin reassign and unassign flows', () => {
       `SELECT agent_id::text AS agent_id FROM agent_transfers WHERE id = '${seeded.transferId}'`,
     )
     expect(rows[0]!.agent_id).toBe(agentB.user.id)
+    } finally {
+      await agentBSession.close()
+    }
   })
 
   test('admin unassigns a transfer back to the queue', async ({ page }) => {

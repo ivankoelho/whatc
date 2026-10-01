@@ -612,3 +612,28 @@ func TestAssignToTeam_RoundRobin_ConcurrentWithOneConnectedAgentNeverDropsAssign
 		assert.Equal(t, agents[2].ID, *r)
 	}
 }
+
+// Calls and chat share one Assigner: the call-transfer rotation (CallLoadCounter,
+// excluded agents already tried) must apply the same presence rule as chat.
+func TestAssignToTeam_CallRotation_UsesSamePresenceRuleAsChat(t *testing.T) {
+	a, db := newAssigner(t)
+	org := testutil.CreateTestOrganization(t, db)
+	team, agents := createTeam(t, db, org.ID, models.AssignmentStrategyLoadBalanced, 3, 0)
+	a.SetPresence(presenceOf(agents[1].ID, agents[2].ID)) // agents[0] is disconnected
+
+	// agents[0] has the lowest call load but is not connected.
+	got := a.AssignToTeam(team.ID, org.ID, nil, assignment.CallLoadCounter)
+	require.NotNil(t, got)
+	assert.NotEqual(t, agents[0].ID, *got, "a disconnected agent must not be rung")
+
+	// Rotation: agents already tried are excluded, and the disconnected one still is not offered.
+	got = a.AssignToTeam(team.ID, org.ID, []uuid.UUID{agents[1].ID}, assignment.CallLoadCounter)
+	require.NotNil(t, got)
+	assert.Equal(t, agents[2].ID, *got)
+
+	got = a.AssignToTeam(team.ID, org.ID, []uuid.UUID{agents[1].ID, agents[2].ID}, assignment.CallLoadCounter)
+	assert.Nil(t, got, "only the disconnected agent is left: nobody to ring")
+
+	// The broadcast fallback uses the same rule.
+	assert.ElementsMatch(t, []uuid.UUID{agents[2].ID}, a.GetAvailableAgents(team.ID, org.ID, []uuid.UUID{agents[1].ID}))
+}
