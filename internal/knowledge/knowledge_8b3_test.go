@@ -94,17 +94,14 @@ func TestRelaxed_StrictFirstThenOrOnlyWhenFewerThanMinHits_ScopeInBothPasses(t *
 	// ... while the strict (API) reading of the same text DOES exclude it
 	assert.NotContains(t, q("prazo -troca", nil, knowledge.Strict), "Politica de troca")
 
-	// no merged duplicates, ordered by score, limited
+	// no merged duplicates and limited (the order is strict-first, never by scores of different queries)
 	hits, err := r.Retrieve(context.Background(), knowledge.Query{OrgID: org, Text: "prazo troca entrega", Limit: 2, Strategy: knowledge.Relaxed})
 	require.NoError(t, err)
 	assert.LessOrEqual(t, len(hits), 2)
 	seen := map[uuid.UUID]bool{}
-	for i, h := range hits {
+	for _, h := range hits {
 		assert.False(t, seen[h.ChunkID], "a chunk is never repeated")
 		seen[h.ChunkID] = true
-		if i > 0 {
-			assert.GreaterOrEqual(t, hits[i-1].Score, h.Score)
-		}
 	}
 }
 
@@ -225,4 +222,28 @@ func TestUnaccentedStopwords_AgreeWithPostgres(t *testing.T) {
 		assert.Equal(t, "", v, "PostgreSQL does not treat %q as a stop word", w)
 		assert.Empty(t, knowledge.PlainTerms(w), w)
 	}
+}
+
+// The case found by the post-merge validation: a chunk that matches EVERY term (the strict pass)
+// must stay before the chunks that only match part of the terms (the OR pass), whatever the
+// scores of the two different queries look like.
+func TestRelaxed_AFullMatchStaysBeforePartialMatches(t *testing.T) {
+	db, org, r := setup(t)
+	add(t, db, org, nil, nil, "Prazo de entrega da argamassa", "O prazo de entrega da argamassa e de cinco dias uteis.")
+	for i := 0; i < 6; i++ { // partial matches that rank HIGH in the OR query: "prazo" over and over
+		add(t, db, org, nil, nil, "Prazo parcial "+string(rune('A'+i)), "prazo prazo prazo. O prazo e o prazo e o prazo de pagamento do prazo.")
+	}
+	msg := "Qual o prazo de entrega da argamassa?"
+
+	hits, err := r.Retrieve(context.Background(), knowledge.Query{OrgID: org, Text: msg, Limit: 4, Strategy: knowledge.Relaxed})
+	require.NoError(t, err)
+	require.NotEmpty(t, hits)
+	assert.Equal(t, "Prazo de entrega da argamassa", hits[0].Title, "the chunk that matches every term comes first")
+
+	// and it is what the prompt block and the usage log say, in the same order
+	blk, err := knowledge.Assemble(context.Background(), r, knowledge.Query{OrgID: org, Text: msg, Strategy: knowledge.Relaxed})
+	require.NoError(t, err)
+	require.NotEmpty(t, blk.Sources)
+	assert.Equal(t, "Prazo de entrega da argamassa", blk.Sources[0].Title)
+	assert.True(t, strings.Contains(blk.Text, "[1] Prazo de entrega da argamassa\n"))
 }

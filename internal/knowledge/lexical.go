@@ -52,19 +52,30 @@ func (l LexicalRetriever) Retrieve(ctx context.Context, q Query) ([]Hit, error) 
 	return l.run(ctx, text, q)
 }
 
-// retrieveRelaxed is the chatbot's strategy: the text is turned into terms (never syntax),
-// tried as AND; when fewer than MinHits come back, as OR, and the two are merged without
-// repeating a chunk, best score first. The scope filter is in the SQL of both passes.
+// retrieveRelaxed is the chatbot's strategy: the text is turned into terms (never syntax) and
+// searched by relaxedRetrieve. The scope filter is in the SQL of both passes.
 func (l LexicalRetriever) retrieveRelaxed(ctx context.Context, q Query) ([]Hit, error) {
 	terms := PlainTerms(q.Text)
+	return relaxedRetrieve(terms, q.Limit, func(tsText string) ([]Hit, error) {
+		return l.run(ctx, tsText, q)
+	})
+}
+
+// relaxedRetrieve runs the strict pass (every term, AND) and, only when it gives fewer than
+// MinHits, the OR pass. The strict results are the main evidence: they ALWAYS come first, in the
+// order of the strict query. The OR pass only COMPLETES them: chunks not already present, among
+// themselves in the order of the OR query. The scores of two different queries are never
+// compared with each other (ts_rank_cd of an AND query and of an OR query are not on one scale).
+// The limit is applied after the composition.
+func relaxedRetrieve(terms []string, limit int, run func(tsText string) ([]Hit, error)) ([]Hit, error) {
 	if len(terms) == 0 {
 		return []Hit{}, nil
 	}
-	hits, err := l.run(ctx, strings.Join(terms, " "), q)
+	hits, err := run(strings.Join(terms, " "))
 	if err != nil || len(hits) >= MinHits || len(terms) == 1 {
 		return hits, err
 	}
-	more, err := l.run(ctx, strings.Join(terms, " or "), q)
+	more, err := run(strings.Join(terms, " or "))
 	if err != nil {
 		return nil, err
 	}
@@ -72,18 +83,19 @@ func (l LexicalRetriever) retrieveRelaxed(ctx context.Context, q Query) ([]Hit, 
 	for _, h := range hits {
 		seen[h.ChunkID] = true
 	}
+	var extra []Hit
 	for _, h := range more {
 		if !seen[h.ChunkID] {
-			hits = append(hits, h)
+			extra = append(extra, h)
 		}
 	}
-	sort.SliceStable(hits, func(i, j int) bool { return hits[i].Score > hits[j].Score })
-	if q.Limit > 0 && len(hits) > q.Limit {
-		hits = hits[:q.Limit]
+	sort.SliceStable(extra, func(i, j int) bool { return extra[i].Score > extra[j].Score }) // same query: comparable
+	hits = append(hits, extra...)
+	if limit > 0 && len(hits) > limit {
+		hits = hits[:limit]
 	}
 	return hits, nil
 }
-
 // run executes one full-text query (tsText is a websearch_to_tsquery input) with the scope filter.
 func (l LexicalRetriever) run(ctx context.Context, text string, q Query) ([]Hit, error) {
 	var rows []lexicalRow
