@@ -110,7 +110,7 @@ type Tool interface {
 
 Na 9A existe só: interface + `testResolver` (double de teste) e um `emptyResolver` (zero ferramentas, usado quando nada está registrado). **Não há registry de produção** e `generateAIResponse` continua sem passar tools. A 9B encaixa **antes de `Execute`** (autorização, catálogo por organização, auditoria, confirmação) sem desmontar o loop, porque `Resolve` e `Execute` já são pontos separados, e o orquestrador recebe o resolver por injeção.
 
-Onde fica: `internal/ai` ganha só o **contrato de tipos + adaptadores**. O **loop** (`RunToolLoop`) fica em `internal/ai` também, sem dependência de handlers/GORM (recebe `Provider`, `ToolResolver`, limites e um *hook* de observação). A integração com `completeAI` é descrita em §7.
+Onde fica: `internal/ai` ganha só o **contrato de tipos + adaptadores**. O **loop** (`RunToolLoop`) fica em `internal/ai` também, sem dependência de handlers/GORM (recebe `Provider`, `ToolResolver`, limites; devolve `LoopResult` com cada resposta do provedor e seu uso, também em caso de erro, no lugar de um hook). A integração com `completeAI` é descrita em §7.
 
 ## 5. Adaptadores
 
