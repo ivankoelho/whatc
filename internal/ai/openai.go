@@ -114,6 +114,9 @@ func (p *openAICompat) Complete(ctx context.Context, req Request) (*Response, er
 		Finish: finishFromOpenAI(ch.FinishReason),
 	}
 	for _, c := range ch.Message.ToolCalls {
+		if len(req.Tools) == 0 {
+			break // no tools were offered: as before tool calling existed, only text counts
+		}
 		args, ok := argsObject(c.Function.Arguments)
 		if c.ID == "" || c.Function.Name == "" || !ok {
 			return nil, invalidToolCall(p.label, "the model returned a tool call that is not valid JSON")
