@@ -112,3 +112,56 @@ func argsObject(raw string) (json.RawMessage, bool) {
 func invalidToolCall(provider, msg string) *Error {
 	return &Error{Provider: provider, Kind: KindInvalidToolCall, Message: msg}
 }
+
+// validateConversation checks the tool-calling shape of a conversation: tool calls only on
+// assistant messages, results only on RoleTool messages, and every call answered by exactly one
+// result, in the message right after it. Plain text conversations always pass.
+func validateConversation(provider string, msgs []Message) *Error {
+	bad := func(msg string) *Error {
+		return &Error{Provider: provider, Kind: KindInvalidRequest, Message: msg}
+	}
+	for i, m := range msgs {
+		if len(m.ToolCalls) > 0 && m.Role != RoleAssistant {
+			return bad("tool calls on a non-assistant message")
+		}
+		if (len(m.ToolResults) > 0 || m.Role == RoleTool) && (m.Role != RoleTool || len(m.ToolResults) == 0) {
+			return bad("tool results must be on a RoleTool message")
+		}
+		if len(m.ToolCalls) == 0 {
+			continue
+		}
+		if i+1 >= len(msgs) || msgs[i+1].Role != RoleTool {
+			return bad("tool calls are not followed by their results")
+		}
+		want := map[string]bool{}
+		for _, c := range m.ToolCalls {
+			if c.ID == "" || c.Name == "" || want[c.ID] {
+				return bad("tool call without a unique id and name")
+			}
+			want[c.ID] = true
+		}
+		got := msgs[i+1].ToolResults
+		if len(got) != len(want) {
+			return bad("every tool call needs exactly one result")
+		}
+		for _, r := range got {
+			if !want[r.CallID] {
+				return bad("tool result for an unknown call")
+			}
+			delete(want, r.CallID)
+		}
+	}
+	if n := len(msgs); n > 0 && len(msgs[n-1].ToolCalls) > 0 {
+		return bad("tool calls are not followed by their results")
+	}
+	return nil
+}
+
+// checkToolRequest runs the neutral checks the adapters share before building a wire request.
+func checkToolRequest(provider string, req Request) *Error {
+	if err := validateTools(req.Tools); err != nil {
+		err.Provider = provider
+		return err
+	}
+	return validateConversation(provider, req.Messages)
+}

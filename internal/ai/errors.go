@@ -32,6 +32,7 @@ type Error struct {
 	Status     int
 	Message    string
 	RetryAfter time.Duration
+	Code       string // the provider's short error code, when it sends one
 }
 
 func (e *Error) Error() string {
