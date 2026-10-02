@@ -605,3 +605,33 @@ func TestChatbotKnowledge_MigrationBackfillsExistingRowsWithFalse(t *testing.T) 
 	require.NoError(t, db.Raw("SELECT count(*) FROM information_schema.columns WHERE table_name = 'chatbot_settings' AND column_name = 'knowledge_enabled'").Scan(&n).Error)
 	assert.EqualValues(t, 1, n)
 }
+
+// Post-merge ranking fix: the chunk that matches every term of the question comes first in the
+// prompt, and knowledge_sources lists the chunks in exactly the order they are in the prompt.
+func TestChatbotKnowledge_TheFullMatchIsFirstInThePromptAndInTheSources(t *testing.T) {
+	e := newRagEnv(t, true, true)
+	e.doc(t, nil, nil, "Prazo de entrega da argamassa", "O prazo de entrega da argamassa e de cinco dias uteis.")
+	for i := 0; i < 6; i++ { // partial matches that outrank it in an OR query
+		e.doc(t, nil, nil, "Prazo parcial "+string(rune('A'+i)), "prazo prazo prazo. O prazo e o prazo e o prazo de pagamento do prazo.")
+	}
+	_, s := e.contact(t, nil, nil)
+
+	sys := e.ask(t, s, "Qual o prazo de entrega da argamassa?")
+	assert.Contains(t, sys, "[1] Prazo de entrega da argamassa\n", "the chunk that matches every term is the first one")
+
+	rows := knowledgeUsageRows(t, e)
+	require.Len(t, rows, 1)
+	var inPrompt []string
+	for _, line := range strings.Split(sys, "\n") {
+		for _, n := range []string{"[1] ", "[2] ", "[3] ", "[4] "} {
+			if strings.HasPrefix(line, n) {
+				inPrompt = append(inPrompt, line[4:])
+			}
+		}
+	}
+	require.Equal(t, len(inPrompt), len(rows[0].KnowledgeSources))
+	for i, src := range rows[0].KnowledgeSources {
+		assert.Equal(t, inPrompt[i], src.(map[string]any)["title"], "source %d is chunk [%d] of the prompt", i, i+1)
+	}
+	assert.Equal(t, "Prazo de entrega da argamassa", rows[0].KnowledgeSources[0].(map[string]any)["title"])
+}
