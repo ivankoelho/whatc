@@ -3654,6 +3654,8 @@
     "notRegistered": "No X2 order registered for this opportunity.",
     "status": "X2 status",
     "valorConfirmado": "Confirmed value",
+    "valorFrete": "Freight",
+    "autoLinked": "Linked automatically (hover for the reason)",
     "editButton": "Edit order",
     "dialogDescription": "Enter the order number generated in X2 and the customer's CPF/CNPJ. Confirmation with X2 runs automatically the next day."
   }

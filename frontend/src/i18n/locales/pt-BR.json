@@ -3643,6 +3643,8 @@
     "notRegistered": "Nenhum pedido X2 registrado para esta oportunidade.",
     "status": "Status no X2",
     "valorConfirmado": "Valor confirmado",
+    "valorFrete": "Frete",
+    "autoLinked": "Vinculado automaticamente (passe o mouse para ver o motivo)",
     "editButton": "Editar pedido",
     "dialogDescription": "Informe o número do pedido gerado no X2 e o CPF/CNPJ do cliente. A confirmação com o X2 roda automaticamente no dia seguinte."
   }

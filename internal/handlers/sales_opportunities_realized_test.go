@@ -3,6 +3,7 @@ package handlers_test
 import (
 	"fmt"
 	"net/http"
+	"sync/atomic"
 	"testing"
 
 	"github.com/shridarpatil/whatomate/internal/handlers"
@@ -277,7 +278,7 @@ func (e salesEnv) reconcile(t *testing.T, opp *models.SalesOpportunity, status, 
 	t.Helper()
 	var link models.SalesOpportunityXProcessLink
 	if err := e.app.DB.Where("sales_opportunity_id = ?", opp.ID).First(&link).Error; err != nil {
-		link = models.SalesOpportunityXProcessLink{OrganizationID: e.org.ID, SalesOpportunityID: opp.ID, NumPedido: "666", Documento: "52998224725"}
+		link = models.SalesOpportunityXProcessLink{OrganizationID: e.org.ID, SalesOpportunityID: opp.ID, NumPedido: fmt.Sprintf("T%d", atomic.AddInt64(&testOpportunitySeq, 1)), Documento: "52998224725"}
 		require.NoError(t, e.app.DB.Create(&link).Error)
 	}
 	srv := fakeXProcessServer(t, http.StatusOK, pedidoWithTotal(status, total))

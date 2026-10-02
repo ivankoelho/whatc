@@ -27,8 +27,11 @@ func (a *App) UpsertSalesOpportunityXProcessLink(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
-	if opp.Status != models.SalesOpportunityStatusAberta {
-		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Only open opportunities can be edited", nil, "")
+	// Open ones, and converted ones too: an agent may convert before the X2 order
+	// exists (X2 is D-1) and register its number afterwards, so the reconciliation
+	// can still fill the realized value. Lost/cancelled ones have nothing to link.
+	if opp.Status != models.SalesOpportunityStatusAberta && opp.Status != models.SalesOpportunityStatusConvertida {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Only open or converted opportunities can be linked to an X2 order", nil, "")
 	}
 
 	var req upsertSalesOpportunityXProcessLinkRequest
@@ -45,6 +48,16 @@ func (a *App) UpsertSalesOpportunityXProcessLink(r *fastglue.Request) error {
 	}
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, err.Error(), nil, "")
+	}
+
+	// One X2 order never feeds two opportunities: the same number for the same
+	// documento already tracked by another opportunity's link is refused.
+	var taken int64
+	a.DB.Model(&models.SalesOpportunityXProcessLink{}).
+		Where("organization_id = ? AND num_pedido = ? AND documento = ? AND sales_opportunity_id <> ?", orgID, req.NumPedido, documento, opp.ID).
+		Count(&taken)
+	if taken > 0 {
+		return r.SendErrorEnvelope(fasthttp.StatusConflict, "This X2 order is already linked to another opportunity", nil, "")
 	}
 
 	// Find this opportunity's open (unresolved) link, if any — design §4/§6:
@@ -125,6 +138,11 @@ type salesOpportunityXProcessLinkResponse struct {
 	Documento      string     `json:"documento"`
 	StatusXProcess *string    `json:"status_xprocess,omitempty"`
 	ValorVendido   *float64   `json:"valor_vendido,omitempty"`
+	// ValorFrete is the order's freight, shown apart: valor_vendido never includes it.
+	ValorFrete  *float64 `json:"valor_frete,omitempty"`
+	LinkSource  string   `json:"link_source"`
+	MatchReason string   `json:"match_reason,omitempty"`
+	CodEmpresa  *string  `json:"cod_empresa,omitempty"`
 	LastCheckedAt  *time.Time `json:"last_checked_at,omitempty"`
 	ResolvedAt     *time.Time `json:"resolved_at,omitempty"`
 	// PendingReview mirrors the design's §5/§8 rule: 5+ consecutive 404
@@ -160,6 +178,7 @@ func (a *App) GetSalesOpportunityXProcessLink(r *fastglue.Request) error {
 	return r.SendEnvelope(salesOpportunityXProcessLinkResponse{
 		NumPedido: link.NumPedido, Documento: link.Documento,
 		StatusXProcess: link.StatusXProcess, ValorVendido: link.ValorVendido,
+		ValorFrete: link.ValorFrete, LinkSource: link.LinkSource, MatchReason: link.MatchReason, CodEmpresa: link.CodEmpresa,
 		LastCheckedAt: link.LastCheckedAt, ResolvedAt: link.ResolvedAt,
 		PendingReview: link.ResolvedAt == nil && link.ConsecutiveNotFound >= xprocessNotFoundReviewThreshold,
 	})

@@ -1,8 +1,11 @@
 package handlers
 
 import (
+	"time"
+
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/pkg/xprocess"
 	"gorm.io/gorm"
 )
 
@@ -94,4 +97,26 @@ func (a *App) GenerateAIResponseForTest(settings *models.ChatbotSettings, sessio
 // GetChatbotSettingsCachedForTest exposes getChatbotSettingsCached.
 func (a *App) GetChatbotSettingsCachedForTest(orgID uuid.UUID, account string) (*models.ChatbotSettings, error) {
 	return a.getChatbotSettingsCached(orgID, account)
+}
+
+// DiscoverXProcessOrdersForTest exposes the discovery pass of one organization.
+func (a *App) DiscoverXProcessOrdersForTest(client *xprocess.Client, apiKey string, orgID uuid.UUID) {
+	a.discoverXProcessOrders(client, apiKey, orgID)
+}
+
+// SaleOnOrAfterOpeningForTest exposes the date comparison used by discovery and candidates.
+func SaleOnOrAfterOpeningForTest(sale, opened time.Time) bool {
+	return saleOnOrAfterOpening(sale, opened)
+}
+
+// CreateDiscoveredXProcessLinkForTest links the order (codEmpresa, numPedido) to the
+// opportunity exactly the way discovery does (one transaction: link, pointer, event).
+func (a *App) CreateDiscoveredXProcessLinkForTest(orgID, oppID uuid.UUID, codEmpresa, numPedido, documento string) bool {
+	m := &xprocessMatch{
+		opp:    &models.SalesOpportunity{BaseModel: models.BaseModel{ID: oppID}},
+		order:  xprocess.PedidoResumo{CodEmpresa: codEmpresa, NumPedido: numPedido},
+		reason: "test",
+	}
+	_, ok := a.createDiscoveredXProcessLink(orgID, m, documento)
+	return ok
 }

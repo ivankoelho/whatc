@@ -199,3 +199,52 @@ func TestLoad_EnvMapsMultiWordKeys(t *testing.T) {
 	assert.Equal(t, "admin@example.com", cfg.DefaultAdmin.Email)
 	assert.Equal(t, "db.internal", cfg.Database.Host)
 }
+
+// --- xprocess.discovery_enabled: OFF unless explicitly true ---
+
+func TestLoad_XProcessDiscoveryIsOffWhenAbsent(t *testing.T) {
+	cfg, err := config.Load(writeConfig(t, ""))
+	require.NoError(t, err)
+	assert.False(t, cfg.XProcess.DiscoveryEnabled)
+
+	cfg, err = config.Load(writeConfig(t, "[xprocess]\n"))
+	require.NoError(t, err)
+	assert.False(t, cfg.XProcess.DiscoveryEnabled, "an empty [xprocess] section does not enable it")
+
+	cfg, err = config.Load("")
+	require.NoError(t, err)
+	assert.False(t, cfg.XProcess.DiscoveryEnabled, "no config file at all does not enable it")
+}
+
+func TestLoad_XProcessDiscoveryCanBeEnabledFromFileOrEnv(t *testing.T) {
+	cfg, err := config.Load(writeConfig(t, "[xprocess]\ndiscovery_enabled = true\n"))
+	require.NoError(t, err)
+	assert.True(t, cfg.XProcess.DiscoveryEnabled)
+
+	cfg, err = config.Load(writeConfig(t, "[xprocess]\ndiscovery_enabled = false\n"))
+	require.NoError(t, err)
+	assert.False(t, cfg.XProcess.DiscoveryEnabled)
+
+	t.Setenv("WHATOMATE_XPROCESS__DISCOVERY_ENABLED", "true")
+	cfg, err = config.Load(writeConfig(t, ""))
+	require.NoError(t, err)
+	assert.True(t, cfg.XProcess.DiscoveryEnabled, "the environment can enable it")
+
+	// The environment overrides the file in both directions.
+	cfg, err = config.Load(writeConfig(t, "[xprocess]\ndiscovery_enabled = false\n"))
+	require.NoError(t, err)
+	assert.True(t, cfg.XProcess.DiscoveryEnabled)
+}
+
+func TestLoad_XProcessDiscoveryNeverBecomesTrueByAccident(t *testing.T) {
+	for _, v := range []string{"", "false", "0", "False"} {
+		t.Setenv("WHATOMATE_XPROCESS__DISCOVERY_ENABLED", v)
+		cfg, err := config.Load(writeConfig(t, ""))
+		require.NoError(t, err, "value %q", v)
+		assert.False(t, cfg.XProcess.DiscoveryEnabled, "value %q", v)
+	}
+	// Garbage is a configuration error (the server refuses to start), never "on".
+	t.Setenv("WHATOMATE_XPROCESS__DISCOVERY_ENABLED", "banana")
+	_, err := config.Load(writeConfig(t, ""))
+	assert.Error(t, err)
+}

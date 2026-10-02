@@ -65,6 +65,9 @@ type PedidoItem struct {
 	CodVendedor string  `json:"cod_vendedor"`
 	Status      string  `json:"status"`
 	Total       string  `json:"total"` // BR decimal, comma separator — see ParseDecimalBR
+	// VlFrete is the freight allotted to this line (BR decimal). It is NOT part of
+	// Total (Total = Subtotal - Desconto); the pedido's freight is the sum over its lines.
+	VlFrete   string  `json:"vl_frete"`
 	DataVenda   *string `json:"data_venda"`
 }
 
@@ -230,6 +233,8 @@ type PedidoResumo struct {
 	Status      string
 	DataVenda   *string
 	ValorTotal  float64
+	// ValorFrete is the sum of the lines' freight, kept apart from ValorTotal.
+	ValorFrete float64
 	Itens       []PedidoItem
 }
 
@@ -256,6 +261,13 @@ func SummarizePedido(items []PedidoItem) (PedidoResumo, error) {
 			return PedidoResumo{}, fmt.Errorf("xprocess: failed to parse item total %q: %w", item.Total, err)
 		}
 		resumo.ValorTotal += v
+	}
+	// Freight is informational: an empty or malformed value counts as zero instead of
+	// failing the whole reconciliation.
+	for _, item := range items {
+		if f, err := ParseDecimalBR(item.VlFrete); err == nil {
+			resumo.ValorFrete += f
+		}
 	}
 	return resumo, nil
 }

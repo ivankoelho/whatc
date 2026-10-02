@@ -304,6 +304,22 @@ func getIndexes() []string {
 		// effect on the next start (existing rows only hold NULL or listed values).
 		`ALTER TABLE sales_opportunities DROP CONSTRAINT IF EXISTS chk_sales_opp_unit_of_measure`,
 		salesUnitCheckSQL(),
+		// An X2 order may be tracked by only ONE open link: the same (cod_empresa,
+		// num_pedido) can never feed two opportunities at once. cod_empresa is only
+		// known after the first answer from X2, so unchecked links are not covered
+		// (the handlers check num_pedido+documento for those). Created only when no
+		// duplicate open links exist yet, so an upgrade never fails on old data.
+		`DO $$ BEGIN
+			IF EXISTS (SELECT 1 FROM sales_opportunity_xprocess_links
+				WHERE cod_empresa IS NOT NULL AND resolved_at IS NULL AND deleted_at IS NULL
+				GROUP BY organization_id, cod_empresa, num_pedido HAVING count(*) > 1) THEN
+				RAISE NOTICE 'idx_sales_opp_xlink_open_order not created: duplicate open links exist';
+			ELSE
+				CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_opp_xlink_open_order
+					ON sales_opportunity_xprocess_links (organization_id, cod_empresa, num_pedido)
+					WHERE cod_empresa IS NOT NULL AND resolved_at IS NULL AND deleted_at IS NULL;
+			END IF;
+		END $$`,
 		// Composite index matching the ListContacts filter + ordering exactly
 		`CREATE INDEX IF NOT EXISTS idx_contacts_org_status_lastmsg ON contacts(organization_id, contact_status, last_message_at DESC NULLS LAST)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_phone_status ON chatbot_sessions(organization_id, phone_number, status)`,

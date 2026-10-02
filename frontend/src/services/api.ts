@@ -1533,6 +1533,8 @@ export interface SalesOpportunity {
   interest?: string
   estimated_value?: number
   estimated_quantity?: number
+  xprocess_num_pedido?: string
+  xprocess_documento?: string
   unit_of_measure?: 'UN' | 'M' | 'M2' | 'KG' | 'PCT' | 'CX'
   // What actually happened. realized_value is overwritten by X2 when the order is reconciled.
   realized_value?: number
@@ -1557,7 +1559,7 @@ export interface SalesOpportunity {
 export interface SalesOpportunityEvent {
   id: string
   sales_opportunity_id: string
-  type: 'opened' | 'stage_changed' | 'direcionamento_changed' | 'converted' | 'lost' | 'cancelled' | 'retriggered'
+  type: 'opened' | 'stage_changed' | 'direcionamento_changed' | 'converted' | 'lost' | 'cancelled' | 'retriggered' | 'xprocess_linked'
   from_stage?: SalesOpportunityStage
   to_stage?: SalesOpportunityStage
   source: 'manual' | 'xprocess' | 'system'
@@ -1596,6 +1598,11 @@ export interface SalesOpportunityXProcessLink {
   documento: string
   status_xprocess?: string
   valor_vendido?: number
+  // Freight of the order, apart from valor_vendido (which never includes it).
+  valor_frete?: number
+  cod_empresa?: string
+  link_source?: 'agent' | 'auto'
+  match_reason?: string
   last_checked_at?: string
   resolved_at?: string
   pending_review: boolean
