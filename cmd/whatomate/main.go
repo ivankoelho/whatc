@@ -860,6 +860,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/knowledge/documents/{id}/reindex", app.ReindexKnowledgeDocument)
 	g.POST("/api/knowledge/reindex", app.ReindexKnowledge)
 	g.GET("/api/knowledge/status", app.KnowledgeIndexStatus)
+	g.GET("/api/knowledge/scopes", app.KnowledgeScopes)
 	g.PUT("/api/knowledge/documents/{id}", app.UpdateKnowledgeDocument)
 	g.DELETE("/api/knowledge/documents/{id}", app.DeleteKnowledgeDocument)
 
