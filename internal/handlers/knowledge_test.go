@@ -168,7 +168,7 @@ func TestKnowledge_CrudAndSearchWithCitation(t *testing.T) {
 
 	// update replaces the content; the old text is no longer found
 	status, _ = e.do(t, e.app.UpdateKnowledgeDocument, kreq{user: e.admin.ID, id: id,
-		body: map[string]any{"title": "Como emitir pedido", "body": "O vendedor emite o pedido no sistema."}})
+		body: map[string]any{"title": "Como emitir pedido", "body": "O vendedor emite o pedido no sistema.", "unit_id": nil, "department_id": nil}})
 	require.Equal(t, fasthttp.StatusOK, status)
 	_, titles, _ = e.search(t, e.admin.ID, "orcamento", nil)
 	assert.Empty(t, titles)
@@ -177,7 +177,7 @@ func TestKnowledge_CrudAndSearchWithCitation(t *testing.T) {
 
 	// archive: out of search; admin still lists it; delete: gone
 	status, _ = e.do(t, e.app.UpdateKnowledgeDocument, kreq{user: e.admin.ID, id: id,
-		body: map[string]any{"title": "Como emitir pedido", "body": "O vendedor emite o pedido no sistema.", "status": "archived"}})
+		body: map[string]any{"title": "Como emitir pedido", "body": "O vendedor emite o pedido no sistema.", "unit_id": nil, "department_id": nil, "status": "archived"}})
 	require.Equal(t, fasthttp.StatusOK, status)
 	_, titles, _ = e.search(t, e.admin.ID, "pedido", nil)
 	assert.Empty(t, titles)
@@ -293,7 +293,7 @@ func TestKnowledge_DocumentReadsRespectTheSameReach(t *testing.T) {
 
 	// archived documents are invisible to readers, visible to administrators
 	s, _ = e.do(t, e.app.UpdateKnowledgeDocument, kreq{user: e.admin.ID, id: own,
-		body: map[string]any{"title": "Da unidade 1", "body": "texto da unidade um", "unit_id": e.u1.ID.String(), "status": "archived"}})
+		body: map[string]any{"title": "Da unidade 1", "body": "texto da unidade um", "unit_id": e.u1.ID.String(), "department_id": nil, "status": "archived"}})
 	require.Equal(t, fasthttp.StatusOK, s)
 	s, _ = e.do(t, e.app.GetKnowledgeDocument, kreq{user: e.reader.ID, id: own})
 	assert.Equal(t, fasthttp.StatusNotFound, s)
@@ -319,7 +319,7 @@ func TestKnowledge_ChangesAreAudited(t *testing.T) {
 
 	// moving to global (clearing the unit) must be recorded as a change
 	s, _ := e.do(t, e.app.UpdateKnowledgeDocument, kreq{user: e.admin.ID, id: id,
-		body: map[string]any{"title": "Doc auditado", "body": "texto novo"}})
+		body: map[string]any{"title": "Doc auditado", "body": "texto novo", "unit_id": nil, "department_id": nil}})
 	require.Equal(t, fasthttp.StatusOK, s)
 	upd := entries(models.AuditActionUpdated)
 	changes, _ := json.Marshal(upd[0].Changes)
@@ -331,4 +331,43 @@ func TestKnowledge_ChangesAreAudited(t *testing.T) {
 	s, _ = e.do(t, e.app.DeleteKnowledgeDocument, kreq{user: e.admin.ID, id: id})
 	require.Equal(t, fasthttp.StatusOK, s)
 	entries(models.AuditActionDeleted)
+}
+
+// PUT is the complete representation: a body that does not state the scope is
+// rejected instead of being read as "make it global".
+func TestKnowledge_PutRequiresTheScopeToBeStated(t *testing.T) {
+	e := newKnowEnv(t)
+	id := e.create(t, "Da unidade 1", "texto restrito da unidade um", &e.u1.ID, nil)
+	put := func(body map[string]any) int {
+		s, _ := e.do(t, e.app.UpdateKnowledgeDocument, kreq{user: e.admin.ID, id: id, body: body})
+		return s
+	}
+	base := func() map[string]any { return map[string]any{"title": "Da unidade 1", "body": "texto restrito da unidade um"} }
+
+	assert.Equal(t, fasthttp.StatusBadRequest, put(map[string]any{}))
+	assert.Equal(t, fasthttp.StatusBadRequest, put(base()), "no scope keys")
+	b := base()
+	b["unit_id"] = e.u1.ID.String()
+	assert.Equal(t, fasthttp.StatusBadRequest, put(b), "department_id missing")
+	b = base()
+	b["department_id"] = nil
+	assert.Equal(t, fasthttp.StatusBadRequest, put(b), "unit_id missing")
+
+	var doc models.KnowledgeDocument
+	require.NoError(t, e.app.DB.First(&doc, "id = ?", id).Error)
+	require.NotNil(t, doc.UnitID, "a rejected PUT changes nothing")
+	assert.Equal(t, models.KnowledgeVisibilityUnit, doc.Visibility)
+
+	// explicit null on both = global, and only then
+	b = base()
+	b["unit_id"], b["department_id"] = nil, nil
+	assert.Equal(t, fasthttp.StatusOK, put(b))
+	var global models.KnowledgeDocument
+	require.NoError(t, e.app.DB.First(&global, "id = ?", id).Error)
+	assert.Nil(t, global.UnitID)
+	assert.Equal(t, models.KnowledgeVisibilityOrganization, global.Visibility)
+
+	// a malformed id is a 400, not a silent null
+	b["unit_id"] = "not-a-uuid"
+	assert.Equal(t, fasthttp.StatusBadRequest, put(b))
 }

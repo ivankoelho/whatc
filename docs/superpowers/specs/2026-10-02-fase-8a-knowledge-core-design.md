@@ -164,6 +164,25 @@ consulta, com a mesma função; `title`, `heading` e `content` ficam originais p
 - Denormalização de escopo nos chunks exige atualização transacional; coberta por teste.
 - Nada nesta fase altera `AIContext`, chatbot, discovery/X2 ou configuração.
 
+## Semântica do PUT e alcance global (como ficou implementado)
+
+- **PUT = representação completa** de título, corpo e escopo; **não existe PATCH na 8A**. `unit_id` e `department_id`
+  são **obrigatórios** no PUT, cada um um UUID ou `null` explícito (= sem restrição). Omitir qualquer um é 400: um corpo
+  parcial nunca vira "global" por acidente. Um UUID malformado é 400, nunca `null`. No POST, chave ausente = `null`.
+  A tela da 8B deve enviar sempre as duas chaves.
+- **Alcance global** é decidido num único helper (`hasGlobalKnowledgeReach`): `knowledge:write` ou
+  `conversations:view_all`. Consequência do modelo atual (só o admin tem `knowledge:*`): conceder `knowledge:write` a um
+  papel também lhe dá alcance sobre toda a base da organização. Se a 8B precisar de escrita limitada à unidade/
+  departamento do autor, a regra é refinada nesse helper, sem espalhar `write || view_all` pelo código.
+
+## Verificação com o app real (smoke)
+
+Banco descartável e Redis isolado, app iniciado com `-migrate`: 22 chamadas HTTP (login, CRUD, busca, 403/401, PUT sem
+escopo, arquivar, excluir) e a CLI `knowledge import-manuals` (45 documentos / 73 chunks, segunda execução 0 gravações).
+O smoke achou um defeito que os testes não pegavam: o DDL do FTS (coluna `search_vector`, GIN, índice de escopo) só
+rodava no caminho de testes (`CreateIndexes`), não no `-migrate` do servidor (`getIndexes`). Corrigido: as duas rotas
+leem a mesma lista, com teste de regressão.
+
 ## Decisões da revisão (fechadas)
 
 1. Papéis: só `admin` recebe `knowledge:read|write` no backfill.

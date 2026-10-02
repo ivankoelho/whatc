@@ -280,6 +280,11 @@ func repeatChar(char string, n int) string {
 
 // getIndexes returns all index creation SQL statements
 func getIndexes() []string {
+	// Both the server migration and CreateIndexes (used by tests) read THIS list.
+	return append(coreIndexes(), knowledge.SchemaSQL...)
+}
+
+func coreIndexes() []string {
 	return []string{
 		// Expand phone_number columns to support group JIDs (e.g., 120363422675615917@g.us)
 		`ALTER TABLE contacts ALTER COLUMN phone_number TYPE varchar(50)`,
@@ -377,7 +382,7 @@ func getIndexes() []string {
 
 // CreateIndexes creates additional indexes not handled by GORM tags
 func CreateIndexes(db *gorm.DB) error {
-	for _, idx := range append(getIndexes(), knowledge.SchemaSQL...) {
+	for _, idx := range getIndexes() {
 		if err := db.Exec(idx).Error; err != nil {
 			return fmt.Errorf("failed to create index: %w", err)
 		}

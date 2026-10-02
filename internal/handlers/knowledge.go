@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"context"
 	"strings"
 
@@ -22,28 +23,64 @@ var apiKnowledgeSources = map[string]bool{
 
 const maxKnowledgeBody = 200_000 // characters
 
-// KnowledgeDocumentRequest is the create/update body. PUT replaces the scope:
-// leaving unit_id/department_id out makes the document global to the organization.
+// ScopeID is a unit/department id that remembers whether its key was present in
+// the JSON ("unit_id": null is explicit; an absent key is not), so PUT can demand
+// the scope be stated instead of turning a partial body into "global".
+type ScopeID struct {
+	Set bool
+	ID  *uuid.UUID
+}
+
+func (s *ScopeID) UnmarshalJSON(b []byte) error {
+	s.Set = true
+	if string(b) == "null" {
+		s.ID = nil
+		return nil
+	}
+	var id uuid.UUID
+	if err := json.Unmarshal(b, &id); err != nil {
+		return err
+	}
+	s.ID = &id
+	return nil
+}
+
+// KnowledgeDocumentRequest is the create/update body.
+//
+// PUT is the COMPLETE representation of title, body and scope (there is no PATCH
+// in 8A): unit_id and department_id MUST be present, each a UUID or an explicit
+// null (= no restriction). Omitting either is a 400, never an implicit "global".
+// POST treats an omitted scope key as null.
 type KnowledgeDocumentRequest struct {
-	Title        string     `json:"title"`
-	Body         string     `json:"body"`
-	SourceType   string     `json:"source_type"`
-	UnitID       *uuid.UUID `json:"unit_id"`
-	DepartmentID *uuid.UUID `json:"department_id"`
-	Status       string     `json:"status"`
+	Title        string  `json:"title"`
+	Body         string  `json:"body"`
+	SourceType   string  `json:"source_type"`
+	UnitID       ScopeID `json:"unit_id"`
+	DepartmentID ScopeID `json:"department_id"`
+	Status       string  `json:"status"`
+}
+
+// hasGlobalKnowledgeReach is THE decision of who may choose the unit/department
+// context of a search or list (and see every document as an administrator).
+// Today: knowledge:write (admin-only in the backfill) or conversations:view_all.
+// Consequence worth knowing: giving knowledge:write to a role also gives that role
+// organization-wide reach over the knowledge base. If 8B needs write access limited
+// to the writer's own unit/department, refine THIS function; no other code repeats the rule.
+func (a *App) hasGlobalKnowledgeReach(userID, orgID uuid.UUID) bool {
+	return a.HasPermission(userID, models.ResourceKnowledge, models.ActionWrite, orgID) ||
+		a.HasPermission(userID, models.ResourceConversations, models.ActionViewAll, orgID)
 }
 
 // knowledgeReach resolves WHO is asking: the unit/department context used to
 // filter content, and whether the caller may choose it freely.
-//   - Global reach (knowledge:write or conversations:view_all) may pass
-//     unit_id/department_id; no parameter means no unit/department (global content only).
+//   - Global reach (hasGlobalKnowledgeReach) may pass unit_id/department_id; no
+//     parameter means no unit/department (global content only).
 //   - Everyone else uses their own unit/department; asking for another is a 403,
 //     never silently ignored.
 //
 // Returns ok=false after sending the error response.
 func (a *App) knowledgeReach(r *fastglue.Request, orgID, userID uuid.UUID) (unit, dept *uuid.UUID, global, ok bool) {
-	global = a.HasPermission(userID, models.ResourceKnowledge, models.ActionWrite, orgID) ||
-		a.HasPermission(userID, models.ResourceConversations, models.ActionViewAll, orgID)
+	global = a.hasGlobalKnowledgeReach(userID, orgID)
 
 	reqUnit, err1 := optionalUUIDQuery(r, "unit_id")
 	reqDept, err2 := optionalUUIDQuery(r, "department_id")
@@ -206,9 +243,11 @@ func (a *App) GetKnowledgeDocument(r *fastglue.Request) error {
 }
 
 // validateKnowledgeRequest checks the body and returns a bad-request message, or "".
-func (a *App) validateKnowledgeRequest(orgID uuid.UUID, req *KnowledgeDocumentRequest, requireSource bool) string {
+func (a *App) validateKnowledgeRequest(orgID uuid.UUID, req *KnowledgeDocumentRequest, isCreate bool) string {
 	req.Title = strings.TrimSpace(req.Title)
 	switch {
+	case !isCreate && (!req.UnitID.Set || !req.DepartmentID.Set):
+		return "unit_id and department_id must be present on update (a UUID or null); PUT replaces the whole scope"
 	case req.Title == "":
 		return "title is required"
 	case len([]rune(req.Title)) > 500:
@@ -217,11 +256,11 @@ func (a *App) validateKnowledgeRequest(orgID uuid.UUID, req *KnowledgeDocumentRe
 		return "body is required"
 	case len([]rune(req.Body)) > maxKnowledgeBody:
 		return "body is too long"
-	case (requireSource || req.SourceType != "") && !apiKnowledgeSources[req.SourceType]:
+	case (isCreate || req.SourceType != "") && !apiKnowledgeSources[req.SourceType]:
 		return "invalid source_type"
 	case req.Status != "" && req.Status != models.KnowledgeStatusActive && req.Status != models.KnowledgeStatusArchived:
 		return "invalid status"
-	case !a.scopeTargetsExist(orgID, req.UnitID, req.DepartmentID):
+	case !a.scopeTargetsExist(orgID, req.UnitID.ID, req.DepartmentID.ID):
 		return "unknown unit or department"
 	}
 	return ""
@@ -266,7 +305,7 @@ func (a *App) CreateKnowledgeDocument(r *fastglue.Request) error {
 	}
 
 	doc := models.KnowledgeDocument{
-		OrganizationID: orgID, UnitID: req.UnitID, DepartmentID: req.DepartmentID,
+		OrganizationID: orgID, UnitID: req.UnitID.ID, DepartmentID: req.DepartmentID.ID,
 		SourceType: req.SourceType, Title: req.Title, Body: req.Body,
 		Status: req.Status, CreatedByID: &userID, UpdatedByID: &userID,
 	}
@@ -305,7 +344,7 @@ func (a *App) UpdateKnowledgeDocument(r *fastglue.Request) error {
 
 	before := auditViewOf(doc)
 	doc.Title, doc.Body = req.Title, req.Body
-	doc.UnitID, doc.DepartmentID = req.UnitID, req.DepartmentID
+	doc.UnitID, doc.DepartmentID = req.UnitID.ID, req.DepartmentID.ID
 	doc.UpdatedByID = &userID
 	if req.SourceType != "" {
 		doc.SourceType = req.SourceType
