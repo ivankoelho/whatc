@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"github.com/google/uuid"
 	"time"
 
 	"github.com/shridarpatil/whatomate/internal/contactutil"
@@ -143,6 +144,9 @@ type salesOpportunityXProcessLinkResponse struct {
 	LinkSource  string   `json:"link_source"`
 	MatchReason string   `json:"match_reason,omitempty"`
 	CodEmpresa  *string  `json:"cod_empresa,omitempty"`
+	// The local unit linked to that X2 store, when an administrator mapped it (units screen).
+	UnitID   *uuid.UUID `json:"unit_id,omitempty"`
+	UnitName string     `json:"unit_name,omitempty"`
 	LastCheckedAt  *time.Time `json:"last_checked_at,omitempty"`
 	ResolvedAt     *time.Time `json:"resolved_at,omitempty"`
 	// PendingReview mirrors the design's §5/§8 rule: 5+ consecutive 404
@@ -175,10 +179,17 @@ func (a *App) GetSalesOpportunityXProcessLink(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "No X2 link registered for this opportunity", nil, "")
 	}
 
+	var unitID *uuid.UUID
+	unitName := ""
+	if link.CodEmpresa != nil {
+		if u, ok := a.unitsByXProcessCode(orgID, *link.CodEmpresa)[*link.CodEmpresa]; ok {
+			unitID, unitName = &u.ID, u.Name
+		}
+	}
 	return r.SendEnvelope(salesOpportunityXProcessLinkResponse{
 		NumPedido: link.NumPedido, Documento: link.Documento,
 		StatusXProcess: link.StatusXProcess, ValorVendido: link.ValorVendido,
-		ValorFrete: link.ValorFrete, LinkSource: link.LinkSource, MatchReason: link.MatchReason, CodEmpresa: link.CodEmpresa,
+		ValorFrete: link.ValorFrete, LinkSource: link.LinkSource, MatchReason: link.MatchReason, CodEmpresa: link.CodEmpresa, UnitID: unitID, UnitName: unitName,
 		LastCheckedAt: link.LastCheckedAt, ResolvedAt: link.ResolvedAt,
 		PendingReview: link.ResolvedAt == nil && link.ConsecutiveNotFound >= xprocessNotFoundReviewThreshold,
 	})

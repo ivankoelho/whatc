@@ -12,6 +12,7 @@ import (
 type xprocessCandidateResponse struct {
 	NumPedido    string     `json:"num_pedido"`
 	CodEmpresa   string     `json:"cod_empresa"`
+	UnitName     string     `json:"unit_name,omitempty"` // the local unit linked to that X2 store, if any
 	Status       string     `json:"status"`
 	ValorVendido float64    `json:"valor_vendido"`
 	DataVenda    *time.Time `json:"data_venda,omitempty"`
@@ -84,6 +85,11 @@ func (a *App) ListSalesOpportunityXProcessCandidates(r *fastglue.Request) error 
 		tracked[n] = true
 	}
 
+	codes := make([]string, 0, len(resumos))
+	for _, resumo := range resumos {
+		codes = append(codes, resumo.CodEmpresa)
+	}
+	unitsByCode := a.unitsByXProcessCode(orgID, codes...)
 	candidates := make([]xprocessCandidateResponse, 0)
 	for _, resumo := range resumos {
 		if tracked[resumo.NumPedido] {
@@ -99,6 +105,7 @@ func (a *App) ListSalesOpportunityXProcessCandidates(r *fastglue.Request) error 
 		candidates = append(candidates, xprocessCandidateResponse{
 			NumPedido: resumo.NumPedido, CodEmpresa: resumo.CodEmpresa,
 			Status: resumo.Status, ValorVendido: resumo.ValorTotal, DataVenda: &dataVenda,
+			UnitName: unitsByCode[resumo.CodEmpresa].Name,
 		})
 	}
 
