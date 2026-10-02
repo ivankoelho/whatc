@@ -19,6 +19,7 @@ import type { ButtonConfig } from '@/types/flow-preview'
 import { validateWhatsAppButtons } from '@/lib/whatsappButtons'
 import { toast } from 'vue-sonner'
 import { getErrorMessage } from '@/lib/api-utils'
+import { knowledgeRagSwitch } from '@/lib/knowledge'
 import { Bot, Loader2, Brain, X, Clock, AlertTriangle, UserPlus, MessageSquare, Users } from 'lucide-vue-next'
 import { chatbotService } from '@/services/api'
 import { useUsersStore } from '@/stores/users'
@@ -106,10 +107,14 @@ const aiSettings = ref({
   ai_api_key_configured: false,
   ai_model: '',
   ai_max_tokens: 500,
-  ai_system_prompt: ''
+  ai_system_prompt: '',
+  // Knowledge in the AI replies: the organization's own switch, and whether the SERVER allows it (read-only)
+  knowledge_enabled: false,
+  knowledge_rag_available: false
 })
 
 const isAIEnabled = ref(false)
+const knowledgeSwitch = computed(() => knowledgeRagSwitch(aiSettings.value.knowledge_rag_available))
 
 // Static suggestions only for the providers that had them before; Groq has none
 // on purpose: its models always come from the provider's own list.
@@ -270,7 +275,9 @@ onMounted(async () => {
         ai_api_key_configured: chatbotData.settings.ai_api_key_configured === true,
         ai_model: chatbotData.settings.ai_model || '',
         ai_max_tokens: chatbotData.settings.ai_max_tokens || 500,
-        ai_system_prompt: chatbotData.settings.ai_system_prompt || ''
+        ai_system_prompt: chatbotData.settings.ai_system_prompt || '',
+        knowledge_enabled: chatbotData.settings.knowledge_enabled === true,
+        knowledge_rag_available: chatbotData.settings.knowledge_rag_available === true
       }
 
       const slaEnabledValue = chatbotData.settings.sla_enabled === true
@@ -378,7 +385,8 @@ async function saveAISettings() {
       ai_provider: aiSettings.value.ai_provider,
       ai_model: aiSettings.value.ai_model,
       ai_max_tokens: aiSettings.value.ai_max_tokens,
-      ai_system_prompt: aiSettings.value.ai_system_prompt
+      ai_system_prompt: aiSettings.value.ai_system_prompt,
+      knowledge_enabled: aiSettings.value.knowledge_enabled
     }
     if (aiSettings.value.ai_api_key) {
       payload.ai_api_key = aiSettings.value.ai_api_key
@@ -1025,6 +1033,19 @@ function removeEscalationUser(userId: string) {
                       v-model="aiSettings.ai_system_prompt"
                       :placeholder="$t('chatbotSettings.systemPromptPlaceholder') + '...'"
                       :rows="3"
+                    />
+                  </div>
+
+                  <div class="flex items-center justify-between gap-4 py-2" data-testid="chatbot-knowledge-switch">
+                    <div>
+                      <p class="font-medium">{{ $t('chatbotSettings.knowledgeTitle') }}</p>
+                      <p class="text-sm text-muted-foreground">{{ $t('chatbotSettings.knowledgeDesc') }}</p>
+                      <p class="text-xs text-muted-foreground mt-1">{{ $t(knowledgeSwitch.hint === 'ready' ? 'chatbotSettings.knowledgeReady' : 'chatbotSettings.knowledgeServerOff') }}</p>
+                    </div>
+                    <Switch
+                      :checked="aiSettings.knowledge_enabled"
+                      :disabled="knowledgeSwitch.disabled"
+                      @update:checked="aiSettings.knowledge_enabled = $event"
                     />
                   </div>
                 </div>

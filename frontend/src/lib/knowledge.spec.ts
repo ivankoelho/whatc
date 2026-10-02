@@ -9,6 +9,7 @@ import {
   emptyKnowledgeForm,
   formFromDocument,
   isStaleChunk,
+  knowledgeRagSwitch,
   knowledgeCapabilities,
   pickerOptions,
   readKnowledgeFile,
@@ -192,5 +193,13 @@ describe('documents whose null scope the server omits from the JSON', () => {
 
   it('describes the scope of such a document as the whole organization', () => {
     expect(scopeKind(raw)).toBe('organization')
+  })
+})
+
+describe('chatbot Knowledge switch', () => {
+  it('is usable only when the server allows Knowledge', () => {
+    expect(knowledgeRagSwitch(true)).toEqual({ disabled: false, hint: 'ready' })
+    expect(knowledgeRagSwitch(false)).toEqual({ disabled: true, hint: 'serverOff' })
+    expect(knowledgeRagSwitch(undefined)).toEqual({ disabled: true, hint: 'serverOff' })
   })
 })

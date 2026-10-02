@@ -180,3 +180,15 @@ export function sourceTypeForFile(name: string): EditableSourceType {
 export function isEditableSource(t: KnowledgeSourceType): t is EditableSourceType {
   return (EDITABLE_SOURCE_TYPES as readonly string[]).includes(t)
 }
+
+export interface KnowledgeRagSwitch {
+  disabled: boolean
+  hint: 'serverOff' | 'ready'
+}
+
+// The organization's switch for Knowledge in the chatbot's AI replies. It is only usable when the SERVER
+// allows it (knowledge_rag_available, read-only); otherwise it is shown disabled with an explanation, so
+// nobody sees a working-looking switch while the infrastructure is off.
+export function knowledgeRagSwitch(available: boolean | undefined): KnowledgeRagSwitch {
+  return available === true ? { disabled: false, hint: 'ready' } : { disabled: true, hint: 'serverOff' }
+}
