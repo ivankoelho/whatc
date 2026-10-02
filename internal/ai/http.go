@@ -67,6 +67,7 @@ func doJSON(ctx context.Context, client *http.Client, provider, apiKey, method, 
 			Kind:       kindForStatus(resp.StatusCode),
 			Status:     resp.StatusCode,
 			Message:    redact(errorMessage(raw), apiKey),
+			Code:       errorCode(raw),
 			RetryAfter: retryAfter(resp.Header.Get("Retry-After")),
 		}
 	}
@@ -89,6 +90,27 @@ func errorMessage(raw []byte) string {
 		s = s[:300]
 	}
 	return s
+}
+
+// errorCode is the provider's short error code ({"error":{"code":...}}); a body carrying
+// "failed_generation" (Groq: the model produced an unusable tool call) reports as tool_use_failed.
+func errorCode(raw []byte) string {
+	var e struct {
+		Error struct {
+			Code             any             `json:"code"`
+			FailedGeneration json.RawMessage `json:"failed_generation"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(raw, &e) != nil {
+		return ""
+	}
+	if len(e.Error.FailedGeneration) > 0 {
+		return "tool_use_failed"
+	}
+	if s, ok := e.Error.Code.(string); ok && len(s) <= 64 {
+		return s
+	}
+	return ""
 }
 
 func retryAfter(h string) time.Duration {

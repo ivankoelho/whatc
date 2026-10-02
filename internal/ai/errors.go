@@ -20,6 +20,8 @@ const (
 	KindNetwork        ErrorKind = "network"
 	KindEmptyResponse  ErrorKind = "empty_response" // 200 with nothing usable
 	KindBadResponse    ErrorKind = "bad_response"   // 200 that could not be parsed
+
+	KindInvalidToolCall ErrorKind = "invalid_tool_call" // the model produced a tool call that cannot be used
 )
 
 // Error is the only error type adapters return for provider failures. Message
@@ -30,6 +32,7 @@ type Error struct {
 	Status     int
 	Message    string
 	RetryAfter time.Duration
+	Code       string // the provider's short error code, when it sends one
 }
 
 func (e *Error) Error() string {
