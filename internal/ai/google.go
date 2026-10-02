@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"sort"
@@ -36,16 +37,14 @@ func (p *googleProvider) headers() map[string]string {
 }
 
 func (p *googleProvider) Complete(ctx context.Context, req Request) (*Response, error) {
+	if derr := checkToolRequest("Google AI", req); derr != nil {
+		return nil, derr
+	}
 	contents := make([]map[string]any, 0, len(req.Messages))
+	var lastCalls []ToolCall // the calls of the assistant message just before, for ordering results
 	for _, m := range req.Messages {
-		role := "user"
-		if m.Role == RoleAssistant {
-			role = "model"
-		}
-		contents = append(contents, map[string]any{
-			"role":  role,
-			"parts": []map[string]string{{"text": m.Content}},
-		})
+		contents = append(contents, googleContent(m, lastCalls))
+		lastCalls = m.ToolCalls
 	}
 	generation := map[string]any{"maxOutputTokens": req.MaxTokens}
 	if req.Temperature > 0 {
@@ -54,6 +53,19 @@ func (p *googleProvider) Complete(ctx context.Context, req Request) (*Response, 
 	payload := map[string]any{"contents": contents, "generationConfig": generation}
 	if req.System != "" {
 		payload["systemInstruction"] = map[string]any{"parts": []map[string]string{{"text": req.System}}}
+	}
+	if len(req.Tools) > 0 {
+		decls := make([]map[string]any, 0, len(req.Tools))
+		for _, t := range req.Tools {
+			if err := googleSchemaOK(t.Parameters); err != nil {
+				return nil, &Error{Provider: "Google AI", Kind: KindInvalidRequest, Message: "tool " + t.Name + ": " + err.Error()}
+			}
+			decls = append(decls, map[string]any{"name": t.Name, "description": t.Description, "parameters": t.Parameters})
+		}
+		payload["tools"] = []map[string]any{{"functionDeclarations": decls}}
+		if req.ToolChoice == ToolChoiceNone {
+			payload["toolConfig"] = map[string]any{"functionCallingConfig": map[string]any{"mode": "NONE"}}
+		} // AUTO is the provider default
 	}
 
 	endpoint := p.baseURL + "/models/" + url.PathEscape(req.Model) + ":generateContent"
@@ -65,9 +77,17 @@ func (p *googleProvider) Complete(ctx context.Context, req Request) (*Response, 
 		Candidates []struct {
 			Content struct {
 				Parts []struct {
-					Text string `json:"text"`
+					Text         string `json:"text"`
+					Thought      bool   `json:"thought"`
+					FunctionCall *struct {
+						ID   string          `json:"id"`
+						Name string          `json:"name"`
+						Args json.RawMessage `json:"args"`
+					} `json:"functionCall"`
+					ThoughtSignature string `json:"thoughtSignature"`
 				} `json:"parts"`
 			} `json:"content"`
+			FinishReason string `json:"finishReason"`
 		} `json:"candidates"`
 		UsageMetadata struct {
 			PromptTokenCount     int `json:"promptTokenCount"`
@@ -79,17 +99,192 @@ func (p *googleProvider) Complete(ctx context.Context, req Request) (*Response, 
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil, badResponse("Google AI")
 	}
-	if len(out.Candidates) == 0 || len(out.Candidates[0].Content.Parts) == 0 {
+	usage := Usage{
+		InputTokens: out.UsageMetadata.PromptTokenCount, OutputTokens: out.UsageMetadata.CandidatesTokenCount,
+		TotalTokens: out.UsageMetadata.TotalTokenCount,
+	}
+	if len(req.Tools) == 0 { // as before tool calling existed
+		if len(out.Candidates) == 0 || len(out.Candidates[0].Content.Parts) == 0 {
+			return nil, emptyResponse("Google AI")
+		}
+		return &Response{Text: strings.TrimSpace(out.Candidates[0].Content.Parts[0].Text), Model: out.ModelVersion, Usage: usage}, nil
+	}
+
+	if len(out.Candidates) == 0 {
 		return nil, emptyResponse("Google AI")
 	}
-	return &Response{
-		Text:  strings.TrimSpace(out.Candidates[0].Content.Parts[0].Text),
-		Model: out.ModelVersion,
-		Usage: Usage{
-			InputTokens: out.UsageMetadata.PromptTokenCount, OutputTokens: out.UsageMetadata.CandidatesTokenCount,
-			TotalTokens: out.UsageMetadata.TotalTokenCount,
-		},
-	}, nil
+	cand := out.Candidates[0]
+	if cand.FinishReason == "MALFORMED_FUNCTION_CALL" || cand.FinishReason == "UNEXPECTED_TOOL_CALL" {
+		return nil, invalidToolCall("Google AI", "the model produced a tool call that cannot be used ("+cand.FinishReason+")")
+	}
+	resp := &Response{Model: out.ModelVersion, Usage: usage, Finish: finishFromGoogle(cand.FinishReason)}
+	hasText := false
+	for _, part := range cand.Content.Parts {
+		switch {
+		case part.FunctionCall != nil:
+			fc := part.FunctionCall
+			args, ok := argsObject(strings.TrimSpace(string(fc.Args)))
+			if string(fc.Args) == "null" {
+				args, ok = json.RawMessage(`{}`), true
+			}
+			if fc.Name == "" || !ok {
+				return nil, invalidToolCall("Google AI", "the model returned a functionCall that is not valid")
+			}
+			call := ToolCall{ID: fc.ID, Name: fc.Name, Arguments: args}
+			state := googleOpaque{Sig: part.ThoughtSignature}
+			if call.ID == "" { // the provider sent no id: a deterministic local one, never sent back
+				call.ID, state.Synth = fmt.Sprintf("call_%d", len(resp.ToolCalls)), true
+			}
+			if state.Synth || state.Sig != "" {
+				call.Opaque, _ = json.Marshal(state)
+			}
+			resp.ToolCalls = append(resp.ToolCalls, call)
+		case part.Text != "" && !part.Thought && !hasText:
+			resp.Text, hasText = strings.TrimSpace(part.Text), true
+		}
+	}
+	if len(resp.ToolCalls) > 0 {
+		if resp.Finish == FinishLength {
+			return nil, invalidToolCall("Google AI", "tool call cut off by the token limit")
+		}
+		resp.Finish = FinishToolCalls
+		return resp, nil
+	}
+	if !hasText {
+		return nil, emptyResponse("Google AI")
+	}
+	return resp, nil
+}
+
+func finishFromGoogle(r string) FinishReason {
+	switch r {
+	case "STOP":
+		return FinishStop
+	case "MAX_TOKENS":
+		return FinishLength
+	}
+	return FinishOther
+}
+
+// googleOpaque is what the Google adapter keeps in ToolCall.Opaque (transport state, never read
+// elsewhere): the thoughtSignature that must go back on the same functionCall part, and whether
+// the call's id was made up locally because Google sent none.
+type googleOpaque struct {
+	Synth bool   `json:"synth,omitempty"`
+	Sig   string `json:"sig,omitempty"`
+}
+
+func googleState(c ToolCall) googleOpaque {
+	var s googleOpaque
+	if len(c.Opaque) > 0 {
+		_ = json.Unmarshal(c.Opaque, &s)
+	}
+	return s
+}
+
+// googleContent is the wire form of one neutral message. lastCalls are the tool calls of the
+// assistant message right before it: results go back in that order, because without provider
+// ids Google pairs a functionResponse with its call by name and position.
+func googleContent(m Message, lastCalls []ToolCall) map[string]any {
+	switch {
+	case m.Role == RoleTool:
+		byID := make(map[string]ToolResult, len(m.ToolResults))
+		for _, r := range m.ToolResults {
+			byID[r.CallID] = r
+		}
+		parts := make([]map[string]any, 0, len(lastCalls))
+		for _, c := range lastCalls {
+			r := byID[c.ID]
+			key := "result"
+			if r.IsError {
+				key = "error"
+			}
+			fr := map[string]any{"name": c.Name, "response": map[string]any{key: r.Content}}
+			if !googleState(c).Synth {
+				fr["id"] = c.ID
+			}
+			parts = append(parts, map[string]any{"functionResponse": fr})
+		}
+		return map[string]any{"role": "user", "parts": parts}
+	case len(m.ToolCalls) > 0:
+		parts := make([]map[string]any, 0, len(m.ToolCalls)+1)
+		if m.Content != "" {
+			parts = append(parts, map[string]any{"text": m.Content})
+		}
+		for _, c := range m.ToolCalls {
+			state := googleState(c)
+			fc := map[string]any{"name": c.Name, "args": c.Arguments}
+			if !state.Synth {
+				fc["id"] = c.ID
+			}
+			part := map[string]any{"functionCall": fc}
+			if state.Sig != "" {
+				part["thoughtSignature"] = state.Sig
+			}
+			parts = append(parts, part)
+		}
+		return map[string]any{"role": "model", "parts": parts}
+	}
+	role := "user"
+	if m.Role == RoleAssistant {
+		role = "model"
+	}
+	return map[string]any{"role": role, "parts": []map[string]string{{"text": m.Content}}}
+}
+
+// googleAllowed is the conservative subset of JSON Schema keywords sent in
+// functionDeclarations[].parameters (the OpenAPI-style Schema). Anything else (additionalProperties,
+// $ref, oneOf, default...) is rejected here with a clear error instead of failing inside the provider.
+var googleAllowed = map[string]bool{
+	"type": true, "format": true, "description": true, "nullable": true, "enum": true, "properties": true,
+	"required": true, "items": true, "minItems": true, "maxItems": true, "minimum": true, "maximum": true,
+	"title": true, "anyOf": true, "propertyOrdering": true,
+}
+
+func googleSchemaOK(raw json.RawMessage) error {
+	var node any
+	if err := json.Unmarshal(raw, &node); err != nil {
+		return err
+	}
+	return googleWalk(node)
+}
+
+func googleWalk(node any) error {
+	switch v := node.(type) {
+	case map[string]any:
+		keys := make([]string, 0, len(v))
+		for k := range v {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys) // the same schema always reports the same keyword
+		for _, k := range keys {
+			child := v[k]
+			if !googleAllowed[k] {
+				return fmt.Errorf("schema keyword %q is not supported by Google AI", k)
+			}
+			switch k {
+			case "properties": // property names are free; check each property's schema
+				props, _ := child.(map[string]any)
+				for _, p := range props {
+					if err := googleWalk(p); err != nil {
+						return err
+					}
+				}
+			case "items":
+				if err := googleWalk(child); err != nil {
+					return err
+				}
+			case "anyOf":
+				list, _ := child.([]any)
+				for _, p := range list {
+					if err := googleWalk(p); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func (p *googleProvider) ListModels(ctx context.Context) ([]ModelInfo, error) {
