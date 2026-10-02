@@ -198,7 +198,7 @@ const router = createRouter({
           path: 'settings/service',
           name: 'settings-service',
           component: () => import('@/views/settings/ServiceSettingsHubView.vue'),
-          meta: { anyPermission: ['settings.chatbot', 'canned_responses', 'tags', 'contacts'] }
+          meta: { anyPermission: ['settings.chatbot', 'canned_responses', 'tags', 'contacts', 'knowledge'] }
         },
         {
           path: 'settings/chatbot',
@@ -443,6 +443,7 @@ const navigationOrder = [
     { path: '/settings/service', permission: 'canned_responses' },
     { path: '/settings/service', permission: 'contacts' },
     { path: '/settings/service', permission: 'tags' },
+    { path: '/settings/service', permission: 'knowledge' },
     { path: '/settings/access', permission: 'teams' },
     { path: '/settings/access', permission: 'users' },
     { path: '/settings/access', permission: 'roles' },
