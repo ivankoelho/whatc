@@ -1671,6 +1671,141 @@ export const departmentsService = {
   list: () => api.get<ApiEnvelope<{ departments: Department[] }>>('/departments'),
 }
 
+// ---- Knowledge base (Fase 8B-2). The screens consume the API of 8B-1 as is, plus the
+// read-only /knowledge/scopes (units and departments as Knowledge needs them, so the
+// screens do not depend on occurrences:read).
+export type KnowledgeSourceType = 'faq' | 'article' | 'process' | 'text' | 'markdown' | 'manual_html'
+export type KnowledgeStatus = 'active' | 'archived'
+export type KnowledgeArchivedBy = '' | 'user' | 'import'
+export type KnowledgeVisibility = 'organization' | 'unit' | 'department'
+
+export interface KnowledgeDocument {
+  id: string
+  organization_id: string
+  // The server omits a null scope from the JSON: these keys may be ABSENT, not only null.
+  unit_id?: string | null
+  department_id?: string | null
+  visibility: KnowledgeVisibility
+  source_type: KnowledgeSourceType
+  title: string
+  origin?: string
+  body?: string // only on GET by id
+  content_hash?: string
+  status: KnowledgeStatus
+  archived_by: KnowledgeArchivedBy
+  created_at: string
+  updated_at: string
+}
+
+// PUT is the complete representation: unit_id and department_id are ALWAYS present (UUID or null).
+export interface KnowledgeDocumentInput {
+  title?: string
+  body?: string
+  source_type?: Exclude<KnowledgeSourceType, 'manual_html'>
+  unit_id: string | null
+  department_id: string | null
+  status?: KnowledgeStatus
+  expected_updated_at?: string
+}
+
+export interface KnowledgeListParams {
+  page?: number
+  limit?: number
+  search?: string
+  source_type?: string
+  status?: string
+  unit_id?: string
+  department_id?: string
+}
+
+export interface KnowledgeChunk {
+  id: string
+  chunk_index: number
+  heading: string
+  content: string
+  char_count: number
+  index_version: number
+}
+
+export interface KnowledgeCitation {
+  title: string
+  heading?: string
+  source_type: KnowledgeSourceType
+  origin?: string
+  anchor?: string
+}
+
+export interface KnowledgeHit {
+  document_id: string
+  chunk_id: string
+  title: string
+  heading?: string
+  content: string
+  score: number
+  citation: KnowledgeCitation
+}
+
+export interface KnowledgeScopeItem {
+  id: string
+  name: string
+  active: boolean
+}
+
+export interface KnowledgeScopes {
+  can_choose_context: boolean
+  units: KnowledgeScopeItem[]
+  departments: KnowledgeScopeItem[]
+  own: { unit_id: string | null; department_id: string | null }
+}
+
+export interface KnowledgeIndexStatus {
+  documents: number
+  chunks: number
+  stale_chunks: number
+  index_version: number
+}
+
+export interface KnowledgeReindexResult {
+  documents: number
+  chunks: number
+  skipped: number
+  stale_remaining: number
+}
+
+export interface KnowledgeSearchParams {
+  q: string
+  limit?: number
+  unit_id?: string
+  department_id?: string
+}
+
+// Empty filters are not sent (an empty unit_id would be a malformed parameter).
+function knowledgeParams<T extends object>(params: T): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ''))
+}
+
+export const knowledgeService = {
+  list: (params: KnowledgeListParams = {}) =>
+    api.get<ApiEnvelope<{ documents: KnowledgeDocument[]; total: number; page: number; limit: number }>>(
+      '/knowledge/documents', { params: knowledgeParams(params) }),
+  get: (id: string) => api.get<ApiEnvelope<KnowledgeDocument>>(`/knowledge/documents/${id}`),
+  create: (data: KnowledgeDocumentInput) => api.post<ApiEnvelope<KnowledgeDocument>>('/knowledge/documents', data),
+  update: (id: string, data: KnowledgeDocumentInput) =>
+    api.put<ApiEnvelope<KnowledgeDocument>>(`/knowledge/documents/${id}`, data),
+  remove: (id: string) => api.delete<ApiEnvelope<{ message: string }>>(`/knowledge/documents/${id}`),
+  chunks: (id: string) =>
+    api.get<ApiEnvelope<{ chunks: KnowledgeChunk[]; total: number }>>(`/knowledge/documents/${id}/chunks`),
+  reindexDocument: (id: string) =>
+    api.post<ApiEnvelope<{ chunks: number; index_version: number }>>(`/knowledge/documents/${id}/reindex`),
+  reindex: (onlyStale: boolean) =>
+    api.post<ApiEnvelope<KnowledgeReindexResult>>('/knowledge/reindex', null, { params: { only_stale: onlyStale } }),
+  status: () => api.get<ApiEnvelope<KnowledgeIndexStatus>>('/knowledge/status'),
+  scopes: () => api.get<ApiEnvelope<KnowledgeScopes>>('/knowledge/scopes'),
+  // Strict mode only: the administrative search tool. The relaxed strategy of the chatbot is not exposed.
+  search: (params: KnowledgeSearchParams) =>
+    api.get<ApiEnvelope<{ results: KnowledgeHit[] }>>('/knowledge/search', { params: knowledgeParams(params) }),
+}
+
 export const occurrenceCategoriesService = {
   list: () => api.get<ApiEnvelope<{ categories: OccurrenceCategory[] }>>('/occurrence-categories'),
   create: (data: { name: string; parent_id?: string | null; position: number; is_active?: boolean }) =>
