@@ -29,6 +29,17 @@ type Config struct {
 	Cookie       CookieConfig       `koanf:"cookie"`
 	Calling      CallingConfig      `koanf:"calling"`
 	TTS          TTSConfig          `koanf:"tts"`
+	XProcess     XProcessConfig     `koanf:"xprocess"`
+}
+
+// XProcessConfig holds the switches of the X2 (XProcess) integration.
+type XProcessConfig struct {
+	// DiscoveryEnabled turns on the automatic discovery and linking of X2 orders to
+	// converted opportunities (see handlers.discoverXProcessOrders). It is OFF unless
+	// it is set to true: an absent key or an empty value mean false, and an unparseable
+	// value makes the configuration fail to load (it never turns the switch on).
+	// Reconciling existing links and linking by hand never depend on it.
+	DiscoveryEnabled bool `koanf:"discovery_enabled"`
 }
 
 type TTSConfig struct {

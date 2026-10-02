@@ -39,6 +39,7 @@ type fakeX2 struct {
 	lines    []x2Line
 	hasCli   bool
 	requests int64
+	clienteCalls int64 // calls to /api/clientes: the first step of discovery
 	extra    int // extra filler lines appended to /api/vendas (to simulate a full 1000-line list)
 }
 
@@ -49,6 +50,7 @@ func newFakeX2(t *testing.T, lines ...x2Line) *fakeX2 {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/api/clientes":
+			atomic.AddInt64(&f.clienteCalls, 1)
 			if !f.hasCli {
 				_, _ = w.Write([]byte(`{"ok":true,"total":0,"clientes":[]}`))
 				return
@@ -600,4 +602,65 @@ func TestDiscovery_WithoutTheIndexTheApplicationGuardsStillHold(t *testing.T) {
 	opp := e.convertedOpp(t, discoveryCPF, 24*time.Hour, time.Hour)
 	e.run(t, newFakeX2(t, order("9200", "FECHADO", today())))
 	assert.Empty(t, e.links(t, opp), "an already tracked order is never reused")
+}
+
+// --- xprocess.discovery_enabled ---
+
+func (e discoveryEnv) activeIntegration(t *testing.T, f *fakeX2) {
+	t.Helper()
+	// RunXProcessReconciliation sweeps every active integration of the shared test
+	// database: park the ones other tests left behind so only this one is visited.
+	require.NoError(t, e.app.DB.Exec(`UPDATE xprocess_integrations SET is_active = false WHERE organization_id <> ?`, e.org.ID).Error)
+	require.NoError(t, e.app.DB.Create(&models.XProcessIntegration{OrganizationID: e.org.ID, BaseURL: f.srv.URL, APIKey: "key", IsActive: true}).Error)
+	t.Cleanup(func() {
+		e.app.DB.Exec(`UPDATE xprocess_integrations SET is_active = false WHERE organization_id = ?`, e.org.ID)
+	})
+}
+
+func TestRunReconciliation_DiscoveryIsOffByDefaultButTheSweepStillRuns(t *testing.T) {
+	e := newDiscoveryEnv(t)
+	assert.False(t, e.app.Config.XProcess.DiscoveryEnabled, "the test config does not enable it")
+
+	// A converted opportunity that discovery WOULD link...
+	candidate := e.convertedOpp(t, discoveryCPF, 24*time.Hour, time.Hour)
+	// ...and an existing link the normal sweep must keep reconciling.
+	existing := e.convertedOpp(t, "11144477735", 24*time.Hour, time.Hour)
+	link := models.SalesOpportunityXProcessLink{OrganizationID: e.org.ID, SalesOpportunityID: existing.ID, NumPedido: "9301", Documento: "11144477735"}
+	require.NoError(t, e.app.DB.Create(&link).Error)
+
+	f := newFakeX2(t, order("9301", "FECHADO", today()), order("9302", "FECHADO", today()))
+	e.activeIntegration(t, f)
+	e.app.RunXProcessReconciliation()
+
+	assert.Empty(t, e.links(t, candidate), "discovery is off: no automatic link")
+	assert.Equal(t, int64(0), atomic.LoadInt64(&f.clienteCalls), "discovery does not even query X2")
+
+	var got models.SalesOpportunityXProcessLink
+	require.NoError(t, e.app.DB.First(&got, "id = ?", link.ID).Error)
+	require.NotNil(t, got.StatusXProcess, "the sweep of existing links keeps working with the switch off")
+	assert.Equal(t, "FECHADO", *got.StatusXProcess)
+}
+
+func TestRunReconciliation_DiscoveryRunsOnlyWhenEnabled(t *testing.T) {
+	e := newDiscoveryEnv(t)
+	candidate := e.convertedOpp(t, discoveryCPF, 24*time.Hour, time.Hour)
+	f := newFakeX2(t, order("9401", "FECHADO", today()))
+	e.activeIntegration(t, f)
+
+	e.app.Config.XProcess.DiscoveryEnabled = true
+	t.Cleanup(func() { e.app.Config.XProcess.DiscoveryEnabled = false })
+	e.app.RunXProcessReconciliation()
+
+	links := e.links(t, candidate)
+	require.Len(t, links, 1)
+	assert.Equal(t, "auto", links[0].LinkSource)
+	assert.Greater(t, atomic.LoadInt64(&f.clienteCalls), int64(0))
+}
+
+func TestManualLinkingDoesNotDependOnTheDiscoverySwitch(t *testing.T) {
+	e := newDiscoveryEnv(t)
+	assert.False(t, e.app.Config.XProcess.DiscoveryEnabled)
+	opp := e.convertedOpp(t, "", 24*time.Hour, time.Hour)
+	assert.Equal(t, fasthttp.StatusOK, e.putLink(t, opp, map[string]any{"num_pedido": "9501", "documento": discoveryCPF}))
+	require.Len(t, e.links(t, opp), 1)
 }

@@ -236,6 +236,8 @@ func (a *App) RunXProcessReconciliation() {
 		a.Log.Error("xprocess reconciliation: failed to load integrations", "error", err)
 		return
 	}
+	discoveryEnabled := a.Config.XProcess.DiscoveryEnabled
+	a.Log.Info("xprocess reconciliation: sweep starting", "integrations", len(integrations), "discovery_enabled", discoveryEnabled)
 	for i := range integrations {
 		integ := integrations[i]
 		integ.DecryptSecrets(a.Config.App.EncryptionKey)
@@ -255,7 +257,11 @@ func (a *App) RunXProcessReconciliation() {
 
 		// Discovery runs after the sweep, and also when there were no pending links:
 		// a converted opportunity with no link at all is exactly what it looks for.
-		a.discoverXProcessOrders(client, integ.APIKey, integ.OrganizationID)
+		// It is OFF unless xprocess.discovery_enabled is true; the sweep above and
+		// linking by hand never depend on the switch.
+		if discoveryEnabled {
+			a.discoverXProcessOrders(client, integ.APIKey, integ.OrganizationID)
+		}
 	}
 }
 

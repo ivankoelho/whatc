@@ -14,6 +14,12 @@ só consulta `POST /api/pedido {numero_pedido, documento}`, ou seja, precisa do 
 - Primeira chamada fria chegou a ~8 s.
 
 ## Descoberta (`xprocess_discovery.go`, dentro de `RunXProcessReconciliation`, depois da varredura dos vínculos)
+
+**Interruptor: `xprocess.discovery_enabled`, DESLIGADO por padrão.** Chave ausente, seção vazia ou valor vazio = desligado;
+valor inválido faz a configuração falhar ao carregar (nunca liga). Também por ambiente:
+`WHATOMATE_XPROCESS__DISCOVERY_ENABLED=true`. Desligado, só a **descoberta** deixa de rodar: a reconciliação dos vínculos
+existentes, o vínculo manual e a lista de candidatos continuam funcionando. Assim, código implantado não significa
+funcionalidade ativa: liga-se depois de validar no ambiente (o log de cada varredura informa `discovery_enabled`).
 Alvo: oportunidade `convertida`, **sem nenhum vínculo X2**, convertida há **no máximo 7 dias**, com documento
 conhecido (`xprocess_documento` ou `Contact.CPFCNPJ`, ambos validados por `contactutil.NormalizeDocumento`).
 
