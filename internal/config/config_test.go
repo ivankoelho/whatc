@@ -248,3 +248,46 @@ func TestLoad_XProcessDiscoveryNeverBecomesTrueByAccident(t *testing.T) {
 	_, err := config.Load(writeConfig(t, ""))
 	assert.Error(t, err)
 }
+
+// --- knowledge.rag_enabled: OFF unless explicitly true ---
+
+func TestLoad_KnowledgeRAGIsOffWhenAbsent(t *testing.T) {
+	cfg, err := config.Load(writeConfig(t, ""))
+	require.NoError(t, err)
+	assert.False(t, cfg.Knowledge.RAGEnabled)
+
+	cfg, err = config.Load(writeConfig(t, "[knowledge]\n"))
+	require.NoError(t, err)
+	assert.False(t, cfg.Knowledge.RAGEnabled, "an empty [knowledge] section does not enable it")
+
+	cfg, err = config.Load("")
+	require.NoError(t, err)
+	assert.False(t, cfg.Knowledge.RAGEnabled, "no config file at all does not enable it")
+}
+
+func TestLoad_KnowledgeRAGCanBeEnabledFromFileOrEnv(t *testing.T) {
+	cfg, err := config.Load(writeConfig(t, "[knowledge]\nrag_enabled = true\n"))
+	require.NoError(t, err)
+	assert.True(t, cfg.Knowledge.RAGEnabled)
+
+	t.Setenv("WHATOMATE_KNOWLEDGE__RAG_ENABLED", "true")
+	cfg, err = config.Load(writeConfig(t, ""))
+	require.NoError(t, err)
+	assert.True(t, cfg.Knowledge.RAGEnabled, "the environment can enable it")
+
+	cfg, err = config.Load(writeConfig(t, "[knowledge]\nrag_enabled = false\n"))
+	require.NoError(t, err)
+	assert.True(t, cfg.Knowledge.RAGEnabled, "the environment overrides the file")
+}
+
+func TestLoad_KnowledgeRAGNeverBecomesTrueByAccident(t *testing.T) {
+	for _, v := range []string{"", "false", "0", "False"} {
+		t.Setenv("WHATOMATE_KNOWLEDGE__RAG_ENABLED", v)
+		cfg, err := config.Load(writeConfig(t, ""))
+		require.NoError(t, err, "value %q", v)
+		assert.False(t, cfg.Knowledge.RAGEnabled, "value %q", v)
+	}
+	t.Setenv("WHATOMATE_KNOWLEDGE__RAG_ENABLED", "banana")
+	_, err := config.Load(writeConfig(t, ""))
+	assert.Error(t, err, "garbage is a configuration error, never 'on'")
+}

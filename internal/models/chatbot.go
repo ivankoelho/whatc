@@ -130,6 +130,13 @@ type ChatbotSettings struct {
 	ClientInactivity ClientInactivityConfig `gorm:"embedded"`
 	AI               AIConfig               `gorm:"embedded"`
 
+	// KnowledgeEnabled lets this organization's chatbot AI replies use the Knowledge base
+	// (Fase 8B-3). It only counts on the organization's DEFAULT row (whats_app_account = '')
+	// and only together with the global knowledge.rag_enabled: both must be true. Opt-in:
+	// the column is added NOT NULL DEFAULT false, so every existing organization starts
+	// with it off.
+	KnowledgeEnabled bool `gorm:"column:knowledge_enabled;not null;default:false" json:"knowledge_enabled"`
+
 	// Session settings
 	SessionTimeoutMins int        `gorm:"default:30" json:"session_timeout_minutes"`
 	ExcludedNumbers    JSONBArray `gorm:"type:jsonb;default:'[]'" json:"excluded_numbers"`

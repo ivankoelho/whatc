@@ -184,3 +184,33 @@ func joinItems(items []string) string {
 
 // AccentedStopwords returns the list, for the test that checks it against PostgreSQL.
 func AccentedStopwords() []string { return append([]string(nil), accentedStopwords...) }
+
+// unaccentedStopwords are the entries of PostgreSQL's Portuguese stop list that carry no
+// diacritic. SearchForm leaves them to PostgreSQL (it drops them itself, and keeping them
+// in the indexed text keeps phrase positions identical to a plain to_tsvector), but PlainTerms
+// must drop them too: otherwise a customer message full of "para", "da", "no" would count as
+// having enough terms and would use up the 12-term cap.
+// TestStopwords_AgreeWithPostgres checks every entry against the database.
+var unaccentedStopwords = strings.Fields(`a ao aos aquela aquelas aquele aqueles aquilo as com como da das de dela delas dele deles
+depois do dos e ela elas ele eles em entre era eram essa essas esse esses esta estamos estas estava estavam este esteja estejam
+estejamos estes esteve estive estivemos estiver estivera estiveram estiverem estivermos estivesse estivessem estou eu foi fomos for
+fora foram forem formos fosse fossem fui haja hajam hajamos havemos hei houve houvemos houver houvera houveram houverei houverem
+houveremos houveria houveriam houvermos houvesse houvessem isso isto lhe lhes mais mas me mesmo meu meus minha minhas muito na nas
+nem no nos nossa nossas nosso nossos num numa o os ou para pela pelas pelo pelos por qual quando que quem se seja sejam sejamos sem
+serei seremos seria seriam seu seus somos sou sua suas te tem temos tenha tenham tenhamos tenho terei teremos teria teriam teu teus
+teve tinha tinham tive tivemos tiver tivera tiveram tiverem tivermos tivesse tivessem tu tua tuas um uma vos`)
+
+// plainStopwords is every Portuguese stop word, folded: what PlainTerms drops.
+var plainStopwords = func() map[string]bool {
+	m := make(map[string]bool, len(foldedStopwords)+len(unaccentedStopwords))
+	for w := range foldedStopwords {
+		m[w] = true
+	}
+	for _, w := range unaccentedStopwords {
+		m[FoldForSearch(w)] = true
+	}
+	return m
+}()
+
+// UnaccentedStopwords returns the list, for the test that checks it against PostgreSQL.
+func UnaccentedStopwords() []string { return append([]string(nil), unaccentedStopwords...) }

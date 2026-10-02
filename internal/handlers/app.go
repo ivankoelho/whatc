@@ -11,6 +11,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/assignment"
 	"github.com/shridarpatil/whatomate/internal/calling"
 	"github.com/shridarpatil/whatomate/internal/config"
+	"github.com/shridarpatil/whatomate/internal/knowledge"
 	"github.com/shridarpatil/whatomate/internal/queue"
 	"github.com/shridarpatil/whatomate/internal/storage"
 	"github.com/shridarpatil/whatomate/internal/tts"
@@ -34,6 +35,9 @@ type App struct {
 	CampaignSubCancel context.CancelFunc
 	// HTTPClient is a shared HTTP client with connection pooling for external API calls
 	HTTPClient *http.Client
+	// KnowledgeRetriever replaces the PostgreSQL full-text retriever the chatbot uses for
+	// Knowledge (tests only; nil = LexicalRetriever on DB).
+	KnowledgeRetriever knowledge.Retriever
 	// Assigner provides shared team-based agent assignment (used by both chat and call transfers)
 	Assigner *assignment.Assigner
 	// CallManager handles WebRTC call sessions (nil when calling is disabled)

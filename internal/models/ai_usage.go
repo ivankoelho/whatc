@@ -36,6 +36,11 @@ type AIUsageLog struct {
 	OutputTokens int `json:"output_tokens"`
 	TotalTokens  int `json:"total_tokens"`
 
+	// KnowledgeSources lists, in the order they were put in the prompt, the Knowledge chunks
+	// that were injected into this call: {document_id, title, origin, score}. NULL when the
+	// Knowledge base was not used (off, nothing found, or it failed). Never the text.
+	KnowledgeSources JSONBArray `gorm:"type:jsonb" json:"knowledge_sources,omitempty"`
+
 	CreatedAt time.Time `gorm:"autoCreateTime;index:idx_ai_usage_org_created,priority:2,sort:desc" json:"created_at"`
 }
 
