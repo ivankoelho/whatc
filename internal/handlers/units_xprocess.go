@@ -135,7 +135,13 @@ func (a *App) SetUnitXProcessLoja(r *fastglue.Request) error {
 		return nil
 	}
 	cod := strings.TrimSpace(req.CodEmpresa)
+	// Snapshot for the audit trail. The code is a pointer that GORM updates in place,
+	// so copying the struct alone would make "before" already show the new value.
 	before := *unit
+	if unit.XProcessCodEmpresa != nil {
+		old := *unit.XProcessCodEmpresa
+		before.XProcessCodEmpresa = &old
+	}
 
 	if cod == "" {
 		// Clearing is local only: it never needs X2.
@@ -211,7 +217,13 @@ func (a *App) finishUnitXProcessLoja(r *fastglue.Request, orgID, userID uuid.UUI
 	if err := a.DB.First(&after, "id = ?", unitID).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to load unit", nil, "")
 	}
-	a.logAudit(orgID, userID, "unit", after.ID, models.AuditActionUpdated, before, &after)
+	// The audit comparison walks the keys of the NEW state, and a removed link has no
+	// key at all (omitempty), so a removal would leave no trace: record it explicitly.
+	var extra []map[string]any
+	if before.XProcessCodEmpresa != nil && after.XProcessCodEmpresa == nil {
+		extra = append(extra, map[string]any{"field": "xprocess_cod_empresa", "old_value": *before.XProcessCodEmpresa, "new_value": nil})
+	}
+	a.logAudit(orgID, userID, "unit", after.ID, models.AuditActionUpdated, before, &after, extra...)
 	return r.SendEnvelope(map[string]any{"unit": after, "cnpj_filled": cnpjFilled, "cnpj_note": cnpjNote})
 }
 

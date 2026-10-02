@@ -486,3 +486,25 @@ func TestUnitsX2_CandidatesCarryTheUnitName(t *testing.T) {
 	assert.Equal(t, "40", resp.Data.Candidates[0].CodEmpresa)
 	assert.Equal(t, "PORTO SEGURO", resp.Data.Candidates[0].UnitName)
 }
+
+// Linking, changing AND removing the store each leave an audit record. (A removal has
+// no key in the new state, so it needs an explicit entry.)
+func TestUnitsX2_ChangingAndRemovingAreAuditedToo(t *testing.T) {
+	e := newUnitsX2Env(t, lojaPorto, lojaSerrinha)
+	u := e.unit(t, "PORTO SEGURO")
+	require.Equal(t, fasthttp.StatusOK, mustStatus(e.set(t, e.admin.ID, u, map[string]any{"cod_empresa": "40"})))
+	require.Equal(t, fasthttp.StatusOK, mustStatus(e.set(t, e.admin.ID, u, map[string]any{"cod_empresa": "41"})))
+	require.Equal(t, fasthttp.StatusOK, mustStatus(e.set(t, e.admin.ID, u, map[string]any{"cod_empresa": ""})))
+
+	var entries []models.AuditLog
+	require.Eventually(t, func() bool {
+		entries = nil
+		e.app.DB.Where("organization_id = ? AND resource_type = ? AND resource_id = ?", e.org.ID, "unit", u.ID).
+			Order("created_at ASC").Find(&entries)
+		return len(entries) == 3
+	}, 3*time.Second, 50*time.Millisecond, "link, change and removal are three records")
+
+	last, _ := json.Marshal(entries[len(entries)-1].Changes)
+	assert.Contains(t, string(last), `"old_value":"41"`)
+	assert.Contains(t, string(last), `"new_value":null`)
+}
