@@ -40,6 +40,9 @@ const (
 type Message struct {
 	Role    Role
 	Content string
+	// Tool calling: ToolCalls on an assistant message, ToolResults on a RoleTool message.
+	ToolCalls   []ToolCall
+	ToolResults []ToolResult
 }
 
 // Request is one completion. Fields map to what the chatbot already sent
@@ -50,6 +53,10 @@ type Request struct {
 	Messages    []Message
 	MaxTokens   int
 	Temperature float64
+	// Tools and ToolChoice are optional; with no Tools the wire request is exactly what it was
+	// before tool calling existed.
+	Tools      []ToolDefinition
+	ToolChoice ToolChoice
 }
 
 // Usage is token accounting as reported by the provider (0 when not reported).
@@ -63,6 +70,9 @@ type Response struct {
 	Text  string
 	Model string // the model the provider says it used, when reported
 	Usage Usage
+	// ToolCalls is what the model asked to run (Finish == FinishToolCalls); Text may accompany it.
+	ToolCalls []ToolCall
+	Finish    FinishReason
 }
 
 // ModelInfo is one model offered by a provider's own listing endpoint. Whatc
