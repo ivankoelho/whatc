@@ -97,6 +97,7 @@ const (
 	ResourceDepartments             = "departments"
 	ResourceSalesOpportunities      = "sales_opportunities"
 	ResourceXProcessIntegration     = "xprocess_integration"
+	ResourceKnowledge               = "knowledge"
 )
 
 // PermissionAction constants for available actions
@@ -225,6 +226,10 @@ func DefaultPermissions() []Permission {
 		// X2 ERP Integration
 		{Resource: ResourceXProcessIntegration, Action: ActionRead, Description: "View the X2 ERP integration settings"},
 		{Resource: ResourceXProcessIntegration, Action: ActionWrite, Description: "Configure the X2 ERP integration credential"},
+
+		// Knowledge base (Fase 8A). Admin only until the management screen defines who else.
+		{Resource: ResourceKnowledge, Action: ActionRead, Description: "Search and read the knowledge base"},
+		{Resource: ResourceKnowledge, Action: ActionWrite, Description: "Create, edit and archive knowledge documents"},
 
 		// Canned Responses
 		{Resource: ResourceCannedResponses, Action: ActionRead, Description: "View canned responses"},

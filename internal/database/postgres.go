@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/config"
+	"github.com/shridarpatil/whatomate/internal/knowledge"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/postgres"
@@ -72,6 +73,10 @@ func GetMigrationModels() []MigrationModel {
 		{"WhatsAppAccount", &models.WhatsAppAccount{}},
 		{"XProcessIntegration", &models.XProcessIntegration{}},
 		{"SalesOpportunityXProcessLink", &models.SalesOpportunityXProcessLink{}},
+
+		// Knowledge base (Fase 8A)
+		{"KnowledgeDocument", &models.KnowledgeDocument{}},
+		{"KnowledgeChunk", &models.KnowledgeChunk{}},
 		{"Contact", &models.Contact{}},
 		{"Tag", &models.Tag{}},
 		{"Message", &models.Message{}},
@@ -275,6 +280,11 @@ func repeatChar(char string, n int) string {
 
 // getIndexes returns all index creation SQL statements
 func getIndexes() []string {
+	// Both the server migration and CreateIndexes (used by tests) read THIS list.
+	return append(coreIndexes(), knowledge.SchemaSQL...)
+}
+
+func coreIndexes() []string {
 	return []string{
 		// Expand phone_number columns to support group JIDs (e.g., 120363422675615917@g.us)
 		`ALTER TABLE contacts ALTER COLUMN phone_number TYPE varchar(50)`,
