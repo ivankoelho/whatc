@@ -1387,6 +1387,8 @@ export interface Unit {
   cnpj?: string
   type?: string
   active: boolean
+  // The X2 store this unit stands for; set only by an administrator (units screen).
+  xprocess_cod_empresa?: string
 }
 
 export interface Department {
@@ -1602,6 +1604,8 @@ export interface SalesOpportunityXProcessLink {
   valor_frete?: number
   cod_empresa?: string
   link_source?: 'agent' | 'auto'
+  unit_id?: string
+  unit_name?: string
   match_reason?: string
   last_checked_at?: string
   resolved_at?: string
@@ -1622,6 +1626,7 @@ export const salesOpportunityXProcessLinkService = {
 export interface SalesOpportunityXProcessCandidate {
   num_pedido: string
   cod_empresa: string
+  unit_name?: string
   status: string
   valor_vendido: number
   data_venda: string
@@ -1636,6 +1641,17 @@ export const salesOpportunityXProcessCandidatesService = {
 // backend (see docs/superpowers/specs/2026-09-04-helpdesk-unidade-departamento-sla-design.md).
 // List-only: this MVP only needs them to populate the "Abrir protocolo" form
 // dropdowns, not the CRUD settings screens (still unbuilt on the frontend).
+export interface XProcessLoja {
+  cod_empresa: string
+  razao_social_empresa: string
+  cnpj_empresa: string
+  unit_id?: string
+  unit_name?: string
+  // A presentation hint ("this looks like that unit"), never saved by itself.
+  suggested_unit_id?: string
+  suggested_unit_name?: string
+}
+
 export const unitsService = {
   list: () => api.get<ApiEnvelope<{ units: Unit[] }>>('/units'),
   create: (data: { name: string; cnpj?: string; type?: string; active: boolean }) =>
@@ -1643,6 +1659,12 @@ export const unitsService = {
   update: (id: string, data: { name: string; cnpj?: string; type?: string; active: boolean }) =>
     api.put<ApiEnvelope<Unit>>(`/units/${id}`, data),
   delete: (id: string) => api.delete<ApiEnvelope<{ deleted: boolean }>>(`/units/${id}`),
+  // X2 stores next to the units already linked to them (units:write; calls X2).
+  listXProcessLojas: () => api.get<ApiEnvelope<{ lojas: XProcessLoja[] }>>('/units/xprocess-lojas'),
+  // Link, change or clear (cod_empresa "") the X2 store of a unit. fill_cnpj copies the
+  // store CNPJ into an EMPTY unit CNPJ; it never blocks the link.
+  setXProcessLoja: (id: string, data: { cod_empresa: string; fill_cnpj?: boolean }) =>
+    api.put<ApiEnvelope<{ unit: Unit; cnpj_filled: boolean; cnpj_note: string }>>(`/units/${id}/xprocess-loja`, data),
 }
 
 export const departmentsService = {

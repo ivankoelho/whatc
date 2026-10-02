@@ -76,6 +76,11 @@ async function onRegistered() {
             <dt class="text-muted-foreground">{{ t('xprocessLink.valorConfirmado') }}</dt>
             <dd>{{ formatCurrency(link.valor_vendido) }}</dd>
           </template>
+          <!-- The order's store: the local unit when mapped, else the X2 code. -->
+          <template v-if="link.cod_empresa">
+            <dt class="text-muted-foreground">{{ t('xprocessLink.loja') }}</dt>
+            <dd data-testid="xprocess-link-store">{{ link.unit_name || t('xprocessLink.lojaX2', { cod: link.cod_empresa }) }}</dd>
+          </template>
           <!-- Freight is the order's own figure; the confirmed value above never includes it. -->
           <template v-if="link.valor_frete != null">
             <dt class="text-muted-foreground">{{ t('xprocessLink.valorFrete') }}</dt>

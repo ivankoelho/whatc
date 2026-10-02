@@ -183,6 +183,11 @@ defineExpose({ refresh: load })
               · {{ t('xprocessLink.valorFrete') }} {{ formatCurrency(linksByOpportunity[opp.id]!.valor_frete) }}
             </span>
           </p>
+          <!-- The store of the order: the local unit when an administrator mapped it,
+               else the X2 code (clearly an X2 code, not a unit). Never required. -->
+          <p v-if="linksByOpportunity[opp.id]!.cod_empresa" data-testid="sales-xprocess-store">
+            {{ t('xprocessLink.loja') }}: {{ linksByOpportunity[opp.id]!.unit_name || t('xprocessLink.lojaX2', { cod: linksByOpportunity[opp.id]!.cod_empresa }) }}
+          </p>
           <p v-if="linksByOpportunity[opp.id]!.link_source === 'auto'" :title="linksByOpportunity[opp.id]!.match_reason">
             {{ t('xprocessLink.autoLinked') }}
           </p>
@@ -214,6 +219,9 @@ defineExpose({ refresh: load })
             {{ t('sales.xprocessCandidateHint', { date: formatDate(candidate.data_venda) }) }}
           </p>
           <p class="text-muted-foreground mt-0.5">{{ t('xprocessLink.numPedido') }} {{ candidate.num_pedido }} · {{ formatCurrency(candidate.valor_vendido) }}</p>
+          <p v-if="candidate.cod_empresa" class="text-muted-foreground" data-testid="sales-candidate-store">
+            {{ t('xprocessLink.loja') }}: {{ candidate.unit_name || t('xprocessLink.lojaX2', { cod: candidate.cod_empresa }) }}
+          </p>
           <Button v-if="canLinkXProcess" variant="outline" size="sm" class="h-6 px-2 mt-1 text-xs" @click="openLinkDialog(opp, candidate)">
             {{ t('sales.xprocessCandidateLink') }}
           </Button>
