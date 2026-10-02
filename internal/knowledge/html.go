@@ -1,6 +1,7 @@
 package knowledge
 
 import (
+	"regexp"
 	"fmt"
 	"io"
 	"strings"
@@ -40,21 +41,15 @@ func ParseManualHTML(r io.Reader) ([]ManualDoc, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse html: %w", err)
 	}
-	w := &htmlWalker{}
+	w := &htmlWalker{used: map[string]bool{}}
 	w.walk(root, "")
 	w.closeSection()
 
-	seen := map[string]int{}
 	var docs []ManualDoc
 	for _, d := range w.docs {
-		if utf8.RuneCountInString(d.Text) < chunkMin {
-			continue
+		if utf8.RuneCountInString(d.Text) >= chunkMin {
+			docs = append(docs, d)
 		}
-		seen[d.Anchor]++
-		if n := seen[d.Anchor]; n > 1 {
-			d.Anchor = fmt.Sprintf("%s-%d", d.Anchor, n)
-		}
-		docs = append(docs, d)
 	}
 	return docs, nil
 }
@@ -64,7 +59,44 @@ type htmlWalker struct {
 	title  string
 	anchor string
 	buf    strings.Builder
-	n      int
+	used   map[string]bool // anchors already given in this file
+}
+
+var nonSlug = regexp.MustCompile(`[^a-z0-9]+`)
+
+// slugOf turns a heading into an anchor: folded, lowercase, hyphenated.
+func slugOf(title string) string {
+	s := strings.Trim(nonSlug.ReplaceAllString(FoldForSearch(title), "-"), "-")
+	if r := []rune(s); len(r) > 60 {
+		s = strings.Trim(string(r[:60]), "-")
+	}
+	if s == "" {
+		return "secao"
+	}
+	return s
+}
+
+// pickAnchor chooses the origin anchor of a section, stable when other sections
+// are inserted or removed: the heading's own id, else the nearest ancestor id
+// (unless an earlier section of the file already took it, as when one <section>
+// holds several headings), else the slug of the heading text. Only when every
+// candidate is taken does a numeric suffix apply, counted among the duplicates of
+// that same anchor and not by position in the file.
+func (w *htmlWalker) pickAnchor(own, ancestor, title string) string {
+	candidates := []string{own, ancestor, slugOf(title)}
+	for _, c := range candidates {
+		if c != "" && !w.used[c] {
+			w.used[c] = true
+			return c
+		}
+	}
+	base := firstNonEmpty(own, slugOf(title))
+	for n := 2; ; n++ {
+		if c := fmt.Sprintf("%s-%d", base, n); !w.used[c] {
+			w.used[c] = true
+			return c
+		}
+	}
 }
 
 func (w *htmlWalker) closeSection() {
@@ -78,8 +110,8 @@ func (w *htmlWalker) closeSection() {
 		title = "Introdução"
 	}
 	anchor := w.anchor
-	if anchor == "" {
-		anchor = fmt.Sprintf("secao-%d", w.n)
+	if anchor == "" { // text before the first heading
+		anchor = w.pickAnchor("", "", "introducao")
 	}
 	w.docs = append(w.docs, ManualDoc{Title: title, Anchor: anchor, Text: text})
 }
@@ -104,9 +136,8 @@ func (w *htmlWalker) walk(n *html.Node, ctxID string) {
 		}
 		if n.Data == "h2" || n.Data == "h3" {
 			w.closeSection()
-			w.n++
 			w.title = NormalizeText(innerText(n))
-			w.anchor = firstNonEmpty(attr(n, "id"), ctxID)
+			w.anchor = w.pickAnchor(attr(n, "id"), ctxID, w.title)
 			return // the heading text is the title, not part of the body
 		}
 		if id := attr(n, "id"); id != "" {

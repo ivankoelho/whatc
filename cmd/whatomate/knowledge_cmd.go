@@ -11,56 +11,82 @@ import (
 	"github.com/shridarpatil/whatomate/internal/knowledge"
 )
 
-// runKnowledge handles `whatomate knowledge import-manuals`. The import is
-// explicit and offline: it reads the HTML files once and stores text + chunks;
-// nothing reads the files at query time. There is deliberately no HTTP endpoint
-// for it in 8A.
+const knowledgeUsage = `Usage:
+  whatomate knowledge import-manuals -org <organization-id> [-dir manuais] [-unit <id>] [-department <id>] [-dry-run] [-config config.toml]
+  whatomate knowledge reindex -org <organization-id> [-all] [-config config.toml]`
+
+// runKnowledge handles the `whatomate knowledge` subcommands. They are explicit,
+// offline operations: nothing here is exposed as an HTTP endpoint for the import,
+// and nothing runs during -migrate.
 func runKnowledge(args []string) {
-	if len(args) == 0 || args[0] != "import-manuals" {
-		fmt.Println("Usage: whatomate knowledge import-manuals -org <organization-id> [-dir manuais] [-unit <id>] [-department <id>] [-config config.toml]")
+	if len(args) == 0 || (args[0] != "import-manuals" && args[0] != "reindex") {
+		fmt.Println(knowledgeUsage)
 		os.Exit(1)
 	}
-	fs := flag.NewFlagSet("knowledge import-manuals", flag.ExitOnError)
+	fs := flag.NewFlagSet("knowledge "+args[0], flag.ExitOnError)
 	configPath := fs.String("config", "config.toml", "Path to config file")
 	orgFlag := fs.String("org", "", "Organization ID (required)")
-	dir := fs.String("dir", "manuais", "Directory with the manual .html files")
-	unitFlag := fs.String("unit", "", "Restrict the documents to this unit (optional)")
-	deptFlag := fs.String("department", "", "Restrict the documents to this department (optional)")
+	dir := fs.String("dir", "manuais", "Directory with the manual .html files (import-manuals)")
+	unitFlag := fs.String("unit", "", "Restrict NEW documents to this unit (import-manuals, optional)")
+	deptFlag := fs.String("department", "", "Restrict NEW documents to this department (import-manuals, optional)")
+	dryRun := fs.Bool("dry-run", false, "Report what would change, write nothing (import-manuals)")
+	all := fs.Bool("all", false, "Reindex every document, not only the stale ones (reindex)")
 	_ = fs.Parse(args[1:])
 
 	orgID, err := uuid.Parse(*orgFlag)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "error: -org must be a valid organization UUID")
-		os.Exit(1)
+		fatalf("-org must be a valid organization UUID")
 	}
 	unit, err := optionalUUID(*unitFlag)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "error: -unit must be a UUID")
-		os.Exit(1)
+		fatalf("-unit must be a UUID")
 	}
 	dept, err := optionalUUID(*deptFlag)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "error: -department must be a UUID")
-		os.Exit(1)
+		fatalf("-department must be a UUID")
 	}
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "error: failed to load config:", err)
-		os.Exit(1)
+		fatalf("failed to load config: %v", err)
 	}
 	db, err := database.NewPostgres(&cfg.Database, false)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "error: failed to connect to the database:", err)
-		os.Exit(1)
+		fatalf("failed to connect to the database: %v", err)
+	}
+	// The organization, unit and department must exist (and belong together) before anything is written.
+	if err := knowledge.ValidateImportTarget(db, orgID, unit, dept); err != nil {
+		fatalf("%v", err)
 	}
 
-	res, err := knowledge.ImportManuals(db, orgID, unit, dept, *dir)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
-		os.Exit(1)
+	if args[0] == "reindex" {
+		res, err := knowledge.ReindexOrg(db, orgID, !*all)
+		if err != nil {
+			fatalf("%v", err)
+		}
+		fmt.Printf("Reindexed: %d documents, %d chunks, %d skipped, %d stale chunks remaining (index version %d)\n",
+			res.Documents, res.Chunks, res.Skipped, res.StaleRemaining, knowledge.IndexVersion)
+		return
 	}
-	fmt.Printf("Manuals imported: %d created, %d updated, %d unchanged\n", res.Created, res.Updated, res.Unchanged)
+
+	res, err := knowledge.ImportManuals(db, orgID, unit, dept, *dir, *dryRun)
+	prefix := "Manuals imported"
+	if *dryRun {
+		prefix = "Dry run (nothing written)"
+	}
+	fmt.Printf("%s: %d created, %d updated, %d unchanged, %d reactivated, %d archived\n",
+		prefix, res.Created, res.Updated, res.Unchanged, res.Reactivated, res.Archived)
+	for _, o := range res.ArchivedOrigins {
+		fmt.Println("  archived (section left the HTML):", o)
+	}
+	if err != nil {
+		fatalf("%v", err)
+	}
+}
+
+func fatalf(format string, a ...any) {
+	fmt.Fprintf(os.Stderr, "error: "+format+"\n", a...)
+	os.Exit(1)
 }
 
 func optionalUUID(s string) (*uuid.UUID, error) {
