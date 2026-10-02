@@ -477,3 +477,129 @@ func TestSave_ConcurrentRebuildsSerializeOnTheLockedRow(t *testing.T) {
 		assert.Equal(t, want[i].Content, c.Content)
 	}
 }
+
+// ---- M1 regressions found by the final audit -------------------------------
+
+// The string forms: compounds are never turned into operators, quoted phrases stay
+// separate, and the legitimate operators are untouched.
+func TestSearchForm_CompoundsPhrasesAndOperatorsKeepTheirMeaning(t *testing.T) {
+	cases := map[string]string{
+		// a hyphen between letters is part of the word, stop-word parts included
+		"não-conformidade":  "nao-conformidade",
+		"nao-conformidade":  "nao-conformidade",
+		"Não-Conformidade":  "nao-conformidade",
+		"só-leitura":        "so-leitura",
+		"já-existente":      "ja-existente",
+		"foo-não":           "foo-nao",
+		`"não-conformidade"`: `"nao-conformidade"`,
+		// separate phrases stay separate
+		`"emitir nota" "nota fiscal"`:      `"emitir nota" "nota fiscal"`,
+		`"emitir nota"`:                    `"emitir nota"`,
+		`"emitir nota" -"nota fiscal"`:     `"emitir nota" -"nota fiscal"`,
+		`"emitir nota" -garantia`:          `"emitir nota" -garantia`,
+		`"emitir não" -"garantia não"`:     `"emitir" -"garantia"`,
+		`"não" "emitir nota"`:              `"emitir nota"`,
+		`"emitir nota" "não"`:              `"emitir nota"`,
+		// exclusions
+		"foo -bar":    "foo -bar",
+		`-"garantia"`: `-"garantia"`,
+		"-não foo":    "foo",
+		"foo -não":    "foo",
+		// OR
+		"foo OR não":        "foo",
+		"não OR foo":        "foo",
+		"foo or or bar":     "foo or bar",
+		"foo OR não OR bar": "foo or bar",
+		// leftovers
+		"-": "", "- foo": "foo", "(não) foo": "foo", "não, foo.": "foo.", `"""`: "", "não não não": "",
+		`unterminado "emitir nota`: "unterminado emitir nota",
+	}
+	for in, want := range cases {
+		assert.Equal(t, want, knowledge.SearchForm(in), in)
+	}
+}
+
+// What PostgreSQL does with the prepared text: the semantics, not the spelling.
+func TestSearchForm_TsqueryHasTheRightSemanticsInPostgres(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	tsq := func(q string) string {
+		var out string
+		require.NoError(t, db.Raw(`SELECT websearch_to_tsquery('portuguese', ?)::text`, knowledge.SearchForm(q)).Scan(&out).Error)
+		return out
+	}
+	// the text as the indexer prepares it, matched against the query as the search prepares it
+	matches := func(doc, q string) bool {
+		var ok bool
+		require.NoError(t, db.Raw(`SELECT to_tsvector('portuguese', ?) @@ websearch_to_tsquery('portuguese', ?)`,
+			knowledge.SearchForm(doc), knowledge.SearchForm(q)).Scan(&ok).Error)
+		return ok
+	}
+
+	// MAJOR 1: a compound is never an exclusion
+	for q, want := range map[string]string{
+		"não-conformidade": "'nao-conform' <-> 'nao' <-> 'conform'",
+		"nao-conformidade": "'nao-conform' <-> 'nao' <-> 'conform'",
+		"só-leitura":       "'so-leitur' <-> 'so' <-> 'leitur'",
+		"já-existente":     "'ja-existent' <-> 'ja' <-> 'existent'",
+	} {
+		got := tsq(q)
+		assert.Equal(t, want, got, q)
+		assert.NotContains(t, got, "!", "%q must not become an exclusion", q)
+	}
+	assert.NotEqual(t, "!'conform'", tsq("não-conformidade"))
+	assert.True(t, matches("O relatório registrou a não-conformidade do lote.", "não-conformidade"))
+	assert.False(t, matches("A política de troca segue a regra geral da loja.", "não-conformidade"),
+		"the old behavior matched every text WITHOUT the word")
+	assert.False(t, matches("A conformidade foi restabelecida.", "não-conformidade"))
+
+	// MAJOR 2: two phrases stay two independent phrases
+	two := tsq(`"emitir nota" "nota fiscal"`)
+	assert.Equal(t, "'emit' <-> 'not' & 'not' <-> 'fiscal'", two)
+	assert.NotEqual(t, "'emit' <-> 'not' <-> 'not' <-> 'fiscal'", two, "not one fused phrase")
+	doc := "Para emitir nota basta clicar no botão. Depois a nota fiscal é enviada ao cliente."
+	assert.True(t, matches(doc, `"emitir nota" "nota fiscal"`))
+	assert.False(t, matches("Para emitir nota basta clicar no botão.", `"emitir nota" "nota fiscal"`), "both phrases are required")
+	assert.False(t, matches("A nota fiscal é enviada ao cliente.", `"emitir nota" "nota fiscal"`))
+
+	// phrase + excluded phrase
+	assert.Equal(t, "'emit' <-> 'not' & !( 'not' <-> 'fiscal' )", tsq(`"emitir nota" -"nota fiscal"`))
+	assert.False(t, matches(doc, `"emitir nota" -"nota fiscal"`), "the excluded phrase removes it")
+	assert.True(t, matches("Para emitir nota basta clicar no botão.", `"emitir nota" -"nota fiscal"`))
+
+	// stop words inside phrases and exclusions
+	assert.Equal(t, "'emit' & !'garant'", tsq(`"emitir não" -"garantia não"`))
+	assert.True(t, matches("Você pode emitir a nota hoje", `"emitir não" -"garantia não"`))
+	assert.False(t, matches("Emitir sem garantia é possível", `"emitir não" -"garantia não"`))
+
+	// exclusions and OR are untouched
+	assert.Equal(t, "'foo' & !'bar'", tsq("foo -bar"))
+	assert.Equal(t, "!'garant'", tsq(`-"garantia"`))
+	assert.Equal(t, "'foo'", tsq("foo OR não"))
+	assert.Equal(t, "'foo'", tsq("não OR foo"))
+	assert.Equal(t, "'foo' | 'bar'", tsq("foo or or bar"))
+	assert.Equal(t, "'foo'", tsq("-não foo"))
+}
+
+// End to end through the retriever: the same two cases, against real chunks.
+func TestSearch_CompoundsAndPhrasesThroughTheRetriever(t *testing.T) {
+	db, org, r := setup(t)
+	add(t, db, org, nil, nil, "Relatório de qualidade", "A não-conformidade encontrada no lote foi registrada.")
+	add(t, db, org, nil, nil, "Política de troca", "Trocas seguem a política geral da loja, sem relação com auditorias.")
+	add(t, db, org, nil, nil, "Emissão", "Para emitir nota basta clicar no botão. Depois a nota fiscal é enviada ao cliente.")
+	add(t, db, org, nil, nil, "Só emissão", "Para emitir nota basta clicar no botão e conferir os dados.")
+
+	assert.Equal(t, []string{"Relatório de qualidade"}, titles(search(t, r, org, nil, nil, "não-conformidade", 10)),
+		"only the text that has the compound, never the ones that lack it")
+	assert.Equal(t, []string{"Relatório de qualidade"}, titles(search(t, r, org, nil, nil, "nao-conformidade", 10)))
+	assert.Equal(t, []string{"Emissão"}, titles(search(t, r, org, nil, nil, `"emitir nota" "nota fiscal"`, 10)))
+	assert.Equal(t, []string{"Só emissão"}, titles(search(t, r, org, nil, nil, `"emitir nota" -"nota fiscal"`, 10)))
+
+	// one rule for both sides: what is indexed is exactly SearchForm of the stored text
+	var chunks []models.KnowledgeChunk
+	require.NoError(t, db.Where("organization_id = ?", org).Find(&chunks).Error)
+	require.NotEmpty(t, chunks)
+	for _, c := range chunks {
+		assert.Equal(t, knowledge.SearchForm(c.Content), c.SearchText)
+		assert.Equal(t, knowledge.SearchForm(c.Heading), c.SearchHeading)
+	}
+}

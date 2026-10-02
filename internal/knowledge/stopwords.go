@@ -1,7 +1,6 @@
 package knowledge
 
 import (
-	"regexp"
 	"strings"
 	"unicode"
 )
@@ -37,63 +36,145 @@ var foldedStopwords = func() map[string]bool {
 	return m
 }()
 
-var (
-	emptyQuotes   = regexp.MustCompile(`-?"\s*"`)
-	quoteInner    = regexp.MustCompile(`(^|\s)"\s+`) // opening quote followed by spaces (a removed word)
-	quoteInnerEnd = regexp.MustCompile(`\s+"(\s|$)`) // spaces before a closing quote
-)
-
 func isWordRune(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' }
 
-// SearchForm is what is indexed and what is searched: FoldForSearch, then the
-// folded stop words removed as WHOLE WORDS. Everything that is not a word (quotes,
-// "-", spaces, punctuation) is kept as is, so websearch syntax keeps its structure;
-// the remnants a removal can leave (empty quotes, a lone "-", a dangling "or") are
-// cleaned up.
+// SearchForm is what is indexed and what is searched (the ONLY transformation
+// shared by both): FoldForSearch, then the folded stop words removed.
+//
+// It reads the text the way websearch_to_tsquery does and keeps that syntax intact:
+//
+//	"a phrase"      a quoted phrase is one item; stop words inside it are dropped,
+//	                and a phrase left empty disappears
+//	-term, -"x y"   a "-" at the START of an item is an exclusion operator
+//	or              a whole word "or" between items is the OR operator
+//	foo-bar         a "-" between letters is part of the word (a compound): the
+//	                compound is kept whole, stop-word parts included ("nao-conformidade"
+//	                stays "nao-conformidade"); it never turns into "-conformidade"
+//
+// A stop word is removed only when it stands alone. Whatever a removal leaves
+// behind (an empty item, a lone "-", an "or" with nothing on one side) is dropped.
+// An unterminated quote is ignored. Items are joined by single spaces.
 func SearchForm(s string) string {
 	rs := []rune(FoldForSearch(s))
-	var b strings.Builder
+	var items []string
 	for i := 0; i < len(rs); {
-		if !isWordRune(rs[i]) {
-			b.WriteRune(rs[i])
+		switch c := rs[i]; {
+		case unicode.IsSpace(c):
+			i++
+		case c == '"':
+			end := indexRune(rs, '"', i+1)
+			if end < 0 {
+				i++ // unterminated quote: ignore the stray character
+				continue
+			}
+			items = appendPhrase(items, false, rs[i+1:end])
+			i = end + 1
+		case c == '-' && i+1 < len(rs) && (rs[i+1] == '"' || isWordRune(rs[i+1])):
+			i++ // exclusion operator: it opens an item
+			if rs[i] == '"' {
+				end := indexRune(rs, '"', i+1)
+				if end < 0 {
+					i++
+					continue
+				}
+				items = appendPhrase(items, true, rs[i+1:end])
+				i = end + 1
+				continue
+			}
+			j := termEnd(rs, i)
+			items = appendTerm(items, true, rs[i:j])
+			i = j
+		case c == '-':
+			i++ // a lone hyphen is neither an operator nor a word
+		default:
+			j := termEnd(rs, i)
+			items = appendTerm(items, false, rs[i:j])
+			i = j
+		}
+	}
+	return joinItems(items)
+}
+
+func indexRune(rs []rune, r rune, from int) int {
+	for i := from; i < len(rs); i++ {
+		if rs[i] == r {
+			return i
+		}
+	}
+	return -1
+}
+
+// termEnd is the end of the bare term starting at i: up to whitespace or a quote.
+func termEnd(rs []rune, i int) int {
+	for i < len(rs) && !unicode.IsSpace(rs[i]) && rs[i] != '"' {
+		i++
+	}
+	return i
+}
+
+func hasWordRune(s string) bool { return strings.IndexFunc(s, isWordRune) >= 0 }
+
+// dropStopwords removes the stop words that stand alone in term. A word joined to
+// another by a hyphen ("nao-conformidade", "so-leitura") is part of a compound and is kept.
+func dropStopwords(term []rune) string {
+	var b strings.Builder
+	for i := 0; i < len(term); {
+		if !isWordRune(term[i]) {
+			b.WriteRune(term[i])
 			i++
 			continue
 		}
 		j := i
-		for j < len(rs) && isWordRune(rs[j]) {
+		for j < len(term) && isWordRune(term[j]) {
 			j++
 		}
-		if w := string(rs[i:j]); !foldedStopwords[w] {
-			b.WriteString(w)
+		compound := (i >= 2 && term[i-1] == '-' && isWordRune(term[i-2])) ||
+			(j+1 < len(term) && term[j] == '-' && isWordRune(term[j+1]))
+		if compound || !foldedStopwords[string(term[i:j])] {
+			b.WriteString(string(term[i:j]))
 		}
 		i = j
 	}
-	return tidySyntax(b.String())
+	return b.String()
 }
 
-// tidySyntax repairs what removing a word can leave behind: empty quotes (with an
-// optional "-" in front), an operator "-" with no word, and "or" at the start, at
-// the end or next to another "or".
-func tidySyntax(s string) string {
-	for {
-		t := emptyQuotes.ReplaceAllString(s, " ")
-		if t == s {
-			break
-		}
-		s = t
+func appendTerm(items []string, neg bool, term []rune) []string {
+	t := dropStopwords(term)
+	if !hasWordRune(t) {
+		return items // nothing left but punctuation
 	}
-	s = quoteInner.ReplaceAllString(s, `$1"`)
-	s = quoteInnerEnd.ReplaceAllString(s, `"$1`)
-	words := strings.Fields(s)
-	out := make([]string, 0, len(words))
-	for _, w := range words {
-		if w == "-" {
+	if neg {
+		return append(items, "-"+t)
+	}
+	return append(items, t) // a plain "or" stays: joinItems treats it as the operator
+}
+
+func appendPhrase(items []string, neg bool, content []rune) []string {
+	var words []string
+	for _, w := range strings.Fields(string(content)) {
+		if t := dropStopwords([]rune(w)); hasWordRune(t) {
+			words = append(words, t)
+		}
+	}
+	if len(words) == 0 {
+		return items
+	}
+	p := `"` + strings.Join(words, " ") + `"`
+	if neg {
+		p = "-" + p
+	}
+	return append(items, p)
+}
+
+// joinItems joins the items and drops an "or" that has nothing on one side
+// (at the start, at the end, or right after another "or").
+func joinItems(items []string) string {
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		if it == "or" && (len(out) == 0 || out[len(out)-1] == "or") {
 			continue
 		}
-		if w == "or" && (len(out) == 0 || out[len(out)-1] == "or") {
-			continue
-		}
-		out = append(out, w)
+		out = append(out, it)
 	}
 	for len(out) > 0 && out[len(out)-1] == "or" {
 		out = out[:len(out)-1]
