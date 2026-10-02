@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/config"
+	"github.com/shridarpatil/whatomate/internal/knowledge"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/postgres"
@@ -72,6 +73,10 @@ func GetMigrationModels() []MigrationModel {
 		{"WhatsAppAccount", &models.WhatsAppAccount{}},
 		{"XProcessIntegration", &models.XProcessIntegration{}},
 		{"SalesOpportunityXProcessLink", &models.SalesOpportunityXProcessLink{}},
+
+		// Knowledge base (Fase 8A)
+		{"KnowledgeDocument", &models.KnowledgeDocument{}},
+		{"KnowledgeChunk", &models.KnowledgeChunk{}},
 		{"Contact", &models.Contact{}},
 		{"Tag", &models.Tag{}},
 		{"Message", &models.Message{}},
@@ -372,7 +377,7 @@ func getIndexes() []string {
 
 // CreateIndexes creates additional indexes not handled by GORM tags
 func CreateIndexes(db *gorm.DB) error {
-	for _, idx := range getIndexes() {
+	for _, idx := range append(getIndexes(), knowledge.SchemaSQL...) {
 		if err := db.Exec(idx).Error; err != nil {
 			return fmt.Errorf("failed to create index: %w", err)
 		}

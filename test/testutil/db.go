@@ -160,6 +160,9 @@ func runMigrations(db *gorm.DB) error {
 		// X2 ERP integration
 		&models.XProcessIntegration{},
 		&models.SalesOpportunityXProcessLink{},
+		// Knowledge base
+		&models.KnowledgeDocument{},
+		&models.KnowledgeChunk{},
 	)
 }
 
@@ -224,6 +227,8 @@ func cleanupTables(db *gorm.DB) {
 		// X2 ERP integration
 		"xprocess_integrations",
 		"sales_opportunity_xprocess_links",
+		"knowledge_chunks",
+		"knowledge_documents",
 		// Roles and permissions
 		"role_permissions",
 		"custom_roles",
@@ -290,6 +295,8 @@ func TruncateTables(db *gorm.DB) {
 		"branding_settings",
 		"xprocess_integrations",
 		"sales_opportunity_xprocess_links",
+		"knowledge_chunks",
+		"knowledge_documents",
 		"role_permissions",
 		"custom_roles",
 		"permissions",

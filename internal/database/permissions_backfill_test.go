@@ -352,3 +352,44 @@ func TestBackfillOccurrenceProcessesPermission_ReachesBuiltInSystemAdminRole(t *
 		assert.Contains(t, keys, k)
 	}
 }
+
+func TestBackfillKnowledgePermissions_OnlyTheSystemAdminRole(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	cleanAll(t, db)
+	require.NoError(t, database.SeedPermissionsAndRoles(db))
+
+	// An existing organization: its roles predate the knowledge permissions.
+	var old []models.Permission
+	require.NoError(t, db.Where("resource <> ?", models.ResourceKnowledge).Find(&old).Error)
+	org := testutil.CreateTestOrganization(t, db)
+	admin := testutil.CreateTestRoleExact(t, db, org.ID, "admin", true, false, old)
+	manager := testutil.CreateTestRoleExact(t, db, org.ID, "manager", true, false, old)
+	custom := testutil.CreateTestRoleExact(t, db, testutil.CreateTestOrganization(t, db).ID, "admin", false, false, old) // user-made role named admin
+	require.NotContains(t, roleKeys(t, db, admin.ID), "knowledge:read")
+
+	require.NoError(t, database.BackfillKnowledgePermissions(db, testLog()))
+
+	assert.Contains(t, roleKeys(t, db, admin.ID), "knowledge:read")
+	assert.Contains(t, roleKeys(t, db, admin.ID), "knowledge:write")
+	assert.NotContains(t, roleKeys(t, db, manager.ID), "knowledge:read", "managers get nothing in 8A")
+	assert.NotContains(t, roleKeys(t, db, manager.ID), "knowledge:write")
+	assert.NotContains(t, roleKeys(t, db, custom.ID), "knowledge:read", "only the SYSTEM admin role")
+
+	// Idempotent, and an admin who later revokes it is not re-granted.
+	n := len(roleKeys(t, db, admin.ID))
+	require.NoError(t, database.BackfillKnowledgePermissions(db, testLog()))
+	assert.Equal(t, n, len(roleKeys(t, db, admin.ID)))
+	require.NoError(t, db.Exec(`DELETE FROM role_permissions WHERE custom_role_id = ? AND permission_id IN (SELECT id FROM permissions WHERE resource = 'knowledge' AND action = 'write')`, admin.ID).Error)
+	require.NoError(t, database.BackfillKnowledgePermissions(db, testLog()))
+	assert.NotContains(t, roleKeys(t, db, admin.ID), "knowledge:write")
+}
+
+func TestKnowledgePermissions_DefaultsGoToAdminOnly(t *testing.T) {
+	roles := models.SystemRolePermissions()
+	assert.Contains(t, roles["admin"], "knowledge:read")
+	assert.Contains(t, roles["admin"], "knowledge:write")
+	for _, r := range []string{"manager", "agent"} {
+		assert.NotContains(t, roles[r], "knowledge:read", r)
+		assert.NotContains(t, roles[r], "knowledge:write", r)
+	}
+}

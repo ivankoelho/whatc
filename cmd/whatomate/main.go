@@ -46,6 +46,8 @@ func main() {
 		runServer(os.Args[2:])
 	case "worker":
 		runWorker(os.Args[2:])
+	case "knowledge":
+		runKnowledge(os.Args[2:])
 	case "version":
 		fmt.Printf("Whatomate %s (built %s)\n", Version, BuildTime)
 	case "help", "-h", "--help":
@@ -66,6 +68,7 @@ Usage:
 Commands:
   server    Start the API server (with optional embedded workers)
   worker    Start background workers only (no API server)
+  knowledge Knowledge base tools (knowledge import-manuals -org <id> [-dir manuais])
   version   Show version information
   help      Show this help message
 
@@ -201,6 +204,11 @@ func runServer(args []string) {
 		// own guard rather than piggybacking on an existing one.
 		if err := database.BackfillXProcessIntegrationPermission(db, lo); err != nil {
 			lo.Fatal("XProcess integration permission backfill failed", "error", err)
+		}
+
+		// Same window: knowledge is a new resource; only the system admin role gets it.
+		if err := database.BackfillKnowledgePermissions(db, lo); err != nil {
+			lo.Fatal("Knowledge permissions backfill failed", "error", err)
 		}
 
 		// Same window: occurrences.processes is a new resource added after the
@@ -842,6 +850,14 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/xprocess-integration", app.GetXProcessIntegration)
 	g.PUT("/api/xprocess-integration", app.UpsertXProcessIntegration)
 	g.POST("/api/xprocess-integration/test", app.TestXProcessIntegrationConnection)
+
+	// Knowledge base (Fase 8A)
+	g.GET("/api/knowledge/search", app.SearchKnowledge)
+	g.GET("/api/knowledge/documents", app.ListKnowledgeDocuments)
+	g.POST("/api/knowledge/documents", app.CreateKnowledgeDocument)
+	g.GET("/api/knowledge/documents/{id}", app.GetKnowledgeDocument)
+	g.PUT("/api/knowledge/documents/{id}", app.UpdateKnowledgeDocument)
+	g.DELETE("/api/knowledge/documents/{id}", app.DeleteKnowledgeDocument)
 
 	// CRM — unidades
 	g.GET("/api/units", app.ListUnits)
