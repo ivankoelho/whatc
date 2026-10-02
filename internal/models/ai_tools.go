@@ -56,10 +56,12 @@ type AIToolCall struct {
 	ID             uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
 	OrganizationID uuid.UUID `gorm:"type:uuid;not null;index:idx_ai_tool_calls_org_requested,priority:1;index:idx_ai_tool_calls_org_tool,priority:1" json:"organization_id"`
 	RunID          uuid.UUID `gorm:"type:uuid;not null;index" json:"run_id"`
-	Step           int       `json:"step"`
-	CallID         string    `gorm:"size:128" json:"call_id"` // the provider's id; unique only within the run
-	ToolName       string    `gorm:"size:64;index:idx_ai_tool_calls_org_tool,priority:2" json:"tool_name"`
-	Risk           string    `gorm:"size:10" json:"risk,omitempty"`
+	// Step is the ORDER of the call within its run_id (1, 2, 3...), not the number of the
+	// RunToolLoop step: the Tool port does not expose round boundaries.
+	Step     int    `json:"step"`
+	CallID   string `gorm:"size:128" json:"call_id"` // the provider's id; unique only within the run
+	ToolName string `gorm:"size:64;index:idx_ai_tool_calls_org_tool,priority:2" json:"tool_name"`
+	Risk     string `gorm:"size:10" json:"risk,omitempty"`
 
 	ActorKind        string     `gorm:"size:10;not null" json:"actor_kind"`
 	ActorRef         string     `gorm:"size:50" json:"actor_ref"` // the feature that asked, e.g. chatbot_reply

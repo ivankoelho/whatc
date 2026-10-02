@@ -11,6 +11,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/assignment"
 	"github.com/shridarpatil/whatomate/internal/calling"
 	"github.com/shridarpatil/whatomate/internal/config"
+	"github.com/shridarpatil/whatomate/internal/aitools"
 	"github.com/shridarpatil/whatomate/internal/knowledge"
 	"github.com/shridarpatil/whatomate/internal/queue"
 	"github.com/shridarpatil/whatomate/internal/storage"
@@ -38,6 +39,9 @@ type App struct {
 	// KnowledgeRetriever replaces the PostgreSQL full-text retriever the chatbot uses for
 	// Knowledge (tests only; nil = LexicalRetriever on DB).
 	KnowledgeRetriever knowledge.Retriever
+	// AIToolCatalog is the catalog of tools the chatbot's AI may use (Fase 9B). nil = the
+	// production catalog, which is empty; tests inject their own.
+	AIToolCatalog *aitools.Catalog
 	// Assigner provides shared team-based agent assignment (used by both chat and call transfers)
 	Assigner *assignment.Assigner
 	// CallManager handles WebRTC call sessions (nil when calling is disabled)

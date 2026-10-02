@@ -18,7 +18,7 @@ type Logger interface {
 // Attempt is what is known about a tool call when it is recorded. Call.Opaque is never read.
 type Attempt struct {
 	RunID uuid.UUID
-	Step  int // the ordinal of the call within its run, starting at 1
+	Step  int // the order of the call within its run (1, 2, 3...), not the RunToolLoop step number
 	Call  ai.ToolCall
 	Risk  Risk // empty for a tool that is not in the catalog
 	Actor Actor

@@ -856,6 +856,10 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.PUT("/api/xprocess-integration", app.UpsertXProcessIntegration)
 	g.POST("/api/xprocess-integration/test", app.TestXProcessIntegrationConnection)
 
+	// AI tools governance (Fase 9B): which catalog tools the organization enabled
+	g.GET("/api/ai-tools", app.ListAITools)
+	g.PUT("/api/ai-tools/{name}", app.SetAIToolEnabled)
+
 	// Knowledge base (Fase 8A)
 	g.GET("/api/knowledge/search", app.SearchKnowledge)
 	g.GET("/api/knowledge/documents", app.ListKnowledgeDocuments)
