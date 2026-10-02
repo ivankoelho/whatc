@@ -41,9 +41,9 @@ ORDER BY score DESC, c.document_id, c.chunk_index
 LIMIT ?`
 
 func (l LexicalRetriever) Retrieve(ctx context.Context, q Query) ([]Hit, error) {
-	text := FoldForSearch(q.Text)
+	text := SearchForm(q.Text)
 	if text == "" {
-		return nil, nil
+		return []Hit{}, nil // an empty list, never null in the JSON
 	}
 	var rows []lexicalRow
 	// A nil *uuid.UUID binds as NULL, and "unit_id = NULL" is never true: no
@@ -82,6 +82,11 @@ var SchemaSQL = []string{
 	`CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_search ON knowledge_chunks USING GIN (search_vector)`,
 	`CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_scope ON knowledge_chunks(organization_id, status, unit_id, department_id)`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledge_docs_org_origin ON knowledge_documents(organization_id, origin) WHERE origin <> '' AND deleted_at IS NULL`,
+	// archived_by is a closed list: '' (not archived by anyone), 'user' or 'import'.
+	`DO $$ BEGIN
+		ALTER TABLE knowledge_documents ADD CONSTRAINT chk_knowledge_archived_by CHECK (archived_by IN ('', 'user', 'import'));
+	EXCEPTION WHEN duplicate_object THEN NULL;
+	END $$`,
 }
 
 // VisibilityFor derives the visibility from the scope.

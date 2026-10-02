@@ -68,7 +68,7 @@ Usage:
 Commands:
   server    Start the API server (with optional embedded workers)
   worker    Start background workers only (no API server)
-  knowledge Knowledge base tools (knowledge import-manuals -org <id> [-dir manuais])
+  knowledge Knowledge base tools (knowledge import-manuals | reindex -org <id>)
   version   Show version information
   help      Show this help message
 
@@ -856,6 +856,10 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/knowledge/documents", app.ListKnowledgeDocuments)
 	g.POST("/api/knowledge/documents", app.CreateKnowledgeDocument)
 	g.GET("/api/knowledge/documents/{id}", app.GetKnowledgeDocument)
+	g.GET("/api/knowledge/documents/{id}/chunks", app.ListKnowledgeChunks)
+	g.POST("/api/knowledge/documents/{id}/reindex", app.ReindexKnowledgeDocument)
+	g.POST("/api/knowledge/reindex", app.ReindexKnowledge)
+	g.GET("/api/knowledge/status", app.KnowledgeIndexStatus)
 	g.PUT("/api/knowledge/documents/{id}", app.UpdateKnowledgeDocument)
 	g.DELETE("/api/knowledge/documents/{id}", app.DeleteKnowledgeDocument)
 

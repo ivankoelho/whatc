@@ -43,6 +43,10 @@ type KnowledgeDocument struct {
 	Body        string     `gorm:"type:text" json:"body,omitempty"`
 	ContentHash string     `gorm:"size:64" json:"content_hash,omitempty"`
 	Status      string     `gorm:"size:20;not null;default:active" json:"status"`
+	// ArchivedBy says who archived the document, so the manual importer only
+	// reactivates what it archived itself: "" (not archived), "user" or "import"
+	// (see KnowledgeArchivedBy*; a CHECK constraint enforces the three values).
+	ArchivedBy string `gorm:"size:10;not null;default:''" json:"archived_by"`
 	CreatedByID *uuid.UUID `gorm:"type:uuid" json:"created_by_id,omitempty"`
 	UpdatedByID *uuid.UUID `gorm:"type:uuid" json:"updated_by_id,omitempty"`
 }
@@ -69,7 +73,18 @@ type KnowledgeChunk struct {
 	Content        string     `gorm:"type:text;not null" json:"content"`
 	SearchHeading  string     `gorm:"type:text" json:"-"`
 	SearchText     string     `gorm:"type:text" json:"-"`
+	// IndexVersion is the version of the INDEXING STRATEGY the chunk was built with
+	// (knowledge.IndexVersion), not a document revision: editing a document rebuilds
+	// its chunks at the current version; only a change of the strategy makes chunks stale.
+	IndexVersion int `gorm:"not null;default:1" json:"index_version"`
 	Metadata       JSONB      `gorm:"type:jsonb;default:'{}'" json:"metadata"`
 }
 
 func (KnowledgeChunk) TableName() string { return "knowledge_chunks" }
+
+// Who archived a knowledge document (KnowledgeDocument.ArchivedBy).
+const (
+	KnowledgeArchivedByNone   = ""
+	KnowledgeArchivedByUser   = "user"
+	KnowledgeArchivedByImport = "import"
+)

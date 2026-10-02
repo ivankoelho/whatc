@@ -246,9 +246,9 @@ func TestStore_ScopeStatusAndDeleteFollowTheDocument(t *testing.T) {
 	require.NotNil(t, c.UnitID)
 
 	// archive: out of search, kept; reactivate: back
-	require.NoError(t, knowledge.SetStatus(db, d, models.KnowledgeStatusArchived))
+	setStatus(t, db, d, models.KnowledgeStatusArchived)
 	assert.Empty(t, search(t, r, org, &unit, nil, "fornecedores", 5))
-	require.NoError(t, knowledge.SetStatus(db, d, models.KnowledgeStatusActive))
+	setStatus(t, db, d, models.KnowledgeStatusActive)
 	assert.Len(t, search(t, r, org, &unit, nil, "fornecedores", 5), 1)
 
 	// delete: gone from search and no chunks left
@@ -295,7 +295,7 @@ func TestImportManuals_IdempotentAndUpdates(t *testing.T) {
 	file := filepath.Join(dir, "guia.html")
 	require.NoError(t, os.WriteFile(file, []byte(manualFixture), 0o600))
 
-	res, err := knowledge.ImportManuals(db, org, nil, nil, dir)
+	res, err := knowledge.ImportManuals(db, org, nil, nil, dir, false)
 	require.NoError(t, err)
 	assert.Equal(t, knowledge.ImportResult{Created: 2}, res)
 
@@ -304,13 +304,13 @@ func TestImportManuals_IdempotentAndUpdates(t *testing.T) {
 	assert.Equal(t, "manual/guia.html#fila-a", h[0].Citation.Origin)
 	assert.Equal(t, "fila-a", h[0].Citation.Anchor)
 
-	res, err = knowledge.ImportManuals(db, org, nil, nil, dir)
+	res, err = knowledge.ImportManuals(db, org, nil, nil, dir, false)
 	require.NoError(t, err)
 	assert.Equal(t, knowledge.ImportResult{Unchanged: 2}, res, "same content: nothing rewritten")
 
 	changed := strings.Replace(manualFixture, "clica em assumir conversa agora", "usa o botão pegar atendimento", 1)
 	require.NoError(t, os.WriteFile(file, []byte(changed), 0o600))
-	res, err = knowledge.ImportManuals(db, org, nil, nil, dir)
+	res, err = knowledge.ImportManuals(db, org, nil, nil, dir, false)
 	require.NoError(t, err)
 	assert.Equal(t, knowledge.ImportResult{Updated: 1, Unchanged: 1}, res)
 	assert.NotEmpty(t, search(t, r, org, nil, nil, "pegar atendimento", 5))
@@ -324,7 +324,7 @@ func TestImportManuals_ScopedToAUnit(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "g.html"), []byte(manualFixture), 0o600))
 	unit := uuid.New()
-	_, err := knowledge.ImportManuals(db, org, &unit, nil, dir)
+	_, err := knowledge.ImportManuals(db, org, &unit, nil, dir, false)
 	require.NoError(t, err)
 	assert.Empty(t, search(t, r, org, nil, nil, "assumir fila", 5))
 	assert.NotEmpty(t, search(t, r, org, &unit, nil, "assumir fila", 5))
@@ -337,7 +337,7 @@ func TestImportManuals_RealManuals(t *testing.T) {
 		t.Skip("manuais/ not present")
 	}
 	db, org, r := setup(t)
-	res, err := knowledge.ImportManuals(db, org, nil, nil, dir)
+	res, err := knowledge.ImportManuals(db, org, nil, nil, dir, false)
 	require.NoError(t, err)
 	t.Logf("imported %d sections", res.Created)
 	assert.Greater(t, res.Created, 10)
@@ -351,4 +351,10 @@ func TestImportManuals_RealManuals(t *testing.T) {
 		assert.LessOrEqual(t, len(d.Body), 400_000)
 	}
 	assert.NotEmpty(t, search(t, r, org, nil, nil, "visibilidade de conversas", 5))
+}
+
+func setStatus(t *testing.T, db *gorm.DB, d *models.KnowledgeDocument, status string) {
+	t.Helper()
+	knowledge.SetArchivedState(d, status, models.KnowledgeArchivedByUser)
+	require.NoError(t, knowledge.ApplyScope(db, d))
 }
