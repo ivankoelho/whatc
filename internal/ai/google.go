@@ -169,6 +169,10 @@ func finishFromGoogle(r string) FinishReason {
 // googleOpaque is what the Google adapter keeps in ToolCall.Opaque (transport state, never read
 // elsewhere): the thoughtSignature that must go back on the same functionCall part, and whether
 // the call's id was made up locally because Google sent none.
+// PROVISIONAL: that a signature belongs to, and must return on, the functionCall part that carried
+// it is the conservative reading of the API, not a confirmed fact. It is covered only by structural
+// tests (a signature is never moved to another call; one on a text part is dropped). A real
+// Gemini 3 test is needed before relying on it.
 type googleOpaque struct {
 	Synth bool   `json:"synth,omitempty"`
 	Sig   string `json:"sig,omitempty"`
@@ -232,15 +236,20 @@ func googleContent(m Message, lastCalls []ToolCall) map[string]any {
 	return map[string]any{"role": role, "parts": []map[string]string{{"text": m.Content}}}
 }
 
-// googleAllowed is the conservative subset of JSON Schema keywords sent in
-// functionDeclarations[].parameters (the OpenAPI-style Schema). Anything else (additionalProperties,
-// $ref, oneOf, default...) is rejected here with a clear error instead of failing inside the provider.
+// googleAllowed is a restriction of the GEMINI ADAPTER ONLY, not of the neutral ToolDefinition
+// (whose Parameters is any JSON Schema object; each adapter validates what its provider takes).
+// PROVISIONAL: it is a conservative subset of JSON Schema keywords for
+// functionDeclarations[].parameters (the OpenAPI-style Schema), chosen from the field list of the
+// official reference. It has NOT been confirmed against the real Gemini API and is covered only by
+// structural tests. Anything outside it (additionalProperties, $ref, oneOf, default...) is rejected
+// with a clear error instead of failing inside the provider. Revisit with a real Gemini test.
 var googleAllowed = map[string]bool{
 	"type": true, "format": true, "description": true, "nullable": true, "enum": true, "properties": true,
 	"required": true, "items": true, "minItems": true, "maxItems": true, "minimum": true, "maximum": true,
 	"title": true, "anyOf": true, "propertyOrdering": true,
 }
 
+// googleSchemaOK applies googleAllowed (Gemini adapter only, provisional) to a tool's schema.
 func googleSchemaOK(raw json.RawMessage) error {
 	var node any
 	if err := json.Unmarshal(raw, &node); err != nil {

@@ -67,7 +67,8 @@ func (l Limits) withDefaults() Limits {
 // ErrToolLoopLimit is returned when the model keeps asking for tools past a limit.
 var ErrToolLoopLimit = errors.New("tool loop limit reached")
 
-// LoopResult is what the loop did, also returned (partial) together with an error.
+// LoopResult is what the loop did, also returned (partial) together with an error. It is meant
+// for callers that may persist or audit it, so no ToolCall in it carries Opaque.
 type LoopResult struct {
 	Response  *Response   // the last provider answer; its Text is the reply when the loop succeeded
 	Responses []*Response // every provider answer, in order, each with its own Usage
@@ -102,8 +103,10 @@ func RunToolLoop(ctx context.Context, p Provider, req Request, r ToolResolver, l
 		if err != nil {
 			return nil, err
 		}
-		res.Response = resp
-		res.Responses = append(res.Responses, resp)
+		out := *resp // what leaves the loop never carries ToolCall.Opaque (transport state)
+		out.ToolCalls = withoutOpaque(resp.ToolCalls)
+		res.Response = &out
+		res.Responses = append(res.Responses, &out)
 		res.Usage.InputTokens += resp.Usage.InputTokens
 		res.Usage.OutputTokens += resp.Usage.OutputTokens
 		res.Usage.TotalTokens += resp.Usage.TotalTokens
@@ -129,8 +132,9 @@ func RunToolLoop(ctx context.Context, p Provider, req Request, r ToolResolver, l
 		res.ToolCalls += len(resp.ToolCalls)
 		asst := Message{Role: RoleAssistant, Content: resp.Text, ToolCalls: resp.ToolCalls}
 		tool := Message{Role: RoleTool, ToolResults: results}
+		req.Messages = append(req.Messages, asst, tool) // replay keeps Opaque, for the adapter only
+		asst.ToolCalls = withoutOpaque(asst.ToolCalls)
 		res.Messages = append(res.Messages, asst, tool)
-		req.Messages = append(req.Messages, asst, tool)
 	}
 
 	// Out of steps: one last answer with tools switched off, to get text for the customer.
@@ -181,6 +185,19 @@ func runOne(ctx context.Context, r ToolResolver, c ToolCall, lim Limits) (res To
 	out, err := tool.Execute(ctx, c)
 	if err != nil {
 		return fail("error: tool failed")
+	}
+	return out
+}
+
+// withoutOpaque copies calls with the adapter's transport state removed.
+func withoutOpaque(calls []ToolCall) []ToolCall {
+	if calls == nil {
+		return nil
+	}
+	out := make([]ToolCall, len(calls))
+	for i, c := range calls {
+		c.Opaque = nil
+		out[i] = c
 	}
 	return out
 }
