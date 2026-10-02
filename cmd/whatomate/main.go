@@ -211,6 +211,11 @@ func runServer(args []string) {
 			lo.Fatal("Knowledge permissions backfill failed", "error", err)
 		}
 
+		// Same window: ai_tools is a new resource; only the system admin role gets it.
+		if err := database.BackfillAIToolsPermissions(db, lo); err != nil {
+			lo.Fatal("AI tools permissions backfill failed", "error", err)
+		}
+
 		// Same window: occurrences.processes is a new resource added after the
 		// what-happened backfill above, so it needs its own guard rather than
 		// piggybacking on that one's already-migrated check.

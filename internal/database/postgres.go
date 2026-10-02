@@ -77,6 +77,10 @@ func GetMigrationModels() []MigrationModel {
 		// Knowledge base (Fase 8A)
 		{"KnowledgeDocument", &models.KnowledgeDocument{}},
 		{"KnowledgeChunk", &models.KnowledgeChunk{}},
+
+		// AI tools governance (Fase 9B)
+		{"AIToolSetting", &models.AIToolSetting{}},
+		{"AIToolCall", &models.AIToolCall{}},
 		{"Contact", &models.Contact{}},
 		{"Tag", &models.Tag{}},
 		{"Message", &models.Message{}},

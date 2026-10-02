@@ -393,3 +393,44 @@ func TestKnowledgePermissions_DefaultsGoToAdminOnly(t *testing.T) {
 		assert.NotContains(t, roles[r], "knowledge:write", r)
 	}
 }
+
+func TestBackfillAIToolsPermissions_OnlyTheSystemAdminRole(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	cleanAll(t, db)
+	require.NoError(t, database.SeedPermissionsAndRoles(db))
+
+	// An existing organization: its roles predate the ai_tools permissions.
+	var old []models.Permission
+	require.NoError(t, db.Where("resource <> ?", models.ResourceAITools).Find(&old).Error)
+	org := testutil.CreateTestOrganization(t, db)
+	admin := testutil.CreateTestRoleExact(t, db, org.ID, "admin", true, false, old)
+	manager := testutil.CreateTestRoleExact(t, db, org.ID, "manager", true, false, old)
+	custom := testutil.CreateTestRoleExact(t, db, testutil.CreateTestOrganization(t, db).ID, "admin", false, false, old) // user-made role named admin
+	require.NotContains(t, roleKeys(t, db, admin.ID), "ai_tools:write")
+
+	require.NoError(t, database.BackfillAIToolsPermissions(db, testLog()))
+
+	assert.Contains(t, roleKeys(t, db, admin.ID), "ai_tools:read")
+	assert.Contains(t, roleKeys(t, db, admin.ID), "ai_tools:write")
+	assert.NotContains(t, roleKeys(t, db, manager.ID), "ai_tools:read")
+	assert.NotContains(t, roleKeys(t, db, manager.ID), "ai_tools:write")
+	assert.NotContains(t, roleKeys(t, db, custom.ID), "ai_tools:write", "only the SYSTEM admin role")
+
+	// Idempotent, and an admin who later revokes it is not re-granted.
+	n := len(roleKeys(t, db, admin.ID))
+	require.NoError(t, database.BackfillAIToolsPermissions(db, testLog()))
+	assert.Equal(t, n, len(roleKeys(t, db, admin.ID)))
+	require.NoError(t, db.Exec(`DELETE FROM role_permissions WHERE custom_role_id = ? AND permission_id IN (SELECT id FROM permissions WHERE resource = 'ai_tools' AND action = 'write')`, admin.ID).Error)
+	require.NoError(t, database.BackfillAIToolsPermissions(db, testLog()))
+	assert.NotContains(t, roleKeys(t, db, admin.ID), "ai_tools:write")
+}
+
+func TestAIToolsPermissions_DefaultsGoToAdminOnly(t *testing.T) {
+	roles := models.SystemRolePermissions()
+	assert.Contains(t, roles["admin"], "ai_tools:read")
+	assert.Contains(t, roles["admin"], "ai_tools:write")
+	for _, r := range []string{"manager", "agent"} {
+		assert.NotContains(t, roles[r], "ai_tools:read", r)
+		assert.NotContains(t, roles[r], "ai_tools:write", r)
+	}
+}

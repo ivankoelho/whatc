@@ -163,6 +163,9 @@ func runMigrations(db *gorm.DB) error {
 		// Knowledge base
 		&models.KnowledgeDocument{},
 		&models.KnowledgeChunk{},
+		// AI tools governance
+		&models.AIToolSetting{},
+		&models.AIToolCall{},
 	)
 }
 
@@ -189,6 +192,8 @@ func cleanupTables(db *gorm.DB) {
 		"keyword_rules",
 		"chatbot_settings",
 		"ai_usage_logs",
+		"ai_tool_calls",
+		"ai_tool_settings",
 		"ai_contexts",
 		"agent_transfers",
 		// WhatsApp tables

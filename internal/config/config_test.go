@@ -291,3 +291,42 @@ func TestLoad_KnowledgeRAGNeverBecomesTrueByAccident(t *testing.T) {
 	_, err := config.Load(writeConfig(t, ""))
 	assert.Error(t, err, "garbage is a configuration error, never 'on'")
 }
+
+// --- ai_tools.enabled: OFF unless explicitly true ---
+
+func TestLoad_AIToolsAreOffWhenAbsent(t *testing.T) {
+	cfg, err := config.Load(writeConfig(t, ""))
+	require.NoError(t, err)
+	assert.False(t, cfg.AITools.Enabled)
+
+	cfg, err = config.Load(writeConfig(t, "[ai_tools]\n"))
+	require.NoError(t, err)
+	assert.False(t, cfg.AITools.Enabled, "an empty [ai_tools] section does not enable it")
+
+	cfg, err = config.Load("")
+	require.NoError(t, err)
+	assert.False(t, cfg.AITools.Enabled, "no config file at all does not enable it")
+}
+
+func TestLoad_AIToolsCanBeEnabledFromFileOrEnv(t *testing.T) {
+	cfg, err := config.Load(writeConfig(t, "[ai_tools]\nenabled = true\n"))
+	require.NoError(t, err)
+	assert.True(t, cfg.AITools.Enabled)
+
+	t.Setenv("WHATOMATE_AI_TOOLS__ENABLED", "true")
+	cfg, err = config.Load(writeConfig(t, ""))
+	require.NoError(t, err)
+	assert.True(t, cfg.AITools.Enabled, "the environment can enable it")
+}
+
+func TestLoad_AIToolsNeverBecomeTrueByAccident(t *testing.T) {
+	for _, v := range []string{"", "false", "0", "False"} {
+		t.Setenv("WHATOMATE_AI_TOOLS__ENABLED", v)
+		cfg, err := config.Load(writeConfig(t, ""))
+		require.NoError(t, err, "value %q", v)
+		assert.False(t, cfg.AITools.Enabled, "value %q", v)
+	}
+	t.Setenv("WHATOMATE_AI_TOOLS__ENABLED", "banana")
+	_, err := config.Load(writeConfig(t, ""))
+	assert.Error(t, err, "garbage is a configuration error, never 'on'")
+}
