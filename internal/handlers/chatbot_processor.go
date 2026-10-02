@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/ai"
+	"github.com/shridarpatil/whatomate/internal/aitools"
 	"github.com/shridarpatil/whatomate/internal/contactutil"
 	"github.com/shridarpatil/whatomate/internal/knowledge"
 	"github.com/shridarpatil/whatomate/internal/models"
@@ -899,6 +900,12 @@ func (a *App) generateAIResponse(settings *models.ChatbotSettings, session *mode
 		meta.Account = session.WhatsAppAccount
 		contactID, sessionID := session.ContactID, session.ID
 		meta.ContactID, meta.SessionID = &contactID, &sessionID
+		// The scope of a tool run comes from the session, never from the model. Dormant unless
+		// ai_tools.enabled is on and an organization enabled a catalog tool (see governedTools).
+		meta.Tools = &aiToolsRun{
+			Scope: aitools.Scope{OrganizationID: settings.OrganizationID, ContactID: &contactID, SessionID: &sessionID, WhatsAppAccount: session.WhatsAppAccount},
+			Actor: aitools.AIActor(feature),
+		}
 	}
 
 	resp, err := a.completeAI(context.Background(), settings, meta, ai.Request{
