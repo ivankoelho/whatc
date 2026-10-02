@@ -845,8 +845,10 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 
 	// CRM — unidades
 	g.GET("/api/units", app.ListUnits)
+	g.GET("/api/units/xprocess-lojas", app.ListUnitXProcessLojas)
 	g.POST("/api/units", app.CreateUnit)
 	g.PUT("/api/units/{id}", app.UpdateUnit)
+	g.PUT("/api/units/{id}/xprocess-loja", app.SetUnitXProcessLoja)
 	g.DELETE("/api/units/{id}", app.DeleteUnit)
 
 	// CRM — departamentos

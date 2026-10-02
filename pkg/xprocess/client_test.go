@@ -184,3 +184,31 @@ func TestSummarizePedido_MissingOrMalformedFreightCountsAsZero(t *testing.T) {
 	assert.InDelta(t, 20.0, r.ValorTotal, 1e-9)
 	assert.InDelta(t, 2.5, r.ValorFrete, 1e-9)
 }
+
+func TestClient_ListarLojas_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/lojas", r.URL.Path)
+		assert.Equal(t, "test-key", r.Header.Get("x-api-key"))
+		_, _ = w.Write([]byte(`{"ok":true,"total":2,"lojas":[
+			{"cod_empresa":"40","razao_social_empresa":"ATACADAO DOS PISOS LTDA  (PORTO)","cnpj_empresa":"58.675.622/0003-61","data_referencia_dados":"2026-10-01T01:18:33"},
+			{"cod_empresa":"41","razao_social_empresa":"ATACADAO DOS PISOS LTDA  (SERRINHA)","cnpj_empresa":"58.675.622/0005-23","data_referencia_dados":"2026-10-01T01:18:33"}
+		]}`))
+	}))
+	defer srv.Close()
+
+	lojas, err := New(testLog(), srv.URL).ListarLojas(context.Background(), "test-key")
+	require.NoError(t, err)
+	require.Len(t, lojas, 2)
+	assert.Equal(t, Loja{CodEmpresa: "40", RazaoSocialEmpresa: "ATACADAO DOS PISOS LTDA  (PORTO)", CNPJEmpresa: "58.675.622/0003-61"}, lojas[0])
+}
+
+func TestClient_ListarLojas_ErrorStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"detail":"invalid key"}`))
+	}))
+	defer srv.Close()
+	_, err := New(testLog(), srv.URL).ListarLojas(context.Background(), "bad")
+	assert.Error(t, err)
+}
