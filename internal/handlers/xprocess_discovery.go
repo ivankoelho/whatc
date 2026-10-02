@@ -175,16 +175,22 @@ func findXProcessOrders(ctx context.Context, client *xprocess.Client, apiKey, do
 	return orders, len(items) >= limit, nil
 }
 
-// xprocessOrderLinkedElsewhere is the strict check used by reconciliation: does
-// another opportunity's link already hold this exact order (cod_empresa known)?
-func (a *App) xprocessOrderLinkedElsewhere(orgID uuid.UUID, codEmpresa, numPedido string, exceptOpportunityID uuid.UUID) bool {
-	if codEmpresa == "" {
-		return false
-	}
+// xprocessOrderHeldByOlderLink is the check reconciliation makes before acting on
+// a link: does ANOTHER opportunity's OLDER link already track this same order?
+// "Same order" = same number and the same company, or an older link X2 has not
+// answered yet (no cod_empresa) for the same documento.
+//
+// The OLDEST link owns the order and keeps being reconciled; only the newer one is
+// held back. Comparing ages (not mere existence) matters for duplicates that
+// already exist in the data: if each saw the other as "elsewhere", both would be
+// frozen forever, including cancellations.
+func (a *App) xprocessOrderHeldByOlderLink(link *models.SalesOpportunityXProcessLink, codEmpresa string) bool {
 	var n int64
 	a.DB.Model(&models.SalesOpportunityXProcessLink{}).
-		Where("organization_id = ? AND cod_empresa = ? AND num_pedido = ? AND sales_opportunity_id <> ?",
-			orgID, codEmpresa, numPedido, exceptOpportunityID).
+		Where("organization_id = ? AND num_pedido = ? AND sales_opportunity_id <> ?",
+			link.OrganizationID, link.NumPedido, link.SalesOpportunityID).
+		Where("((cod_empresa = ?) OR (cod_empresa IS NULL AND documento = ?))", codEmpresa, link.Documento).
+		Where("(created_at < ? OR (created_at = ? AND id < ?))", link.CreatedAt, link.CreatedAt, link.ID).
 		Count(&n)
 	return n > 0
 }

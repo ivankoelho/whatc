@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/handlers"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/xprocess"
@@ -464,4 +465,139 @@ func TestDiscovery_AnOldConvertedUnlinkedOpportunityDoesNotBlockTheMatch(t *test
 	e.run(t, newFakeX2(t, order("6801", "FECHADO", today())))
 	assert.Len(t, e.links(t, fresh), 1)
 	assert.Empty(t, e.links(t, old), "the old one is outside the window and is never touched")
+}
+
+// --- duplicates that already exist in the data, and concurrency ---
+
+// Two open links for the same order, as an older version allowed. The OLDEST owns
+// it and keeps being reconciled; only the newer one is held back. (A guard where
+// each side saw "the other" would freeze both forever, cancellations included.)
+func TestReconcile_PreExistingDuplicates_OlderLinkKeepsWorkingNewerIsHeld(t *testing.T) {
+	e := newDiscoveryEnv(t)
+	require.NoError(t, e.app.DB.Exec(`DROP INDEX IF EXISTS idx_sales_opp_xlink_open_order`).Error)
+	cod := "40"
+	older := e.convertedOpp(t, discoveryCPF, 24*time.Hour, time.Hour)
+	olderLink := models.SalesOpportunityXProcessLink{OrganizationID: e.org.ID, SalesOpportunityID: older.ID, NumPedido: "9001", Documento: discoveryCPF, CodEmpresa: &cod}
+	require.NoError(t, e.app.DB.Create(&olderLink).Error)
+	time.Sleep(15 * time.Millisecond)
+
+	newer := e.convertedOpp(t, "11144477735", 24*time.Hour, time.Hour)
+	newerLink := models.SalesOpportunityXProcessLink{OrganizationID: e.org.ID, SalesOpportunityID: newer.ID, NumPedido: "9001", Documento: "11144477735", CodEmpresa: &cod}
+	require.NoError(t, e.app.DB.Create(&newerLink).Error)
+
+	f := newFakeX2(t, order("9001", "FECHADO", today()))
+	client := xprocess.New(e.app.Log, f.srv.URL)
+
+	e.app.ReconcileXProcessLinkForTest(client, "key", &newerLink)
+	var n models.SalesOpportunityXProcessLink
+	require.NoError(t, e.app.DB.First(&n, "id = ?", newerLink.ID).Error)
+	assert.Nil(t, n.StatusXProcess, "the newer duplicate is held back")
+	assert.Nil(t, e.reload(t, newer).RealizedValue)
+
+	e.app.ReconcileXProcessLinkForTest(client, "key", &olderLink)
+	var o models.SalesOpportunityXProcessLink
+	require.NoError(t, e.app.DB.First(&o, "id = ?", olderLink.ID).Error)
+	require.NotNil(t, o.StatusXProcess, "the older link is not frozen by the duplicate")
+	assert.Equal(t, "FECHADO", *o.StatusXProcess)
+	require.NotNil(t, e.reload(t, older).RealizedValue)
+}
+
+func TestReconcile_AnOlderAgentLinkNotYetCheckedStillOwnsTheOrder(t *testing.T) {
+	// Older link typed by an agent (no cod_empresa yet, same documento) vs a newer one.
+	e := newDiscoveryEnv(t)
+	require.NoError(t, e.app.DB.Exec(`DROP INDEX IF EXISTS idx_sales_opp_xlink_open_order`).Error)
+	older := e.convertedOpp(t, discoveryCPF, 24*time.Hour, time.Hour)
+	olderLink := models.SalesOpportunityXProcessLink{OrganizationID: e.org.ID, SalesOpportunityID: older.ID, NumPedido: "9002", Documento: discoveryCPF}
+	require.NoError(t, e.app.DB.Create(&olderLink).Error)
+	time.Sleep(15 * time.Millisecond)
+	newer := e.convertedOpp(t, "", 24*time.Hour, time.Hour)
+	newerLink := models.SalesOpportunityXProcessLink{OrganizationID: e.org.ID, SalesOpportunityID: newer.ID, NumPedido: "9002", Documento: discoveryCPF}
+	require.NoError(t, e.app.DB.Create(&newerLink).Error)
+
+	f := newFakeX2(t, order("9002", "SEPARACAO", today()))
+	client := xprocess.New(e.app.Log, f.srv.URL)
+	e.app.ReconcileXProcessLinkForTest(client, "key", &newerLink)
+	var n models.SalesOpportunityXProcessLink
+	require.NoError(t, e.app.DB.First(&n, "id = ?", newerLink.ID).Error)
+	assert.Nil(t, n.StatusXProcess)
+
+	e.app.ReconcileXProcessLinkForTest(client, "key", &olderLink)
+	var o models.SalesOpportunityXProcessLink
+	require.NoError(t, e.app.DB.First(&o, "id = ?", olderLink.ID).Error)
+	assert.NotNil(t, o.StatusXProcess)
+}
+
+// With the unique index in place, two opportunities racing for the same order end
+// with exactly ONE link; the loser changes nothing (its transaction rolls back).
+func TestDiscovery_UniqueIndexMakesTheRaceForAnOrderHaveOneWinner(t *testing.T) {
+	e := newDiscoveryEnv(t)
+	// The shared test database keeps rows from other tests (some deliberately duplicated):
+	// soft-delete the duplicate open links so the unique index can be built.
+	require.NoError(t, e.app.DB.Exec(`UPDATE sales_opportunity_xprocess_links SET deleted_at = now()
+		WHERE deleted_at IS NULL AND resolved_at IS NULL AND cod_empresa IS NOT NULL
+		AND (organization_id, cod_empresa, num_pedido) IN (
+			SELECT organization_id, cod_empresa, num_pedido FROM sales_opportunity_xprocess_links
+			WHERE deleted_at IS NULL AND resolved_at IS NULL AND cod_empresa IS NOT NULL
+			GROUP BY 1, 2, 3 HAVING count(*) > 1)`).Error)
+	require.NoError(t, e.app.DB.Exec(`DROP INDEX IF EXISTS idx_sales_opp_xlink_open_order`).Error)
+	require.NoError(t, e.app.DB.Exec(`CREATE UNIQUE INDEX idx_sales_opp_xlink_open_order
+		ON sales_opportunity_xprocess_links (organization_id, cod_empresa, num_pedido)
+		WHERE cod_empresa IS NOT NULL AND resolved_at IS NULL AND deleted_at IS NULL`).Error)
+	t.Cleanup(func() { e.app.DB.Exec(`DROP INDEX IF EXISTS idx_sales_opp_xlink_open_order`) })
+
+	a := e.convertedOpp(t, discoveryCPF, 24*time.Hour, time.Hour)
+	b := e.convertedOpp(t, "11144477735", 24*time.Hour, time.Hour)
+
+	start := make(chan struct{})
+	results := make(chan bool, 2)
+	for _, opp := range []*models.SalesOpportunity{a, b} {
+		go func(id uuid.UUID) {
+			<-start
+			results <- e.app.CreateDiscoveredXProcessLinkForTest(e.org.ID, id, "40", "9100", discoveryCPF)
+		}(opp.ID)
+	}
+	close(start)
+	wins := 0
+	for i := 0; i < 2; i++ {
+		if <-results {
+			wins++
+		}
+	}
+	assert.Equal(t, 1, wins, "exactly one opportunity gets the order")
+
+	var links int64
+	e.app.DB.Model(&models.SalesOpportunityXProcessLink{}).Where("organization_id = ? AND num_pedido = ?", e.org.ID, "9100").Count(&links)
+	assert.Equal(t, int64(1), links)
+
+	// The loser is untouched: no link, no pointer, no history event.
+	for _, opp := range []*models.SalesOpportunity{a, b} {
+		hasLink := len(e.links(t, opp)) == 1
+		var evs int64
+		e.app.DB.Model(&models.SalesOpportunityEvent{}).Where("sales_opportunity_id = ? AND type = ?", opp.ID, models.SalesOpportunityEventXProcessLinked).Count(&evs)
+		got := e.reload(t, opp)
+		if hasLink {
+			assert.Equal(t, int64(1), evs)
+			require.NotNil(t, got.XProcessNumPedido)
+		} else {
+			assert.Equal(t, int64(0), evs)
+			assert.Nil(t, got.XProcessNumPedido, "the loser's pointer was rolled back with its transaction")
+		}
+	}
+}
+
+// Without the index (it is skipped when duplicates already exist) the application
+// guards still stop discovery from reusing a tracked order.
+func TestDiscovery_WithoutTheIndexTheApplicationGuardsStillHold(t *testing.T) {
+	e := newDiscoveryEnv(t)
+	require.NoError(t, e.app.DB.Exec(`DROP INDEX IF EXISTS idx_sales_opp_xlink_open_order`).Error)
+	cod := "40"
+	owner := e.convertedOpp(t, "11144477735", 24*time.Hour, time.Hour)
+	for i := 0; i < 2; i++ { // two pre-existing open links for the same order (the duplicate case)
+		require.NoError(t, e.app.DB.Create(&models.SalesOpportunityXProcessLink{
+			OrganizationID: e.org.ID, SalesOpportunityID: owner.ID, NumPedido: "9200", Documento: "11144477735", CodEmpresa: &cod,
+		}).Error)
+	}
+	opp := e.convertedOpp(t, discoveryCPF, 24*time.Hour, time.Hour)
+	e.run(t, newFakeX2(t, order("9200", "FECHADO", today())))
+	assert.Empty(t, e.links(t, opp), "an already tracked order is never reused")
 }

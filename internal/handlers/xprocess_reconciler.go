@@ -56,11 +56,11 @@ func (a *App) reconcileXProcessLink(client *xprocess.Client, apiKey string, link
 		a.Log.Error("xprocess reconciliation: failed to encode itens", "link_id", link.ID, "error", err)
 	}
 
-	// One X2 order must never feed two opportunities. If another opportunity's
-	// link already holds this exact order, change nothing on either side and leave
-	// the case for a person (the unique index would reject the update anyway).
-	if a.xprocessOrderLinkedElsewhere(link.OrganizationID, resumo.CodEmpresa, link.NumPedido, link.SalesOpportunityID) {
-		a.Log.Warn("xprocess reconciliation: order already linked to another opportunity; leaving it alone",
+	// One X2 order must never feed two opportunities. If an OLDER link of another
+	// opportunity already tracks this exact order, this (newer) link changes nothing
+	// and is left for a person; the older one keeps being reconciled.
+	if a.xprocessOrderHeldByOlderLink(link, resumo.CodEmpresa) {
+		a.Log.Warn("xprocess reconciliation: order already tracked by an older link of another opportunity; leaving this one alone",
 			"link_id", link.ID, "opportunity_id", link.SalesOpportunityID, "cod_empresa", resumo.CodEmpresa, "num_pedido", link.NumPedido)
 		a.DB.Model(link).Update("last_checked_at", now)
 		return
@@ -109,7 +109,16 @@ func (a *App) reconcileXProcessLink(client *xprocess.Client, apiKey string, link
 		updates["resolved_at"] = now
 	}
 
-	a.DB.Model(link).Updates(updates)
+	err = a.DB.Model(link).Updates(updates).Error
+	if err != nil && isUniqueViolation(err) {
+		// The unique index on open (cod_empresa, num_pedido) refused the company code:
+		// another link holds the order. Keep reconciling this link without it.
+		delete(updates, "cod_empresa")
+		err = a.DB.Model(link).Updates(updates).Error
+	}
+	if err != nil {
+		a.Log.Error("xprocess reconciliation: failed to update link", "link_id", link.ID, "error", err)
+	}
 }
 
 // setRealizedValueFromXProcess records X2's order total as the opportunity's

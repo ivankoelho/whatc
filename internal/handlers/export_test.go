@@ -108,3 +108,15 @@ func (a *App) DiscoverXProcessOrdersForTest(client *xprocess.Client, apiKey stri
 func SaleOnOrAfterOpeningForTest(sale, opened time.Time) bool {
 	return saleOnOrAfterOpening(sale, opened)
 }
+
+// CreateDiscoveredXProcessLinkForTest links the order (codEmpresa, numPedido) to the
+// opportunity exactly the way discovery does (one transaction: link, pointer, event).
+func (a *App) CreateDiscoveredXProcessLinkForTest(orgID, oppID uuid.UUID, codEmpresa, numPedido, documento string) bool {
+	m := &xprocessMatch{
+		opp:    &models.SalesOpportunity{BaseModel: models.BaseModel{ID: oppID}},
+		order:  xprocess.PedidoResumo{CodEmpresa: codEmpresa, NumPedido: numPedido},
+		reason: "test",
+	}
+	_, ok := a.createDiscoveredXProcessLink(orgID, m, documento)
+	return ok
+}
