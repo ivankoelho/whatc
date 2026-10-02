@@ -41,6 +41,10 @@ func (a *App) ListAITools(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
+	// context.Background(), not r.RequestCtx: fasthttp's RequestCtx only satisfies context.Context
+	// nominally (Done() closes on server shutdown, never on a client disconnect, there is no
+	// deadline, and Done() dereferences a server that does not exist outside a running one). It
+	// would add no cancellation here, and it is not what the AI handlers use (see ai_models.go).
 	enabled, err := aitools.SettingsStore{DB: a.DB}.EnabledTools(context.Background(), orgID)
 	if err != nil {
 		a.Log.Error("Failed to read the AI tool settings", "error", err)
