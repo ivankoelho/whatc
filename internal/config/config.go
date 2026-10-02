@@ -30,6 +30,7 @@ type Config struct {
 	Calling      CallingConfig      `koanf:"calling"`
 	TTS          TTSConfig          `koanf:"tts"`
 	XProcess     XProcessConfig     `koanf:"xprocess"`
+	Knowledge    KnowledgeConfig    `koanf:"knowledge"`
 }
 
 // XProcessConfig holds the switches of the X2 (XProcess) integration.
@@ -333,4 +334,14 @@ func setDefaults(cfg *Config) {
 	if cfg.Calling.TransferTimeoutSecs == 0 {
 		cfg.Calling.TransferTimeoutSecs = 120
 	}
+}
+
+// KnowledgeConfig holds the global switch of the Knowledge base in the chatbot (Fase 8B-3).
+type KnowledgeConfig struct {
+	// RAGEnabled makes the chatbot's AI replies consult the Knowledge base, but only for
+	// organizations that also turned it on (ChatbotSettings.knowledge_enabled): both must
+	// be true. It is OFF unless it is set to true: an absent key or an empty value mean
+	// false, and an unparseable value makes the configuration fail to load (it never turns
+	// the switch on). With it off the chatbot behaves exactly as before.
+	RAGEnabled bool `koanf:"rag_enabled"`
 }

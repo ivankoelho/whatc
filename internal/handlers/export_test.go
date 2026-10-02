@@ -120,3 +120,13 @@ func (a *App) CreateDiscoveredXProcessLinkForTest(orgID, oppID uuid.UUID, codEmp
 	_, ok := a.createDiscoveredXProcessLink(orgID, m, documento)
 	return ok
 }
+
+// GenerateAIResponseNodeForTest exposes generateAIResponse as the flow's ai_response node calls it.
+func (a *App) GenerateAIResponseNodeForTest(settings *models.ChatbotSettings, session *models.ChatbotSession, userMessage string) (string, error) {
+	return a.generateAIResponse(settings, session, userMessage, aiFeatureChatbotNode)
+}
+
+// KnowledgeRAGEnabledForTest exposes knowledgeRAGEnabled.
+func (a *App) KnowledgeRAGEnabledForTest(orgID uuid.UUID) bool {
+	return a.knowledgeRAGEnabled(orgID)
+}

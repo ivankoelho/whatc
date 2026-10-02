@@ -2,6 +2,7 @@ package knowledge
 
 import (
 	"context"
+	"sort"
 	"strings"
 
 	"github.com/google/uuid"
@@ -41,10 +42,50 @@ ORDER BY score DESC, c.document_id, c.chunk_index
 LIMIT ?`
 
 func (l LexicalRetriever) Retrieve(ctx context.Context, q Query) ([]Hit, error) {
+	if q.Strategy == Relaxed {
+		return l.retrieveRelaxed(ctx, q)
+	}
 	text := SearchForm(q.Text)
 	if text == "" {
 		return []Hit{}, nil // an empty list, never null in the JSON
 	}
+	return l.run(ctx, text, q)
+}
+
+// retrieveRelaxed is the chatbot's strategy: the text is turned into terms (never syntax),
+// tried as AND; when fewer than MinHits come back, as OR, and the two are merged without
+// repeating a chunk, best score first. The scope filter is in the SQL of both passes.
+func (l LexicalRetriever) retrieveRelaxed(ctx context.Context, q Query) ([]Hit, error) {
+	terms := PlainTerms(q.Text)
+	if len(terms) == 0 {
+		return []Hit{}, nil
+	}
+	hits, err := l.run(ctx, strings.Join(terms, " "), q)
+	if err != nil || len(hits) >= MinHits || len(terms) == 1 {
+		return hits, err
+	}
+	more, err := l.run(ctx, strings.Join(terms, " or "), q)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[uuid.UUID]bool, len(hits))
+	for _, h := range hits {
+		seen[h.ChunkID] = true
+	}
+	for _, h := range more {
+		if !seen[h.ChunkID] {
+			hits = append(hits, h)
+		}
+	}
+	sort.SliceStable(hits, func(i, j int) bool { return hits[i].Score > hits[j].Score })
+	if q.Limit > 0 && len(hits) > q.Limit {
+		hits = hits[:q.Limit]
+	}
+	return hits, nil
+}
+
+// run executes one full-text query (tsText is a websearch_to_tsquery input) with the scope filter.
+func (l LexicalRetriever) run(ctx context.Context, text string, q Query) ([]Hit, error) {
 	var rows []lexicalRow
 	// A nil *uuid.UUID binds as NULL, and "unit_id = NULL" is never true: no
 	// unit/department in the context means only global content matches.

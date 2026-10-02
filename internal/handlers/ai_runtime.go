@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/ai"
+	"github.com/shridarpatil/whatomate/internal/knowledge"
 	"github.com/shridarpatil/whatomate/internal/models"
 )
 
@@ -27,6 +28,9 @@ type aiCallMeta struct {
 	UserID    *uuid.UUID
 	ContactID *uuid.UUID
 	SessionID *uuid.UUID
+	// KnowledgeSources are the Knowledge chunks put in the prompt, in prompt order (ids,
+	// title, origin and score; never text). Empty when Knowledge was not used.
+	KnowledgeSources []knowledge.Source
 }
 
 // newAIProvider builds the adapter for provider using a plaintext key. Callers
@@ -72,6 +76,14 @@ func (a *App) recordAIUsage(meta aiCallMeta, provider, model string, resp *ai.Re
 		WhatsAppAccount: meta.Account,
 		Success:         callErr == nil,
 		LatencyMs:       int(took.Milliseconds()),
+	}
+	if len(meta.KnowledgeSources) > 0 { // recorded even when the provider call failed: they were used
+		entry.KnowledgeSources = make(models.JSONBArray, len(meta.KnowledgeSources))
+		for i, s := range meta.KnowledgeSources {
+			entry.KnowledgeSources[i] = map[string]any{
+				"document_id": s.DocumentID.String(), "title": s.Title, "origin": s.Origin, "score": s.Score,
+			}
+		}
 	}
 	if resp != nil {
 		if resp.Model != "" {

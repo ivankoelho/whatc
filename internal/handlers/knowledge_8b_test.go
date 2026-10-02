@@ -336,10 +336,13 @@ func TestKnowledge8B_ReindexAndStatusEndpoints(t *testing.T) {
 
 	// reindexing is audited with the version change
 	var entry models.AuditLog
+	// The audit rows are written asynchronously: wait for the one that carries the reindex
+	// (waiting for "any row of the document" could return the creation row, which comes first).
 	require.Eventually(t, func() bool {
-		return e.app.DB.Where("organization_id = ? AND resource_type = ? AND resource_id = ?", e.org.ID, "knowledge_document", uuid.MustParse(a)).
+		return e.app.DB.Where("organization_id = ? AND resource_type = ? AND resource_id = ? AND changes::text LIKE ?",
+			e.org.ID, "knowledge_document", uuid.MustParse(a), "%reindexed%").
 			Order("created_at DESC").First(&entry).Error == nil
-	}, 3*time.Second, 50*time.Millisecond)
+	}, 5*time.Second, 50*time.Millisecond)
 	assert.Contains(t, string(mustJSON(t, entry.Changes)), "reindexed")
 
 	// the rest of the organization, only stale

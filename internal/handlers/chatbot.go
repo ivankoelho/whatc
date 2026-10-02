@@ -37,6 +37,11 @@ type ChatbotSettingsResponse struct {
 	// AIAPIKeyConfigured says whether a key is stored. The key itself is never
 	// returned, not even masked: the UI only needs to know there is one.
 	AIAPIKeyConfigured bool `json:"ai_api_key_configured"`
+	// KnowledgeEnabled is the organization's own switch for Knowledge in the AI replies;
+	// KnowledgeRAGAvailable says whether the SERVER allows it at all (knowledge.rag_enabled,
+	// read-only: no request can change it). Knowledge is used only when both are true.
+	KnowledgeEnabled      bool `json:"knowledge_enabled"`
+	KnowledgeRAGAvailable bool `json:"knowledge_rag_available"`
 	// SLA Settings
 	SLAEnabled             bool     `json:"sla_enabled"`
 	SLAResponseMinutes     int      `json:"sla_response_minutes"`
@@ -194,6 +199,9 @@ func (a *App) GetChatbotSettings(r *fastglue.Request) error {
 		AIMaxTokens:        settings.AI.MaxTokens,
 		AISystemPrompt:     settings.AI.SystemPrompt,
 		AIAPIKeyConfigured: settings.AI.APIKey != "",
+		// Knowledge
+		KnowledgeEnabled:      settings.KnowledgeEnabled,
+		KnowledgeRAGAvailable: a.Config != nil && a.Config.Knowledge.RAGEnabled,
 		// SLA Settings
 		SLAEnabled:                 settings.SLA.Enabled,
 		SLAResponseMinutes:         settings.SLA.ResponseMinutes,
@@ -318,6 +326,9 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		AIModel                      *string            `json:"ai_model"`
 		AIMaxTokens                  *int               `json:"ai_max_tokens"`
 		AISystemPrompt               *string            `json:"ai_system_prompt"`
+		// KnowledgeEnabled turns Knowledge on for this organization's AI replies (needs
+		// settings.chatbot:write; it also takes the global knowledge.rag_enabled to have effect).
+		KnowledgeEnabled *bool `json:"knowledge_enabled"`
 		// SLA Settings
 		SLAEnabled                 *bool     `json:"sla_enabled"`
 		SLAResponseMinutes         *int      `json:"sla_response_minutes"`
@@ -425,6 +436,11 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		}
 	}
 
+	// Letting the AI read the organization's Knowledge is as sensitive as the AI settings.
+	if req.KnowledgeEnabled != nil && !a.HasPermission(userID, models.ResourceSettingsChatbot, models.ActionWrite, orgID) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Insufficient permissions", nil, "")
+	}
+
 	// Update fields if provided
 	if req.Enabled != nil {
 		settings.IsEnabled = *req.Enabled
@@ -488,6 +504,9 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 	}
 
 	// AI Settings
+	if req.KnowledgeEnabled != nil {
+		settings.KnowledgeEnabled = *req.KnowledgeEnabled
+	}
 	if req.AIEnabled != nil {
 		settings.AI.Enabled = *req.AIEnabled
 	}

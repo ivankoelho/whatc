@@ -143,3 +143,10 @@ full_name = "Admin"
 # OFF by default: set to true (or WHATOMATE_XPROCESS__DISCOVERY_ENABLED=true) only after
 # validating it against your X2. Reconciling existing links and linking by hand never depend on it.
 discovery_enabled = false
+
+# Knowledge base in the chatbot (Fase 8B-3)
+[knowledge]
+# Lets the chatbot's AI replies use the Knowledge base. OFF by default: set to true (or
+# WHATOMATE_KNOWLEDGE__RAG_ENABLED=true) only after validating it. It also needs the
+# per-organization switch (Settings > Chatbot > AI): both must be on.
+rag_enabled = false

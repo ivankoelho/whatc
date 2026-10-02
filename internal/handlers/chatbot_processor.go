@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/ai"
 	"github.com/shridarpatil/whatomate/internal/contactutil"
+	"github.com/shridarpatil/whatomate/internal/knowledge"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 )
@@ -867,6 +868,20 @@ func (a *App) generateAIResponse(settings *models.ChatbotSettings, session *mode
 		}
 	}
 
+	// Knowledge (Fase 8B-3): only when it is on globally AND for this organization. The block
+	// goes after the AIContext and never fails the reply (see buildKnowledgeBlock). With it
+	// off, nothing is queried and the system prompt is exactly what it was.
+	var kb knowledge.Block
+	if a.knowledgeRAGEnabled(settings.OrganizationID) {
+		kb = a.buildKnowledgeBlock(settings, session, userMessage)
+	}
+	if kb.Text != "" {
+		if system != "" {
+			system += "\n\n"
+		}
+		system += kb.Text
+	}
+
 	var messages []ai.Message
 	if settings.AI.IncludeHistory && session != nil {
 		for _, msg := range a.getSessionHistory(session.ID, settings.AI.HistoryLimit) {
@@ -879,7 +894,7 @@ func (a *App) generateAIResponse(settings *models.ChatbotSettings, session *mode
 	}
 	messages = append(messages, ai.Message{Role: ai.RoleUser, Content: userMessage})
 
-	meta := aiCallMeta{Feature: feature, OrgID: settings.OrganizationID}
+	meta := aiCallMeta{Feature: feature, OrgID: settings.OrganizationID, KnowledgeSources: kb.Sources}
 	if session != nil {
 		meta.Account = session.WhatsAppAccount
 		contactID, sessionID := session.ContactID, session.ID

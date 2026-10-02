@@ -17,7 +17,27 @@ type Query struct {
 	UnitID       *uuid.UUID
 	DepartmentID *uuid.UUID
 	Limit        int
+	// Strategy is Strict (the zero value: the API and the admin search tool) or Relaxed
+	// (the chatbot, free customer text).
+	Strategy Strategy
 }
+
+// Strategy says how Text is read and matched.
+type Strategy int
+
+const (
+	// Strict reads Text as a websearch query (quotes, "-" and "or" are syntax); every term
+	// must match. It is the ONLY strategy the HTTP API exposes.
+	Strict Strategy = iota
+	// Relaxed is for free text typed by a customer: it is NEVER read as syntax (a "-" or a
+	// quote typed by a customer is just punctuation). The text becomes terms, tried as AND
+	// first and, when fewer than MinHits come back, as OR. The scope filter applies to both.
+	Relaxed
+)
+
+// MinHits is how many results the strict pass must give before the relaxed strategy
+// gives up on the OR pass.
+const MinHits = 2
 
 // Citation is what a consumer needs to say where a passage came from.
 type Citation struct {
