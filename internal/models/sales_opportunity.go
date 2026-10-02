@@ -104,6 +104,9 @@ const (
 	SalesOpportunityEventLost                  SalesOpportunityEventType = "lost"
 	SalesOpportunityEventCancelled             SalesOpportunityEventType = "cancelled"
 	SalesOpportunityEventRetriggered           SalesOpportunityEventType = "retriggered"
+	// XProcessLinked: the discovery job linked an X2 order to an already converted
+	// opportunity (the link row says why).
+	SalesOpportunityEventXProcessLinked        SalesOpportunityEventType = "xprocess_linked"
 )
 
 type SalesOpportunityEventSource string

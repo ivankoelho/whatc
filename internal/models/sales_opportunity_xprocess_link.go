@@ -35,6 +35,14 @@ type SalesOpportunityXProcessLink struct {
 	StatusXProcess *string    `gorm:"column:status_xprocess;size:20" json:"status_xprocess,omitempty"`
 	ValorVendido   *float64   `gorm:"type:numeric" json:"valor_vendido,omitempty"`
 	Itens          JSONBArray `gorm:"type:jsonb" json:"itens,omitempty"`
+	// ValorFrete is the pedido's freight (sum of the lines' vl_frete), recorded apart
+	// from ValorVendido, which never includes it. Informational.
+	ValorFrete *float64 `gorm:"type:numeric" json:"valor_frete,omitempty"`
+
+	// LinkSource says who created the link: "agent" (typed by a user) or "auto"
+	// (found by the discovery job). MatchReason explains an automatic match.
+	LinkSource  string `gorm:"size:10;not null;default:'agent'" json:"link_source"`
+	MatchReason string `gorm:"type:text" json:"match_reason,omitempty"`
 
 	LastCheckedAt *time.Time `json:"last_checked_at,omitempty"`
 	// FirstClosedAt is written exactly once, on the first round the job

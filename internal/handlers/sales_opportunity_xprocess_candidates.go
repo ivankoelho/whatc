@@ -43,15 +43,17 @@ func (a *App) ListSalesOpportunityXProcessCandidates(r *fastglue.Request) error 
 
 	empty := func() error { return r.SendEnvelope(map[string]any{"candidates": []xprocessCandidateResponse{}}) }
 
-	// Only meaningful while still open — once converted/lost, the outcome is
-	// already recorded one way or another.
-	if opp.Status != models.SalesOpportunityStatusAberta {
+	// Meaningful while the opportunity is open, and also once it is converted: an
+	// agent may convert before the X2 order exists (X2 is D-1), and then link it by
+	// hand when it shows up. Lost/cancelled ones have nothing to link.
+	if opp.Status != models.SalesOpportunityStatusAberta && opp.Status != models.SalesOpportunityStatusConvertida {
 		return empty()
 	}
 	// documento is usually empty for a sales-only conversation (design doc
 	// §1: only filled from SAC or from a link this contact registered
 	// before) — without it there is nothing to search X2 for.
-	if opp.Contact == nil || opp.Contact.CPFCNPJ == "" {
+	documento := oppDocumento(opp)
+	if documento == "" {
 		return empty()
 	}
 
@@ -65,19 +67,9 @@ func (a *App) ListSalesOpportunityXProcessCandidates(r *fastglue.Request) error 
 	defer cancel()
 	client := xprocess.New(a.Log, integ.BaseURL)
 
-	codCliente, err := client.ConsultarClientePorDocumento(ctx, integ.APIKey, opp.Contact.CPFCNPJ)
+	resumos, _, err := findXProcessOrders(ctx, client, integ.APIKey, documento, xprocessVendasLimit)
 	if err != nil {
-		a.Log.Warn("xprocess candidates: cliente lookup failed", "opportunity_id", opp.ID, "error", err)
-		return empty()
-	}
-	items, err := client.ListarVendasPorCliente(ctx, integ.APIKey, codCliente, 200)
-	if err != nil {
-		a.Log.Warn("xprocess candidates: vendas lookup failed", "opportunity_id", opp.ID, "error", err)
-		return empty()
-	}
-	resumos, err := xprocess.GroupPedidos(items)
-	if err != nil {
-		a.Log.Warn("xprocess candidates: failed to group vendas", "opportunity_id", opp.ID, "error", err)
+		a.Log.Warn("xprocess candidates: X2 lookup failed", "opportunity_id", opp.ID, "error", err)
 		return empty()
 	}
 
@@ -85,7 +77,7 @@ func (a *App) ListSalesOpportunityXProcessCandidates(r *fastglue.Request) error 
 	// another) shouldn't be re-suggested as a "new" find.
 	var trackedNumPedidos []string
 	a.DB.Model(&models.SalesOpportunityXProcessLink{}).
-		Where("organization_id = ? AND documento = ?", orgID, opp.Contact.CPFCNPJ).
+		Where("organization_id = ? AND documento = ?", orgID, documento).
 		Pluck("num_pedido", &trackedNumPedidos)
 	tracked := make(map[string]bool, len(trackedNumPedidos))
 	for _, n := range trackedNumPedidos {
@@ -98,10 +90,10 @@ func (a *App) ListSalesOpportunityXProcessCandidates(r *fastglue.Request) error 
 			continue
 		}
 		dataVenda, ok := parseXProcessDataVenda(resumo.DataVenda)
-		// Only a purchase AFTER this opportunity was opened counts (spec
-		// item G's explicit scenario) — an earlier purchase isn't a result
-		// of this funnel entry.
-		if !ok || !dataVenda.After(opp.OpenedAt) {
+		// Only a purchase on or after the DAY this opportunity was opened counts
+		// (an earlier purchase isn't a result of this funnel entry). Compared by
+		// date: X2's data_venda is always midnight, so a same-day sale must count.
+		if !ok || !saleOnOrAfterOpening(dataVenda, opp.OpenedAt) {
 			continue
 		}
 		candidates = append(candidates, xprocessCandidateResponse{

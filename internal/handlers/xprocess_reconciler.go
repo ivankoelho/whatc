@@ -56,6 +56,16 @@ func (a *App) reconcileXProcessLink(client *xprocess.Client, apiKey string, link
 		a.Log.Error("xprocess reconciliation: failed to encode itens", "link_id", link.ID, "error", err)
 	}
 
+	// One X2 order must never feed two opportunities. If another opportunity's
+	// link already holds this exact order, change nothing on either side and leave
+	// the case for a person (the unique index would reject the update anyway).
+	if a.xprocessOrderLinkedElsewhere(link.OrganizationID, resumo.CodEmpresa, link.NumPedido, link.SalesOpportunityID) {
+		a.Log.Warn("xprocess reconciliation: order already linked to another opportunity; leaving it alone",
+			"link_id", link.ID, "opportunity_id", link.SalesOpportunityID, "cod_empresa", resumo.CodEmpresa, "num_pedido", link.NumPedido)
+		a.DB.Model(link).Update("last_checked_at", now)
+		return
+	}
+
 	updates := map[string]any{
 		"last_checked_at":       now,
 		"consecutive_not_found": 0,
@@ -63,7 +73,9 @@ func (a *App) reconcileXProcessLink(client *xprocess.Client, apiKey string, link
 		"cod_vendedor":          resumo.CodVendedor,
 		"status_xprocess":       resumo.Status,
 		"valor_vendido":         resumo.ValorTotal,
-		"itens":                 itensJSON,
+		// Freight is recorded apart and never added to valor_vendido / realized_value.
+		"valor_frete": resumo.ValorFrete,
+		"itens":       itensJSON,
 	}
 
 	switch resumo.Status {
@@ -224,15 +236,17 @@ func (a *App) RunXProcessReconciliation() {
 			a.Log.Error("xprocess reconciliation: failed to load pending links", "org_id", integ.OrganizationID, "error", err)
 			continue
 		}
-		if len(links) == 0 {
-			continue
-		}
-
 		client := xprocess.New(a.Log, integ.BaseURL)
 		for j := range links {
 			a.reconcileXProcessLink(client, integ.APIKey, &links[j])
 		}
-		a.Log.Info("xprocess reconciliation: organization done", "org_id", integ.OrganizationID, "links_checked", len(links))
+		if len(links) > 0 {
+			a.Log.Info("xprocess reconciliation: organization done", "org_id", integ.OrganizationID, "links_checked", len(links))
+		}
+
+		// Discovery runs after the sweep, and also when there were no pending links:
+		// a converted opportunity with no link at all is exactly what it looks for.
+		a.discoverXProcessOrders(client, integ.APIKey, integ.OrganizationID)
 	}
 }
 

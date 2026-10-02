@@ -158,3 +158,29 @@ func TestGroupPedidos_GroupsByEmpresaAndNumPedido(t *testing.T) {
 	assert.Equal(t, "1", resumos[1].CodEmpresa)
 	assert.InDelta(t, 61.6, resumos[1].ValorTotal, 0.0001)
 }
+
+// Freight is informational and separate from the total: Total = Subtotal - Desconto,
+// and the pedido's freight is the sum of the lines' vl_frete (values from a real
+// 8-line order: they add up to exactly 100,00).
+func TestSummarizePedido_SumsFreightSeparatelyFromTotal(t *testing.T) {
+	items := []PedidoItem{
+		{CodEmpresa: "40", NumPedido: "1", Status: "SEPARACAO", Total: "1000,50", VlFrete: "0,87"},
+		{CodEmpresa: "40", NumPedido: "1", Status: "SEPARACAO", Total: "500,00", VlFrete: "99,13"},
+	}
+	r, err := SummarizePedido(items)
+	require.NoError(t, err)
+	assert.InDelta(t, 1500.50, r.ValorTotal, 1e-9, "freight is not part of the total")
+	assert.InDelta(t, 100.00, r.ValorFrete, 1e-9)
+}
+
+func TestSummarizePedido_MissingOrMalformedFreightCountsAsZero(t *testing.T) {
+	items := []PedidoItem{
+		{NumPedido: "1", Status: "FECHADO", Total: "10,0"},
+		{NumPedido: "1", Status: "FECHADO", Total: "5,0", VlFrete: "n/a"},
+		{NumPedido: "1", Status: "FECHADO", Total: "5,0", VlFrete: "2,5"},
+	}
+	r, err := SummarizePedido(items)
+	require.NoError(t, err)
+	assert.InDelta(t, 20.0, r.ValorTotal, 1e-9)
+	assert.InDelta(t, 2.5, r.ValorFrete, 1e-9)
+}
