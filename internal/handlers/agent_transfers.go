@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strconv"
@@ -1484,25 +1485,44 @@ func (a *App) saveAndFinalizeTransfer(transfer *models.AgentTransfer, account *m
 	return nil
 }
 
-// createTransferToQueue creates an unassigned agent transfer that goes to the queue
-func (a *App) createTransferToQueue(account *models.WhatsAppAccount, contact *models.Contact, source models.TransferSource) {
+// TransferOutcome is what the transfer service did for a request to queue a conversation.
+type TransferOutcome string
+
+const (
+	// TransferCreated: a new active transfer was created.
+	TransferCreated TransferOutcome = "created"
+	// TransferAlreadyActive: the contact already had an active transfer; nothing was created.
+	TransferAlreadyActive TransferOutcome = "already_active"
+	// TransferOutsideHours: outside the configured business hours; nothing was created.
+	TransferOutsideHours TransferOutcome = "outside_hours"
+)
+
+// TransferResult is the outcome of TransferToQueue. TransferID is set only when Outcome is
+// TransferCreated.
+type TransferResult struct {
+	Outcome    TransferOutcome
+	TransferID uuid.UUID
+}
+
+// TransferToQueue is the transfer service for an unassigned transfer that goes to the queue. It
+// does the work createTransferToQueue always did, but reports what happened instead of logging it,
+// and sends NO message to the customer: whoever calls it decides what to say (the legacy wrapper
+// sends the out-of-hours message; the AI confirmation path sends its own). An error is a real
+// failure; "already active" and "outside business hours" are outcomes, not errors, and the
+// existing unique-active-transfer index (or hasActiveAgentTransfer) keeps the call idempotent.
+// notes is stored on the transfer as given.
+func (a *App) TransferToQueue(_ context.Context, account *models.WhatsAppAccount, contact *models.Contact, source models.TransferSource, notes string) (TransferResult, error) {
 	if a.hasActiveAgentTransfer(account.OrganizationID, contact.ID) {
-		a.Log.Debug("Contact already has active transfer, skipping", "contact_id", contact.ID, "source", source)
-		return
+		return TransferResult{Outcome: TransferAlreadyActive}, nil
 	}
 
 	settings, _ := a.getChatbotSettingsCached(account.OrganizationID, account.Name)
 
-	// Suppress transfers outside business hours — flow steps and the
-	// chatbot-disabled fallback would otherwise hand off to a human at
-	// 11pm. createTransferFromKeyword already does this; mirror it here.
+	// Suppress transfers outside business hours: flow steps and the chatbot-disabled fallback
+	// would otherwise hand off to a human at 11pm. createTransferFromKeyword does the same.
 	if settings != nil && settings.BusinessHours.Enabled && len(settings.BusinessHours.Hours) > 0 {
 		if !a.isWithinBusinessHours(settings.BusinessHours.Hours) {
-			a.Log.Info("Outside business hours, sending out-of-hours message instead of queue transfer", "contact_id", contact.ID, "source", source)
-			if settings.BusinessHours.OutOfHoursMessage != "" {
-				_ = a.sendAndSaveTextMessage(account, contact, settings.BusinessHours.OutOfHoursMessage)
-			}
-			return
+			return TransferResult{Outcome: TransferOutsideHours}, nil
 		}
 	}
 
@@ -1514,19 +1534,37 @@ func (a *App) createTransferToQueue(account *models.WhatsAppAccount, contact *mo
 		PhoneNumber:     contact.PhoneNumber,
 		Status:          models.TransferStatusActive,
 		Source:          source,
+		Notes:           notes,
 		TransferredAt:   time.Now(),
 	}
 
 	if err := a.saveAndFinalizeTransfer(&transfer, account, contact, settings, false); err != nil {
 		if errors.Is(err, ErrTransferAlreadyActive) {
-			a.Log.Debug("Contact already has active transfer (concurrent create), skipping", "contact_id", contact.ID)
-			return
+			return TransferResult{Outcome: TransferAlreadyActive}, nil
 		}
-		a.Log.Error("Failed to create transfer to queue", "error", err, "contact_id", contact.ID, "source", string(source))
-		return
+		return TransferResult{}, err
 	}
+	return TransferResult{Outcome: TransferCreated, TransferID: transfer.ID}, nil
+}
 
-	a.Log.Info("Transfer created to agent queue", "transfer_id", transfer.ID, "contact_id", contact.ID, "source", source)
+// createTransferToQueue creates an unassigned agent transfer that goes to the queue. It is a thin
+// wrapper of TransferToQueue that keeps the behaviour callers have always had: it logs, and
+// outside business hours it sends the out-of-hours message instead of transferring.
+func (a *App) createTransferToQueue(account *models.WhatsAppAccount, contact *models.Contact, source models.TransferSource) {
+	res, err := a.TransferToQueue(context.Background(), account, contact, source, "")
+	switch {
+	case err != nil:
+		a.Log.Error("Failed to create transfer to queue", "error", err, "contact_id", contact.ID, "source", string(source))
+	case res.Outcome == TransferAlreadyActive:
+		a.Log.Debug("Contact already has active transfer, skipping", "contact_id", contact.ID, "source", source)
+	case res.Outcome == TransferOutsideHours:
+		a.Log.Info("Outside business hours, sending out-of-hours message instead of queue transfer", "contact_id", contact.ID, "source", source)
+		if settings, _ := a.getChatbotSettingsCached(account.OrganizationID, account.Name); settings != nil && settings.BusinessHours.OutOfHoursMessage != "" {
+			_ = a.sendAndSaveTextMessage(account, contact, settings.BusinessHours.OutOfHoursMessage)
+		}
+	default:
+		a.Log.Info("Transfer created to agent queue", "transfer_id", res.TransferID, "contact_id", contact.ID, "source", source)
+	}
 }
 
 // openAgentInitiatedTransfer opens an attendance when an agent messages a
