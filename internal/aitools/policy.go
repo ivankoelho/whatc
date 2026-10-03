@@ -10,6 +10,7 @@ const (
 	DenyConfirmationUnavailable = models.AIToolDenyConfirmationUnavailable
 	DenyLoopLimit               = models.AIToolDenyLoopLimit
 	DenyAuditUnavailable        = models.AIToolDenyAuditUnavailable
+	DenyArgsTooLarge            = models.AIToolDenyArgsTooLarge
 )
 
 // PolicyInput is everything the decision depends on. It is plain data so the policy is a pure,

@@ -258,3 +258,27 @@ func TestSettingsStore_EnabledToolsAreOptInAndPerOrganization(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, got, "another organization's opt-in does not count")
 }
+
+func TestDBAuditor_ArgsTooLargeRecordsOnlyTheSize(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	org := testutil.CreateTestOrganization(t, db)
+	au := aitools.DBAuditor{DB: db, Secret: "server-secret"}
+	huge := `{"cpf":"SENTINEL-CPF","pad":"` + strings.Repeat("x", 5000) + `"}`
+	at := attempt(org.ID, huge)
+
+	require.NoError(t, au.Denied(t.Context(), at, aitools.DenyArgsTooLarge))
+	var row models.AIToolCall
+	require.NoError(t, db.First(&row, "organization_id = ?", org.ID).Error)
+	assert.Equal(t, models.AIToolCallDenied, row.Status)
+	assert.Equal(t, "args_too_large", row.DenialReason)
+	assert.Equal(t, len(huge), row.ArgsBytes)
+	assert.Empty(t, row.ArgsHMAC, "nothing is computed over an oversized document")
+	assert.Empty(t, row.ArgsKeys)
+
+	// any other denial of the same call still records keys and HMAC
+	require.NoError(t, au.Denied(t.Context(), at, aitools.DenyNotEnabled))
+	var other models.AIToolCall
+	require.NoError(t, db.First(&other, "organization_id = ? AND denial_reason = ?", org.ID, "not_enabled").Error)
+	assert.NotEmpty(t, other.ArgsHMAC)
+	assert.Equal(t, models.JSONBArray{"cpf", "pad"}, other.ArgsKeys)
+}

@@ -54,7 +54,7 @@ type DBAuditor struct {
 
 var _ Auditor = DBAuditor{}
 
-func (d DBAuditor) row(a Attempt) models.AIToolCall {
+func (d DBAuditor) row(a Attempt, withArgs bool) models.AIToolCall {
 	name := a.Call.Name
 	if len(name) > 64 { // the model may call anything; keep the column bounded
 		name = name[:64]
@@ -68,8 +68,12 @@ func (d DBAuditor) row(a Attempt) models.AIToolCall {
 		OrganizationID: a.Scope.OrganizationID, RunID: a.RunID, Step: a.Step, CallID: callID,
 		ToolName: name, Risk: string(a.Risk), ActorKind: string(a.Actor.Kind), ActorRef: a.Actor.Ref,
 		SubjectContactID: a.Scope.ContactID, SessionID: a.Scope.SessionID, WhatsAppAccount: a.Scope.WhatsAppAccount,
-		ArgsBytes: len(args), ArgsHMAC: ArgsHMAC(d.Secret, args), RequestedAt: time.Now(),
+		ArgsBytes: len(args), RequestedAt: time.Now(),
 	}
+	if !withArgs {
+		return row // arguments the loop refused for their size: only the size is recorded
+	}
+	row.ArgsHMAC = ArgsHMAC(d.Secret, args)
 	if keys := ArgsKeys(args); len(keys) > 0 {
 		row.ArgsKeys = make(models.JSONBArray, len(keys))
 		for i, k := range keys {
@@ -80,7 +84,7 @@ func (d DBAuditor) row(a Attempt) models.AIToolCall {
 }
 
 func (d DBAuditor) Requested(ctx context.Context, a Attempt) (uuid.UUID, error) {
-	row := d.row(a)
+	row := d.row(a, true)
 	row.Status = models.AIToolCallRequested
 	if err := d.DB.WithContext(ctx).Create(&row).Error; err != nil {
 		return uuid.Nil, err
@@ -89,7 +93,8 @@ func (d DBAuditor) Requested(ctx context.Context, a Attempt) (uuid.UUID, error) 
 }
 
 func (d DBAuditor) Denied(ctx context.Context, a Attempt, reason string) error {
-	row := d.row(a)
+	// Arguments refused for being too large are not read at all: no keys, no HMAC, just the size.
+	row := d.row(a, reason != models.AIToolDenyArgsTooLarge)
 	row.Status, row.DenialReason = models.AIToolCallDenied, reason
 	now := time.Now()
 	row.FinishedAt = &now

@@ -47,7 +47,11 @@ type Resolver struct {
 	step atomic.Int64
 }
 
-var _ ai.ToolResolver = (*Resolver)(nil)
+var (
+	_ ai.ToolResolver = (*Resolver)(nil)
+	_ ai.ToolRejecter = deniedTool{}
+	_ ai.ToolRejecter = governedTool{}
+)
 
 // NewResolver builds the resolver of one run. A nil source, or one that fails, leaves every tool
 // disabled (fail-closed) and the failure is logged.
@@ -140,6 +144,22 @@ func (d deniedTool) Execute(ctx context.Context, call ai.ToolCall) (ai.ToolResul
 	spec, _ := d.r.cfg.Catalog.Get(call.Name)
 	d.r.recordDenied(ctx, d.r.attempt(call, spec.Risk), d.reason)
 	return ai.ToolResult{Content: genericUnavailable, IsError: true}, nil
+}
+
+// Reject implements ai.ToolRejecter: the loop refused the call's arguments for their size before
+// executing anything. The refusal is recorded with the policy's own reason (the policy comes before
+// the size) and the model hears the same generic answer as for any denial.
+func (d deniedTool) Reject(ctx context.Context, call ai.ToolCall, why ai.RejectReason) ai.ToolResult {
+	spec, _ := d.r.cfg.Catalog.Get(call.Name)
+	d.r.recordDenied(ctx, d.r.attempt(call, spec.Risk), d.reason)
+	return ai.ToolResult{Content: genericUnavailable, IsError: true}
+}
+
+// Reject implements ai.ToolRejecter for an available tool: recorded as denied / args_too_large,
+// without building the tool.
+func (g governedTool) Reject(ctx context.Context, call ai.ToolCall, why ai.RejectReason) ai.ToolResult {
+	g.r.recordDenied(ctx, g.r.attempt(call, g.spec.Risk), DenyArgsTooLarge)
+	return ai.ToolResult{Content: genericUnavailable, IsError: true}
 }
 
 // governedTool is a tool the policy allowed at resolution time. It is decided again at Execute.

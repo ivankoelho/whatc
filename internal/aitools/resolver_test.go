@@ -563,3 +563,79 @@ type failingSource struct{}
 func (failingSource) EnabledTools(context.Context, uuid.UUID) (map[string]bool, error) {
 	return nil, errors.New("db down")
 }
+
+// --- oversized arguments: recorded, never executed ---
+
+func bigArgs(n int) string { return `{"id":"` + strings.Repeat("x", n) + `"}` }
+
+func TestRunToolLoop_OversizedArgumentsAreRecordedAsArgsTooLargeAndNeverBuildTheTool(t *testing.T) {
+	var p probe
+	au := &memAuditor{}
+	r := newResolver(catalogOf(t, p.spec("get_order", aitools.RiskRead)), map[string]bool{"get_order": true}, au, nil)
+	prov := &fakeProvider{answers: []func() *ai.Response{asks(call("c1", "get_order", bigArgs(200))), says("done")}}
+
+	res, err := ai.RunToolLoop(context.Background(), prov, userMsg, r, ai.Limits{MaxArgsBytes: 100})
+	require.NoError(t, err)
+	assert.Equal(t, "done", res.Response.Text)
+	assert.Zero(t, p.factoryCalls+p.execCalls, "the tool was neither built nor run")
+	require.Equal(t, []string{"denied"}, au.kinds())
+	assert.Equal(t, aitools.DenyArgsTooLarge, au.events[0].reason)
+	assert.Equal(t, aitools.RiskRead, au.events[0].attempt.Risk)
+	assert.Greater(t, len(au.events[0].attempt.Call.Arguments), 100)
+	// the model hears the same generic answer as for any other refusal
+	assert.Equal(t, "error: this tool is not available", res.Messages[1].ToolResults[0].Content)
+}
+
+func TestRunToolLoop_OversizedArgumentsToAnUnavailableToolKeepThePolicyReason(t *testing.T) {
+	var p probe
+	au := &memAuditor{}
+	r := newResolver(catalogOf(t, p.spec("read_off", aitools.RiskRead)), map[string]bool{}, au, nil)
+	prov := &fakeProvider{answers: []func() *ai.Response{
+		asks(call("c1", "read_off", bigArgs(200)), call("c2", "made_up", bigArgs(200))), says("done"),
+	}}
+	_, err := ai.RunToolLoop(context.Background(), prov, userMsg, r, ai.Limits{MaxArgsBytes: 100})
+	require.NoError(t, err)
+	require.Len(t, au.events, 2)
+	assert.Equal(t, aitools.DenyNotEnabled, au.events[0].reason)
+	assert.Equal(t, aitools.DenyUnknownTool, au.events[1].reason)
+	assert.Zero(t, p.factoryCalls)
+}
+
+// Every ToolCall that reaches the loop and asks to run leaves exactly one row.
+func TestRunToolLoop_EveryCallThatReachesTheLoopLeavesExactlyOneRow(t *testing.T) {
+	var p probe
+	au := &memAuditor{}
+	cat := catalogOf(t, p.spec("read_on", aitools.RiskRead), p.spec("read_off", aitools.RiskRead), p.spec("write_on", aitools.RiskWrite))
+	r := newResolver(cat, map[string]bool{"read_on": true, "write_on": true}, au, nil)
+	round := []ai.ToolCall{
+		call("a", "read_on", `{}`),         // allowed: requested + finish (one row)
+		call("b", "read_off", `{}`),        // not enabled
+		call("c", "write_on", `{}`),        // write
+		call("d", "made_up", `{}`),         // unknown
+		call("e", "read_on", bigArgs(200)), // too large
+	}
+	prov := &fakeProvider{answers: []func() *ai.Response{asks(round...), says("done")}}
+	_, err := ai.RunToolLoop(context.Background(), prov, userMsg, r, ai.Limits{MaxArgsBytes: 100, MaxCallsStep: 5})
+	require.NoError(t, err)
+
+	rows := map[string][]string{} // call id -> "kind:reason"
+	for _, e := range au.events {
+		if e.kind == "finish" {
+			continue
+		}
+		rows[e.attempt.Call.ID] = append(rows[e.attempt.Call.ID], e.kind+":"+e.reason)
+	}
+	assert.Equal(t, map[string][]string{
+		"a": {"requested:"}, "b": {"denied:" + aitools.DenyNotEnabled}, "c": {"denied:" + aitools.DenyConfirmationUnavailable},
+		"d": {"denied:" + aitools.DenyUnknownTool}, "e": {"denied:" + aitools.DenyArgsTooLarge},
+	}, rows, "one row per call")
+
+	// and a round the loop refuses as a whole is covered by RecordAborted
+	au2 := &memAuditor{}
+	r2 := newResolver(cat, map[string]bool{"read_on": true}, au2, nil)
+	prov2 := &fakeProvider{answers: []func() *ai.Response{asks(round...)}}
+	res2, err := ai.RunToolLoop(context.Background(), prov2, userMsg, r2, ai.Limits{MaxCallsStep: 2})
+	require.ErrorIs(t, err, ai.ErrToolLoopLimit)
+	r2.RecordAborted(context.Background(), res2.Response.ToolCalls)
+	assert.Len(t, au2.events, len(round))
+}
