@@ -397,6 +397,11 @@ func runServer(args []string) {
 	presenceCtx, presenceCancel := context.WithCancel(context.Background())
 	go presenceReaper.Start(presenceCtx)
 
+	// AI tool reconciler (Fase 9D): closes confirmations a crash left in "confirmed". Recovery only,
+	// never an authorization; ai_tools.reconcile_interval_seconds = 0 turns it off.
+	aiToolReconciler := handlers.NewAIToolReconciler(app)
+	go aiToolReconciler.Start(presenceCtx)
+
 	// Start XProcess reconciler (checks once daily, first tick after 2am)
 	xprocessReconciler := handlers.NewXProcessReconciler(app, 15*time.Minute, 2)
 	xprocessCtx, xprocessCancel := context.WithCancel(context.Background())
@@ -448,6 +453,7 @@ func runServer(args []string) {
 	slaProcessor.Stop()
 	presenceCancel()
 	presenceReaper.Stop()
+	aiToolReconciler.Stop()
 	lo.Info("SLA processor stopped")
 
 	// Stop XProcess reconciler
@@ -859,6 +865,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	// AI tools governance (Fase 9B): which catalog tools the organization enabled
 	g.GET("/api/ai-tools", app.ListAITools)
 	g.GET("/api/ai-tools/calls", app.ListAIToolCalls)
+	g.GET("/api/ai-tools/confirmations", app.ListAIToolConfirmations)
 	g.PUT("/api/ai-tools/{name}", app.SetAIToolEnabled)
 
 	// Knowledge base (Fase 8A)
