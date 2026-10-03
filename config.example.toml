@@ -154,6 +154,17 @@ enabled = false
 # Add a provider here only after its validation result is recorded (see docs/superpowers/specs,
 # Fase 9C). In the environment: WHATOMATE_AI_TOOLS__PROVIDERS=groq,google
 providers = []
+# Extra switch for tools that change data (Fase 9D). OFF by default. Even when on, every action
+# needs the customer's confirmation, and nothing runs while `providers` is empty.
+write_enabled = false
+# Confirmation of a proposed action (defaults shown; values outside the bounds fall back to them).
+# confirmation_ttl_minutes = 10        # 1-60: how long the customer has to confirm
+# proposal_limit = 3                   # 1-20 proposals per contact...
+# proposal_window_minutes = 60         # 1-1440: ...in this window
+# decline_cooldown_minutes = 30        # 0-1440: no new proposal after a refusal (0 = none)
+# reconcile_interval_seconds = 30      # 0-3600: sweep of confirmed actions left unfinished (0 = off)
+# reconcile_min_age_seconds = 60       # 10-3600
+# reconcile_max_attempts = 3           # 1-10
 
 # Knowledge base in the chatbot (Fase 8B-3)
 [knowledge]

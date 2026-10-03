@@ -166,6 +166,7 @@ func runMigrations(db *gorm.DB) error {
 		// AI tools governance
 		&models.AIToolSetting{},
 		&models.AIToolCall{},
+		&models.AIToolConfirmation{},
 	)
 }
 
@@ -192,6 +193,7 @@ func cleanupTables(db *gorm.DB) {
 		"keyword_rules",
 		"chatbot_settings",
 		"ai_usage_logs",
+		"ai_tool_confirmations",
 		"ai_tool_calls",
 		"ai_tool_settings",
 		"ai_contexts",

@@ -1,6 +1,7 @@
 package database_test
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -75,4 +76,44 @@ func TestAIToolCall_RoundTrip(t *testing.T) {
 		"args_hmac_sha256", "result_bytes", "result_truncated", "result_is_error", "error_kind",
 		"requested_at", "finished_at", "duration_ms",
 	}, names)
+}
+
+func TestAIToolConfirmation_IsInTheMigrationListAndEnforcesItsKeys(t *testing.T) {
+	names := map[string]bool{}
+	for _, m := range database.GetMigrationModels() {
+		names[m.Name] = true
+	}
+	assert.True(t, names["AIToolConfirmation"])
+
+	db := testutil.SetupTestDB(t)
+	cleanAll(t, db)
+	org := testutil.CreateTestOrganization(t, db)
+	now := time.Now()
+	mk := func(hash string) models.AIToolConfirmation {
+		return models.AIToolConfirmation{
+			OrganizationID: org.ID, ContactID: uuid.New(), SessionID: uuid.New(), RunID: uuid.New(), ToolName: "request_agent_transfer",
+			Risk: "write", TokenHash: hash, Args: models.JSONB{"reason": "x"}, ActionDigest: "d", Status: models.AIConfirmationPending,
+			ProposedAt: now, ExpiresAt: now.Add(10 * time.Minute),
+		}
+	}
+	a := mk("hash-1")
+	require.NoError(t, db.Create(&a).Error)
+	var got models.AIToolConfirmation
+	require.NoError(t, db.First(&got, "id = ?", a.ID).Error)
+	assert.Equal(t, models.AIConfirmationPending, got.Status)
+	assert.Equal(t, 0, got.ReconcileAttempts)
+	assert.Equal(t, models.JSONB{"reason": "x"}, got.Args)
+	assert.Nil(t, got.ConfirmedAt)
+
+	dup := mk("hash-1")
+	assert.Error(t, db.Create(&dup).Error, "a token hash is unique")
+
+	// the model must not serialize its secrets
+	b, err := json.Marshal(got)
+	require.NoError(t, err)
+	for _, secret := range []string{"hash-1", "action_digest", "args", "token", "reconcile", "confirm_wamid"} {
+		assert.NotContains(t, string(b), secret)
+	}
+	assert.Len(t, models.AIConfirmationPending, len("pending"))
+	assert.LessOrEqual(t, len(models.AIConfirmationNotExecuted), 16, "fits the status column")
 }

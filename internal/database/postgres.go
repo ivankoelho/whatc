@@ -81,6 +81,7 @@ func GetMigrationModels() []MigrationModel {
 		// AI tools governance (Fase 9B)
 		{"AIToolSetting", &models.AIToolSetting{}},
 		{"AIToolCall", &models.AIToolCall{}},
+		{"AIToolConfirmation", &models.AIToolConfirmation{}},
 		{"Contact", &models.Contact{}},
 		{"Tag", &models.Tag{}},
 		{"Message", &models.Message{}},
