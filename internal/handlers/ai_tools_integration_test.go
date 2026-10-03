@@ -370,7 +370,7 @@ type noopWriteTool struct{}
 func (noopWriteTool) Propose(context.Context, ai.ToolCall) (*aitools.Proposal, ai.ToolResult, error) {
 	return nil, ai.ToolResult{Content: "{}"}, nil
 }
-func (noopWriteTool) Execute(context.Context, models.JSONB) (aitools.ExecResult, error) {
+func (noopWriteTool) Execute(context.Context, models.JSONB, time.Time) (aitools.ExecResult, error) {
 	return aitools.ExecResult{}, nil
 }
 

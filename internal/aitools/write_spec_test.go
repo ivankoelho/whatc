@@ -27,7 +27,7 @@ func (f fakeWriteTool) Propose(context.Context, ai.ToolCall) (*aitools.Proposal,
 	*f.proposed++
 	return nil, ai.ToolResult{Content: "{}"}, nil
 }
-func (f fakeWriteTool) Execute(context.Context, models.JSONB) (aitools.ExecResult, error) {
+func (f fakeWriteTool) Execute(context.Context, models.JSONB, time.Time) (aitools.ExecResult, error) {
 	*f.executed++
 	return aitools.ExecResult{}, nil
 }

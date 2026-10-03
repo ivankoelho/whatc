@@ -30,7 +30,7 @@ type WriteTool interface {
 	Propose(ctx context.Context, call ai.ToolCall) (*Proposal, ai.ToolResult, error)
 	// Execute carries out a confirmed proposal. It must be idempotent: the reconciler may call it
 	// again for the same confirmation after a crash.
-	Execute(ctx context.Context, args models.JSONB) (ExecResult, error)
+	Execute(ctx context.Context, args models.JSONB, confirmedAt time.Time) (ExecResult, error)
 }
 
 // ExecResult is what became of a confirmed action.
