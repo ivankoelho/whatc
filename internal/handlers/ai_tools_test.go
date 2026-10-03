@@ -163,7 +163,7 @@ func TestAITools_PermissionsAndValidation(t *testing.T) {
 	assert.Equal(t, fasthttp.StatusBadRequest, status)
 }
 
-func TestAITools_TheProductionCatalogIsEmpty(t *testing.T) {
+func TestAITools_TheProductionCatalogIsTheTwoReadToolsAndNothingIsOnByDefault(t *testing.T) {
 	app := newTestApp(t) // no injected catalog
 	org := testutil.CreateTestOrganization(t, app.DB)
 	role := testutil.CreateAdminRole(t, app.DB, org.ID)
@@ -172,10 +172,20 @@ func TestAITools_TheProductionCatalogIsEmpty(t *testing.T) {
 
 	status, data := e.do(t, app.ListAITools, org.ID, admin.ID, "", nil)
 	require.Equal(t, fasthttp.StatusOK, status)
-	assert.Empty(t, data["tools"])
 	assert.Equal(t, false, data["global_enabled"])
+	assert.Equal(t, map[string][2]bool{"get_business_hours": {false, false}, "get_my_occurrences": {false, false}}, toolStates(data),
+		"two read tools, both off for the organization and unavailable")
+	for _, x := range data["tools"].([]any) {
+		assert.Equal(t, "read", x.(map[string]any)["risk"])
+	}
 	status, _ = e.do(t, app.SetAIToolEnabled, org.ID, admin.ID, "anything", map[string]any{"enabled": true})
-	assert.Equal(t, fasthttp.StatusNotFound, status, "nothing can be enabled: no real tool exists")
+	assert.Equal(t, fasthttp.StatusNotFound, status, "only catalog tools can be switched")
+
+	// opting in still does not make a tool available while the server switch is off
+	status, _ = e.do(t, app.SetAIToolEnabled, org.ID, admin.ID, "get_my_occurrences", map[string]any{"enabled": true})
+	require.Equal(t, fasthttp.StatusOK, status)
+	_, data = e.do(t, app.ListAITools, org.ID, admin.ID, "", nil)
+	assert.Equal(t, [2]bool{true, false}, toolStates(data)["get_my_occurrences"])
 }
 
 func TestAITools_OrganizationsAreIsolated(t *testing.T) {

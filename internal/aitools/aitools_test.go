@@ -26,10 +26,14 @@ func spec(name string, risk aitools.Risk) aitools.ToolSpec {
 	}
 }
 
-func TestDefaultCatalogIsEmpty(t *testing.T) {
+func TestDefaultCatalogHoldsExactlyTheTwoReadTools(t *testing.T) {
 	c := aitools.DefaultCatalog()
 	require.NotNil(t, c)
-	assert.Empty(t, c.Names(), "no real tool exists in 9B")
+	assert.Equal(t, []string{"get_business_hours", "get_my_occurrences"}, c.Names())
+	for _, n := range c.Names() {
+		s, _ := c.Get(n)
+		assert.Equal(t, aitools.RiskRead, s.Risk, n+": no write tool in the catalog")
+	}
 	_, ok := c.Get("anything")
 	assert.False(t, ok)
 }

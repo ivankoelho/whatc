@@ -142,9 +142,9 @@ func TestAITools_Dormant_GlobalSwitchOffSendsNoToolsAndTouchesNothing(t *testing
 	assert.Zero(t, *e.factories)
 }
 
-func TestAITools_Dormant_EmptyProductionCatalogSendsNoTools(t *testing.T) {
+func TestAITools_Dormant_ProductionCatalogDoesNotKnowAToolTheOrganizationEnabled(t *testing.T) {
 	e := newToolEnv(t, textReply("plain answer"))
-	e.app.AIToolCatalog = nil // the production catalog, empty in 9B
+	e.app.AIToolCatalog = nil // the production catalog: it has no get_order
 	e.app.Config.AITools.Enabled = true
 	e.enable(t, "get_order")
 

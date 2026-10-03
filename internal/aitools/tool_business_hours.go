@@ -63,21 +63,20 @@ func (t businessHoursTool) Execute(ctx context.Context, call ai.ToolCall) (ai.To
 		return InvalidArgsResult(), nil
 	}
 
-	var row struct {
-		Enabled bool              `gorm:"column:business_hours_enabled"`
-		Hours   models.JSONBArray `gorm:"column:business_hours"`
-	}
-	var found int64
+	// only the two business-hours columns are read (never the AI credentials in the same row)
+	var rows []models.ChatbotSettings
 	err := t.read.View(ctx, 0, func(tx *gorm.DB) error {
-		res := tx.Table("chatbot_settings").
-			Select("business_hours_enabled", "business_hours").
-			Where("organization_id = ? AND whats_app_account = '' AND deleted_at IS NULL", t.scope.OrganizationID).
-			Limit(1).Scan(&row)
-		found = res.RowsAffected
-		return res.Error
+		return tx.Select("business_hours_enabled", "business_hours").
+			Where("organization_id = ? AND whats_app_account = ''", t.scope.OrganizationID).
+			Limit(1).Find(&rows).Error
 	})
 	if err != nil {
 		return ai.ToolResult{}, err
+	}
+	found := len(rows)
+	var row models.BusinessHoursConfig
+	if found > 0 {
+		row = rows[0].BusinessHours
 	}
 
 	out := businessHoursResult{}
