@@ -51,16 +51,23 @@ func (a *App) ListAITools(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to load AI tools", nil, "")
 	}
 	global := a.aiToolsGloballyEnabled()
+	// tools only run with a provider on the validated list; report whether this organization's is
+	var orgProvider string
+	var providers []string
+	if a.DB.Model(&models.ChatbotSettings{}).Where("organization_id = ? AND whats_app_account = ''", orgID).Limit(1).Pluck("ai_provider", &providers).Error == nil && len(providers) > 0 {
+		orgProvider = providers[0]
+	}
+	provider := a.Config != nil && a.Config.AITools.ProviderValidated(orgProvider)
 	cat := a.aiToolCatalog()
 	tools := make([]AIToolView, 0, len(cat.Names()))
 	for _, name := range cat.Names() {
 		spec, _ := cat.Get(name)
 		v := aitools.Authorize(aitools.PolicyInput{GlobalEnabled: global, Known: true, OrgEnabled: enabled[name], Risk: spec.Risk})
 		tools = append(tools, AIToolView{
-			Name: name, Description: spec.Description, Risk: string(spec.Risk), Enabled: enabled[name], Available: v.Allowed,
+			Name: name, Description: spec.Description, Risk: string(spec.Risk), Enabled: enabled[name], Available: v.Allowed && provider,
 		})
 	}
-	return r.SendEnvelope(map[string]any{"global_enabled": global, "tools": tools})
+	return r.SendEnvelope(map[string]any{"global_enabled": global, "provider_validated": provider, "tools": tools})
 }
 
 // SetAIToolEnabledRequest is the body of PUT /api/ai-tools/{name}.

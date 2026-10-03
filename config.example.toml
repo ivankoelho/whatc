@@ -150,6 +150,10 @@ discovery_enabled = false
 # WHATOMATE_AI_TOOLS__ENABLED=true) only after validating it. A tool also has to exist in the
 # catalog and be enabled for the organization by an administrator. The catalog is empty in 9B.
 enabled = false
+# AI providers whose tool calling was validated against the real API. Empty = tools never run.
+# Add a provider here only after its validation result is recorded (see docs/superpowers/specs,
+# Fase 9C). In the environment: WHATOMATE_AI_TOOLS__PROVIDERS=groq,google
+providers = []
 
 # Knowledge base in the chatbot (Fase 8B-3)
 [knowledge]

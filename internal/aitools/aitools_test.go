@@ -22,14 +22,18 @@ var objSchema = json.RawMessage(`{"type":"object","properties":{"id":{"type":"st
 func spec(name string, risk aitools.Risk) aitools.ToolSpec {
 	return aitools.ToolSpec{
 		Name: name, Description: "d", Parameters: objSchema, Risk: risk,
-		Factory: func(aitools.Scope) ai.Tool { return nil },
+		Factory: func(aitools.Scope, aitools.Deps) ai.Tool { return nil },
 	}
 }
 
-func TestDefaultCatalogIsEmpty(t *testing.T) {
+func TestDefaultCatalogHoldsExactlyTheTwoReadTools(t *testing.T) {
 	c := aitools.DefaultCatalog()
 	require.NotNil(t, c)
-	assert.Empty(t, c.Names(), "no real tool exists in 9B")
+	assert.Equal(t, []string{"get_business_hours", "get_my_occurrences"}, c.Names())
+	for _, n := range c.Names() {
+		s, _ := c.Get(n)
+		assert.Equal(t, aitools.RiskRead, s.Risk, n+": no write tool in the catalog")
+	}
 	_, ok := c.Get("anything")
 	assert.False(t, ok)
 }
@@ -257,4 +261,28 @@ func TestSettingsStore_EnabledToolsAreOptInAndPerOrganization(t *testing.T) {
 	got, err = st.EnabledTools(t.Context(), b.ID)
 	require.NoError(t, err)
 	assert.Empty(t, got, "another organization's opt-in does not count")
+}
+
+func TestDBAuditor_ArgsTooLargeRecordsOnlyTheSize(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	org := testutil.CreateTestOrganization(t, db)
+	au := aitools.DBAuditor{DB: db, Secret: "server-secret"}
+	huge := `{"cpf":"SENTINEL-CPF","pad":"` + strings.Repeat("x", 5000) + `"}`
+	at := attempt(org.ID, huge)
+
+	require.NoError(t, au.Denied(t.Context(), at, aitools.DenyArgsTooLarge))
+	var row models.AIToolCall
+	require.NoError(t, db.First(&row, "organization_id = ?", org.ID).Error)
+	assert.Equal(t, models.AIToolCallDenied, row.Status)
+	assert.Equal(t, "args_too_large", row.DenialReason)
+	assert.Equal(t, len(huge), row.ArgsBytes)
+	assert.Empty(t, row.ArgsHMAC, "nothing is computed over an oversized document")
+	assert.Empty(t, row.ArgsKeys)
+
+	// any other denial of the same call still records keys and HMAC
+	require.NoError(t, au.Denied(t.Context(), at, aitools.DenyNotEnabled))
+	var other models.AIToolCall
+	require.NoError(t, db.First(&other, "organization_id = ? AND denial_reason = ?", org.ID, "not_enabled").Error)
+	assert.NotEmpty(t, other.ArgsHMAC)
+	assert.Equal(t, models.JSONBArray{"cpf", "pad"}, other.ArgsKeys)
 }

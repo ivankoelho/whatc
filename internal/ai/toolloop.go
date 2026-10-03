@@ -27,6 +27,19 @@ type Tool interface {
 	Execute(ctx context.Context, call ToolCall) (ToolResult, error)
 }
 
+// RejectReason says why the loop refused a call before executing it.
+type RejectReason string
+
+const RejectArgsTooLarge RejectReason = "args_too_large"
+
+// ToolRejecter may be implemented by a Tool returned from Resolve. The loop calls it INSTEAD of
+// Execute for a call it refuses itself (arguments over Limits.MaxArgsBytes), so whoever governs
+// the tools can record the refusal. Reject must not run the tool. A tool that does not implement
+// it gets the plain error result. internal/ai knows nothing about who implements it.
+type ToolRejecter interface {
+	Reject(ctx context.Context, call ToolCall, reason RejectReason) ToolResult
+}
+
 // Limits bound the loop. Zero fields take the defaults of DefaultLimits.
 type Limits struct {
 	MaxSteps       int           // provider calls that may answer with tool calls
@@ -174,9 +187,6 @@ func runCalls(ctx context.Context, provider string, r ToolResolver, calls []Tool
 
 func runOne(ctx context.Context, r ToolResolver, c ToolCall, lim Limits) (res ToolResult) {
 	fail := func(msg string) ToolResult { return ToolResult{Content: msg, IsError: true} }
-	if len(c.Arguments) > lim.MaxArgsBytes {
-		return fail("error: arguments too large")
-	}
 	if r == nil {
 		return fail("error: unknown tool")
 	}
@@ -189,6 +199,15 @@ func runOne(ctx context.Context, r ToolResolver, c ToolCall, lim Limits) (res To
 			res = fail("error: tool failed")
 		}
 	}()
+	// The argument limit is checked AFTER Resolve so the governance layer can record the refusal.
+	// The limit itself stays here, global; a tool that does not implement ToolRejecter gets the
+	// plain error result.
+	if len(c.Arguments) > lim.MaxArgsBytes {
+		if rj, ok := tool.(ToolRejecter); ok {
+			return rj.Reject(ctx, c, RejectArgsTooLarge)
+		}
+		return fail("error: arguments too large")
+	}
 	out, err := tool.Execute(ctx, c)
 	if err != nil {
 		return fail("error: tool failed")

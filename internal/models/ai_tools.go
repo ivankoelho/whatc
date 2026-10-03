@@ -38,6 +38,7 @@ const (
 	AIToolDenyConfirmationUnavailable = "confirmation_unavailable"
 	AIToolDenyLoopLimit               = "loop_limit"
 	AIToolDenyAuditUnavailable        = "audit_unavailable"
+	AIToolDenyArgsTooLarge            = "args_too_large"
 )
 
 // Risk class of a tool and who acted.

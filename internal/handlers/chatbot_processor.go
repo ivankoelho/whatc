@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/ai"
 	"github.com/shridarpatil/whatomate/internal/aitools"
+	"github.com/shridarpatil/whatomate/internal/businesshours"
 	"github.com/shridarpatil/whatomate/internal/contactutil"
 	"github.com/shridarpatil/whatomate/internal/knowledge"
 	"github.com/shridarpatil/whatomate/internal/models"
@@ -1398,53 +1399,10 @@ func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *mode
 	})
 }
 
-// isWithinBusinessHours checks if current time is within configured business hours
+// isWithinBusinessHours checks if current time is within configured business hours. The rule
+// lives in internal/businesshours so the AI's get_business_hours tool shares it.
 func (a *App) isWithinBusinessHours(businessHours models.JSONBArray) bool {
-	now := time.Now()
-	currentDay := int(now.Weekday()) // 0 = Sunday, 1 = Monday, etc.
-	currentTime := now.Format("15:04")
-
-	for _, bh := range businessHours {
-		bhMap, ok := bh.(map[string]any)
-		if !ok {
-			continue
-		}
-
-		// Get day (0-6, Sunday-Saturday)
-		day, ok := bhMap["day"].(float64)
-		if !ok {
-			continue
-		}
-
-		if int(day) != currentDay {
-			continue
-		}
-
-		// Check if enabled for this day
-		enabled, ok := bhMap["enabled"].(bool)
-		if !ok || !enabled {
-			return false // Day exists but is disabled
-		}
-
-		// Get start and end times
-		startTime, ok := bhMap["start_time"].(string)
-		if !ok {
-			continue
-		}
-		endTime, ok := bhMap["end_time"].(string)
-		if !ok {
-			continue
-		}
-
-		// Compare times (simple string comparison works for HH:MM format)
-		if currentTime >= startTime && currentTime <= endTime {
-			return true
-		}
-		return false // Found the day but outside hours
-	}
-
-	// If no matching day found, assume outside business hours
-	return false
+	return businesshours.Within(businessHours, time.Now())
 }
 
 // replyToMessageIDString renders a message's reply target for webhook payloads.

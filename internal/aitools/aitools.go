@@ -4,13 +4,14 @@
 // ask a provider for tool calls and run a bounded loop) and the application, so authorization and
 // auditing never leak into the provider adapters.
 //
-// The catalog is EMPTY in production in 9B: no real tool exists yet.
+// The production catalog holds the read-only tools of Fase 9C (see DefaultCatalog).
 package aitools
 
 import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/ai"
@@ -66,7 +67,7 @@ type ToolSpec struct {
 	Risk        Risk
 	// Factory builds the real tool. It is called ONLY by the governed tool's Execute, after the
 	// call was authorized and its "requested" audit row was written; never at resolution time.
-	Factory func(Scope) ai.Tool
+	Factory func(Scope, Deps) ai.Tool
 }
 
 // Definition is the neutral definition offered to the provider.
@@ -119,9 +120,13 @@ func (c *Catalog) Names() []string {
 	return append([]string(nil), c.names...)
 }
 
-// DefaultCatalog is the production catalog. It is empty in 9B: the real tools arrive in 9C
-// (read-only) and 9D (the first write, with human confirmation).
+// DefaultCatalog is the production catalog: the two read-only tools of Fase 9C. Being in it does
+// nothing by itself: a tool still needs ai_tools.enabled, the organization's opt-in and a provider
+// validated for tools. The first write tool (with human confirmation) arrives in 9D.
 func DefaultCatalog() *Catalog {
-	c, _ := NewCatalog()
+	c, err := NewCatalog(NewBusinessHoursSpec(time.Now), NewMyOccurrencesSpec())
+	if err != nil {
+		panic(err) // the specs are code: a bad one must fail at start, not at the first call
+	}
 	return c
 }
