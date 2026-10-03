@@ -29,6 +29,9 @@ func (f *fakeTransfers) HasActive(context.Context, uuid.UUID, uuid.UUID) bool { 
 func (f *fakeTransfers) WithinBusinessHours(context.Context, uuid.UUID, string) bool {
 	return f.inHours
 }
+func (f *fakeTransfers) FindAITransfer(context.Context, uuid.UUID, uuid.UUID, time.Time) (uuid.UUID, bool) {
+	return uuid.Nil, false
+}
 func (f *fakeTransfers) TransferToQueue(_ context.Context, _ aitools.Scope, notes string) (aitools.ExecResult, error) {
 	f.transferred++
 	f.notes = append(f.notes, notes)

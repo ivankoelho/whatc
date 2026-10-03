@@ -37,6 +37,13 @@ const (
 // AIToolDenyWriteDisabled is the policy reason for a write tool while ai_tools.write_enabled is off.
 const AIToolDenyWriteDisabled = "write_disabled"
 
+// More denial reasons of a confirmation's re-authorization.
+const (
+	AIToolDenyProviderNotValidated = "provider_not_validated"
+	AIToolDenyChatbotDisabled      = "chatbot_disabled"
+	AIToolDenyTampered             = "tampered"
+)
+
 // AIToolConfirmation is one proposal of the AI that needs the customer's authorization before
 // anything happens (Fase 9D). It is the truth about what became of the proposal: ai_tool_calls only
 // says that the proposing tool call ran.

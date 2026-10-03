@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -35,7 +36,11 @@ type ResolverConfig struct {
 	// mechanism is wired. A write tool is offered only when both are true.
 	WriteEnabled          bool
 	ConfirmationAvailable bool
-	RunID                 uuid.UUID // a fresh one when zero
+	// Confirmations and WriteDeps serve a write tool: the store where a proposal waits for the customer
+	// and the dependencies of the write tool. Without a store a write tool is refused.
+	Confirmations *ConfirmationStore
+	WriteDeps     WriteDeps
+	RunID         uuid.UUID // a fresh one when zero
 	// Deps are handed to the tool's Factory (a read tool gets only a ReadDB).
 	Deps Deps
 	// MaxResultBytes is the size above which a result is recorded as truncated (the loop cuts it
@@ -51,6 +56,26 @@ type ResolverConfig struct {
 type Resolver struct {
 	cfg  ResolverConfig
 	step atomic.Int64
+
+	mu      sync.Mutex
+	pending *PendingConfirmation // the latest proposal made in this run
+}
+
+// PendingConfirmation is a proposal created during a run, waiting for the customer. The caller sends
+// the server-composed confirmation message with it INSTEAD of whatever the model said.
+type PendingConfirmation struct {
+	Token        string
+	Confirmation models.AIToolConfirmation
+	Spec         *ConfirmSpec
+	ToolName     string
+	TTL          time.Duration
+}
+
+// Pending returns the latest proposal made in this run, or nil.
+func (r *Resolver) Pending() *PendingConfirmation {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.pending
 }
 
 var (
@@ -182,9 +207,7 @@ func (g governedTool) Execute(ctx context.Context, call ai.ToolCall) (ai.ToolRes
 		return deniedTool{r: r, reason: v.Reason}.Execute(ctx, call)
 	}
 	if g.spec.Risk == RiskWrite {
-		// the proposal path arrives with the confirmation mechanism; until it is wired a write tool
-		// can only be refused, and nothing of it is built
-		return deniedTool{r: r, reason: DenyConfirmationUnavailable}.Execute(ctx, call)
+		return g.executeWrite(ctx, call)
 	}
 	at := r.attempt(call, g.spec.Risk)
 
@@ -213,6 +236,78 @@ func (g governedTool) Execute(ctx context.Context, call ai.ToolCall) (ai.ToolRes
 	// run it again; the row stays "requested" (attempted, outcome unknown) and the failure is logged.
 	r.finish(ctx, at, id, out)
 	return res, nil
+}
+
+// executeWrite is the path of a write tool: the model's call only PROPOSES. Same order as a read
+// tool (authorize, "requested" written, only then the tool is built), but what the tool does is
+// Propose, and a proposal is recorded in the confirmation store for the customer; nothing is carried
+// out here.
+func (g governedTool) executeWrite(ctx context.Context, call ai.ToolCall) (ai.ToolResult, error) {
+	r := g.r
+	if r.cfg.Confirmations == nil { // no mechanism wired: refused, nothing built
+		return deniedTool{r: r, reason: DenyConfirmationUnavailable}.Execute(ctx, call)
+	}
+	at := r.attempt(call, RiskWrite)
+	id, err := r.cfg.Auditor.Requested(ctx, at)
+	if err != nil {
+		logError(r.cfg.Log, "ai tools: could not record the request; the tool was not run",
+			"organization_id", at.Scope.OrganizationID.String(), "run_id", at.RunID.String(), "tool", g.spec.Name, "error", err.Error())
+		r.recordDenied(ctx, at, DenyAuditUnavailable)
+		return ai.ToolResult{Content: genericUnavailable, IsError: true}, nil
+	}
+
+	started := time.Now()
+	res, errKind := g.propose(ctx, call, id)
+	out := Outcome{
+		Status: models.AIToolCallExecuted, ResultBytes: len(res.Content), Truncated: len(res.Content) > r.cfg.MaxResultBytes,
+		ResultError: res.IsError, ErrorKind: errKind, Duration: time.Since(started),
+	}
+	if errKind != "" {
+		out.Status = models.AIToolCallFailed
+		res = ai.ToolResult{Content: genericFailed, IsError: true}
+	}
+	r.finish(ctx, at, id, out)
+	return res, nil
+}
+
+// propose builds the write tool (only now), asks it for a proposal and records it.
+func (g governedTool) propose(ctx context.Context, call ai.ToolCall, proposalCallID uuid.UUID) (res ai.ToolResult, errKind string) {
+	r := g.r
+	defer func() {
+		if recover() != nil {
+			res, errKind = ai.ToolResult{}, "panic"
+		}
+	}()
+	tool := g.spec.WriteFactory(r.cfg.Scope, r.cfg.WriteDeps)
+	if tool == nil {
+		return ai.ToolResult{}, "tool_error"
+	}
+	proposal, res, err := tool.Propose(ctx, call)
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return ai.ToolResult{}, "timeout"
+	case err != nil:
+		return ai.ToolResult{}, "tool_error"
+	case proposal == nil: // nothing to ask the customer; the tool's result is what the model hears
+		return res, ""
+	}
+	token, conf, err := r.cfg.Confirmations.Propose(ctx, ProposeInput{
+		Scope: r.cfg.Scope, RunID: r.cfg.RunID, Tool: g.spec.Name, Args: proposal.Args, ProposalCallID: &proposalCallID,
+	})
+	switch {
+	case errors.Is(err, ErrTooManyProposals):
+		return NotAvailableResult(NotAvailableTooManyRequests), ""
+	case errors.Is(err, ErrRecentlyDeclined):
+		return NotAvailableResult(NotAvailableRecentlyDeclined), ""
+	case err != nil:
+		logError(r.cfg.Log, "ai tools: could not record the proposal",
+			"organization_id", r.cfg.Scope.OrganizationID.String(), "run_id", r.cfg.RunID.String(), "tool", g.spec.Name, "error", err.Error())
+		return ai.ToolResult{}, "tool_error"
+	}
+	r.mu.Lock()
+	r.pending = &PendingConfirmation{Token: token, Confirmation: conf, Spec: g.spec.Confirm, ToolName: g.spec.Name, TTL: r.cfg.Confirmations.Params.TTL}
+	r.mu.Unlock()
+	return res, ""
 }
 
 // run builds and runs the real tool, turning a panic or an error into an error kind.

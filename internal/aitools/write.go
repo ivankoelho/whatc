@@ -50,6 +50,9 @@ type TransferService interface {
 	HasActive(ctx context.Context, orgID, contactID uuid.UUID) bool
 	// WithinBusinessHours says whether the organization accepts a transfer now.
 	WithinBusinessHours(ctx context.Context, orgID uuid.UUID, account string) bool
+	// FindAITransfer looks for an AI-confirmed transfer of the contact created at or after `since`.
+	// The reconciler uses it to tell whether a crashed execution had already created it.
+	FindAITransfer(ctx context.Context, orgID, contactID uuid.UUID, since time.Time) (uuid.UUID, bool)
 	// TransferToQueue creates the transfer. It is idempotent and reports an outcome.
 	TransferToQueue(ctx context.Context, scope Scope, notes string) (ExecResult, error)
 }
