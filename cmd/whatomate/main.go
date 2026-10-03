@@ -858,6 +858,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 
 	// AI tools governance (Fase 9B): which catalog tools the organization enabled
 	g.GET("/api/ai-tools", app.ListAITools)
+	g.GET("/api/ai-tools/calls", app.ListAIToolCalls)
 	g.PUT("/api/ai-tools/{name}", app.SetAIToolEnabled)
 
 	// Knowledge base (Fase 8A)
