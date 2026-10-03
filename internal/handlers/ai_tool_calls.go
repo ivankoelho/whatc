@@ -52,7 +52,9 @@ func aiToolCallView(c models.AIToolCall) AIToolCallView {
 
 // ListAIToolCalls GET /api/ai-tools/calls: the audit of the AI's tool calls, read only.
 // Filters: tool, status, denial_reason, contact_id (the customer the call was about), run_id,
-// from, to (YYYY-MM-DD or RFC 3339), page, limit (max 100). Newest first. The organization is
+// from, to, page, limit (max 100). Time filters are read in UTC: a plain date (YYYY-MM-DD) is a
+// UTC date (from = 00:00:00Z, to = 23:59:59Z of that day) and an RFC 3339 value keeps its own
+// offset; nothing is interpreted in a local time zone. Newest first. The organization is
 // always the authenticated one. There is no way to change this audit through the API.
 func (a *App) ListAIToolCalls(r *fastglue.Request) error {
 	orgID, _, err := a.requireAuth(r, models.ResourceAITools, models.ActionRead)
