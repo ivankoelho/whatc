@@ -124,7 +124,3 @@ func (a *App) SetAIToolEnabled(r *fastglue.Request) error {
 	}
 	return r.SendEnvelope(map[string]any{"name": name, "enabled": row.Enabled})
 }
-
-// aiToolConfirmationsReady says whether the customer-confirmation mechanism is wired, which a write
-// tool needs before the policy lets it even propose. Not wired yet: false.
-func (a *App) aiToolConfirmationsReady() bool { return false }

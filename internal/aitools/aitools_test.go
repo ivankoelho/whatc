@@ -26,14 +26,20 @@ func spec(name string, risk aitools.Risk) aitools.ToolSpec {
 	}
 }
 
-func TestDefaultCatalogHoldsExactlyTheTwoReadTools(t *testing.T) {
+func TestDefaultCatalogHoldsTheTwoReadToolsAndTheOneWriteTool(t *testing.T) {
 	c := aitools.DefaultCatalog()
 	require.NotNil(t, c)
-	assert.Equal(t, []string{"get_business_hours", "get_my_occurrences"}, c.Names())
+	assert.Equal(t, []string{"get_business_hours", "get_my_occurrences", "request_agent_transfer"}, c.Names())
+	writes := 0
 	for _, n := range c.Names() {
 		s, _ := c.Get(n)
-		assert.Equal(t, aitools.RiskRead, s.Risk, n+": no write tool in the catalog")
+		if s.Risk == aitools.RiskWrite {
+			writes++
+			assert.Equal(t, "request_agent_transfer", n)
+			assert.Equal(t, []string{"chatbot_reply"}, s.Features)
+		}
 	}
+	assert.Equal(t, 1, writes, "exactly one write tool")
 	_, ok := c.Get("anything")
 	assert.False(t, ok)
 }

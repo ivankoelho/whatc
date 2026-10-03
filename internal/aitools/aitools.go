@@ -147,11 +147,12 @@ func (c *Catalog) Names() []string {
 	return append([]string(nil), c.names...)
 }
 
-// DefaultCatalog is the production catalog: the two read-only tools of Fase 9C. Being in it does
-// nothing by itself: a tool still needs ai_tools.enabled, the organization's opt-in and a provider
-// validated for tools. The first write tool (with human confirmation) arrives in 9D.
+// DefaultCatalog is the production catalog: the two read-only tools of Fase 9C and the first write
+// tool of Fase 9D, request_agent_transfer. Being in it does nothing by itself: a tool still needs
+// ai_tools.enabled, the organization's opt-in and a provider validated for tools, and the write tool
+// also ai_tools.write_enabled and the customer's confirmation of every single action.
 func DefaultCatalog() *Catalog {
-	c, err := NewCatalog(NewBusinessHoursSpec(time.Now), NewMyOccurrencesSpec())
+	c, err := NewCatalog(NewBusinessHoursSpec(time.Now), NewMyOccurrencesSpec(), NewRequestAgentTransferSpec())
 	if err != nil {
 		panic(err) // the specs are code: a bad one must fail at start, not at the first call
 	}
