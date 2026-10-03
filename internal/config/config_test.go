@@ -330,3 +330,32 @@ func TestLoad_AIToolsNeverBecomeTrueByAccident(t *testing.T) {
 	_, err := config.Load(writeConfig(t, ""))
 	assert.Error(t, err, "garbage is a configuration error, never 'on'")
 }
+
+func TestLoad_AIToolsProvidersAreEmptyByDefaultAndNothingIsValidated(t *testing.T) {
+	cfg, err := config.Load(writeConfig(t, ""))
+	require.NoError(t, err)
+	assert.Empty(t, cfg.AITools.Providers)
+	for _, p := range []string{"openai", "anthropic", "google", "groq", ""} {
+		assert.False(t, cfg.AITools.ProviderValidated(p), p)
+	}
+}
+
+func TestLoad_AIToolsProvidersFromFileAndEnv(t *testing.T) {
+	cfg, err := config.Load(writeConfig(t, "[ai_tools]\nproviders = [\"groq\", \"Google\"]\n"))
+	require.NoError(t, err)
+	assert.True(t, cfg.AITools.ProviderValidated("groq"))
+	assert.True(t, cfg.AITools.ProviderValidated("GOOGLE"), "case does not matter")
+	assert.False(t, cfg.AITools.ProviderValidated("openai"))
+
+	t.Setenv("WHATOMATE_AI_TOOLS__PROVIDERS", "openai, anthropic")
+	cfg, err = config.Load(writeConfig(t, ""))
+	require.NoError(t, err)
+	assert.True(t, cfg.AITools.ProviderValidated("openai"))
+	assert.True(t, cfg.AITools.ProviderValidated("anthropic"), "comma separated, spaces ignored")
+	assert.False(t, cfg.AITools.ProviderValidated("groq"))
+
+	t.Setenv("WHATOMATE_AI_TOOLS__PROVIDERS", "")
+	cfg, err = config.Load(writeConfig(t, "[ai_tools]\nproviders = [\"groq\"]\n"))
+	require.NoError(t, err)
+	assert.False(t, cfg.AITools.ProviderValidated(""), "an empty name is never validated")
+}

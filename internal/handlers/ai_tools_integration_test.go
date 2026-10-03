@@ -95,6 +95,7 @@ func newToolEnv(t *testing.T, replies ...seqReply) toolEnv {
 	cat, err := aitools.NewCatalog(mk("get_order", aitools.RiskRead), mk("write_it", aitools.RiskWrite))
 	require.NoError(t, err)
 	app.AIToolCatalog = cat
+	app.Config.AITools.Providers = []string{"openai"} // the provider these tests use is on the validated list
 	return toolEnv{app: app, tr: tr, org: org, settings: settings, session: session, contact: contact, execs: &execs, factories: &factories}
 }
 
@@ -324,4 +325,37 @@ func TestAITools_Active_OrganizationsDoNotShareOptIn(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, hasTools(e.tr.bodies[0]), "another organization's opt-in does not count")
 	assert.Empty(t, e.callRows(t))
+}
+
+func TestAITools_Dormant_AProviderThatIsNotValidatedNeverGetsTools(t *testing.T) {
+	for name, providers := range map[string][]string{
+		"no provider validated":       nil,
+		"another provider validated":  {"groq", "google"},
+		"empty strings are not names": {"", " "},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newToolEnv(t, textReply("plain answer"))
+			e.app.Config.AITools.Enabled = true
+			e.app.Config.AITools.Providers = providers
+			e.enable(t, "get_order")
+
+			out, err := e.app.GenerateAIResponseForTest(e.settings, e.session, "hi")
+			require.NoError(t, err)
+			assert.Equal(t, "plain answer", out)
+			require.Len(t, e.tr.bodies, 1)
+			assert.False(t, hasTools(e.tr.bodies[0]), "everything else is on, the provider is not validated")
+			assert.Empty(t, e.callRows(t))
+			assert.Zero(t, *e.factories)
+		})
+	}
+}
+
+func TestAITools_Active_ProviderNameMatchIsCaseInsensitive(t *testing.T) {
+	e := newToolEnv(t, callsReply([2]string{"call_1", "get_order"}), textReply("ok"))
+	e.app.Config.AITools.Enabled = true
+	e.app.Config.AITools.Providers = []string{" OpenAI "}
+	e.enable(t, "get_order")
+	_, err := e.app.GenerateAIResponseForTest(e.settings, e.session, "hi")
+	require.NoError(t, err)
+	assert.Len(t, e.callRows(t), 1)
 }

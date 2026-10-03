@@ -344,6 +344,28 @@ type AIToolsConfig struct {
 	// false, and an unparseable value makes the configuration fail to load (it never turns the
 	// switch on). With it off the chatbot behaves exactly as before.
 	Enabled bool `koanf:"enabled"`
+	// Providers lists the AI providers whose tool calling was validated against the real API
+	// (Fase 9C gate). It is EMPTY by default: with no provider listed, tools never run. A provider
+	// is added only after its validation result is recorded as validated. Names are the provider
+	// ids (openai, anthropic, google, groq); in the environment, comma separated.
+	Providers []string `koanf:"providers"`
+}
+
+// ProviderValidated says whether tools may run with the given provider (case-insensitive).
+func (c AIToolsConfig) ProviderValidated(provider string) bool {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if provider == "" {
+		return false
+	}
+	// an environment variable arrives as one string ("groq, google"), a file as a list: accept both
+	for _, entry := range c.Providers {
+		for _, p := range strings.Split(entry, ",") {
+			if strings.ToLower(strings.TrimSpace(p)) == provider {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // KnowledgeConfig holds the global switch of the Knowledge base in the chatbot (Fase 8B-3).

@@ -93,10 +93,20 @@ func TestAITools_ListStartsDisabledAndRespectsTheGlobalSwitch(t *testing.T) {
 	_, data = e.do(t, e.app.ListAITools, e.orgA.ID, e.adminA.ID, "", nil)
 	assert.Equal(t, map[string][2]bool{"get_order": {true, false}, "write_it": {true, false}}, toolStates(data))
 
-	// global on: the read tool is available, the write tool is still not
+	// global on, but the organization's provider is not on the validated list: still not available
 	e.app.Config.AITools.Enabled = true
+	s := models.ChatbotSettings{OrganizationID: e.orgA.ID}
+	s.AI.Provider = models.AIProviderOpenAI
+	require.NoError(t, e.app.DB.Create(&s).Error)
 	_, data = e.do(t, e.app.ListAITools, e.orgA.ID, e.adminA.ID, "", nil)
 	assert.Equal(t, true, data["global_enabled"])
+	assert.Equal(t, false, data["provider_validated"])
+	assert.Equal(t, map[string][2]bool{"get_order": {true, false}, "write_it": {true, false}}, toolStates(data))
+
+	// provider validated: the read tool is available, the write tool is still not
+	e.app.Config.AITools.Providers = []string{"OpenAI"} // case does not matter
+	_, data = e.do(t, e.app.ListAITools, e.orgA.ID, e.adminA.ID, "", nil)
+	assert.Equal(t, true, data["provider_validated"])
 	assert.Equal(t, map[string][2]bool{"get_order": {true, true}, "write_it": {true, false}}, toolStates(data))
 }
 

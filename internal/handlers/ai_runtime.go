@@ -87,13 +87,18 @@ func (a *App) governedTools(ctx context.Context, meta aiCallMeta, p ai.Provider)
 	if meta.Tools == nil || !a.aiToolsGloballyEnabled() || len(a.aiToolCatalog().Names()) == 0 || !p.Capabilities().ToolCalling {
 		return nil
 	}
+	// the provider has to be on the validated list (ai_tools.providers); an unvalidated one never
+	// gets tools, however everything else is set
+	if !a.Config.AITools.ProviderValidated(p.Name()) {
+		return nil
+	}
 	secret := ""
 	if a.Config != nil {
 		secret = a.Config.App.EncryptionKey
 	}
 	r := aitools.NewResolver(ctx, aitools.ResolverConfig{
 		Catalog: a.aiToolCatalog(), GlobalEnabled: true, Auditor: aitools.DBAuditor{DB: a.DB, Secret: secret},
-		Actor: meta.Tools.Actor, Scope: meta.Tools.Scope, Log: a.Log,
+		Actor: meta.Tools.Actor, Scope: meta.Tools.Scope, Log: a.Log, Deps: aitools.Deps{Read: aitools.NewReadDB(a.DB)},
 	}, aitools.SettingsStore{DB: a.DB})
 	if len(r.Definitions()) == 0 {
 		return nil
