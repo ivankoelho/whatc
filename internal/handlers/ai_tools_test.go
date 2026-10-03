@@ -30,7 +30,7 @@ func newAIToolsEnv(t *testing.T) aiToolsEnv {
 	schema := json.RawMessage(`{"type":"object","properties":{}}`)
 	mk := func(name string, risk aitools.Risk) aitools.ToolSpec {
 		return aitools.ToolSpec{Name: name, Description: "d " + name, Parameters: schema, Risk: risk,
-			Factory: func(aitools.Scope) ai.Tool { return nil }}
+			Factory: func(aitools.Scope, aitools.Deps) ai.Tool { return nil }}
 	}
 	cat, err := aitools.NewCatalog(mk("get_order", aitools.RiskRead), mk("write_it", aitools.RiskWrite))
 	require.NoError(t, err)

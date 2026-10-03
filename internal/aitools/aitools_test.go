@@ -22,7 +22,7 @@ var objSchema = json.RawMessage(`{"type":"object","properties":{"id":{"type":"st
 func spec(name string, risk aitools.Risk) aitools.ToolSpec {
 	return aitools.ToolSpec{
 		Name: name, Description: "d", Parameters: objSchema, Risk: risk,
-		Factory: func(aitools.Scope) ai.Tool { return nil },
+		Factory: func(aitools.Scope, aitools.Deps) ai.Tool { return nil },
 	}
 }
 

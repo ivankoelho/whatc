@@ -84,7 +84,7 @@ func newToolEnv(t *testing.T, replies ...seqReply) toolEnv {
 	var factories int
 	schema := json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"}}}`)
 	mk := func(name string, risk aitools.Risk) aitools.ToolSpec {
-		return aitools.ToolSpec{Name: name, Description: "d", Parameters: schema, Risk: risk, Factory: func(sc aitools.Scope) ai.Tool {
+		return aitools.ToolSpec{Name: name, Description: "d", Parameters: schema, Risk: risk, Factory: func(sc aitools.Scope, _ aitools.Deps) ai.Tool {
 			factories++
 			return toolFn(func(_ context.Context, c ai.ToolCall) (ai.ToolResult, error) {
 				execs = append(execs, sc)

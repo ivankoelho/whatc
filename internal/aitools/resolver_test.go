@@ -108,7 +108,7 @@ type probe struct {
 
 func (p *probe) spec(name string, risk aitools.Risk) aitools.ToolSpec {
 	s := spec(name, risk)
-	s.Factory = func(sc aitools.Scope) ai.Tool {
+	s.Factory = func(sc aitools.Scope, _ aitools.Deps) ai.Tool {
 		p.factoryCalls++
 		p.gotScope = sc
 		return toolFn(func(ctx context.Context, c ai.ToolCall) (ai.ToolResult, error) {
@@ -303,7 +303,7 @@ func TestExecute_ToolErrorPanicAndTimeoutAreFailedAndGeneric(t *testing.T) {
 
 func TestExecute_APanickingFactoryIsAFailedCall(t *testing.T) {
 	s := spec("get_order", aitools.RiskRead)
-	s.Factory = func(aitools.Scope) ai.Tool { panic("bad init") }
+	s.Factory = func(aitools.Scope, aitools.Deps) ai.Tool { panic("bad init") }
 	au := &memAuditor{}
 	r := newResolver(catalogOf(t, s), map[string]bool{"get_order": true}, au, nil)
 	tool, _ := r.Resolve("get_order")
@@ -312,7 +312,7 @@ func TestExecute_APanickingFactoryIsAFailedCall(t *testing.T) {
 	assert.Equal(t, "error: tool failed", res.Content)
 	assert.Equal(t, "panic", au.events[1].outcome.ErrorKind)
 
-	s.Factory = func(aitools.Scope) ai.Tool { return nil }
+	s.Factory = func(aitools.Scope, aitools.Deps) ai.Tool { return nil }
 	r = newResolver(catalogOf(t, s), map[string]bool{"get_order": true}, &memAuditor{}, nil)
 	tool, _ = r.Resolve("get_order")
 	res, _ = tool.Execute(context.Background(), call("c", "get_order", `{}`))

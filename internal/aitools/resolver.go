@@ -32,6 +32,8 @@ type ResolverConfig struct {
 	Actor         Actor
 	Scope         Scope
 	RunID         uuid.UUID // a fresh one when zero
+	// Deps are handed to the tool's Factory (a read tool gets only a ReadDB).
+	Deps Deps
 	// MaxResultBytes is the size above which a result is recorded as truncated (the loop cuts it
 	// at this size before the model sees it). ai.DefaultLimits().MaxResultBytes when zero.
 	MaxResultBytes int
@@ -209,7 +211,7 @@ func (g governedTool) run(ctx context.Context, call ai.ToolCall) (res ai.ToolRes
 			res, errKind = ai.ToolResult{}, "panic"
 		}
 	}()
-	tool := g.spec.Factory(g.r.cfg.Scope)
+	tool := g.spec.Factory(g.r.cfg.Scope, g.r.cfg.Deps)
 	if tool == nil {
 		return ai.ToolResult{}, "tool_error"
 	}

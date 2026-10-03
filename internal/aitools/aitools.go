@@ -66,7 +66,7 @@ type ToolSpec struct {
 	Risk        Risk
 	// Factory builds the real tool. It is called ONLY by the governed tool's Execute, after the
 	// call was authorized and its "requested" audit row was written; never at resolution time.
-	Factory func(Scope) ai.Tool
+	Factory func(Scope, Deps) ai.Tool
 }
 
 // Definition is the neutral definition offered to the provider.
