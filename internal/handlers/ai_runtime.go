@@ -99,6 +99,7 @@ func (a *App) governedTools(ctx context.Context, meta aiCallMeta, p ai.Provider)
 	r := aitools.NewResolver(ctx, aitools.ResolverConfig{
 		Catalog: a.aiToolCatalog(), GlobalEnabled: true, Auditor: aitools.DBAuditor{DB: a.DB, Secret: secret},
 		Actor: meta.Tools.Actor, Scope: meta.Tools.Scope, Log: a.Log, Deps: aitools.Deps{Read: aitools.NewReadDB(a.DB)},
+		WriteEnabled: a.Config.AITools.WriteEnabled, ConfirmationAvailable: a.aiToolConfirmationsReady(),
 	}, aitools.SettingsStore{DB: a.DB})
 	if len(r.Definitions()) == 0 {
 		return nil

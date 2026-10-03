@@ -29,8 +29,14 @@ func newAIToolsEnv(t *testing.T) aiToolsEnv {
 	app := newTestApp(t)
 	schema := json.RawMessage(`{"type":"object","properties":{}}`)
 	mk := func(name string, risk aitools.Risk) aitools.ToolSpec {
-		return aitools.ToolSpec{Name: name, Description: "d " + name, Parameters: schema, Risk: risk,
-			Factory: func(aitools.Scope, aitools.Deps) ai.Tool { return nil }}
+		s := aitools.ToolSpec{Name: name, Description: "d " + name, Parameters: schema, Risk: risk}
+		if risk == aitools.RiskWrite {
+			s.Confirm = testConfirm()
+			s.WriteFactory = func(aitools.Scope, aitools.WriteDeps) aitools.WriteTool { return noopWriteTool{} }
+			return s
+		}
+		s.Factory = func(aitools.Scope, aitools.Deps) ai.Tool { return nil }
+		return s
 	}
 	cat, err := aitools.NewCatalog(mk("get_order", aitools.RiskRead), mk("write_it", aitools.RiskWrite))
 	require.NoError(t, err)

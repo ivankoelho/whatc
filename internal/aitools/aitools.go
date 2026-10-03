@@ -65,9 +65,20 @@ type ToolSpec struct {
 	Description string
 	Parameters  json.RawMessage // a JSON Schema object (ai.ToolDefinition.Validate)
 	Risk        Risk
-	// Factory builds the real tool. It is called ONLY by the governed tool's Execute, after the
-	// call was authorized and its "requested" audit row was written; never at resolution time.
+	// Features restricts the tool to these features (the actor's Ref, e.g. "chatbot_reply"); empty
+	// means every feature. A tool outside its features is not offered and a forced call is denied.
+	Features []string
+
+	// Factory builds a READ tool. It is called ONLY by the governed tool's Execute, after the call was
+	// authorized and its "requested" audit row was written; never at resolution time. A read spec
+	// has a Factory and no WriteFactory.
 	Factory func(Scope, Deps) ai.Tool
+
+	// WriteFactory builds a WRITE tool (same timing rule as Factory). A write spec has a
+	// WriteFactory, a Confirm and NO Factory: a write tool can never be built with the ReadDB.
+	WriteFactory func(Scope, WriteDeps) WriteTool
+	// Confirm is what the server says to the customer about this tool's proposals.
+	Confirm *ConfirmSpec
 }
 
 // Definition is the neutral definition offered to the provider.
@@ -91,8 +102,24 @@ func NewCatalog(specs ...ToolSpec) (*Catalog, error) {
 		if s.Risk != RiskRead && s.Risk != RiskWrite {
 			return nil, fmt.Errorf("aitools: tool %q has no valid risk class", s.Name)
 		}
-		if s.Factory == nil {
-			return nil, fmt.Errorf("aitools: tool %q has no factory", s.Name)
+		switch s.Risk {
+		case RiskRead:
+			if s.Factory == nil {
+				return nil, fmt.Errorf("aitools: tool %q has no factory", s.Name)
+			}
+			if s.WriteFactory != nil || s.Confirm != nil {
+				return nil, fmt.Errorf("aitools: read tool %q must not have a write factory or a confirmation", s.Name)
+			}
+		case RiskWrite:
+			if s.WriteFactory == nil {
+				return nil, fmt.Errorf("aitools: write tool %q has no write factory", s.Name)
+			}
+			if s.Factory != nil {
+				return nil, fmt.Errorf("aitools: write tool %q must not have a read factory", s.Name)
+			}
+			if !s.Confirm.valid() {
+				return nil, fmt.Errorf("aitools: write tool %q needs a complete confirmation (server text and buttons of at most %d characters)", s.Name, maxButtonTitle)
+			}
 		}
 		if _, dup := c.specs[s.Name]; dup {
 			return nil, fmt.Errorf("aitools: duplicate tool %q", s.Name)

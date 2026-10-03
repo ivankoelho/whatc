@@ -31,7 +31,11 @@ type ResolverConfig struct {
 	Auditor       Auditor
 	Actor         Actor
 	Scope         Scope
-	RunID         uuid.UUID // a fresh one when zero
+	// WriteEnabled is ai_tools.write_enabled; ConfirmationAvailable says the customer-confirmation
+	// mechanism is wired. A write tool is offered only when both are true.
+	WriteEnabled          bool
+	ConfirmationAvailable bool
+	RunID                 uuid.UUID // a fresh one when zero
 	// Deps are handed to the tool's Factory (a read tool gets only a ReadDB).
 	Deps Deps
 	// MaxResultBytes is the size above which a result is recorded as truncated (the loop cuts it
@@ -89,6 +93,8 @@ func (r *Resolver) verdict(name string) (ToolSpec, Verdict) {
 	spec, known := r.cfg.Catalog.Get(name)
 	return spec, Authorize(PolicyInput{
 		GlobalEnabled: r.cfg.GlobalEnabled, Known: known, OrgEnabled: r.cfg.Enabled[name], Risk: spec.Risk,
+		FeatureAllowed: known && spec.featureAllowed(r.cfg.Actor.Ref),
+		WriteEnabled:   r.cfg.WriteEnabled, ConfirmationAvailable: r.cfg.ConfirmationAvailable,
 	})
 }
 
@@ -174,6 +180,11 @@ func (g governedTool) Execute(ctx context.Context, call ai.ToolCall) (ai.ToolRes
 	r := g.r
 	if _, v := r.verdict(g.spec.Name); !v.Allowed {
 		return deniedTool{r: r, reason: v.Reason}.Execute(ctx, call)
+	}
+	if g.spec.Risk == RiskWrite {
+		// the proposal path arrives with the confirmation mechanism; until it is wired a write tool
+		// can only be refused, and nothing of it is built
+		return deniedTool{r: r, reason: DenyConfirmationUnavailable}.Execute(ctx, call)
 	}
 	at := r.attempt(call, g.spec.Risk)
 

@@ -62,24 +62,47 @@ func TestCatalog_ValidatesAndSorts(t *testing.T) {
 }
 
 func TestAuthorize_DenyByDefaultInAFixedOrder(t *testing.T) {
+	read := aitools.PolicyInput{GlobalEnabled: true, Known: true, OrgEnabled: true, FeatureAllowed: true, Risk: aitools.RiskRead}
+	write := aitools.PolicyInput{GlobalEnabled: true, Known: true, OrgEnabled: true, FeatureAllowed: true, Risk: aitools.RiskWrite}
+	with := func(in aitools.PolicyInput, f func(*aitools.PolicyInput)) aitools.PolicyInput { f(&in); return in }
+
 	cases := []struct {
 		name string
 		in   aitools.PolicyInput
 		want string // "" = allowed
+		conf bool   // allowed, but only to propose
 	}{
-		{"all off", aitools.PolicyInput{}, aitools.DenyGlobalOff},
-		{"global off beats the rest", aitools.PolicyInput{Known: true, OrgEnabled: true, Risk: aitools.RiskRead}, aitools.DenyGlobalOff},
-		{"unknown tool", aitools.PolicyInput{GlobalEnabled: true, OrgEnabled: true, Risk: aitools.RiskRead}, aitools.DenyUnknownTool},
-		{"not enabled for the organization", aitools.PolicyInput{GlobalEnabled: true, Known: true, Risk: aitools.RiskRead}, aitools.DenyNotEnabled},
-		{"write is always denied", aitools.PolicyInput{GlobalEnabled: true, Known: true, OrgEnabled: true, Risk: aitools.RiskWrite}, aitools.DenyConfirmationUnavailable},
-		{"no risk class is not read", aitools.PolicyInput{GlobalEnabled: true, Known: true, OrgEnabled: true}, aitools.DenyConfirmationUnavailable},
-		{"read, enabled, global on", aitools.PolicyInput{GlobalEnabled: true, Known: true, OrgEnabled: true, Risk: aitools.RiskRead}, ""},
+		{"all off", aitools.PolicyInput{}, aitools.DenyGlobalOff, false},
+		{"global off beats the rest", with(read, func(p *aitools.PolicyInput) { p.GlobalEnabled = false }), aitools.DenyGlobalOff, false},
+		{"unknown tool", with(read, func(p *aitools.PolicyInput) { p.Known = false }), aitools.DenyUnknownTool, false},
+		{"not enabled for the organization", with(read, func(p *aitools.PolicyInput) { p.OrgEnabled = false }), aitools.DenyNotEnabled, false},
+		{"feature not allowed", with(read, func(p *aitools.PolicyInput) { p.FeatureAllowed = false }), aitools.DenyFeatureNotAllowed, false},
+		{"read, enabled, global on", read, "", false},
+		{"a read tool ignores the write switches", with(read, func(p *aitools.PolicyInput) { p.WriteEnabled, p.ConfirmationAvailable = false, false }), "", false},
+
+		{"write while write_enabled is off", write, aitools.DenyWriteDisabled, false},
+		{"write_enabled but no confirmation mechanism", with(write, func(p *aitools.PolicyInput) { p.WriteEnabled = true }), aitools.DenyConfirmationUnavailable, false},
+		{"confirmation wired but write_enabled off", with(write, func(p *aitools.PolicyInput) { p.ConfirmationAvailable = true }), aitools.DenyWriteDisabled, false},
+		{"write with the whole chain: allowed only to propose", with(write, func(p *aitools.PolicyInput) { p.WriteEnabled, p.ConfirmationAvailable = true, true }), "", true},
+		{"write chain but the tool is not enabled", with(write, func(p *aitools.PolicyInput) {
+			p.WriteEnabled, p.ConfirmationAvailable, p.OrgEnabled = true, true, false
+		}), aitools.DenyNotEnabled, false},
+		{"write chain but the global switch is off", with(write, func(p *aitools.PolicyInput) {
+			p.WriteEnabled, p.ConfirmationAvailable, p.GlobalEnabled = true, true, false
+		}), aitools.DenyGlobalOff, false},
+		{"write chain but the feature is not allowed", with(write, func(p *aitools.PolicyInput) {
+			p.WriteEnabled, p.ConfirmationAvailable, p.FeatureAllowed = true, true, false
+		}), aitools.DenyFeatureNotAllowed, false},
+		{"no risk class is never allowed", with(read, func(p *aitools.PolicyInput) { p.Risk = ""; p.WriteEnabled, p.ConfirmationAvailable = true, true }), aitools.DenyConfirmationUnavailable, false},
 	}
 	for _, c := range cases {
 		v := aitools.Authorize(c.in)
 		assert.Equal(t, c.want == "", v.Allowed, c.name)
 		assert.Equal(t, c.want, v.Reason, c.name)
+		assert.Equal(t, c.conf, v.NeedsConfirmation, c.name)
 	}
+	// a caller that forgets to say the feature gets a denial, not a permission
+	assert.Equal(t, aitools.DenyFeatureNotAllowed, aitools.Authorize(aitools.PolicyInput{GlobalEnabled: true, Known: true, OrgEnabled: true, Risk: aitools.RiskRead}).Reason)
 }
 
 func TestAIActor(t *testing.T) {
