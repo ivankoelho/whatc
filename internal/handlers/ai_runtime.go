@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/ai"
+	"github.com/shridarpatil/whatomate/internal/aitools"
 	"github.com/shridarpatil/whatomate/internal/knowledge"
 	"github.com/shridarpatil/whatomate/internal/models"
 )
@@ -31,6 +32,17 @@ type aiCallMeta struct {
 	// KnowledgeSources are the Knowledge chunks put in the prompt, in prompt order (ids,
 	// title, origin and score; never text). Empty when Knowledge was not used.
 	KnowledgeSources []knowledge.Source
+	// Tools is set when this call may use tools (Fase 9B): the server-built scope and the actor.
+	// nil means no tools, exactly as before. Even when set, tools run only if ai_tools.enabled is
+	// on, the catalog has tools and the organization enabled one (see completeAI).
+	Tools *aiToolsRun
+}
+
+// aiToolsRun is the identity and scope a governed tool run is made with. The server builds it
+// from the chatbot session; nothing in it comes from what the model said.
+type aiToolsRun struct {
+	Scope aitools.Scope
+	Actor aitools.Actor
 }
 
 // newAIProvider builds the adapter for provider using a plaintext key. Callers
@@ -56,10 +68,59 @@ func (a *App) completeAI(ctx context.Context, settings *models.ChatbotSettings, 
 		return nil, err
 	}
 
+	if resolver := a.governedTools(ctx, meta, p); resolver != nil {
+		return a.completeWithTools(ctx, p, provider, meta, req, resolver)
+	}
+
 	start := time.Now()
 	resp, err := p.Complete(ctx, req)
 	a.recordAIUsage(meta, provider, req.Model, resp, time.Since(start), err)
 	return resp, err
+}
+
+// governedTools returns the governed resolver for this call, or nil when the call must go the
+// plain way, which is the case unless ALL of these hold: the caller asked for tools, the global
+// ai_tools.enabled switch is on, the catalog has at least one tool, the provider can call tools
+// and the organization enabled at least one tool that the policy lets the AI use. With the
+// production catalog empty (Fase 9B) this is always nil, and nothing extra is even queried.
+func (a *App) governedTools(ctx context.Context, meta aiCallMeta, p ai.Provider) *aitools.Resolver {
+	if meta.Tools == nil || !a.aiToolsGloballyEnabled() || len(a.aiToolCatalog().Names()) == 0 || !p.Capabilities().ToolCalling {
+		return nil
+	}
+	secret := ""
+	if a.Config != nil {
+		secret = a.Config.App.EncryptionKey
+	}
+	r := aitools.NewResolver(ctx, aitools.ResolverConfig{
+		Catalog: a.aiToolCatalog(), GlobalEnabled: true, Auditor: aitools.DBAuditor{DB: a.DB, Secret: secret},
+		Actor: meta.Tools.Actor, Scope: meta.Tools.Scope, Log: a.Log,
+	}, aitools.SettingsStore{DB: a.DB})
+	if len(r.Definitions()) == 0 {
+		return nil
+	}
+	return r
+}
+
+// completeWithTools runs the bounded tool loop through the governed resolver and writes one
+// AIUsageLog row per provider call, with the real latency of each. A failed loop surfaces as an
+// ordinary AI error, so the caller falls back exactly as it does today.
+func (a *App) completeWithTools(ctx context.Context, p ai.Provider, provider string, meta aiCallMeta, req ai.Request, r *aitools.Resolver) (*ai.Response, error) {
+	res, err := ai.RunToolLoop(ctx, p, req, r, ai.Limits{})
+	for i, resp := range res.Responses {
+		a.recordAIUsage(meta, provider, req.Model, resp, res.Took[i], nil)
+	}
+	if err != nil {
+		if errors.Is(err, ai.ErrToolLoopLimit) {
+			// the round the loop refused ran nothing; leave the attempts on record
+			if res.Response != nil {
+				r.RecordAborted(ctx, res.Response.ToolCalls)
+			}
+		} else {
+			a.recordAIUsage(meta, provider, req.Model, nil, res.FailedTook, err)
+		}
+		return nil, err
+	}
+	return res.Response, nil
 }
 
 // recordAIUsage persists one AIUsageLog row. A failure to log is logged and

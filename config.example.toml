@@ -144,6 +144,13 @@ full_name = "Admin"
 # validating it against your X2. Reconciling existing links and linking by hand never depend on it.
 discovery_enabled = false
 
+# AI tool calling in the chatbot (Fase 9B)
+[ai_tools]
+# Lets the chatbot's AI use tools. OFF by default: set to true (or
+# WHATOMATE_AI_TOOLS__ENABLED=true) only after validating it. A tool also has to exist in the
+# catalog and be enabled for the organization by an administrator. The catalog is empty in 9B.
+enabled = false
+
 # Knowledge base in the chatbot (Fase 8B-3)
 [knowledge]
 # Lets the chatbot's AI replies use the Knowledge base. OFF by default: set to true (or

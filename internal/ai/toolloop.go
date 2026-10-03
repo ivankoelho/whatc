@@ -70,11 +70,13 @@ var ErrToolLoopLimit = errors.New("tool loop limit reached")
 // LoopResult is what the loop did, also returned (partial) together with an error. It is meant
 // for callers that may persist or audit it, so no ToolCall in it carries Opaque.
 type LoopResult struct {
-	Response  *Response   // the last provider answer; its Text is the reply when the loop succeeded
-	Responses []*Response // every provider answer, in order, each with its own Usage
-	Messages  []Message   // what the loop appended to the conversation (assistant calls, tool results)
-	ToolCalls int         // tool calls handled
-	Usage     Usage       // summed over all provider answers
+	Response   *Response       // the last provider answer; its Text is the reply when the loop succeeded
+	Responses  []*Response     // every provider answer, in order, each with its own Usage
+	Took       []time.Duration // how long each of Responses took, same order
+	FailedTook time.Duration   // how long the provider call that failed took (0 when none failed)
+	Messages   []Message       // what the loop appended to the conversation (assistant calls, tool results)
+	ToolCalls  int             // tool calls handled
+	Usage      Usage           // summed over all provider answers
 }
 
 const truncMarker = " …[truncated]"
@@ -99,14 +101,18 @@ func RunToolLoop(ctx context.Context, p Provider, req Request, r ToolResolver, l
 		if err := ctx.Err(); err != nil {
 			return nil, ctxError(p.Name(), err)
 		}
+		started := time.Now()
 		resp, err := p.Complete(ctx, r)
+		took := time.Since(started)
 		if err != nil {
+			res.FailedTook = took
 			return nil, err
 		}
 		out := *resp // what leaves the loop never carries ToolCall.Opaque (transport state)
 		out.ToolCalls = withoutOpaque(resp.ToolCalls)
 		res.Response = &out
 		res.Responses = append(res.Responses, &out)
+		res.Took = append(res.Took, took)
 		res.Usage.InputTokens += resp.Usage.InputTokens
 		res.Usage.OutputTokens += resp.Usage.OutputTokens
 		res.Usage.TotalTokens += resp.Usage.TotalTokens
@@ -157,6 +163,7 @@ func runCalls(ctx context.Context, provider string, r ToolResolver, calls []Tool
 		if err := ctx.Err(); err != nil {
 			return nil, ctxError(provider, err)
 		}
+		c.Opaque = nil // transport state of the adapter: a tool never sees it
 		res := runOne(ctx, r, c, lim)
 		res.CallID, res.Name = c.ID, c.Name // a tool cannot answer for another call
 		res.Content = truncateUTF8(res.Content, lim.MaxResultBytes)

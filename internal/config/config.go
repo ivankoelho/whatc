@@ -31,6 +31,7 @@ type Config struct {
 	TTS          TTSConfig          `koanf:"tts"`
 	XProcess     XProcessConfig     `koanf:"xprocess"`
 	Knowledge    KnowledgeConfig    `koanf:"knowledge"`
+	AITools      AIToolsConfig      `koanf:"ai_tools"`
 }
 
 // XProcessConfig holds the switches of the X2 (XProcess) integration.
@@ -334,6 +335,15 @@ func setDefaults(cfg *Config) {
 	if cfg.Calling.TransferTimeoutSecs == 0 {
 		cfg.Calling.TransferTimeoutSecs = 120
 	}
+}
+
+// AIToolsConfig holds the global switch of AI tool calling in the chatbot (Fase 9B).
+type AIToolsConfig struct {
+	// Enabled lets the chatbot's AI use tools, but only the ones an administrator enabled for
+	// the organization. It is OFF unless it is set to true: an absent key or an empty value mean
+	// false, and an unparseable value makes the configuration fail to load (it never turns the
+	// switch on). With it off the chatbot behaves exactly as before.
+	Enabled bool `koanf:"enabled"`
 }
 
 // KnowledgeConfig holds the global switch of the Knowledge base in the chatbot (Fase 8B-3).

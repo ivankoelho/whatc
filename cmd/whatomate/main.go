@@ -211,6 +211,11 @@ func runServer(args []string) {
 			lo.Fatal("Knowledge permissions backfill failed", "error", err)
 		}
 
+		// Same window: ai_tools is a new resource; only the system admin role gets it.
+		if err := database.BackfillAIToolsPermissions(db, lo); err != nil {
+			lo.Fatal("AI tools permissions backfill failed", "error", err)
+		}
+
 		// Same window: occurrences.processes is a new resource added after the
 		// what-happened backfill above, so it needs its own guard rather than
 		// piggybacking on that one's already-migrated check.
@@ -850,6 +855,10 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/xprocess-integration", app.GetXProcessIntegration)
 	g.PUT("/api/xprocess-integration", app.UpsertXProcessIntegration)
 	g.POST("/api/xprocess-integration/test", app.TestXProcessIntegrationConnection)
+
+	// AI tools governance (Fase 9B): which catalog tools the organization enabled
+	g.GET("/api/ai-tools", app.ListAITools)
+	g.PUT("/api/ai-tools/{name}", app.SetAIToolEnabled)
 
 	// Knowledge base (Fase 8A)
 	g.GET("/api/knowledge/search", app.SearchKnowledge)
