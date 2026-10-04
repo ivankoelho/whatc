@@ -3812,5 +3812,676 @@
     "autoLinked": "Linked automatically (hover for the reason)",
     "editButton": "Edit order",
     "dialogDescription": "Enter the order number generated in X2 and the customer's CPF/CNPJ. Confirmation with X2 runs automatically the next day."
+  },
+  "permissionCatalog": {
+    "groups": {
+      "admin": "Administration and Access",
+      "service": "Service and Conversations",
+      "crm": "SAC / CRM",
+      "sales": "Sales",
+      "whatsapp": "WhatsApp and Automation",
+      "ai": "Artificial Intelligence and Knowledge",
+      "integrations": "Integrations",
+      "analytics": "Analytics",
+      "calls": "Calls",
+      "other": "Other"
+    },
+    "resources": {
+      "users": {
+        "label": "Users",
+        "description": "Manage the people who can access Whatc."
+      },
+      "teams": {
+        "label": "Teams",
+        "description": "Organize agents into service teams."
+      },
+      "roles": {
+        "label": "Roles",
+        "description": "Define what each role can see and do."
+      },
+      "organizations": {
+        "label": "Organizations",
+        "description": "Manage organizations and their members."
+      },
+      "audit_logs": {
+        "label": "Audit logs",
+        "description": "Review the history of changes made in the system."
+      },
+      "settings_general": {
+        "label": "General settings",
+        "description": "Organization-wide settings."
+      },
+      "settings_sso": {
+        "label": "Single sign-on (SSO)",
+        "description": "Configure sign-in through external providers."
+      },
+      "chat": {
+        "label": "Chat",
+        "description": "Follow and answer customer conversations."
+      },
+      "chat_assign": {
+        "label": "Conversation assignment",
+        "description": "Choose which agent handles each conversation."
+      },
+      "conversations": {
+        "label": "Conversation visibility",
+        "description": "Control which conversations of other people are visible."
+      },
+      "contacts": {
+        "label": "Contacts",
+        "description": "Manage the contact base."
+      },
+      "contacts_name": {
+        "label": "Contact name",
+        "description": "Fix a contact's name during service."
+      },
+      "tags": {
+        "label": "Tags",
+        "description": "Classify contacts and conversations with tags."
+      },
+      "transfers": {
+        "label": "Transfers",
+        "description": "Hand conversations over between agents and teams."
+      },
+      "canned_responses": {
+        "label": "Canned responses",
+        "description": "Ready-made messages to speed up service."
+      },
+      "occurrences": {
+        "label": "Occurrences",
+        "description": "Record and follow SAC cases."
+      },
+      "occurrences_stages": {
+        "label": "Pipeline stages",
+        "description": "Configure the stages an occurrence goes through."
+      },
+      "occurrences_categories": {
+        "label": "Occurrence categories",
+        "description": "Classify occurrences by category."
+      },
+      "occurrences_what_happened": {
+        "label": "What happened",
+        "description": "Reasons used to describe what happened in each case."
+      },
+      "occurrences_sla_policies": {
+        "label": "Occurrence SLA",
+        "description": "Service deadlines for occurrences."
+      },
+      "occurrences_processes": {
+        "label": "Occurrence processes",
+        "description": "Processes and automatic messages for each type of case."
+      },
+      "units": {
+        "label": "Units",
+        "description": "Stores and branches where the company operates."
+      },
+      "departments": {
+        "label": "Departments",
+        "description": "Internal sectors that handle occurrences."
+      },
+      "sales_opportunities": {
+        "label": "Sales opportunities",
+        "description": "Sales funnel and opportunity portfolio."
+      },
+      "accounts": {
+        "label": "WhatsApp accounts",
+        "description": "WhatsApp numbers connected to Whatc."
+      },
+      "templates": {
+        "label": "Message templates",
+        "description": "Message templates approved by Meta."
+      },
+      "campaigns": {
+        "label": "Campaigns",
+        "description": "Bulk sends to contact lists."
+      },
+      "flows_whatsapp": {
+        "label": "WhatsApp flows",
+        "description": "Interactive forms inside WhatsApp."
+      },
+      "flows_chatbot": {
+        "label": "Chatbot flows",
+        "description": "Automatic conversation flows of the chatbot."
+      },
+      "chatbot_keywords": {
+        "label": "Keywords",
+        "description": "Rules that trigger replies by keyword."
+      },
+      "settings_chatbot": {
+        "label": "Chatbot settings",
+        "description": "Messages, hours and general chatbot rules."
+      },
+      "chatbot_ai": {
+        "label": "AI contexts",
+        "description": "Instructions that guide the AI's answers."
+      },
+      "knowledge": {
+        "label": "Knowledge base",
+        "description": "Documents the AI and the team consult."
+      },
+      "ai_tools": {
+        "label": "AI tools",
+        "description": "Actions the chatbot AI is allowed to run."
+      },
+      "xprocess_integration": {
+        "label": "X2 ERP",
+        "description": "Connection to the company's X2 ERP."
+      },
+      "webhooks": {
+        "label": "Webhooks",
+        "description": "Automatic notices sent to other systems."
+      },
+      "api_keys": {
+        "label": "API keys",
+        "description": "Keys for other systems to access Whatc."
+      },
+      "custom_actions": {
+        "label": "Custom actions",
+        "description": "Buttons that trigger actions in external systems."
+      },
+      "analytics": {
+        "label": "Dashboards and analytics",
+        "description": "Dashboards with operation indicators."
+      },
+      "analytics_agents": {
+        "label": "Agent performance",
+        "description": "Agent productivity indicators."
+      },
+      "call_logs": {
+        "label": "Call history",
+        "description": "Record of calls made and received."
+      },
+      "ivr_flows": {
+        "label": "IVR flows",
+        "description": "Voice menu flows."
+      },
+      "call_transfers": {
+        "label": "Call transfers",
+        "description": "Calls forwarded between agents."
+      },
+      "outgoing_calls": {
+        "label": "Outgoing calls",
+        "description": "Calls started by agents."
+      }
+    },
+    "permissions": {
+      "users_read": {
+        "label": "View users",
+        "description": "Look up users, status and basic information."
+      },
+      "users_write": {
+        "label": "Create and edit users",
+        "description": "Add users and change their data and roles."
+      },
+      "users_delete": {
+        "label": "Delete users",
+        "description": "Remove users from the system."
+      },
+      "teams_read": {
+        "label": "View teams",
+        "description": "Look up teams and their members."
+      },
+      "teams_write": {
+        "label": "Create and edit teams",
+        "description": "Add teams and change members and service rules."
+      },
+      "teams_delete": {
+        "label": "Delete teams",
+        "description": "Remove teams."
+      },
+      "roles_read": {
+        "label": "View roles",
+        "description": "Look up roles and their permissions."
+      },
+      "roles_write": {
+        "label": "Create and edit roles",
+        "description": "Create roles and change what each can do."
+      },
+      "roles_delete": {
+        "label": "Delete roles",
+        "description": "Remove roles that have no users."
+      },
+      "settings_general_read": {
+        "label": "View general settings",
+        "description": "Look up the organization's general settings."
+      },
+      "settings_general_write": {
+        "label": "Edit general settings",
+        "description": "Change the organization's general settings."
+      },
+      "settings_chatbot_read": {
+        "label": "View chatbot settings",
+        "description": "Look up chatbot messages, hours and rules."
+      },
+      "settings_chatbot_write": {
+        "label": "Edit chatbot settings",
+        "description": "Change chatbot messages, hours and rules."
+      },
+      "settings_sso_read": {
+        "label": "View single sign-on (SSO)",
+        "description": "Look up the configured sign-in providers."
+      },
+      "settings_sso_write": {
+        "label": "Edit single sign-on (SSO)",
+        "description": "Configure external sign-in providers."
+      },
+      "accounts_read": {
+        "label": "View WhatsApp accounts",
+        "description": "Look up the connected numbers."
+      },
+      "accounts_write": {
+        "label": "Create and edit WhatsApp accounts",
+        "description": "Connect numbers and change their settings."
+      },
+      "accounts_delete": {
+        "label": "Delete WhatsApp accounts",
+        "description": "Disconnect and remove WhatsApp numbers."
+      },
+      "templates_read": {
+        "label": "View message templates",
+        "description": "Look up templates and their approval status."
+      },
+      "templates_write": {
+        "label": "Create and edit templates",
+        "description": "Create templates and submit them to Meta for approval."
+      },
+      "templates_delete": {
+        "label": "Delete templates",
+        "description": "Remove message templates."
+      },
+      "templates_sync": {
+        "label": "Sync templates with Meta",
+        "description": "Fetch the current templates and status from Meta."
+      },
+      "flows_whatsapp_read": {
+        "label": "View WhatsApp flows",
+        "description": "Look up the interactive forms."
+      },
+      "flows_whatsapp_write": {
+        "label": "Create and edit WhatsApp flows",
+        "description": "Build and change interactive forms."
+      },
+      "flows_whatsapp_delete": {
+        "label": "Delete WhatsApp flows",
+        "description": "Remove interactive forms."
+      },
+      "flows_chatbot_read": {
+        "label": "View chatbot flows",
+        "description": "Look up the automatic conversation flows."
+      },
+      "flows_chatbot_write": {
+        "label": "Create and edit chatbot flows",
+        "description": "Build and change automatic conversation flows."
+      },
+      "flows_chatbot_delete": {
+        "label": "Delete chatbot flows",
+        "description": "Remove automatic conversation flows."
+      },
+      "campaigns_read": {
+        "label": "View campaigns",
+        "description": "Look up campaigns and their results."
+      },
+      "campaigns_write": {
+        "label": "Create and edit campaigns",
+        "description": "Build campaigns and choose the audience."
+      },
+      "campaigns_delete": {
+        "label": "Delete campaigns",
+        "description": "Remove campaigns."
+      },
+      "campaigns_execute": {
+        "label": "Execute campaigns",
+        "description": "Start, pause and cancel campaign sends."
+      },
+      "chatbot_keywords_read": {
+        "label": "View keywords",
+        "description": "Look up keyword rules."
+      },
+      "chatbot_keywords_write": {
+        "label": "Create and edit keywords",
+        "description": "Define which words trigger each reply."
+      },
+      "chatbot_keywords_delete": {
+        "label": "Delete keywords",
+        "description": "Remove keyword rules."
+      },
+      "chatbot_ai_read": {
+        "label": "View AI contexts",
+        "description": "Look up the instructions given to the AI."
+      },
+      "chatbot_ai_write": {
+        "label": "Create and edit AI contexts",
+        "description": "Write and change the instructions that guide the AI."
+      },
+      "chatbot_ai_delete": {
+        "label": "Delete AI contexts",
+        "description": "Remove AI contexts."
+      },
+      "chat_read": {
+        "label": "View conversations",
+        "description": "Follow the conversations assigned to you."
+      },
+      "chat_write": {
+        "label": "Send messages",
+        "description": "Reply to customers in the chat."
+      },
+      "chat_assign_write": {
+        "label": "Assign conversations",
+        "description": "Choose which agent handles each conversation."
+      },
+      "conversations_view_all": {
+        "label": "View all conversations",
+        "description": "See and act on conversations of any agent."
+      },
+      "conversations_view_team": {
+        "label": "View team conversations",
+        "description": "See and act on conversations of the teams the person belongs to."
+      },
+      "contacts_read": {
+        "label": "View contacts",
+        "description": "Look up contacts and their history."
+      },
+      "contacts_write": {
+        "label": "Create and edit contacts",
+        "description": "Add contacts and change their data."
+      },
+      "contacts_delete": {
+        "label": "Delete contacts",
+        "description": "Remove contacts."
+      },
+      "contacts_import": {
+        "label": "Import contacts",
+        "description": "Load contacts from a spreadsheet."
+      },
+      "contacts_export": {
+        "label": "Export contacts",
+        "description": "Download the contact list as a spreadsheet."
+      },
+      "contacts_name_write": {
+        "label": "Rename contacts",
+        "description": "Fix a contact's name without being able to edit the rest of the record."
+      },
+      "tags_read": {
+        "label": "View tags",
+        "description": "Look up the tags on contacts and conversations."
+      },
+      "tags_write": {
+        "label": "Create and edit tags",
+        "description": "Create tags and apply them to contacts."
+      },
+      "tags_delete": {
+        "label": "Delete tags",
+        "description": "Remove tags."
+      },
+      "transfers_read": {
+        "label": "View transfers",
+        "description": "Look up transfers and the service queue."
+      },
+      "transfers_write": {
+        "label": "Create transfers",
+        "description": "Hand a conversation over to another agent or team."
+      },
+      "transfers_pickup": {
+        "label": "Pick up from the queue",
+        "description": "Take conversations that are waiting in the queue."
+      },
+      "canned_responses_read": {
+        "label": "View canned responses",
+        "description": "Look up and use the ready-made messages."
+      },
+      "canned_responses_write": {
+        "label": "Create and edit canned responses",
+        "description": "Add and change ready-made messages."
+      },
+      "canned_responses_delete": {
+        "label": "Delete canned responses",
+        "description": "Remove ready-made messages."
+      },
+      "occurrences_read": {
+        "label": "View occurrences",
+        "description": "Look up occurrences, protocols and the stage board."
+      },
+      "occurrences_write": {
+        "label": "Create and edit occurrences",
+        "description": "Open protocols, move them between stages and log service."
+      },
+      "occurrences_delete": {
+        "label": "Permanently delete occurrences",
+        "description": "Erase a protocol for good. Only takes effect for super admins."
+      },
+      "occurrences_stages_read": {
+        "label": "View pipeline stages",
+        "description": "Open the stage configuration screen."
+      },
+      "occurrences_stages_write": {
+        "label": "Create and edit stages",
+        "description": "Create stages and change the pipeline order and rules."
+      },
+      "occurrences_stages_delete": {
+        "label": "Delete stages",
+        "description": "Remove pipeline stages."
+      },
+      "occurrences_categories_read": {
+        "label": "View categories",
+        "description": "Look up occurrence categories."
+      },
+      "occurrences_categories_write": {
+        "label": "Create and edit categories",
+        "description": "Add and change occurrence categories."
+      },
+      "occurrences_categories_delete": {
+        "label": "Delete categories",
+        "description": "Remove occurrence categories."
+      },
+      "occurrences_what_happened_read": {
+        "label": "View \"what happened\"",
+        "description": "Look up the registered reasons."
+      },
+      "occurrences_what_happened_write": {
+        "label": "Create and edit \"what happened\"",
+        "description": "Add and change occurrence reasons."
+      },
+      "occurrences_what_happened_delete": {
+        "label": "Delete \"what happened\"",
+        "description": "Remove registered reasons."
+      },
+      "occurrences_sla_policies_read": {
+        "label": "View occurrence SLA",
+        "description": "Look up the service deadlines."
+      },
+      "occurrences_sla_policies_write": {
+        "label": "Edit occurrence SLA",
+        "description": "Change the service deadlines."
+      },
+      "occurrences_processes_read": {
+        "label": "View processes",
+        "description": "Look up processes and their automatic messages."
+      },
+      "occurrences_processes_write": {
+        "label": "Create and edit processes",
+        "description": "Add processes and change the automatic messages."
+      },
+      "occurrences_processes_delete": {
+        "label": "Delete processes",
+        "description": "Remove occurrence processes."
+      },
+      "units_read": {
+        "label": "View units",
+        "description": "Look up the registered units."
+      },
+      "units_write": {
+        "label": "Manage units",
+        "description": "Add and change the units used by the system."
+      },
+      "units_delete": {
+        "label": "Delete units",
+        "description": "Remove units."
+      },
+      "departments_read": {
+        "label": "View departments",
+        "description": "Look up the registered departments."
+      },
+      "departments_write": {
+        "label": "Create and edit departments",
+        "description": "Add and change departments."
+      },
+      "departments_delete": {
+        "label": "Delete departments",
+        "description": "Remove departments."
+      },
+      "sales_opportunities_read": {
+        "label": "View opportunities",
+        "description": "Look up the funnel and your own portfolio."
+      },
+      "sales_opportunities_write": {
+        "label": "Create and edit opportunities",
+        "description": "Open opportunities and move them through the funnel."
+      },
+      "sales_opportunities_view_all": {
+        "label": "View all opportunities",
+        "description": "See and manage opportunities of any seller."
+      },
+      "sales_opportunities_delete": {
+        "label": "Permanently delete opportunities",
+        "description": "Erase an opportunity for good. Only takes effect for super admins."
+      },
+      "knowledge_read": {
+        "label": "Search the knowledge base",
+        "description": "Search and read the base documents."
+      },
+      "knowledge_write": {
+        "label": "Manage the knowledge base",
+        "description": "Create, edit and archive base documents."
+      },
+      "ai_tools_read": {
+        "label": "View AI tools",
+        "description": "See which tools the AI may use."
+      },
+      "ai_tools_write": {
+        "label": "Turn AI tools on and off",
+        "description": "Decide which actions the chatbot AI may run."
+      },
+      "xprocess_integration_read": {
+        "label": "View the X2 ERP",
+        "description": "Look up the X2 integration settings."
+      },
+      "xprocess_integration_write": {
+        "label": "Configure the X2 ERP",
+        "description": "Enter and change the X2 access credential."
+      },
+      "webhooks_read": {
+        "label": "View webhooks",
+        "description": "Look up the notices sent to other systems."
+      },
+      "webhooks_write": {
+        "label": "Create and edit webhooks",
+        "description": "Define where and when notices are sent."
+      },
+      "webhooks_delete": {
+        "label": "Delete webhooks",
+        "description": "Remove webhooks."
+      },
+      "api_keys_read": {
+        "label": "View API keys",
+        "description": "Look up the existing keys."
+      },
+      "api_keys_write": {
+        "label": "Create API keys",
+        "description": "Generate keys for other systems."
+      },
+      "api_keys_delete": {
+        "label": "Delete API keys",
+        "description": "Revoke API keys."
+      },
+      "custom_actions_read": {
+        "label": "View custom actions",
+        "description": "Look up the registered actions."
+      },
+      "custom_actions_write": {
+        "label": "Create and edit custom actions",
+        "description": "Add and change actions for external systems."
+      },
+      "custom_actions_delete": {
+        "label": "Delete custom actions",
+        "description": "Remove custom actions."
+      },
+      "organizations_read": {
+        "label": "View organizations",
+        "description": "Look up organizations."
+      },
+      "organizations_write": {
+        "label": "Create organizations",
+        "description": "Add new organizations."
+      },
+      "organizations_delete": {
+        "label": "Delete organizations",
+        "description": "Remove organizations."
+      },
+      "organizations_assign": {
+        "label": "Manage organization members",
+        "description": "Add and remove people from an organization."
+      },
+      "audit_logs_read": {
+        "label": "View audit logs",
+        "description": "See who changed what and when."
+      },
+      "analytics_read": {
+        "label": "View dashboards",
+        "description": "Open dashboards and indicators."
+      },
+      "analytics_write": {
+        "label": "Create and edit dashboards",
+        "description": "Build and change dashboard widgets."
+      },
+      "analytics_delete": {
+        "label": "Delete widgets",
+        "description": "Remove dashboard widgets."
+      },
+      "analytics_agents_read": {
+        "label": "View agent performance",
+        "description": "Look up agent productivity indicators."
+      },
+      "call_logs_read": {
+        "label": "View call history",
+        "description": "Look up the recorded calls."
+      },
+      "ivr_flows_read": {
+        "label": "View IVR flows",
+        "description": "Look up the voice menus."
+      },
+      "ivr_flows_write": {
+        "label": "Create and edit IVR flows",
+        "description": "Build and change the voice menus."
+      },
+      "ivr_flows_delete": {
+        "label": "Delete IVR flows",
+        "description": "Remove voice menus."
+      },
+      "call_transfers_read": {
+        "label": "View call transfers",
+        "description": "Look up transferred calls."
+      },
+      "call_transfers_write": {
+        "label": "Manage call transfers",
+        "description": "Accept and handle transferred calls."
+      },
+      "outgoing_calls_read": {
+        "label": "View outgoing calls",
+        "description": "Look up the progress of started calls."
+      },
+      "outgoing_calls_write": {
+        "label": "Start outgoing calls",
+        "description": "Call customers from the chat."
+      }
+    },
+    "activeCount": "{active} of {total} permissions on",
+    "on": "On",
+    "off": "Off",
+    "enableAll": "Turn all on",
+    "disableAll": "Turn all off",
+    "search": "Search permissions",
+    "searchPlaceholder": "Search by name, resource, description or key",
+    "noResults": "No permission matches the search.",
+    "groupToggle": "Turn all {group} permissions on or off"
   }
 }

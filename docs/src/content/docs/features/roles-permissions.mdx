@@ -78,21 +78,20 @@ Permissions follow the format `resource:action`. Available actions are:
 
 ### Permission Matrix
 
-When creating or editing a role, you'll see a permission matrix organized by resource:
+When creating or editing a role, permissions are organized by functional area, then by resource. Each permission has a name, a plain-language description and an **On / Off** switch:
 
 ```
-Users
-  ☑ Read users
-  ☑ Create users
-  ☐ Update users
-  ☐ Delete users
-
-Contacts
-  ☑ Read contacts
-  ☑ Create contacts
-  ☑ Update contacts
-  ☐ Delete contacts
+Administration and Access        3 of 21 permissions on
+  Users
+    View users                   On
+    Create and edit users        Off
 ```
+
+- Each group can be expanded or collapsed and shows how many of its permissions are on. **Turn all on / Turn all off** changes the whole group; as with every other change, nothing is saved until you click **Save**.
+- The search box filters by name, resource, description or technical key (for example `units:write`) and keeps the group structure.
+- Groups: Administration and Access, Service and Conversations, SAC / CRM, Sales, WhatsApp and Automation, Artificial Intelligence and Knowledge, Integrations, Analytics and Calls.
+
+The grouping is presentation only. The permission key (`resource:action`) is still what authorizes a request, and `GET /api/permissions` returns each permission with `group`, `group_order` and `sort_order` next to the existing fields. Names and descriptions are translated in the frontend (`permissionCatalog` in the locale files).
 
 ## Assigning Roles to Users
 
