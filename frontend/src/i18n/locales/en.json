@@ -844,6 +844,10 @@
     "noPermissionsSeeded": "No permissions available. Please check if permissions are seeded in the database."
   },
   "teams": {
+    "unit": "Unit",
+    "department": "Department",
+    "placementHint": "Used by a flow transfer node set to the contact's registration.",
+    "placementConflict": "Another active team has the same unit and department ({teams}). With two teams for the pair, automatic routing by registration picks none and uses the node's fallback team.",
     "title": "Teams",
     "subtitle": "Organize agents into teams",
     "addTeam": "Add Team",
@@ -2974,6 +2978,11 @@
       "tags": "Tags on transfer",
       "tagsPlaceholder": "quote, photo",
       "tagsHint": "Added to the contact when it reaches this transfer (comma-separated).",
+      "destination": "Destination",
+      "destinationTeam": "Fixed team",
+      "destinationPlacement": "Contact's registration (unit and department)",
+      "destinationPlacementHint": "For colaboradores: goes to the team tagged with the contact's unit and department. With no placement, no team or more than one team for the pair, it uses the team below.",
+      "fallbackTeam": "If there is no team",
       "finalMessageOptional": "Final message (optional)",
       "finalMessagePlaceholder": "Sent when the flow ends. Leave blank for silent terminal.",
       "targetFlow": "Target flow",

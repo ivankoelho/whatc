@@ -339,9 +339,12 @@ type AgentTransfer struct {
 	TeamID              *uuid.UUID     `gorm:"type:uuid;index" json:"team_id,omitempty"`          // Team queue (null = general queue)
 	TransferredByUserID *uuid.UUID     `gorm:"type:uuid" json:"transferred_by_user_id,omitempty"` // User who initiated the transfer (null for system)
 	Notes               string         `gorm:"type:text" json:"notes"`
-	TransferredAt       time.Time      `gorm:"autoCreateTime" json:"transferred_at"`
-	ResumedAt           *time.Time     `json:"resumed_at,omitempty"`
-	ResumedBy           *uuid.UUID     `gorm:"type:uuid" json:"resumed_by,omitempty"`
+	// RoutingReason is why a flow transfer node routed here (the RoutingReason* constants); NULL
+	// when the transfer did not come from a flow transfer node.
+	RoutingReason *string    `gorm:"size:50" json:"routing_reason,omitempty"`
+	TransferredAt time.Time  `gorm:"autoCreateTime" json:"transferred_at"`
+	ResumedAt     *time.Time `json:"resumed_at,omitempty"`
+	ResumedBy     *uuid.UUID `gorm:"type:uuid" json:"resumed_by,omitempty"`
 
 	// SLA Tracking (embedded - all fields stored in same table)
 	SLA SLATracking `gorm:"embedded"`

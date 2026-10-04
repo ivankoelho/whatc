@@ -189,10 +189,13 @@ type Team struct {
 	UpdatedByID         *uuid.UUID         `gorm:"type:uuid" json:"updated_by_id,omitempty"`
 
 	// UnitID/DepartmentID tag which store+sector combination this Team
-	// represents. Additive metadata only — chat routing, round-robin
-	// assignment and everything else about Team is unaffected; these two
-	// fields exist only for Occurrence to read at creation time (see
-	// docs/superpowers/specs/2026-09-04-helpdesk-unidade-departamento-sla-design.md §3).
+	// represents. They are read by Occurrence at creation time (see
+	// docs/superpowers/specs/2026-09-04-helpdesk-unidade-departamento-sla-design.md §3) and by a
+	// flow transfer node with destination "contact_placement", which sends a colaborador to the
+	// one active team tagged with the contact's pair (see
+	// docs/superpowers/specs/2026-10-04-fluxo-transferencia-por-cadastro-design.md). Round-robin
+	// assignment inside the team is unaffected. Two active teams with the same pair make that
+	// routing ambiguous, and the node uses its fallback.
 	UnitID       *uuid.UUID `gorm:"type:uuid;index" json:"unit_id,omitempty"`
 	DepartmentID *uuid.UUID `gorm:"type:uuid;index" json:"department_id,omitempty"`
 

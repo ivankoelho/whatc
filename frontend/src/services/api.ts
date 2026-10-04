@@ -849,6 +849,8 @@ export interface Team {
   assignment_strategy: 'round_robin' | 'load_balanced' | 'manual'
   per_agent_timeout_secs: number
   is_active: boolean
+  unit_id?: string
+  department_id?: string
   member_count: number
   members?: TeamMember[]
   created_by_id?: string
@@ -887,6 +889,8 @@ export const teamsService = {
     description?: string
     assignment_strategy?: 'round_robin' | 'load_balanced' | 'manual'
     per_agent_timeout_secs?: number
+    unit_id?: string
+    department_id?: string
   }) => api.post<{ team: Team }>('/teams', data),
   update: (id: string, data: {
     name?: string
@@ -894,6 +898,8 @@ export const teamsService = {
     assignment_strategy?: 'round_robin' | 'load_balanced' | 'manual'
     per_agent_timeout_secs?: number
     is_active?: boolean
+    unit_id?: string
+    department_id?: string
   }) => api.put<{ team: Team }>(`/teams/${id}`, data),
   delete: (id: string) => api.delete(`/teams/${id}`),
   // Members

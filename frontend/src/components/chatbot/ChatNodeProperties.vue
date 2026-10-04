@@ -570,8 +570,22 @@ const typeLabel = computed<Record<string, string>>(() => ({
         />
       </div>
       <div class="space-y-1.5">
-        <Label class="text-xs">{{ t('chatbot.properties.team') }}</Label>
-        <Select :model-value="config.team_id || '_general'" @update:model-value="(v: any) => updateConfig('team_id', v)">
+        <Label class="text-xs">{{ t('chatbot.properties.destination') }}</Label>
+        <Select :model-value="config.destination || 'team'" @update:model-value="(v: any) => updateConfig('destination', v === 'team' ? undefined : v)">
+          <SelectTrigger class="h-8 text-sm" data-testid="transfer-destination"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="team">{{ t('chatbot.properties.destinationTeam') }}</SelectItem>
+            <SelectItem value="contact_placement">{{ t('chatbot.properties.destinationPlacement') }}</SelectItem>
+          </SelectContent>
+        </Select>
+        <p v-if="config.destination === 'contact_placement'" class="text-[11px] text-muted-foreground">{{ t('chatbot.properties.destinationPlacementHint') }}</p>
+      </div>
+      <div class="space-y-1.5">
+        <Label class="text-xs">{{ config.destination === 'contact_placement' ? t('chatbot.properties.fallbackTeam') : t('chatbot.properties.team') }}</Label>
+        <Select
+          :model-value="(config.destination === 'contact_placement' ? config.fallback_team_id : config.team_id) || '_general'"
+          @update:model-value="(v: any) => updateConfig(config.destination === 'contact_placement' ? 'fallback_team_id' : 'team_id', v)"
+        >
           <SelectTrigger class="h-8 text-sm"><SelectValue :placeholder="t('chatbot.properties.generalQueue')" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="_general">{{ t('chatbot.properties.generalQueue') }}</SelectItem>

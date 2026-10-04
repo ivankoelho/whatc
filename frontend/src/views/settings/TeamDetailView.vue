@@ -5,7 +5,8 @@ import { useI18n } from 'vue-i18n'
 import { useTeamsStore } from '@/stores/teams'
 import { useUsersStore } from '@/stores/users'
 import { useAuthStore } from '@/stores/auth'
-import { teamsService, type Team, type TeamMember } from '@/services/api'
+import { teamsService, unitsService, departmentsService, type Team, type TeamMember, type Unit, type Department } from '@/services/api'
+import { teamsSharingPlacement } from '@/lib/team-placement'
 import { toast } from 'vue-sonner'
 import { ASSIGNMENT_STRATEGIES } from '@/lib/constants'
 import { useDebounceFn } from '@vueuse/core'
@@ -72,6 +73,7 @@ const { showLeaveDialog, confirmLeave, cancelLeave } = useUnsavedChangesGuard(ha
 
 const canWrite = computed(() => authStore.hasPermission('teams', 'write'))
 const canDelete = computed(() => authStore.hasPermission('teams', 'delete'))
+const NONE = 'none' // the Select cannot hold an empty value
 
 // Edit form
 const form = ref({
@@ -80,7 +82,40 @@ const form = ref({
   assignment_strategy: 'round_robin' as 'round_robin' | 'load_balanced' | 'manual',
   per_agent_timeout_secs: 0,
   is_active: true,
+  unit_id: NONE as string,
+  department_id: NONE as string,
 })
+
+// Unit + department tag the team for flow transfers by the contact's placement. Both lists are
+// optional context: without access to them the selects are simply empty.
+const units = ref<Unit[]>([])
+const departments = ref<Department[]>([])
+const allTeams = ref<Team[]>([])
+async function fetchPlacementContext() {
+  try {
+    const res = await unitsService.list()
+    units.value = ((res.data as any).data || res.data).units || []
+  } catch { /* no access */ }
+  try {
+    const res = await departmentsService.list()
+    departments.value = ((res.data as any).data || res.data).departments || []
+  } catch { /* no access */ }
+  try {
+    const res = await teamsService.list({ limit: 500 })
+    allTeams.value = ((res.data as any).data || res.data).teams || []
+  } catch { /* no access */ }
+}
+onMounted(fetchPlacementContext)
+
+// Other active teams with the same unit + department make the routing by placement ambiguous.
+const sharingPlacement = computed(() => form.value.is_active
+  ? teamsSharingPlacement(
+    allTeams.value,
+    form.value.unit_id === NONE ? undefined : form.value.unit_id,
+    form.value.department_id === NONE ? undefined : form.value.department_id,
+    team.value?.id,
+  )
+  : [])
 
 const breadcrumbs = computed(() => [
   { label: t('nav.settings'), href: '/settings' },
@@ -119,6 +154,8 @@ function syncForm() {
     assignment_strategy: team.value.assignment_strategy,
     per_agent_timeout_secs: team.value.per_agent_timeout_secs,
     is_active: team.value.is_active,
+    unit_id: team.value.unit_id || NONE,
+    department_id: team.value.department_id || NONE,
   }
 }
 
@@ -141,6 +178,8 @@ async function save() {
         description: form.value.description,
         assignment_strategy: form.value.assignment_strategy,
         per_agent_timeout_secs: form.value.per_agent_timeout_secs,
+        unit_id: form.value.unit_id === NONE ? undefined : form.value.unit_id,
+        department_id: form.value.department_id === NONE ? undefined : form.value.department_id,
       })
       hasChanges.value = false
       toast.success(t('teams.created', 'Team created'))
@@ -152,8 +191,12 @@ async function save() {
         assignment_strategy: form.value.assignment_strategy,
         per_agent_timeout_secs: form.value.per_agent_timeout_secs,
         is_active: form.value.is_active,
+        // '' clears the tag
+        unit_id: form.value.unit_id === NONE ? '' : form.value.unit_id,
+        department_id: form.value.department_id === NONE ? '' : form.value.department_id,
       })
       await loadTeam()
+      fetchPlacementContext()
       hasChanges.value = false
       toast.success(t('teams.updated', 'Team updated'))
     }
@@ -287,6 +330,30 @@ onMounted(async () => {
         <div v-if="form.assignment_strategy !== 'manual'" class="space-y-1.5">
           <Label class="text-xs">{{ $t('teams.perAgentTimeout', 'Per-Agent Timeout') }} ({{ $t('common.seconds', 'seconds') }})</Label>
           <Input v-model.number="form.per_agent_timeout_secs" type="number" min="0" max="300" :disabled="!canWrite" />
+        </div>
+        <div class="space-y-1.5">
+          <Label class="text-xs">{{ $t('teams.unit') }}</Label>
+          <Select v-model="form.unit_id" :disabled="!canWrite">
+            <SelectTrigger data-testid="team-unit-select"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem :value="NONE">{{ $t('contacts.noneSelected') }}</SelectItem>
+              <SelectItem v-for="u in units" :key="u.id" :value="u.id">{{ u.name }}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div class="space-y-1.5">
+          <Label class="text-xs">{{ $t('teams.department') }}</Label>
+          <Select v-model="form.department_id" :disabled="!canWrite">
+            <SelectTrigger data-testid="team-department-select"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem :value="NONE">{{ $t('contacts.noneSelected') }}</SelectItem>
+              <SelectItem v-for="d in departments" :key="d.id" :value="d.id">{{ d.name }}</SelectItem>
+            </SelectContent>
+          </Select>
+          <p class="text-[11px] text-muted-foreground">{{ $t('teams.placementHint') }}</p>
+          <p v-if="sharingPlacement.length > 0" class="text-[11px] text-amber-600 dark:text-amber-400" data-testid="team-placement-conflict">
+            {{ $t('teams.placementConflict', { teams: sharingPlacement.map(t => t.name).join(', ') }) }}
+          </p>
         </div>
         <div class="flex items-center gap-2">
           <Switch :checked="form.is_active" @update:checked="form.is_active = $event" :disabled="!canWrite" />

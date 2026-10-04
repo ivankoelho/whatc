@@ -326,9 +326,16 @@ export function useFlowGraphSimulation(
   function execTransfer(node: ChatNode): string {
     const body = interpolate(stringField(node, 'body', 'message', 'text'), state.variables)
     if (body) addMessage('bot', body, { stepName: node.id })
-    const teamID = stringField(node, 'team_id') || '_general'
-    const label = teamID === '_general' ? 'General Queue' : teamID
-    addMessage('system', `Conversation transferred to ${label}`)
+    if (stringField(node, 'destination') === 'contact_placement') {
+      // the real routing reads the contact's unit + department; a preview has no contact
+      const fallback = stringField(node, 'fallback_team_id') || '_general'
+      const fallbackLabel = fallback === '_general' ? 'General Queue' : fallback
+      addMessage('system', `Conversation transferred to the team of the contact's unit and department (fallback: ${fallbackLabel})`)
+    } else {
+      const teamID = stringField(node, 'team_id') || '_general'
+      const label = teamID === '_general' ? 'General Queue' : teamID
+      addMessage('system', `Conversation transferred to ${label}`)
+    }
     log('flow_complete', node.id, { reason: 'transfer' })
     state.status = 'completed'
     return '__yield__'
