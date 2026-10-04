@@ -2529,7 +2529,8 @@
       "noStores": "Nenhuma loja encontrada",
       "loadFailed": "Não foi possível carregar as lojas do X2",
       "loadFailedHint": "O X2 não respondeu. Nenhuma unidade foi alterada; tente de novo.",
-      "selectedCount": "{count} lojas selecionadas",
+      "selectedCount": "Lojas selecionadas: {count}",
+      "resultDescription": "O que aconteceu com cada loja escolhida.",
       "willBeNamed": "Será criada como {name}",
       "linkedUnit": "Unidade: {unit}",
       "status": {

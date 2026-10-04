@@ -2540,7 +2540,8 @@
       "noStores": "No stores found",
       "loadFailed": "Could not load the stores from X2",
       "loadFailedHint": "X2 did not answer. No unit was changed; try again.",
-      "selectedCount": "{count} stores selected",
+      "selectedCount": "Stores selected: {count}",
+      "resultDescription": "What happened to each store you picked.",
       "willBeNamed": "Will be created as {name}",
       "linkedUnit": "Unit: {unit}",
       "status": {

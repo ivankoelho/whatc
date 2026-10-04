@@ -92,7 +92,7 @@ function resultStoreName(cod: string): string {
     <DialogContent class="sm:max-w-2xl" data-testid="x2-import-dialog">
       <DialogHeader>
         <DialogTitle>{{ result ? $t('units.import.resultTitle') : $t('units.import.title') }}</DialogTitle>
-        <DialogDescription>{{ $t('units.import.description') }}</DialogDescription>
+        <DialogDescription>{{ result ? $t('units.import.resultDescription') : $t('units.import.description') }}</DialogDescription>
       </DialogHeader>
 
       <!-- Result of the import -->
