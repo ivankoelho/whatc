@@ -2,8 +2,6 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import { Loader2 } from 'lucide-vue-next'
-import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -13,11 +11,11 @@ import { CONTACT_TYPES, showsPlacement, placementPayload } from '@/lib/contact-r
 import type { Contact } from '@/stores/contacts'
 
 // The registration rows of a contact (type and document; unit and department only for a
-// colaborador). It sits under the name and phone in the header of the panel, and the pencil that
-// opens the form lives in that header: `editing` is owned by the parent.
+// colaborador). It sits under the name and phone in the header of the panel. The pencil, the Save
+// and Cancel buttons and `editing` belong to the parent: one edit covers the name too.
 const props = defineProps<{ contact: Contact; editing: boolean }>()
 const emit = defineEmits<{
-  'update:editing': [editing: boolean]
+  submit: []
   updated: [registration: Pick<Contact, 'contact_type' | 'cpf_cnpj' | 'unit_id' | 'department_id'>]
 }>()
 
@@ -26,7 +24,6 @@ const { t } = useI18n()
 const NONE = 'none' // the Select cannot hold an empty value
 const units = ref<Unit[]>([])
 const departments = ref<Department[]>([])
-const isSaving = ref(false)
 const form = ref({ contact_type: 'cliente' as string, cpf_cnpj: '', unit_id: NONE, department_id: NONE })
 
 const type = computed(() => props.contact.contact_type || 'cliente')
@@ -57,11 +54,16 @@ watch(() => props.editing, (editing) => {
   }
 })
 
-// Switching contacts with the form open must not post the old draft to the new contact.
-watch(() => props.contact.id, () => emit('update:editing', false))
+// What the form would change. Unit/department only count for a colaborador.
+function hasChanges(): boolean {
+  const f = form.value
+  return f.contact_type !== type.value
+    || f.cpf_cnpj !== (props.contact.cpf_cnpj || '')
+    || (showsPlacement(f.contact_type) && (f.unit_id !== (props.contact.unit_id || NONE) || f.department_id !== (props.contact.department_id || NONE)))
+}
 
-async function save() {
-  isSaving.value = true
+// Saves the form; the parent closes the edit when everything it saved went through.
+async function save(): Promise<boolean> {
   try {
     const payload: Record<string, any> = {
       contact_type: form.value.contact_type,
@@ -84,14 +86,15 @@ async function save() {
       unit_id: saved.unit_id,
       department_id: saved.department_id,
     })
-    emit('update:editing', false)
     toast.success(t('contacts.registrationSaved'))
+    return true
   } catch (e) {
     toast.error(getErrorMessage(e, t('common.failedSave', { resource: t('resources.contact') })))
-  } finally {
-    isSaving.value = false
+    return false
   }
 }
+
+defineExpose({ save, hasChanges })
 </script>
 
 <template>
@@ -114,7 +117,7 @@ async function save() {
     </dl>
 
     <!-- Edit -->
-    <form v-else class="space-y-3" @submit.prevent="save">
+    <form v-else class="space-y-3" @submit.prevent="emit('submit')">
       <div class="space-y-1.5">
         <Label class="text-xs">{{ $t('contacts.type') }}</Label>
         <Select v-model="form.contact_type">
@@ -153,13 +156,6 @@ async function save() {
         </div>
       </template>
 
-      <div class="flex justify-end gap-2">
-        <Button type="button" variant="ghost" size="sm" :disabled="isSaving" @click="emit('update:editing', false)">{{ $t('common.cancel') }}</Button>
-        <Button type="submit" size="sm" :disabled="isSaving" data-testid="contact-registration-save">
-          <Loader2 v-if="isSaving" class="h-3.5 w-3.5 mr-1 animate-spin" />
-          {{ $t('common.save') }}
-        </Button>
-      </div>
     </form>
   </div>
 </template>
