@@ -1656,6 +1656,27 @@ export interface XProcessLoja {
   // A presentation hint ("this looks like that unit"), never saved by itself.
   suggested_unit_id?: string
   suggested_unit_name?: string
+  // What importing the store would do (same rule as the server's import).
+  import_status?: 'new' | 'already_imported' | 'conflict'
+  import_name?: string // the name the unit would get
+  conflict_reason?: 'cnpj_in_use' | 'name_in_use'
+  conflict_unit_id?: string
+  conflict_unit_name?: string
+}
+
+export interface XProcessImportResult {
+  cod_empresa: string
+  status: 'created' | 'updated' | 'already_exists' | 'conflict' | 'failed'
+  reason?: string
+  notes?: string[]
+  x2_store?: { cod_empresa: string; razao_social_empresa: string; cnpj_empresa: string }
+  unit?: Unit
+  existing_unit?: { id: string; name: string; cnpj?: string }
+}
+
+export interface XProcessImportResponse {
+  summary: { selected: number; created: number; updated: number; already_exists: number; conflicts: number; failed: number }
+  results: XProcessImportResult[]
 }
 
 export const unitsService = {
@@ -1671,6 +1692,10 @@ export const unitsService = {
   // store CNPJ into an EMPTY unit CNPJ; it never blocks the link.
   setXProcessLoja: (id: string, data: { cod_empresa: string; fill_cnpj?: boolean }) =>
     api.put<ApiEnvelope<{ unit: Unit; cnpj_filled: boolean; cnpj_note: string }>>(`/units/${id}/xprocess-loja`, data),
+  // Create the unit of each X2 store (units:write). Idempotent; clashes come back as
+  // "conflict" results, never as a second unit.
+  importXProcess: (cod_empresa: string[]) =>
+    api.post<ApiEnvelope<XProcessImportResponse>>('/units/xprocess-import', { cod_empresa }),
 }
 
 export const departmentsService = {

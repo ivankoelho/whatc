@@ -2531,6 +2531,59 @@
     "x2LoadFailed": "Could not load the X2 stores",
     "x2LoadFailedHint": "X2 did not answer. A link already saved keeps working; try again to change it.",
     "x2SaveFailed": "Failed to save the link",
+    "import": {
+      "button": "Import from X2",
+      "title": "Import units from X2",
+      "description": "Pick the X2 stores that do not have a unit in Whatc yet. Each one becomes a unit; nothing is created until you confirm.",
+      "search": "Search by code, name or CNPJ",
+      "available": "Stores available in X2",
+      "noStores": "No stores found",
+      "loadFailed": "Could not load the stores from X2",
+      "loadFailedHint": "X2 did not answer. No unit was changed; try again.",
+      "selectedCount": "{count} stores selected",
+      "willBeNamed": "Will be created as {name}",
+      "linkedUnit": "Unit: {unit}",
+      "status": {
+        "new": "New",
+        "already_imported": "Already imported",
+        "conflict": "Conflict"
+      },
+      "conflictReason": {
+        "cnpj_in_use": "Unit {unit} already uses this store's CNPJ and is not linked to it.",
+        "name_in_use": "A unit named {unit} already exists and is not linked to this store."
+      },
+      "importSelected": "Import selected",
+      "importing": "Importing...",
+      "importFailed": "Failed to import the units",
+      "resultTitle": "Import result",
+      "summary": {
+        "created": "Created",
+        "updated": "Updated",
+        "already_exists": "Already existed",
+        "conflicts": "Conflicts",
+        "failed": "Failed"
+      },
+      "result": {
+        "created": "Created",
+        "updated": "CNPJ filled",
+        "already_exists": "Already existed",
+        "conflict": "Conflict",
+        "failed": "Failed"
+      },
+      "reason": {
+        "cnpj_in_use": "Another unit ({unit}) already uses this store's CNPJ. Nothing was created.",
+        "name_in_use": "A unit named {unit} already exists. Nothing was created.",
+        "not_in_x2": "This store no longer exists in X2.",
+        "create_failed": "Could not create the unit."
+      },
+      "note": {
+        "store_cnpj_invalid": "The store's CNPJ in X2 is not valid: the unit was created without a CNPJ.",
+        "cnpj_differs": "The unit's CNPJ differs from X2 and was kept.",
+        "cnpj_in_use": "The X2 CNPJ belongs to another unit and was not filled in."
+      },
+      "backToList": "Back to the list",
+      "close": "Close"
+    },
     "columnActive": "Active",
     "noUnitsYet": "No units yet",
     "noUnitsYetDesc": "Add your first unit/store.",

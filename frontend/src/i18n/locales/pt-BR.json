@@ -2520,6 +2520,59 @@
     "x2LoadFailed": "Não foi possível carregar as lojas do X2",
     "x2LoadFailedHint": "O X2 não respondeu. Um vínculo já salvo continua funcionando; tente de novo para alterá-lo.",
     "x2SaveFailed": "Falha ao salvar o vínculo",
+    "import": {
+      "button": "Importar do X2",
+      "title": "Importar unidades do X2",
+      "description": "Escolha as lojas do X2 que ainda não têm unidade no Whatc. Cada uma vira uma unidade; nada é criado até você confirmar.",
+      "search": "Buscar por código, nome ou CNPJ",
+      "available": "Lojas disponíveis no X2",
+      "noStores": "Nenhuma loja encontrada",
+      "loadFailed": "Não foi possível carregar as lojas do X2",
+      "loadFailedHint": "O X2 não respondeu. Nenhuma unidade foi alterada; tente de novo.",
+      "selectedCount": "{count} lojas selecionadas",
+      "willBeNamed": "Será criada como {name}",
+      "linkedUnit": "Unidade: {unit}",
+      "status": {
+        "new": "Nova",
+        "already_imported": "Já importada",
+        "conflict": "Conflito"
+      },
+      "conflictReason": {
+        "cnpj_in_use": "A unidade {unit} já usa o CNPJ desta loja e não está vinculada a ela.",
+        "name_in_use": "Já existe uma unidade chamada {unit}, sem vínculo com esta loja."
+      },
+      "importSelected": "Importar selecionadas",
+      "importing": "Importando...",
+      "importFailed": "Falha ao importar as unidades",
+      "resultTitle": "Resultado da importação",
+      "summary": {
+        "created": "Criadas",
+        "updated": "Atualizadas",
+        "already_exists": "Já existentes",
+        "conflicts": "Conflitos",
+        "failed": "Falhas"
+      },
+      "result": {
+        "created": "Criada",
+        "updated": "CNPJ preenchido",
+        "already_exists": "Já existia",
+        "conflict": "Conflito",
+        "failed": "Falhou"
+      },
+      "reason": {
+        "cnpj_in_use": "Outra unidade ({unit}) já usa o CNPJ desta loja. Nada foi criado.",
+        "name_in_use": "Já existe uma unidade chamada {unit}. Nada foi criado.",
+        "not_in_x2": "Esta loja não existe mais no X2.",
+        "create_failed": "Não foi possível criar a unidade."
+      },
+      "note": {
+        "store_cnpj_invalid": "O CNPJ da loja no X2 não é válido: a unidade foi criada sem CNPJ.",
+        "cnpj_differs": "O CNPJ da unidade é diferente do X2 e foi mantido.",
+        "cnpj_in_use": "O CNPJ do X2 já é de outra unidade e não foi preenchido."
+      },
+      "backToList": "Voltar à lista",
+      "close": "Fechar"
+    },
     "columnActive": "Ativa",
     "noUnitsYet": "Nenhuma unidade ainda",
     "noUnitsYetDesc": "Adicione a primeira unidade/loja.",
