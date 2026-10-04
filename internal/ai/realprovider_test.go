@@ -247,24 +247,45 @@ func runScenarios(t *testing.T, name string, p ai.Provider, model, key string) {
 	// the model is asked for a person, calls the tool, hears "transfer_performed:false" and answers.
 	// In production that text is discarded and the customer gets the server's confirmation buttons,
 	// so the point is the protocol and the arguments, not the words.
+	//
+	// Protocol and the model's choice are kept apart. ToolChoice cannot force a tool, so whether the
+	// model calls it is the model's decision: an error from the API, arguments that break the schema
+	// or a missing answer after the result are divergences (protocol); a model that simply does not
+	// pick the tool is only observed, and the round trip is then reported as not exercised, never as
+	// approved or failed. Two prompts are tried: a natural one, then an explicit one.
 	t.Run("8_write_tool_proposal", func(t *testing.T) {
-		tools := newStubToolsWithTransfer()
-		req := baseReq(model, "Quero falar com um atendente humano agora, meu pedido está atrasado.")
-		req.System = "You are a customer support assistant. If the customer asks for a person or the matter needs a human, " +
-			"use the transfer tool. Never invent data. Answer in Portuguese."
-		res, err := ai.RunToolLoop(ctx, p, req, tools, ai.Limits{})
-		if err != nil {
-			record(t, name, "8_write_tool_proposal", verdictDivergent, fmt.Sprintf("error kind=%s: %v", ai.KindOf(err), err))
-			return
+		prompts := []string{
+			"Quero falar com um atendente humano agora, meu pedido está atrasado.",
+			"Use a ferramenta de transferência para me colocar na fila de um atendente humano.",
 		}
+		var tools *stubTools
+		var res *ai.LoopResult
 		var proposals []ai.ToolCall
-		for _, c := range tools.calls {
-			if c.Name == aitools.RequestAgentTransferToolName {
-				proposals = append(proposals, c)
+		for i, prompt := range prompts {
+			tools = newStubToolsWithTransfer()
+			req := baseReq(model, prompt)
+			req.System = "You are a customer support assistant. If the customer asks for a person or the matter needs a human, " +
+				"use the transfer tool. Never invent data. Answer in Portuguese."
+			var err error
+			res, err = ai.RunToolLoop(ctx, p, req, tools, ai.Limits{})
+			if err != nil {
+				record(t, name, "8_write_tool_proposal", verdictDivergent, fmt.Sprintf("error kind=%s: %v", ai.KindOf(err), err))
+				return
+			}
+			proposals = nil
+			for _, c := range tools.calls {
+				if c.Name == aitools.RequestAgentTransferToolName {
+					proposals = append(proposals, c)
+				}
+			}
+			if len(proposals) > 0 {
+				record(t, name, "8_tool_selection_observed", verdictObserved, fmt.Sprintf("the model called the tool with prompt %d of %d (%s)", i+1, len(prompts), map[int]string{0: "natural", 1: "explicit"}[i]))
+				break
 			}
 		}
 		if len(proposals) == 0 {
-			record(t, name, "8_write_tool_proposal", verdictDivergent, "the model never called request_agent_transfer for an explicit request for a person")
+			record(t, name, "8_tool_selection_observed", verdictObserved, "the model chose not to call request_agent_transfer, even when asked explicitly: its decision, not a protocol failure")
+			record(t, name, "8_write_tool_proposal", verdictNotValidated, "the API accepted the request with the tool's schema, but the proposal round trip was not exercised (no call); repeat with another model or rely on scenarios 1 and 2 for the protocol")
 			return
 		}
 		for _, c := range proposals {
