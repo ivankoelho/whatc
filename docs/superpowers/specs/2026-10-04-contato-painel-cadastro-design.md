@@ -27,7 +27,16 @@ Esconder os campos na interface sem tratar o valor deixaria um contato `cliente`
 - O servidor limpa em silêncio (não responde 400): a interface já esconde os campos, e um cliente de API antigo que ainda envie unidade para um `cliente` não quebra.
 - A validação contra a organização continua valendo para o que for gravado.
 
-**Dados já existentes.** Esta fase **não faz migração**. Um `cliente` que já tenha unidade/departamento só é limpo na próxima edição dele. Para decidir uma limpeza em massa, a implementação inclui uma consulta somente de leitura (contagem de contatos não colaboradores com unidade ou departamento por organização), e qualquer `UPDATE` em massa fica como passo separado, com a sua autorização.
+**Dados já existentes.** Esta fase **não faz migração**. Um `cliente` que já tenha unidade/departamento só é limpo na próxima edição dele. Para decidir uma limpeza em massa, a implementação inclui uma consulta somente de leitura (contagem de contatos não colaboradores com unidade ou departamento por organização), e qualquer `UPDATE` em massa fica como passo separado, com a sua autorização. A consulta (validada por teste, `TestLegacyPlacementCount_ByOrganization`):
+
+```sql
+SELECT organization_id, COUNT(*) AS contatos_com_vinculo_indevido
+FROM contacts
+WHERE deleted_at IS NULL
+  AND contact_type <> 'colaborador'
+  AND (unit_id IS NOT NULL OR department_id IS NOT NULL)
+GROUP BY organization_id;
+```
 
 ## 4. Interface
 
