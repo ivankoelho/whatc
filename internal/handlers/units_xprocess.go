@@ -38,6 +38,12 @@ type xprocessLojaView struct {
 	// it is never saved by itself.
 	SuggestedUnitID   *uuid.UUID `json:"suggested_unit_id,omitempty"`
 	SuggestedUnitName string     `json:"suggested_unit_name,omitempty"`
+	// What importing this store would do (see classifyLoja): new | already_imported | conflict.
+	ImportStatus   string     `json:"import_status"`
+	ImportName     string     `json:"import_name"` // the name the unit would get
+	ConflictReason string     `json:"conflict_reason,omitempty"`
+	ConflictUnitID *uuid.UUID `json:"conflict_unit_id,omitempty"`
+	ConflictUnit   string     `json:"conflict_unit_name,omitempty"`
 }
 
 // fetchXProcessLojas reads the store list with the organization's own X2
@@ -96,6 +102,11 @@ func (a *App) ListUnitXProcessLojas(r *fastglue.Request) error {
 	out := make([]xprocessLojaView, 0, len(lojas))
 	for _, l := range lojas {
 		v := xprocessLojaView{CodEmpresa: l.CodEmpresa, RazaoSocialEmpresa: strings.Join(strings.Fields(l.RazaoSocialEmpresa), " "), CNPJEmpresa: l.CNPJEmpresa}
+		class := classifyLoja(l, units)
+		v.ImportStatus, v.ImportName = class.Status, unitNameFromLoja(l.RazaoSocialEmpresa)
+		if class.Status == importConflict {
+			v.ConflictReason, v.ConflictUnitID, v.ConflictUnit = class.Reason, &class.Unit.ID, class.Unit.Name
+		}
 		if u, ok := byCode[l.CodEmpresa]; ok {
 			v.UnitID, v.UnitName = &u.ID, u.Name
 		} else if u, ok := suggestions[l.CodEmpresa]; ok {
