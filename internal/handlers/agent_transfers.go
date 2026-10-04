@@ -1511,7 +1511,13 @@ type TransferResult struct {
 // failure; "already active" and "outside business hours" are outcomes, not errors, and the
 // existing unique-active-transfer index (or hasActiveAgentTransfer) keeps the call idempotent.
 // notes is stored on the transfer as given.
-func (a *App) TransferToQueue(_ context.Context, account *models.WhatsAppAccount, contact *models.Contact, source models.TransferSource, notes string) (TransferResult, error) {
+func (a *App) TransferToQueue(ctx context.Context, account *models.WhatsAppAccount, contact *models.Contact, source models.TransferSource, notes string) (TransferResult, error) {
+	return a.transferToQueue(ctx, account, contact, source, notes, "")
+}
+
+// transferToQueue is TransferToQueue with the routing reason a flow transfer node records
+// (empty = NULL, the transfer did not come from a flow transfer node).
+func (a *App) transferToQueue(_ context.Context, account *models.WhatsAppAccount, contact *models.Contact, source models.TransferSource, notes, routingReason string) (TransferResult, error) {
 	if a.hasActiveAgentTransfer(account.OrganizationID, contact.ID) {
 		return TransferResult{Outcome: TransferAlreadyActive}, nil
 	}
@@ -1535,6 +1541,7 @@ func (a *App) TransferToQueue(_ context.Context, account *models.WhatsAppAccount
 		Status:          models.TransferStatusActive,
 		Source:          source,
 		Notes:           notes,
+		RoutingReason:   routingReasonPtr(routingReason),
 		TransferredAt:   time.Now(),
 	}
 
@@ -1551,7 +1558,13 @@ func (a *App) TransferToQueue(_ context.Context, account *models.WhatsAppAccount
 // wrapper of TransferToQueue that keeps the behaviour callers have always had: it logs, and
 // outside business hours it sends the out-of-hours message instead of transferring.
 func (a *App) createTransferToQueue(account *models.WhatsAppAccount, contact *models.Contact, source models.TransferSource) {
-	res, err := a.TransferToQueue(context.Background(), account, contact, source, "")
+	a.createTransferToQueueRouted(account, contact, source, "")
+}
+
+// createTransferToQueueRouted is createTransferToQueue recording why a flow transfer node routed to
+// the queue (a RoutingReason* value; empty = not recorded).
+func (a *App) createTransferToQueueRouted(account *models.WhatsAppAccount, contact *models.Contact, source models.TransferSource, routingReason string) {
+	res, err := a.transferToQueue(context.Background(), account, contact, source, "", routingReason)
 	switch {
 	case err != nil:
 		a.Log.Error("Failed to create transfer to queue", "error", err, "contact_id", contact.ID, "source", string(source))
@@ -1662,7 +1675,7 @@ func (a *App) createTransferFromKeyword(account *models.WhatsAppAccount, contact
 }
 
 // createTransferToTeam creates an agent transfer to a specific team with appropriate assignment
-func (a *App) createTransferToTeam(account *models.WhatsAppAccount, contact *models.Contact, teamID uuid.UUID, notes string, source models.TransferSource) {
+func (a *App) createTransferToTeam(account *models.WhatsAppAccount, contact *models.Contact, teamID uuid.UUID, notes string, source models.TransferSource, routingReason string) {
 	if a.hasActiveAgentTransfer(account.OrganizationID, contact.ID) {
 		a.Log.Debug("Contact already has active transfer, skipping team transfer", "contact_id", contact.ID, "team_id", teamID)
 		return
@@ -1698,6 +1711,7 @@ func (a *App) createTransferToTeam(account *models.WhatsAppAccount, contact *mod
 		AgentID:         agentID,
 		TeamID:          &teamID,
 		Notes:           notes,
+		RoutingReason:   routingReasonPtr(routingReason),
 		TransferredAt:   time.Now(),
 	}
 
@@ -1720,7 +1734,16 @@ func (a *App) createTransferToTeam(account *models.WhatsAppAccount, contact *mod
 		"team_id", teamID,
 		"agent_id", agentIDStrLog,
 		"source", source,
+		"routing_reason", routingReason,
 	)
+}
+
+// routingReasonPtr stores an empty reason as NULL.
+func routingReasonPtr(reason string) *string {
+	if reason == "" {
+		return nil
+	}
+	return &reason
 }
 
 // ReturnAgentTransfersToQueue returns all active transfers assigned to an agent back to their team queues
