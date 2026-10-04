@@ -82,11 +82,9 @@ test.describe('Roles Management', () => {
     await nameInput(page).fill(roleName)
     await descriptionInput(page).fill('A custom test role for E2E testing')
 
-    // Select a permission (first checkbox in the matrix)
-    const permissionCheckbox = page.locator('button[role="checkbox"]').first()
-    if (await permissionCheckbox.isVisible()) {
-      await permissionCheckbox.click()
-    }
+    // Open the first functional group and turn its first permission on
+    await page.locator('[data-testid^="permission-group-"] button[data-state]').first().click()
+    await page.locator('button[role="switch"][data-testid^="permission-"]').first().click()
 
     await saveButton(page).click()
     await page.waitForLoadState('networkidle')
@@ -337,26 +335,39 @@ test.describe('Roles - Permissions Selection', () => {
 
     await gotoCreateRole(page)
 
-    // Should show permission groups (Users, Contacts, Messages, etc.)
-    await expect(page.locator('text=Users').first()).toBeVisible()
-    await expect(page.locator('text=Contacts').first()).toBeVisible()
+    // Functional groups, not one block per resource
+    await expect(page.locator('[data-testid="permission-group-admin"]')).toBeVisible()
+    await expect(page.locator('[data-testid="permission-group-crm"]')).toBeVisible()
   })
 
-  test('should select all permissions in a group', async ({ page }) => {
+  test('should turn on all permissions in a group', async ({ page }) => {
     await loginAsAdmin(page)
     await page.goto('/settings/roles')
     await page.waitForLoadState('networkidle')
 
     await gotoCreateRole(page)
 
-    // Click the group checkbox to select all
-    const groupCheckbox = page.locator('[data-testid="group-users-checkbox"]').or(
-      page.locator('button[role="checkbox"]').first()
-    )
-    await groupCheckbox.click()
+    const group = page.locator('[data-testid="permission-group-admin"]')
+    await group.locator('button[data-state]').first().click()
+    await group.getByRole('button', { name: /Turn all .* on or off/ }).click()
 
-    // Permission count should increase
-    const selectedCount = page.locator('text=/\\d+ selected/')
-    await expect(selectedCount).toBeVisible()
+    // Every permission of the group is on
+    const switches = group.locator('button[role="switch"]')
+    const total = await switches.count()
+    expect(total).toBeGreaterThan(0)
+    await expect(group.locator('button[role="switch"][aria-checked="true"]')).toHaveCount(total)
+  })
+
+  test('search keeps the group and shows only matching permissions', async ({ page }) => {
+    await loginAsAdmin(page)
+    await page.goto('/settings/roles')
+    await page.waitForLoadState('networkidle')
+
+    await gotoCreateRole(page)
+
+    await page.locator('[data-testid="permission-search"]').fill('units:write')
+    await expect(page.locator('[data-testid="permission-group-crm"]')).toBeVisible()
+    await expect(page.locator('[data-testid="permission-units:write"]')).toBeVisible()
+    await expect(page.locator('[data-testid="permission-group-admin"]')).toHaveCount(0)
   })
 })
