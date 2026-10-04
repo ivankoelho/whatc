@@ -62,7 +62,10 @@ func (a *App) ListAITools(r *fastglue.Request) error {
 	tools := make([]AIToolView, 0, len(cat.Names()))
 	for _, name := range cat.Names() {
 		spec, _ := cat.Get(name)
-		v := aitools.Authorize(aitools.PolicyInput{GlobalEnabled: global, Known: true, OrgEnabled: enabled[name], Risk: spec.Risk})
+		v := aitools.Authorize(aitools.PolicyInput{
+			GlobalEnabled: global, Known: true, OrgEnabled: enabled[name], Risk: spec.Risk, FeatureAllowed: true,
+			WriteEnabled: a.Config != nil && a.Config.AITools.WriteEnabled, ConfirmationAvailable: a.aiToolConfirmationsReady(),
+		})
 		tools = append(tools, AIToolView{
 			Name: name, Description: spec.Description, Risk: string(spec.Risk), Enabled: enabled[name], Available: v.Allowed && provider,
 		})

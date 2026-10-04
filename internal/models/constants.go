@@ -149,6 +149,10 @@ const (
 	// messaged the customer first. Without this record the chatbot would take
 	// over the customer's reply.
 	TransferSourceAgentInitiated TransferSource = "agent_initiated"
+
+	// TransferSourceAIConfirmed marks a transfer the chatbot's AI proposed and the CUSTOMER
+	// confirmed (Fase 9D). TransferredByUserID stays NULL: nobody on the staff did it.
+	TransferSourceAIConfirmed TransferSource = "ai_confirmed"
 )
 
 // CampaignStatus represents bulk message campaign states

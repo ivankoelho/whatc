@@ -217,6 +217,14 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	// Clear chatbot tracking since client has replied
 	a.ClearContactChatbotTracking(contact.ID)
 
+	// A tap on the confirmation button of something the AI proposed (Fase 9D): consumed here, it never
+	// reaches the chatbot as a message. It is handled before the other checks because it must be
+	// answered (or deliberately ignored) even if a transfer meanwhile became active.
+	if isAIToolConfirmationButton(buttonID) {
+		a.handleAIToolConfirmationTap(account, contact, buttonID, msg.ID)
+		return
+	}
+
 	// Check for active agent transfer - skip chatbot processing if transferred
 	if a.hasActiveAgentTransfer(account.OrganizationID, contact.ID) {
 		a.Log.Info("Contact has active agent transfer, skipping chatbot processing",
@@ -399,13 +407,18 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	// If no keyword matched, try AI response if enabled
 	if settings.AI.Enabled && settings.AI.Provider != "" && settings.AI.APIKey != "" {
 		a.Log.Info("Attempting AI response", "provider", settings.AI.Provider, "model", settings.AI.Model)
-		aiResponse, err := a.generateAIResponse(settings, session, messageText, aiFeatureChatbotReply)
+		reply, err := a.generateAIReply(settings, session, messageText, aiFeatureChatbotReply)
+		aiResponse := reply.Text
 		if err != nil {
 			a.Log.Error("AI response failed", "error", err, "provider", settings.AI.Provider, "model", settings.AI.Model)
 			// Fall through to default response
 		} else if aiResponse != "" {
 			a.Log.Info("AI response generated successfully", "response_length", len(aiResponse))
-			if err := a.sendAndSaveTextMessage(account, contact, aiResponse); err != nil {
+			if len(reply.Buttons) > 0 { // the server's confirmation message, with its buttons
+				if err := a.sendAndSaveInteractiveButtons(account, contact, aiResponse, reply.Buttons); err != nil {
+					a.Log.Error("Failed to send AI confirmation", "error", err, "contact", contact.PhoneNumber)
+				}
+			} else if err := a.sendAndSaveTextMessage(account, contact, aiResponse); err != nil {
 				a.Log.Error("Failed to send AI response", "error", err, "contact", contact.PhoneNumber)
 			}
 			a.logSessionMessage(session.ID, models.DirectionOutgoing, aiResponse, "ai_response")
@@ -858,6 +871,21 @@ type ApiResponse struct {
 // ai.Provider interface (completeAI), which also writes the usage log. feature
 // says which part of Whatc is asking (see aiFeature* constants).
 func (a *App) generateAIResponse(settings *models.ChatbotSettings, session *models.ChatbotSession, userMessage string, feature string) (string, error) {
+	reply, err := a.generateAIReply(settings, session, userMessage, feature)
+	return reply.Text, err
+}
+
+// aiReply is what the AI path wants said to the customer: normally just text, but when the AI
+// proposed an action that needs the customer's confirmation, the SERVER's confirmation message with
+// its buttons. In that case the model's own text is discarded: it never reaches the customer.
+type aiReply struct {
+	Text    string
+	Buttons []map[string]any
+}
+
+// generateAIReply is generateAIResponse with the confirmation case (Fase 9D). Only chatbot_reply can
+// produce buttons; the flow's ai_response node keeps going through generateAIResponse and gets text.
+func (a *App) generateAIReply(settings *models.ChatbotSettings, session *models.ChatbotSession, userMessage string, feature string) (aiReply, error) {
 	// Build context from AIContext entries
 	contextData := a.buildAIContext(settings.OrganizationID, session, userMessage)
 
@@ -896,7 +924,8 @@ func (a *App) generateAIResponse(settings *models.ChatbotSettings, session *mode
 	}
 	messages = append(messages, ai.Message{Role: ai.RoleUser, Content: userMessage})
 
-	meta := aiCallMeta{Feature: feature, OrgID: settings.OrganizationID, KnowledgeSources: kb.Sources}
+	out := &aiCallOut{}
+	meta := aiCallMeta{Feature: feature, OrgID: settings.OrganizationID, KnowledgeSources: kb.Sources, Out: out}
 	if session != nil {
 		meta.Account = session.WhatsAppAccount
 		contactID, sessionID := session.ContactID, session.ID
@@ -916,10 +945,17 @@ func (a *App) generateAIResponse(settings *models.ChatbotSettings, session *mode
 		MaxTokens:   settings.AI.MaxTokens,
 		Temperature: settings.AI.Temperature,
 	})
-	if err != nil {
-		return "", err
+	if out.Pending != nil && feature == aiFeatureChatbotReply {
+		// the AI proposed an action: what the customer sees is the server's confirmation, never the
+		// model's words (it may not claim the action happened). It also wins over an error in a later
+		// step of the run: the proposal already exists and the customer must be able to answer it.
+		text, buttons := aiConfirmationButtons(out.Pending)
+		return aiReply{Text: text, Buttons: buttons}, nil
 	}
-	return resp.Text, nil
+	if err != nil {
+		return aiReply{}, err
+	}
+	return aiReply{Text: resp.Text}, nil
 }
 
 // buildAIContext fetches and combines all AI context data

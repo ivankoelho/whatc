@@ -84,6 +84,10 @@ func newToolEnv(t *testing.T, replies ...seqReply) toolEnv {
 	var factories int
 	schema := json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"}}}`)
 	mk := func(name string, risk aitools.Risk) aitools.ToolSpec {
+		if risk == aitools.RiskWrite {
+			return aitools.ToolSpec{Name: name, Description: "d", Parameters: schema, Risk: risk, Confirm: testConfirm(),
+				WriteFactory: func(aitools.Scope, aitools.WriteDeps) aitools.WriteTool { factories++; return noopWriteTool{} }}
+		}
 		return aitools.ToolSpec{Name: name, Description: "d", Parameters: schema, Risk: risk, Factory: func(sc aitools.Scope, _ aitools.Deps) ai.Tool {
 			factories++
 			return toolFn(func(_ context.Context, c ai.ToolCall) (ai.ToolResult, error) {
@@ -264,7 +268,7 @@ func TestAITools_Active_AForcedCallToAnUnofferedOrWriteToolIsDeniedNotRun(t *tes
 		assert.Equal(t, models.AIToolCallDenied, r.Status)
 		got[r.ToolName] = r.DenialReason
 	}
-	assert.Equal(t, map[string]string{"write_it": aitools.DenyConfirmationUnavailable, "made_up": aitools.DenyUnknownTool}, got)
+	assert.Equal(t, map[string]string{"write_it": aitools.DenyWriteDisabled, "made_up": aitools.DenyUnknownTool}, got)
 
 	// the model heard the same generic answer for both
 	msgs := e.tr.bodies[1]["messages"].([]any)
@@ -358,4 +362,21 @@ func TestAITools_Active_ProviderNameMatchIsCaseInsensitive(t *testing.T) {
 	_, err := e.app.GenerateAIResponseForTest(e.settings, e.session, "hi")
 	require.NoError(t, err)
 	assert.Len(t, e.callRows(t), 1)
+}
+
+// A write spec has a WriteFactory and a confirmation, never a read factory.
+type noopWriteTool struct{}
+
+func (noopWriteTool) Propose(context.Context, ai.ToolCall) (*aitools.Proposal, ai.ToolResult, error) {
+	return nil, ai.ToolResult{Content: "{}"}, nil
+}
+func (noopWriteTool) Execute(context.Context, models.JSONB, time.Time) (aitools.ExecResult, error) {
+	return aitools.ExecResult{}, nil
+}
+
+func testConfirm() *aitools.ConfirmSpec {
+	return &aitools.ConfirmSpec{
+		Prompt: func(time.Duration) string { return "Confirm?" }, ConfirmLabel: "Sim", DeclineLabel: "Nao",
+		DeclinedText: "ok", ExpiredText: "expirou", OutcomeText: func(string) string { return "done" },
+	}
 }

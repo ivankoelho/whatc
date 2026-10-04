@@ -36,6 +36,14 @@ type aiCallMeta struct {
 	// nil means no tools, exactly as before. Even when set, tools run only if ai_tools.enabled is
 	// on, the catalog has tools and the organization enabled one (see completeAI).
 	Tools *aiToolsRun
+	// Out, when set, receives what happened beyond the text: a confirmation the AI proposed, which the
+	// caller must present to the customer INSTEAD of the model's text (Fase 9D).
+	Out *aiCallOut
+}
+
+// aiCallOut carries results of a call back to its caller.
+type aiCallOut struct {
+	Pending *aitools.PendingConfirmation
 }
 
 // aiToolsRun is the identity and scope a governed tool run is made with. The server builds it
@@ -96,9 +104,15 @@ func (a *App) governedTools(ctx context.Context, meta aiCallMeta, p ai.Provider)
 	if a.Config != nil {
 		secret = a.Config.App.EncryptionKey
 	}
+	var confirmations *aitools.ConfirmationStore
+	if a.aiToolConfirmationsReady() {
+		confirmations = a.aiToolConfirmationStore()
+	}
 	r := aitools.NewResolver(ctx, aitools.ResolverConfig{
 		Catalog: a.aiToolCatalog(), GlobalEnabled: true, Auditor: aitools.DBAuditor{DB: a.DB, Secret: secret},
 		Actor: meta.Tools.Actor, Scope: meta.Tools.Scope, Log: a.Log, Deps: aitools.Deps{Read: aitools.NewReadDB(a.DB)},
+		WriteEnabled: a.Config.AITools.WriteEnabled, ConfirmationAvailable: a.aiToolConfirmationsReady(),
+		Confirmations: confirmations, WriteDeps: aitools.WriteDeps{Transfers: appTransferService{a: a}},
 	}, aitools.SettingsStore{DB: a.DB})
 	if len(r.Definitions()) == 0 {
 		return nil
@@ -111,6 +125,9 @@ func (a *App) governedTools(ctx context.Context, meta aiCallMeta, p ai.Provider)
 // ordinary AI error, so the caller falls back exactly as it does today.
 func (a *App) completeWithTools(ctx context.Context, p ai.Provider, provider string, meta aiCallMeta, req ai.Request, r *aitools.Resolver) (*ai.Response, error) {
 	res, err := ai.RunToolLoop(ctx, p, req, r, ai.Limits{})
+	if meta.Out != nil {
+		meta.Out.Pending = r.Pending() // a proposal made during the loop, even if the loop failed after it
+	}
 	for i, resp := range res.Responses {
 		a.recordAIUsage(meta, provider, req.Model, resp, res.Took[i], nil)
 	}

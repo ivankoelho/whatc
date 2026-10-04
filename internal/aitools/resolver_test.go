@@ -108,6 +108,16 @@ type probe struct {
 
 func (p *probe) spec(name string, risk aitools.Risk) aitools.ToolSpec {
 	s := spec(name, risk)
+	if risk == aitools.RiskWrite {
+		// a write spec cannot have a read factory: its (counting) write factory stands for "built"
+		s.Factory = nil
+		s.Confirm = goodConfirm()
+		s.WriteFactory = func(aitools.Scope, aitools.WriteDeps) aitools.WriteTool {
+			p.factoryCalls++
+			return fakeWriteTool{proposed: &p.execCalls, executed: &p.execCalls}
+		}
+		return s
+	}
 	s.Factory = func(sc aitools.Scope, _ aitools.Deps) ai.Tool {
 		p.factoryCalls++
 		p.gotScope = sc
@@ -342,7 +352,7 @@ func TestExecute_DeniedNeverBuildsOrRunsTheToolAndTheModelHearsTheSameThing(t *t
 	for _, c := range []attemptCase{
 		{r, "never_heard_of_it", aitools.DenyUnknownTool},
 		{r, "read_off", aitools.DenyNotEnabled},
-		{r, "write_on", aitools.DenyConfirmationUnavailable},
+		{r, "write_on", aitools.DenyWriteDisabled},
 		{globalOff, "read_off", aitools.DenyGlobalOff},
 	} {
 		tool, _ := c.res.Resolve(c.name)
@@ -375,7 +385,7 @@ func TestExecute_AWriteToolNeverRuns(t *testing.T) {
 	_, err := tool.Execute(context.Background(), call("c", "write_it", `{}`))
 	require.NoError(t, err)
 	assert.Zero(t, p.factoryCalls+p.execCalls)
-	assert.Equal(t, aitools.DenyConfirmationUnavailable, au.events[0].reason)
+	assert.Equal(t, aitools.DenyWriteDisabled, au.events[0].reason)
 	assert.Equal(t, aitools.RiskWrite, au.events[0].attempt.Risk)
 }
 
@@ -626,7 +636,7 @@ func TestRunToolLoop_EveryCallThatReachesTheLoopLeavesExactlyOneRow(t *testing.T
 		rows[e.attempt.Call.ID] = append(rows[e.attempt.Call.ID], e.kind+":"+e.reason)
 	}
 	assert.Equal(t, map[string][]string{
-		"a": {"requested:"}, "b": {"denied:" + aitools.DenyNotEnabled}, "c": {"denied:" + aitools.DenyConfirmationUnavailable},
+		"a": {"requested:"}, "b": {"denied:" + aitools.DenyNotEnabled}, "c": {"denied:" + aitools.DenyWriteDisabled},
 		"d": {"denied:" + aitools.DenyUnknownTool}, "e": {"denied:" + aitools.DenyArgsTooLarge},
 	}, rows, "one row per call")
 

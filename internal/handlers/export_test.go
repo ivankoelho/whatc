@@ -130,3 +130,15 @@ func (a *App) GenerateAIResponseNodeForTest(settings *models.ChatbotSettings, se
 func (a *App) KnowledgeRAGEnabledForTest(orgID uuid.UUID) bool {
 	return a.knowledgeRAGEnabled(orgID)
 }
+
+// GenerateAIReplyForTest exposes generateAIReply (chatbot_reply): the text and, when the AI proposed
+// an action, the server's confirmation buttons.
+func (a *App) GenerateAIReplyForTest(settings *models.ChatbotSettings, session *models.ChatbotSession, userMessage string) (string, []map[string]any, error) {
+	r, err := a.generateAIReply(settings, session, userMessage, aiFeatureChatbotReply)
+	return r.Text, r.Buttons, err
+}
+
+// HandleAIToolTapForTest exposes handleAIToolConfirmationTap.
+func (a *App) HandleAIToolTapForTest(account *models.WhatsAppAccount, contact *models.Contact, buttonID, wamid string) {
+	a.handleAIToolConfirmationTap(account, contact, buttonID, wamid)
+}

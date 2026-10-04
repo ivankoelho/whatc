@@ -29,8 +29,14 @@ func newAIToolsEnv(t *testing.T) aiToolsEnv {
 	app := newTestApp(t)
 	schema := json.RawMessage(`{"type":"object","properties":{}}`)
 	mk := func(name string, risk aitools.Risk) aitools.ToolSpec {
-		return aitools.ToolSpec{Name: name, Description: "d " + name, Parameters: schema, Risk: risk,
-			Factory: func(aitools.Scope, aitools.Deps) ai.Tool { return nil }}
+		s := aitools.ToolSpec{Name: name, Description: "d " + name, Parameters: schema, Risk: risk}
+		if risk == aitools.RiskWrite {
+			s.Confirm = testConfirm()
+			s.WriteFactory = func(aitools.Scope, aitools.WriteDeps) aitools.WriteTool { return noopWriteTool{} }
+			return s
+		}
+		s.Factory = func(aitools.Scope, aitools.Deps) ai.Tool { return nil }
+		return s
 	}
 	cat, err := aitools.NewCatalog(mk("get_order", aitools.RiskRead), mk("write_it", aitools.RiskWrite))
 	require.NoError(t, err)
@@ -183,10 +189,15 @@ func TestAITools_TheProductionCatalogIsTheTwoReadToolsAndNothingIsOnByDefault(t 
 	status, data := e.do(t, app.ListAITools, org.ID, admin.ID, "", nil)
 	require.Equal(t, fasthttp.StatusOK, status)
 	assert.Equal(t, false, data["global_enabled"])
-	assert.Equal(t, map[string][2]bool{"get_business_hours": {false, false}, "get_my_occurrences": {false, false}}, toolStates(data),
-		"two read tools, both off for the organization and unavailable")
+	assert.Equal(t, map[string][2]bool{"get_business_hours": {false, false}, "get_my_occurrences": {false, false}, "request_agent_transfer": {false, false}}, toolStates(data),
+		"two read tools and one write tool, all off for the organization and unavailable")
 	for _, x := range data["tools"].([]any) {
-		assert.Equal(t, "read", x.(map[string]any)["risk"])
+		m := x.(map[string]any)
+		want := "read"
+		if m["name"] == "request_agent_transfer" {
+			want = "write"
+		}
+		assert.Equal(t, want, m["risk"], m["name"])
 	}
 	status, _ = e.do(t, app.SetAIToolEnabled, org.ID, admin.ID, "anything", map[string]any{"enabled": true})
 	assert.Equal(t, fasthttp.StatusNotFound, status, "only catalog tools can be switched")

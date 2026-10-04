@@ -52,7 +52,10 @@ func ArgsHMAC(secret string, args []byte) string {
 	return hex.EncodeToString(mac(derivedKey(secret), canon))
 }
 
-func derivedKey(secret string) []byte { return mac([]byte(secret), []byte(argsPurpose)) }
+func derivedKey(secret string) []byte { return derivedKeyFor(secret, argsPurpose) }
+
+// derivedKeyFor derives a purpose-specific key from the server secret, so no key is reused across uses.
+func derivedKeyFor(secret, purpose string) []byte { return mac([]byte(secret), []byte(purpose)) }
 
 func mac(key, msg []byte) []byte {
 	m := hmac.New(sha256.New, key)

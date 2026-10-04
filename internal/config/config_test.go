@@ -359,3 +359,72 @@ func TestLoad_AIToolsProvidersFromFileAndEnv(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, cfg.AITools.ProviderValidated(""), "an empty name is never validated")
 }
+
+// --- ai_tools write switch and confirmation parameters (Fase 9D) ---
+
+func TestLoad_AIToolsWriteIsOffByDefaultAndNeverByAccident(t *testing.T) {
+	cfg, err := config.Load(writeConfig(t, ""))
+	require.NoError(t, err)
+	assert.False(t, cfg.AITools.WriteEnabled)
+
+	cfg, err = config.Load(writeConfig(t, "[ai_tools]\nwrite_enabled = true\n"))
+	require.NoError(t, err)
+	assert.True(t, cfg.AITools.WriteEnabled)
+
+	for _, v := range []string{"", "false", "0", "False"} {
+		t.Setenv("WHATOMATE_AI_TOOLS__WRITE_ENABLED", v)
+		cfg, err := config.Load(writeConfig(t, ""))
+		require.NoError(t, err, "value %q", v)
+		assert.False(t, cfg.AITools.WriteEnabled, "value %q", v)
+	}
+	t.Setenv("WHATOMATE_AI_TOOLS__WRITE_ENABLED", "banana")
+	_, err = config.Load(writeConfig(t, ""))
+	assert.Error(t, err, "garbage is a configuration error, never 'on'")
+}
+
+func TestAIToolsConfig_DefaultsAreExactlyTheApprovedNumbers(t *testing.T) {
+	cfg, err := config.Load(writeConfig(t, ""))
+	require.NoError(t, err)
+	c := cfg.AITools
+	assert.Equal(t, 10*time.Minute, c.ConfirmationTTL())
+	assert.Equal(t, 3, c.ProposalLimitPerWindow())
+	assert.Equal(t, 60*time.Minute, c.ProposalWindow())
+	assert.Equal(t, 30*time.Minute, c.DeclineCooldown())
+	assert.Equal(t, 30*time.Second, c.ReconcileInterval())
+	assert.Equal(t, 60*time.Second, c.ReconcileMinAge())
+	assert.Equal(t, 3, c.ReconcileAttempts())
+}
+
+func TestAIToolsConfig_ValuesComeFromFileAndEnvAndFallBackWhenOutOfBounds(t *testing.T) {
+	cfg, err := config.Load(writeConfig(t, "[ai_tools]\nconfirmation_ttl_minutes = 5\nproposal_limit = 7\nproposal_window_minutes = 120\n"+
+		"decline_cooldown_minutes = 0\nreconcile_interval_seconds = 0\nreconcile_min_age_seconds = 90\nreconcile_max_attempts = 5\n"))
+	require.NoError(t, err)
+	c := cfg.AITools
+	assert.Equal(t, 5*time.Minute, c.ConfirmationTTL())
+	assert.Equal(t, 7, c.ProposalLimitPerWindow())
+	assert.Equal(t, 120*time.Minute, c.ProposalWindow())
+	assert.Equal(t, time.Duration(0), c.DeclineCooldown(), "0 means no cooldown, not 'unset'")
+	assert.Equal(t, time.Duration(0), c.ReconcileInterval(), "0 turns the reconciler off")
+	assert.Equal(t, 90*time.Second, c.ReconcileMinAge())
+	assert.Equal(t, 5, c.ReconcileAttempts())
+
+	// outside the bounds: the default, never the bad value
+	cfg, err = config.Load(writeConfig(t, "[ai_tools]\nconfirmation_ttl_minutes = 0\nproposal_limit = 99\nproposal_window_minutes = -5\n"+
+		"decline_cooldown_minutes = 99999\nreconcile_interval_seconds = 99999\nreconcile_min_age_seconds = 1\nreconcile_max_attempts = 0\n"))
+	require.NoError(t, err)
+	c = cfg.AITools
+	assert.Equal(t, 10*time.Minute, c.ConfirmationTTL())
+	assert.Equal(t, 3, c.ProposalLimitPerWindow())
+	assert.Equal(t, 60*time.Minute, c.ProposalWindow())
+	assert.Equal(t, 30*time.Minute, c.DeclineCooldown())
+	assert.Equal(t, 30*time.Second, c.ReconcileInterval())
+	assert.Equal(t, 60*time.Second, c.ReconcileMinAge())
+	assert.Equal(t, 3, c.ReconcileAttempts())
+}
+
+func TestAIToolsConfig_EnvironmentOverridesTheFile(t *testing.T) {
+	t.Setenv("WHATOMATE_AI_TOOLS__CONFIRMATION_TTL_MINUTES", "20")
+	cfg, err := config.Load(writeConfig(t, "[ai_tools]\nconfirmation_ttl_minutes = 5\n"))
+	require.NoError(t, err)
+	assert.Equal(t, 20*time.Minute, cfg.AITools.ConfirmationTTL())
+}
