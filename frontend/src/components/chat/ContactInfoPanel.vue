@@ -22,7 +22,7 @@ import {
   CommandItem,
   CommandList
 } from '@/components/ui/command'
-import { X, ArrowLeft, ChevronDown, Phone, User, Plus, Check, Tags, Loader2, Copy, Pencil } from 'lucide-vue-next'
+import { X, ArrowLeft, ChevronDown, Phone, Plus, Check, Tags, Loader2, Copy, Pencil } from 'lucide-vue-next'
 import { TagBadge } from '@/components/ui/tag-badge'
 import { IconButton } from '@/components/shared'
 import { Input } from '@/components/ui/input'
@@ -30,6 +30,8 @@ import MetadataSection from '@/components/chat/MetadataSection.vue'
 import ContactSalesOpportunitiesPanel from '@/components/chat/ContactSalesOpportunitiesPanel.vue'
 import ContactOccurrencesPanel from '@/components/chat/ContactOccurrencesPanel.vue'
 import ContactRegistrationSection from '@/components/chat/ContactRegistrationSection.vue'
+import { usePlacementOptions } from '@/composables/usePlacementOptions'
+import { isContactPanelField, resolveContactPanelField } from '@/lib/contact-registration'
 import { getInitials, getAvatarGradient, formatLabel } from '@/lib/utils'
 import { getTagColorClass } from '@/lib/constants'
 import { useTagsStore } from '@/stores/tags'
@@ -249,10 +251,41 @@ function getColorClass(color?: string): string {
   }
 }
 
-// Sort sections by order
+// The organization's units and departments, read once for everything the panel shows by name.
+const placement = usePlacementOptions()
+const placementUnits = placement.units
+const placementDepartments = placement.departments
+onMounted(placement.load)
+
+const contactLookups = computed(() => ({
+  typeLabel: (type: string) => t('contacts.types.' + type),
+  unitName: placement.unitName,
+  departmentName: placement.departmentName,
+  defined: t('contacts.defined'),
+}))
+
+// What a field of the flow's panel shows. A registration field (contact:*) comes from the contact
+// as it is now, not from the session, and has nothing to show when the data is empty or does not
+// apply; a session variable keeps showing '-' when it is empty.
+function resolveField(field: PanelFieldConfig): { visible: boolean; value: string } {
+  if (isContactPanelField(field.key)) return resolveContactPanelField(field.key, props.contact, contactLookups.value)
+  return { visible: true, value: getFieldValue(field.key) }
+}
+
+// Sections in order with only their visible fields; a section left without fields is dropped.
 const sortedSections = computed(() => {
-  if (!props.sessionData?.panel_config?.sections) return []
-  return [...props.sessionData.panel_config.sections].sort((a, b) => a.order - b.order)
+  const sections = props.sessionData?.panel_config?.sections
+  if (!sections) return []
+  return [...sections]
+    .sort((a, b) => a.order - b.order)
+    .map((section) => ({
+      ...section,
+      fields: [...section.fields]
+        .sort((a, b) => a.order - b.order)
+        .map((field) => ({ ...field, shown: resolveField(field) }))
+        .filter((field) => field.shown.visible),
+    }))
+    .filter((section) => section.fields.length > 0)
 })
 
 // Get tags from contact
@@ -401,6 +434,8 @@ async function updateContactTags(tags: string[]) {
             ref="registrationRef"
             :contact="contact"
             :editing="isEditing && canEditRegistration"
+            :units="placementUnits"
+            :departments="placementDepartments"
             @updated="(registration) => emit('registrationUpdated', registration)"
             @submit="saveAll"
           />
@@ -506,15 +541,8 @@ async function updateContactTags(tags: string[]) {
           />
         </div>
 
-        <!-- No Session Data or no panel config -->
-        <div v-if="!props.sessionData || sortedSections.length === 0" class="text-center py-6 text-muted-foreground border-t">
-          <User class="h-8 w-8 mx-auto mb-2 opacity-50" />
-          <p class="text-sm">{{ $t('chat.noDataConfigured') }}</p>
-          <p class="text-xs mt-1">{{ $t('chat.configurePanelHint') }}</p>
-        </div>
-
-        <!-- Session Data with panel config -->
-        <template v-else>
+        <!-- Flow panel: nothing at all (not even the flow name) without a session or without anything to show -->
+        <template v-if="props.sessionData && sortedSections.length > 0">
           <!-- Flow Name Badge -->
           <div v-if="props.sessionData?.flow_name" class="flex items-center gap-2">
             <Badge variant="outline" class="text-xs">
@@ -546,7 +574,7 @@ async function updateContactTags(tags: string[]) {
                   ]"
                 >
                   <div
-                    v-for="field in section.fields.sort((a, b) => a.order - b.order)"
+                    v-for="field in section.fields"
                     :key="field.key"
                     class="bg-muted/50 rounded-md px-3 py-2"
                   >
@@ -556,17 +584,17 @@ async function updateContactTags(tags: string[]) {
                       v-if="field.display_type === 'badge'"
                       :class="['inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold mt-1', getColorClass(field.color)]"
                     >
-                      {{ getFieldValue(field.key) }}
+                      {{ field.shown.value }}
                     </span>
                     <!-- Tag display -->
                     <span
                       v-else-if="field.display_type === 'tag'"
                       :class="['inline-flex items-center rounded-md px-2 py-1 text-xs font-medium mt-1', getColorClass(field.color)]"
                     >
-                      {{ getFieldValue(field.key) }}
+                      {{ field.shown.value }}
                     </span>
                     <!-- Default text display -->
-                    <p v-else class="text-sm font-semibold break-words mt-0.5">{{ getFieldValue(field.key) }}</p>
+                    <p v-else class="text-sm font-semibold break-words mt-0.5">{{ field.shown.value }}</p>
                   </div>
                 </div>
               </CollapsibleContent>
@@ -582,7 +610,7 @@ async function updateContactTags(tags: string[]) {
                 ]"
               >
                 <div
-                  v-for="field in section.fields.sort((a, b) => a.order - b.order)"
+                  v-for="field in section.fields"
                   :key="field.key"
                   class="bg-muted/50 rounded-md px-3 py-2"
                 >
@@ -592,17 +620,17 @@ async function updateContactTags(tags: string[]) {
                     v-if="field.display_type === 'badge'"
                     :class="['inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold mt-1', getColorClass(field.color)]"
                   >
-                    {{ getFieldValue(field.key) }}
+                    {{ field.shown.value }}
                   </span>
                   <!-- Tag display -->
                   <span
                     v-else-if="field.display_type === 'tag'"
                     :class="['inline-flex items-center rounded-md px-2 py-1 text-xs font-medium mt-1', getColorClass(field.color)]"
                   >
-                    {{ getFieldValue(field.key) }}
+                    {{ field.shown.value }}
                   </span>
                   <!-- Default text display -->
-                  <p v-else class="text-sm font-semibold break-words mt-0.5">{{ getFieldValue(field.key) }}</p>
+                  <p v-else class="text-sm font-semibold break-words mt-0.5">{{ field.shown.value }}</p>
                 </div>
               </div>
             </div>
