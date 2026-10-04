@@ -1,6 +1,6 @@
 # Transferência do fluxo pelo cadastro do contato (unidade + departamento)
 
-Nota de design. Estado: **aguardando aprovação**; nada implementado.
+Nota de design. Estado: **aprovada para implementação** (regra de ambiguidade ajustada na revisão); implementação restrita à branch `feature/flow-transfer-by-contact-placement`, sem push nem PR antes da validação local.
 
 ## 1. Objetivo
 
@@ -39,23 +39,34 @@ A unidade e o departamento vêm **do contato no banco**, nunca de texto da conve
 2. Candidatos: times da mesma organização, **ativos** (`is_active`), não excluídos, com `unit_id` e `department_id` iguais aos do contato, ordenados por `created_at, id` (ordem fixa).
 3. Nenhum candidato → motivo `no_team_for_contact_placement` → fallback.
 4. Um candidato → `createTransferToTeam(time)`, sem mudança nenhuma dali em diante.
-5. Vários candidatos: a distribuição existente não atravessa times, então a escolha entre times é **determinística e explícita**: o primeiro candidato, na ordem fixa, que tenha agente disponível (`Assigner.GetAvailableAgents`); se nenhum tiver, o primeiro da ordem (a fila daquele time). Quem escolhe o agente dentro do time é a distribuição de sempre.
-   - Limite conhecido, anotado no código: não há balanceamento entre times que compartilham o par. O caminho para melhorar é escolher por carga do time.
-   - A tela de times deve avisar quando dois times ativos compartilham o par (item da implementação).
+5. **Mais de um candidato → ambiguidade → fallback.** Não se escolhe um time automaticamente: a escolha dependeria do estado momentâneo dos times e da ordem da consulta, e criaria uma distribuição entre times que o produto não definiu. Motivo `ambiguous_contact_placement`. A distribuição existente continua só dentro de um time, depois que o time foi determinado.
+   - Por isso a duplicidade do par é uma configuração ambígua que **impede o roteamento automático**, não só um alerta: a tela de times deve avisar quando dois times ativos compartilham o par (item da implementação).
+
+Matriz completa:
+
+| Situação | Motivo | Destino |
+|---|---|---|
+| Modo time fixo | `team_fixed` | `team_id` (ou fila) |
+| Placement encontrado, um time | `contact_placement` | o time correspondente |
+| Contato sem placement válido (não colaborador, ou falta unidade ou departamento) | `no_contact_placement` | fallback |
+| Nenhum time correspondente | `no_team_for_contact_placement` | fallback |
+| Mais de um time correspondente | `ambiguous_contact_placement` | fallback |
+
+Os cinco valores são fechados (não há texto livre).
 
 Tudo o que `createTransferToTeam` e `createTransferToQueue` já fazem continua valendo: transferência ativa existente, horário comercial, `TransferSourceFlow`, índice único de transferência ativa.
 
 ## 5. Fallback e auditoria do motivo
 
 - Fallback: `fallback_team_id` do nó (time) ou, se ausente/`_general`, a fila geral. A transferência **nunca falha em silêncio** e o contato sempre é atendido pelo destino de fallback.
-- Motivos: `team_fixed` (modo atual), `contact_placement` (resolveu pelo cadastro), `no_contact_placement`, `no_team_for_contact_placement`.
-- O motivo é registrado no log estruturado (ids, sem conteúdo de mensagem) **e** persistido em `agent_transfers.routing_reason` (coluna nova, nullable, aditiva) para dar para auditar depois por que uma transferência foi parar numa fila. Ver decisão 1.
+- Motivos (valores fechados, ver a matriz da seção 4): `team_fixed`, `contact_placement`, `no_contact_placement`, `no_team_for_contact_placement`, `ambiguous_contact_placement`.
+- O motivo é registrado no log estruturado (ids, sem conteúdo de mensagem) **e** persistido em `agent_transfers.routing_reason` (coluna nova, nullable, aditiva) para dar para auditar depois por que uma transferência foi parar numa fila. O log resolve o diagnóstico imediato, a coluna a auditoria histórica.
 
 ## 6. Interface
 
 - `ChatNodeProperties.vue`: seletor "Destino" (Time fixo / Cadastro do contato). No segundo, o seletor "Se não houver time" (fallback: um time ou a fila geral). O seletor de time atual continua para o modo fixo.
 - Simulação e pré-visualização do fluxo: mostram "cadastro do contato (unidade/departamento)" e o fallback configurado, sem executar nada.
-- Tela de times: aviso quando dois times ativos têm o mesmo par unidade + departamento.
+- Tela de times: aviso quando dois times ativos têm o mesmo par unidade + departamento, explicando que isso impede o roteamento automático por cadastro (vai para o fallback).
 - Textos em `pt-BR` e `en`. O comentário do modelo `Team` é atualizado para dizer que unidade e departamento agora também são lidos pelo fluxo.
 
 ## 7. Segurança e compatibilidade
@@ -68,8 +79,8 @@ Tudo o que `createTransferToTeam` e `createTransferToQueue` já fazem continua v
 
 **Backend (`internal/handlers`)**
 - Resolução: um time; nenhum; sem unidade; sem departamento; contato não colaborador; time inativo e excluído ignorados; times de outra organização ignorados.
-- Vários times: o primeiro com agente disponível; nenhum com agente → o primeiro da ordem; ordem estável entre execuções.
-- Fallback: time de fallback e fila geral, com o motivo certo registrado e persistido.
+- Vários times com o par: ambiguidade, sempre o fallback, independentemente de haver agente disponível e da ordem; motivo `ambiguous_contact_placement`.
+- Fallback: time de fallback e fila geral, com o motivo certo registrado e persistido (os cinco motivos).
 - Compatibilidade: nó sem `destination`, com `team_id` e com fila, idêntico ao atual (casos existentes passam sem alteração).
 - Transferência ativa, horário comercial e idempotência continuam valendo no modo novo.
 
@@ -78,7 +89,7 @@ Tudo o que `createTransferToTeam` e `createTransferToQueue` já fazem continua v
 
 ## 9. Fora de escopo
 
-Unidade e departamento fixos no nó; `team_id` dos botões; transferência por palavra-chave e fluxo legado; balanceamento entre times; restrição de unicidade do par entre times (só o aviso); Fase 9D.
+Unidade e departamento fixos no nó; `team_id` dos botões; transferência por palavra-chave e fluxo legado; distribuição entre times; restrição de unicidade do par entre times (só o aviso); Fase 9D.
 
 ## 10. Plano (depois da aprovação)
 
@@ -88,13 +99,13 @@ Unidade e departamento fixos no nó; `team_id` dos botões; transferência por p
 
 Branch `feature/flow-transfer-by-contact-placement`, a partir de `development` (`03f39fc`). Sem push antes da sua revisão local.
 
-## 11. Pontos para decidir
+## 11. Decisões fechadas
 
-1. **Persistir o motivo** em `agent_transfers.routing_reason` (recomendado, coluna aditiva nullable) ou só no log?
-2. **Vários times com o mesmo par:** a regra da seção 4 (primeiro com agente disponível, senão o primeiro da ordem) serve? A alternativa é recusar a ambiguidade e usar sempre o fallback quando houver mais de um.
-3. **Exigir unidade e departamento juntos** (recomendado) ou aceitar só um dos dois? Aceitar só um tornaria o destino ambíguo.
-4. **Só contatos `colaborador`** usam o modo novo (recomendado, coerente com a regra do cadastro).
-5. **Fallback padrão:** a fila geral quando o nó não define `fallback_team_id`.
+1. **Motivo persistido** em `agent_transfers.routing_reason` (nullable, aditiva), com os cinco valores fechados, e também no log.
+2. **Vários times com o mesmo par:** ambiguidade, sempre fallback com `ambiguous_contact_placement`. Nenhuma escolha automática entre times.
+3. **Unidade e departamento juntos**: o par `(unit_id, department_id)` é a identidade do placement. Os dois são obrigatórios; com só um, `no_contact_placement`.
+4. **Só contatos `colaborador`** usam o modo novo.
+5. **Fallback padrão:** fila geral quando o nó não define `fallback_team_id`.
 
 ## 12. Garantias que não mudam
 
