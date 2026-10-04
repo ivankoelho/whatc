@@ -162,8 +162,15 @@ func (a *App) handleAIToolConfirmationTap(account *models.WhatsAppAccount, conta
 	}
 	decline := strings.HasPrefix(buttonID, aiToolDeclinePrefix)
 	token := strings.TrimPrefix(strings.TrimPrefix(buttonID, aiToolConfirmPrefix), aiToolDeclinePrefix)
+	// the sender's current session: the latest active one of this contact on this account. Read only.
+	var session models.ChatbotSession
+	if err := a.DB.Where("organization_id = ? AND contact_id = ? AND whats_app_account = ? AND status = ?",
+		account.OrganizationID, contact.ID, account.Name, models.SessionStatusActive).
+		Order("started_at DESC").First(&session).Error; err != nil {
+		return // no current session: the button is not applicable
+	}
 	res := a.aiToolConfirmer().HandleTap(context.Background(), aitools.Tap{
-		Token: token, OrgID: account.OrganizationID, ContactID: contact.ID, Account: account.Name, WAMID: wamid, Decline: decline,
+		Token: token, OrgID: account.OrganizationID, ContactID: contact.ID, SessionID: session.ID, Account: account.Name, WAMID: wamid, Decline: decline,
 	})
 	if res.Kind != aitools.TapReply {
 		return // unknown, repeated or inert: nothing to say

@@ -102,3 +102,41 @@ func TestAIToolConfirmationsNeedTheServerSecret(t *testing.T) {
 	app.Config.App.EncryptionKey = ""
 	assert.False(t, app.aiToolConfirmationsReady(), "without the secret nothing can be bound to an action")
 }
+
+func TestWebhook_ATapFromAnotherSessionOfTheSameContactIsIgnored(t *testing.T) {
+	app := newProcessorTestApp(t)
+	require.NoError(t, app.DB.Exec("DELETE FROM ai_tool_confirmations").Error)
+	t.Cleanup(func() { app.DB.Exec("DELETE FROM ai_tool_confirmations") })
+	org, account := createProcessorTestOrg(t, app)
+	contact := testutil.CreateTestContactWith(t, app.DB, org.ID, testutil.WithPhoneNumber("5511987654322"))
+	s := models.ChatbotSettings{OrganizationID: org.ID, IsEnabled: true}
+	s.AI = models.AIConfig{Enabled: true, Provider: models.AIProviderOpenAI}
+	require.NoError(t, app.DB.Create(&s).Error)
+	app.Config.AITools.Enabled, app.Config.AITools.WriteEnabled, app.Config.AITools.Providers = true, true, []string{"openai"}
+	require.NoError(t, app.DB.Create(&models.AIToolSetting{OrganizationID: org.ID, ToolName: "request_agent_transfer", Enabled: true}).Error)
+
+	old := &models.ChatbotSession{BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: org.ID, ContactID: contact.ID,
+		WhatsAppAccount: account.Name, PhoneNumber: contact.PhoneNumber, Status: models.SessionStatusActive,
+		StartedAt: time.Now().Add(-time.Hour), LastActivityAt: time.Now()}
+	require.NoError(t, app.DB.Create(old).Error)
+	token, conf, err := app.aiToolConfirmationStore().Propose(context.Background(), aitools.ProposeInput{
+		Scope: aitools.Scope{OrganizationID: org.ID, ContactID: &contact.ID, SessionID: &old.ID, WhatsAppAccount: account.Name},
+		RunID: uuid.New(), Tool: "request_agent_transfer", Args: models.JSONB{"reason": "x"},
+	})
+	require.NoError(t, err)
+
+	// the contact is now in a newer session
+	cur := &models.ChatbotSession{BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: org.ID, ContactID: contact.ID,
+		WhatsAppAccount: account.Name, PhoneNumber: contact.PhoneNumber, Status: models.SessionStatusActive,
+		StartedAt: time.Now(), LastActivityAt: time.Now()}
+	require.NoError(t, app.DB.Create(cur).Error)
+
+	app.processIncomingMessageFull(account.PhoneID, buttonTap(contact.PhoneNumber, "wamid.in.s1", "aitc:"+token), "Customer")
+
+	var transfers []models.AgentTransfer
+	require.NoError(t, app.DB.Where("contact_id = ?", contact.ID).Find(&transfers).Error)
+	assert.Empty(t, transfers, "an old confirmation cannot be used from another session")
+	got, err := app.aiToolConfirmationStore().Get(context.Background(), conf.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.AIConfirmationPending, got.Status, "nothing was consumed")
+}

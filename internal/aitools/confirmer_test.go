@@ -161,7 +161,7 @@ func (w *writeEnv) proposeViaTheAI(t *testing.T, args string) (ai.ToolResult, *a
 
 func (w *writeEnv) tap(token string, decline bool) aitools.TapResult {
 	return w.confirmer.HandleTap(context.Background(), aitools.Tap{
-		Token: token, OrgID: w.org.ID, ContactID: w.contact.ID, Account: "acc", WAMID: "wamid.tap", Decline: decline,
+		Token: token, OrgID: w.org.ID, ContactID: w.contact.ID, SessionID: w.session.ID, Account: "acc", WAMID: "wamid.tap", Decline: decline,
 	})
 }
 
@@ -403,7 +403,13 @@ func TestTap_DeclineExpiredSupersededAndForeignTaps(t *testing.T) {
 	w4 := newWriteEnv(t)
 	_, p4 := w4.proposeViaTheAI(t, `{}`)
 	other, _ := w4.newContact(t, w4.org)
-	res := w4.confirmer.HandleTap(context.Background(), aitools.Tap{Token: p4.Token, OrgID: w4.org.ID, ContactID: other.ID, Account: "acc"})
+	res := w4.confirmer.HandleTap(context.Background(), aitools.Tap{Token: p4.Token, OrgID: w4.org.ID, ContactID: other.ID, SessionID: w4.session.ID, Account: "acc"})
+	assert.Equal(t, aitools.TapIgnored, res.Kind)
+	assert.Zero(t, w4.transfers.count())
+	assert.Equal(t, models.AIConfirmationPending, w4.conf(t, p4.Confirmation.ID).Status)
+
+	// the same contact, but another session: indistinguishable from an unknown token, nothing consumed
+	res = w4.confirmer.HandleTap(context.Background(), aitools.Tap{Token: p4.Token, OrgID: w4.org.ID, ContactID: w4.contact.ID, SessionID: uuid.New(), Account: "acc"})
 	assert.Equal(t, aitools.TapIgnored, res.Kind)
 	assert.Zero(t, w4.transfers.count())
 	assert.Equal(t, models.AIConfirmationPending, w4.conf(t, p4.Confirmation.ID).Status)

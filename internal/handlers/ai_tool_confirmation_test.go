@@ -304,3 +304,21 @@ func closedDays() models.JSONBArray {
 	}
 	return h
 }
+
+func TestAIConfirmation_AProviderErrorAfterTheProposalStillGivesTheCustomerTheButtons(t *testing.T) {
+	e := newConfirmEnv(t,
+		callWith("call_1", "request_agent_transfer", `{"reason":"quero uma pessoa"}`),
+		seqReply{500, `{"error":{"message":"boom"}}`}) // the second step of the loop fails
+
+	text, buttons, err := e.app.GenerateAIReplyForTest(e.settings, e.session, "quero falar com uma pessoa")
+	require.NoError(t, err, "the caller must not take the fallback path: a proposal exists")
+	assert.Contains(t, text, "atendente")
+	assert.NotEmpty(t, buttonID(buttons, "aitc:"))
+	assert.NotEmpty(t, buttonID(buttons, "aitd:"))
+	assert.Len(t, buttons, 2)
+
+	rows := e.confirmations(t)
+	require.Len(t, rows, 1)
+	assert.Equal(t, models.AIConfirmationPending, rows[0].Status)
+	assert.Empty(t, e.transfers(t))
+}

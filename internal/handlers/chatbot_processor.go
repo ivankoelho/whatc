@@ -945,14 +945,15 @@ func (a *App) generateAIReply(settings *models.ChatbotSettings, session *models.
 		MaxTokens:   settings.AI.MaxTokens,
 		Temperature: settings.AI.Temperature,
 	})
-	if err != nil {
-		return aiReply{}, err
-	}
 	if out.Pending != nil && feature == aiFeatureChatbotReply {
 		// the AI proposed an action: what the customer sees is the server's confirmation, never the
-		// model's words (it may not claim the action happened)
+		// model's words (it may not claim the action happened). It also wins over an error in a later
+		// step of the run: the proposal already exists and the customer must be able to answer it.
 		text, buttons := aiConfirmationButtons(out.Pending)
 		return aiReply{Text: text, Buttons: buttons}, nil
+	}
+	if err != nil {
+		return aiReply{}, err
 	}
 	return aiReply{Text: resp.Text}, nil
 }

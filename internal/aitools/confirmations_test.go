@@ -67,7 +67,7 @@ func (e *confEnv) input(args models.JSONB) aitools.ProposeInput {
 }
 
 func (e *confEnv) lookup(token string) (*models.AIToolConfirmation, aitools.LookupResult) {
-	return e.store.Lookup(context.Background(), token, e.org.ID, e.contact.ID)
+	return e.store.Lookup(context.Background(), token, e.org.ID, e.contact.ID, e.session.ID)
 }
 
 func TestConfirmation_ProposeStoresOnlyTheHashAndBindsTheAction(t *testing.T) {
@@ -131,12 +131,17 @@ func TestConfirmation_LookupIsScopedToTheOwner(t *testing.T) {
 	tok, _ := e.propose(t, models.JSONB{})
 
 	otherContact, _ := e.newContact(t, e.org)
-	_, res := e.store.Lookup(context.Background(), tok, e.org.ID, otherContact.ID)
+	_, res := e.store.Lookup(context.Background(), tok, e.org.ID, otherContact.ID, e.session.ID)
 	assert.Equal(t, aitools.LookupNotFound, res, "another contact's tap looks like an unknown token")
 
 	otherOrg := testutil.CreateTestOrganization(t, e.db)
-	_, res = e.store.Lookup(context.Background(), tok, otherOrg.ID, e.contact.ID)
+	_, res = e.store.Lookup(context.Background(), tok, otherOrg.ID, e.contact.ID, e.session.ID)
 	assert.Equal(t, aitools.LookupNotFound, res, "another organization")
+
+	_, res = e.store.Lookup(context.Background(), tok, e.org.ID, e.contact.ID, uuid.New())
+	assert.Equal(t, aitools.LookupNotFound, res, "a different session looks like an unknown token")
+	_, res = e.store.Lookup(context.Background(), tok, e.org.ID, e.contact.ID, uuid.Nil)
+	assert.Equal(t, aitools.LookupNotFound, res, "no session")
 
 	for _, bad := range []string{"", "nope", tok + "x"} {
 		_, res = e.lookup(bad)

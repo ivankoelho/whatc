@@ -56,6 +56,7 @@ type Tap struct {
 	Token     string
 	OrgID     uuid.UUID
 	ContactID uuid.UUID // the contact the webhook identified as the sender
+	SessionID uuid.UUID // the sender's current chatbot session, from the server, never from the button
 	Account   string    // the WhatsApp account that received it
 	WAMID     string
 	Decline   bool
@@ -152,7 +153,7 @@ func (c *Confirmer) attempt(conf *models.AIToolConfirmation, account string) Att
 // compare-and-set; the CAS pending -> confirmed is won by exactly one caller; only then is the action
 // carried out. A tap on anything that is not pending is inert.
 func (c *Confirmer) HandleTap(ctx context.Context, tap Tap) TapResult {
-	conf, res := c.Store.Lookup(ctx, tap.Token, tap.OrgID, tap.ContactID)
+	conf, res := c.Store.Lookup(ctx, tap.Token, tap.OrgID, tap.ContactID, tap.SessionID)
 	switch res {
 	case LookupNotFound, LookupNotPending:
 		return ignored() // never executes, never reconciles, never answers again

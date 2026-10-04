@@ -175,15 +175,18 @@ const (
 )
 
 // Lookup finds the confirmation of a button token, for the contact who tapped it. A token that
-// belongs to another organization, another contact or a session that is not the contact's looks
-// exactly like an unknown token. These checks do not consume anything.
-func (s *ConfirmationStore) Lookup(ctx context.Context, token string, orgID, contactID uuid.UUID) (*models.AIToolConfirmation, LookupResult) {
-	if token == "" || orgID == uuid.Nil || contactID == uuid.Nil {
+// belongs to another organization, another contact or another session than the sender's current one
+// looks exactly like an unknown token. These checks do not consume anything.
+func (s *ConfirmationStore) Lookup(ctx context.Context, token string, orgID, contactID, sessionID uuid.UUID) (*models.AIToolConfirmation, LookupResult) {
+	if token == "" || orgID == uuid.Nil || contactID == uuid.Nil || sessionID == uuid.Nil {
 		return nil, LookupNotFound
 	}
 	var c models.AIToolConfirmation
 	err := s.DB.WithContext(ctx).Where("token_hash = ? AND organization_id = ? AND contact_id = ?", HashToken(token), orgID, contactID).First(&c).Error
 	if err != nil {
+		return nil, LookupNotFound
+	}
+	if c.SessionID != sessionID {
 		return nil, LookupNotFound
 	}
 	var sessions int64

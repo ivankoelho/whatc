@@ -21,7 +21,6 @@ type AIToolConfirmationView struct {
 	Status           string     `json:"status"`
 	Outcome          string     `json:"outcome,omitempty"`
 	DenialReason     string     `json:"denial_reason,omitempty"`
-	ErrorKind        string     `json:"error_kind,omitempty"`
 	ProposedAt       time.Time  `json:"proposed_at"`
 	ExpiresAt        time.Time  `json:"expires_at"`
 	ConfirmedAt      *time.Time `json:"confirmed_at,omitempty"`
@@ -34,7 +33,7 @@ type AIToolConfirmationView struct {
 
 func aiToolConfirmationView(c models.AIToolConfirmation) AIToolConfirmationView {
 	return AIToolConfirmationView{
-		ID: c.ID, ToolName: c.ToolName, Status: c.Status, Outcome: c.Outcome, DenialReason: c.DenialReason, ErrorKind: c.ErrorKind,
+		ID: c.ID, ToolName: c.ToolName, Status: c.Status, Outcome: c.Outcome, DenialReason: c.DenialReason,
 		ProposedAt: c.ProposedAt, ExpiresAt: c.ExpiresAt, ConfirmedAt: c.ConfirmedAt, FinishedAt: c.FinishedAt,
 		SubjectContactID: c.ContactID, SessionID: c.SessionID, RunID: c.RunID, TransferID: c.TransferID,
 	}
