@@ -108,6 +108,10 @@ const canRenameContact = computed(() => authStore.hasPermission('contacts.name',
 const canReadSalesOpportunities = computed(() => authStore.hasPermission('sales_opportunities', 'read'))
 const canReadOccurrences = computed(() => authStore.hasPermission('occurrences', 'read'))
 
+// Registration (type, document, unit, department): the pencil in the header opens it.
+const canEditRegistration = computed(() => authStore.hasPermission('contacts', 'write'))
+const isEditingRegistration = ref(false)
+
 const isEditingName = ref(false)
 const nameDraft = ref('')
 const isSavingName = ref(false)
@@ -335,15 +339,16 @@ async function updateContactTags(tags: string[]) {
     <ScrollArea class="flex-1">
       <div class="p-4 space-y-4">
         <!-- Contact Header -->
-        <div class="flex flex-col items-center text-center pb-4 border-b">
-          <Avatar class="h-16 w-16 mb-3">
+        <div class="flex items-start gap-3 pb-4 border-b">
+          <Avatar class="h-16 w-16 shrink-0">
             <AvatarImage :src="contact.avatar_url" />
             <AvatarFallback :class="'text-lg bg-gradient-to-br text-white ' + getAvatarGradient(contact.name || contact.phone_number)">
               {{ getInitials(contact.name || contact.phone_number) }}
             </AvatarFallback>
           </Avatar>
+          <div class="min-w-0 flex-1">
           <div v-if="!isEditingName" class="flex items-center gap-1">
-            <h4 id="contact-info-name" class="font-medium">{{ displayName }}</h4>
+            <h4 id="contact-info-name" class="font-medium break-words min-w-0">{{ displayName }}</h4>
             <IconButton
               id="contact-info-copy-name"
               :icon="Copy"
@@ -394,13 +399,22 @@ async function updateContactTags(tags: string[]) {
               @click="copyText(contact.phone_number)"
             />
           </div>
+          <!-- Registration: type and document always; unit/department only for a colaborador -->
+          <ContactRegistrationSection
+            v-model:editing="isEditingRegistration"
+            :contact="contact"
+            @updated="(registration) => emit('registrationUpdated', registration)"
+          />
+          </div>
+          <IconButton
+            v-if="canEditRegistration && !isEditingRegistration"
+            id="contact-info-edit-registration"
+            :icon="Pencil"
+            :label="$t('contacts.editRegistration')"
+            class="h-7 w-7 shrink-0"
+            @click="isEditingRegistration = true"
+          />
         </div>
-
-        <!-- Registration: type and document always; unit/department only for a colaborador -->
-        <ContactRegistrationSection
-          :contact="contact"
-          @updated="(registration) => emit('registrationUpdated', registration)"
-        />
 
         <!-- Tags Section (always shown) -->
         <div class="pb-4">

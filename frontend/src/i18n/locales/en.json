@@ -576,6 +576,7 @@
     "documentPlaceholder": "Optional",
     "registration": "Registration",
     "registrationSaved": "Registration updated",
+    "editRegistration": "Edit registration",
     "notInformed": "Not provided",
     "defined": "Set",
     "unit": "Unit",

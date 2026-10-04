@@ -2,30 +2,30 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import { ClipboardList, Pencil, Loader2 } from 'lucide-vue-next'
+import { Loader2 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { useAuthStore } from '@/stores/auth'
 import { contactsService, unitsService, departmentsService, type Unit, type Department } from '@/services/api'
 import { getErrorMessage } from '@/lib/api-utils'
 import { CONTACT_TYPES, showsPlacement, placementPayload } from '@/lib/contact-registration'
 import type { Contact } from '@/stores/contacts'
 
-const props = defineProps<{ contact: Contact }>()
+// The registration rows of a contact (type and document; unit and department only for a
+// colaborador). It sits under the name and phone in the header of the panel, and the pencil that
+// opens the form lives in that header: `editing` is owned by the parent.
+const props = defineProps<{ contact: Contact; editing: boolean }>()
 const emit = defineEmits<{
+  'update:editing': [editing: boolean]
   updated: [registration: Pick<Contact, 'contact_type' | 'cpf_cnpj' | 'unit_id' | 'department_id'>]
 }>()
 
 const { t } = useI18n()
-const authStore = useAuthStore()
-const canWrite = computed(() => authStore.hasPermission('contacts', 'write'))
 
 const NONE = 'none' // the Select cannot hold an empty value
 const units = ref<Unit[]>([])
 const departments = ref<Department[]>([])
-const isEditing = ref(false)
 const isSaving = ref(false)
 const form = ref({ contact_type: 'cliente' as string, cpf_cnpj: '', unit_id: NONE, department_id: NONE })
 
@@ -46,18 +46,19 @@ async function fetchPlacementOptions() {
 }
 onMounted(fetchPlacementOptions)
 
-function startEdit() {
+// The form starts from the contact every time it opens.
+watch(() => props.editing, (editing) => {
+  if (!editing) return
   form.value = {
     contact_type: type.value,
     cpf_cnpj: props.contact.cpf_cnpj || '',
     unit_id: props.contact.unit_id || NONE,
     department_id: props.contact.department_id || NONE,
   }
-  isEditing.value = true
-}
+})
 
 // Switching contacts with the form open must not post the old draft to the new contact.
-watch(() => props.contact.id, () => { isEditing.value = false })
+watch(() => props.contact.id, () => emit('update:editing', false))
 
 async function save() {
   isSaving.value = true
@@ -83,7 +84,7 @@ async function save() {
       unit_id: saved.unit_id,
       department_id: saved.department_id,
     })
-    isEditing.value = false
+    emit('update:editing', false)
     toast.success(t('contacts.registrationSaved'))
   } catch (e) {
     toast.error(getErrorMessage(e, t('common.failedSave', { resource: t('resources.contact') })))
@@ -94,36 +95,21 @@ async function save() {
 </script>
 
 <template>
-  <div class="pb-4" data-testid="contact-registration">
-    <div class="flex items-center justify-between py-2">
-      <h5 class="text-sm font-medium flex items-center gap-2">
-        <ClipboardList class="h-4 w-4 text-muted-foreground" />
-        {{ $t('contacts.registration') }}
-      </h5>
-      <Button v-if="canWrite && !isEditing" variant="ghost" size="sm" class="h-7 px-2" :aria-label="$t('common.edit')" data-testid="contact-registration-edit" @click="startEdit">
-        <Pencil class="h-3.5 w-3.5" />
-      </Button>
-    </div>
+  <div class="mt-3" data-testid="contact-registration">
+    <!-- Read: labels in one column, values aligned in the next -->
+    <dl v-if="!editing" class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+      <dt class="text-muted-foreground">{{ $t('contacts.type') }}</dt>
+      <dd class="min-w-0 break-words" data-testid="contact-registration-type">{{ $t('contacts.types.' + type) }}</dd>
 
-    <!-- Read -->
-    <dl v-if="!isEditing" class="space-y-1.5 text-sm">
-      <div class="flex justify-between gap-2">
-        <dt class="text-muted-foreground">{{ $t('contacts.type') }}</dt>
-        <dd data-testid="contact-registration-type">{{ $t('contacts.types.' + type) }}</dd>
-      </div>
-      <div class="flex justify-between gap-2">
-        <dt class="text-muted-foreground">{{ $t('contacts.document') }}</dt>
-        <dd data-testid="contact-registration-document">{{ contact.cpf_cnpj || $t('contacts.notInformed') }}</dd>
-      </div>
+      <dt class="text-muted-foreground">{{ $t('contacts.document') }}</dt>
+      <dd class="min-w-0 break-words" data-testid="contact-registration-document">{{ contact.cpf_cnpj || $t('contacts.notInformed') }}</dd>
+
       <template v-if="showsPlacement(type)">
-        <div class="flex justify-between gap-2">
-          <dt class="text-muted-foreground">{{ $t('contacts.unit') }}</dt>
-          <dd data-testid="contact-registration-unit">{{ unitName || (contact.unit_id ? $t('contacts.defined') : $t('contacts.notInformed')) }}</dd>
-        </div>
-        <div class="flex justify-between gap-2">
-          <dt class="text-muted-foreground">{{ $t('contacts.department') }}</dt>
-          <dd data-testid="contact-registration-department">{{ departmentName || (contact.department_id ? $t('contacts.defined') : $t('contacts.notInformed')) }}</dd>
-        </div>
+        <dt class="text-muted-foreground">{{ $t('contacts.unit') }}</dt>
+        <dd class="min-w-0 break-words" data-testid="contact-registration-unit">{{ unitName || (contact.unit_id ? $t('contacts.defined') : $t('contacts.notInformed')) }}</dd>
+
+        <dt class="text-muted-foreground">{{ $t('contacts.department') }}</dt>
+        <dd class="min-w-0 break-words" data-testid="contact-registration-department">{{ departmentName || (contact.department_id ? $t('contacts.defined') : $t('contacts.notInformed')) }}</dd>
       </template>
     </dl>
 
@@ -168,7 +154,7 @@ async function save() {
       </template>
 
       <div class="flex justify-end gap-2">
-        <Button type="button" variant="ghost" size="sm" :disabled="isSaving" @click="isEditing = false">{{ $t('common.cancel') }}</Button>
+        <Button type="button" variant="ghost" size="sm" :disabled="isSaving" @click="emit('update:editing', false)">{{ $t('common.cancel') }}</Button>
         <Button type="submit" size="sm" :disabled="isSaving" data-testid="contact-registration-save">
           <Loader2 v-if="isSaving" class="h-3.5 w-3.5 mr-1 animate-spin" />
           {{ $t('common.save') }}
