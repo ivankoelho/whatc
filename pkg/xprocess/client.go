@@ -339,5 +339,9 @@ func (c *Client) ListarLojas(ctx context.Context, apiKey string) ([]Loja, error)
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return nil, fmt.Errorf("xprocess: failed to parse response: %w", err)
 	}
+	// "ok": false with a 2xx status would otherwise read as "no stores".
+	if !parsed.OK {
+		return nil, fmt.Errorf("xprocess: stores response is not ok: %s", truncate(string(body), 300))
+	}
 	return parsed.Lojas, nil
 }
