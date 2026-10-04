@@ -29,6 +29,7 @@ import { Input } from '@/components/ui/input'
 import MetadataSection from '@/components/chat/MetadataSection.vue'
 import ContactSalesOpportunitiesPanel from '@/components/chat/ContactSalesOpportunitiesPanel.vue'
 import ContactOccurrencesPanel from '@/components/chat/ContactOccurrencesPanel.vue'
+import ContactRegistrationSection from '@/components/chat/ContactRegistrationSection.vue'
 import { getInitials, getAvatarGradient, formatLabel } from '@/lib/utils'
 import { getTagColorClass } from '@/lib/constants'
 import { useTagsStore } from '@/stores/tags'
@@ -80,6 +81,7 @@ const emit = defineEmits<{
   close: []
   tagsUpdated: [tags: string[]]
   nameUpdated: [name: string]
+  registrationUpdated: [registration: Pick<Contact, 'contact_type' | 'cpf_cnpj' | 'unit_id' | 'department_id'>]
 }>()
 
 const { t } = useI18n()
@@ -393,6 +395,12 @@ async function updateContactTags(tags: string[]) {
             />
           </div>
         </div>
+
+        <!-- Registration: type and document always; unit/department only for a colaborador -->
+        <ContactRegistrationSection
+          :contact="contact"
+          @updated="(registration) => emit('registrationUpdated', registration)"
+        />
 
         <!-- Tags Section (always shown) -->
         <div class="pb-4">

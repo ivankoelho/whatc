@@ -10,6 +10,7 @@ import type { Contact } from '@/stores/contacts'
 import { toast } from 'vue-sonner'
 import { getErrorMessage } from '@/lib/api-utils'
 import { getTagColorClass } from '@/lib/constants'
+import { CONTACT_TYPES, showsPlacement, placementPayload } from '@/lib/contact-registration'
 import { useUnsavedChangesGuard } from '@/composables/useUnsavedChangesGuard'
 import DetailPageLayout from '@/components/shared/DetailPageLayout.vue'
 import MetadataPanel from '@/components/shared/MetadataPanel.vue'
@@ -83,7 +84,6 @@ const agentSelectorOpen = ref(false)
 const accounts = ref<{ id: string; name: string; phone_number: string }[]>([])
 const units = ref<Unit[]>([])
 const departments = ref<Department[]>([])
-const CONTACT_TYPES = ['cliente', 'fornecedor', 'colaborador'] as const
 const NONE = 'none' // the Select cannot hold an empty value
 
 const { showLeaveDialog, confirmLeave, cancelLeave } = useUnsavedChangesGuard(hasChanges)
@@ -160,8 +160,11 @@ async function save() {
       profile_name: form.value.profile_name,
       whatsapp_account: form.value.whatsapp_account,
       contact_type: form.value.contact_type,
-      unit_id: form.value.unit_id === NONE ? '' : form.value.unit_id,
-      department_id: form.value.department_id === NONE ? '' : form.value.department_id,
+      ...placementPayload(
+        form.value.contact_type,
+        form.value.unit_id === NONE ? '' : form.value.unit_id,
+        form.value.department_id === NONE ? '' : form.value.department_id,
+      ),
       tags: form.value.tags,
     }
     // Only send the document when it was edited: with number masking on, the
@@ -355,7 +358,7 @@ onMounted(async () => {
             <Input v-model="form.cpf_cnpj" :disabled="!canWrite" :placeholder="$t('contacts.documentPlaceholder')" />
           </div>
 
-          <div class="space-y-1.5">
+          <div v-if="showsPlacement(form.contact_type)" class="space-y-1.5">
             <Label class="text-xs">{{ $t('contacts.unit') }}</Label>
             <Select v-model="form.unit_id" :disabled="!canWrite">
               <SelectTrigger><SelectValue /></SelectTrigger>
@@ -366,7 +369,7 @@ onMounted(async () => {
             </Select>
           </div>
 
-          <div class="space-y-1.5">
+          <div v-if="showsPlacement(form.contact_type)" class="space-y-1.5">
             <Label class="text-xs">{{ $t('contacts.department') }}</Label>
             <Select v-model="form.department_id" :disabled="!canWrite">
               <SelectTrigger><SelectValue /></SelectTrigger>
