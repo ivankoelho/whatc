@@ -1522,6 +1522,11 @@ func (a *App) CreateContact(r *fastglue.Request) error {
 		return nil
 	}
 
+	// Only a colaborador has a unit/department (see applyContactPlacement).
+	if contactType != models.ContactTypeColaborador {
+		placement = orgPlacement{}
+	}
+
 	// Canonical digits-only identity (see contactutil.NormalizePhone).
 	normalizedPhone := contactutil.NormalizePhone(req.PhoneNumber)
 
@@ -1565,7 +1570,11 @@ func (a *App) CreateContact(r *fastglue.Request) error {
 		if req.ContactType != "" {
 			updates["contact_type"] = string(contactType)
 		}
-		placement.apply(updates)
+		claimedType := existingContact.ContactType
+		if req.ContactType != "" {
+			claimedType = contactType
+		}
+		applyContactPlacement(updates, placement, claimedType, existingContact.UnitID != nil, existingContact.DepartmentID != nil)
 		if req.Tags != nil {
 			tagsArray := make(models.JSONBArray, len(req.Tags))
 			for i, tag := range req.Tags {
@@ -1713,7 +1722,12 @@ func (a *App) UpdateContact(r *fastglue.Request) error {
 	if !ok {
 		return nil
 	}
-	placement.apply(updates)
+	// The final type decides: a colaborador keeps what was sent, any other type ends with none.
+	finalType := contact.ContactType
+	if req.ContactType != nil {
+		finalType = models.ContactType(*req.ContactType)
+	}
+	applyContactPlacement(updates, placement, finalType, contact.UnitID != nil, contact.DepartmentID != nil)
 	if req.Tags != nil {
 		tagsArray := make(models.JSONBArray, len(req.Tags))
 		for i, tag := range req.Tags {

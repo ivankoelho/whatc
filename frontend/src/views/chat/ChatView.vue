@@ -2821,6 +2821,7 @@ async function sendMediaMessage() {
       @close="isInfoPanelOpen = false"
       @tags-updated="(tags) => contactsStore.updateContactTags(contactsStore.currentContact!.id, tags)"
       @name-updated="(name) => contactsStore.updateContactName(contactsStore.currentContact!.id, name)"
+      @registration-updated="(registration) => contactsStore.updateContactRegistration(contactsStore.currentContact!.id, registration)"
     />
 
     <!-- Template Params Dialog -->

@@ -439,6 +439,19 @@ export const useContactsStore = defineStore('contacts', () => {
     }
   }
 
+  // The registration fields of a contact (type, document, unit, department) after an edit. A
+  // cleared unit/department arrives as undefined and replaces the old value.
+  type ContactRegistration = Pick<Contact, 'contact_type' | 'cpf_cnpj' | 'unit_id' | 'department_id'>
+  function updateContactRegistration(contactId: string, registration: ContactRegistration) {
+    const contact = contacts.value.find(c => c.id === contactId)
+    if (contact) {
+      Object.assign(contact, registration)
+    }
+    if (currentContact.value?.id === contactId) {
+      currentContact.value = { ...currentContact.value, ...registration }
+    }
+  }
+
   // Debounce server-side search so each keystroke doesn't fire a request.
   let searchDebounceHandle: ReturnType<typeof setTimeout> | null = null
   watch(searchQuery, (query) => {
@@ -582,6 +595,7 @@ export const useContactsStore = defineStore('contacts', () => {
     updateMessageReactions,
     updateContactTags,
     updateContactName,
+    updateContactRegistration,
     typingByContact,
     applyAgentTyping,
     clearTyping

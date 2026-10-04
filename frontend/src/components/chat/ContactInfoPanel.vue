@@ -29,6 +29,7 @@ import { Input } from '@/components/ui/input'
 import MetadataSection from '@/components/chat/MetadataSection.vue'
 import ContactSalesOpportunitiesPanel from '@/components/chat/ContactSalesOpportunitiesPanel.vue'
 import ContactOccurrencesPanel from '@/components/chat/ContactOccurrencesPanel.vue'
+import ContactRegistrationSection from '@/components/chat/ContactRegistrationSection.vue'
 import { getInitials, getAvatarGradient, formatLabel } from '@/lib/utils'
 import { getTagColorClass } from '@/lib/constants'
 import { useTagsStore } from '@/stores/tags'
@@ -80,6 +81,7 @@ const emit = defineEmits<{
   close: []
   tagsUpdated: [tags: string[]]
   nameUpdated: [name: string]
+  registrationUpdated: [registration: Pick<Contact, 'contact_type' | 'cpf_cnpj' | 'unit_id' | 'department_id'>]
 }>()
 
 const { t } = useI18n()
@@ -106,9 +108,14 @@ const canRenameContact = computed(() => authStore.hasPermission('contacts.name',
 const canReadSalesOpportunities = computed(() => authStore.hasPermission('sales_opportunities', 'read'))
 const canReadOccurrences = computed(() => authStore.hasPermission('occurrences', 'read'))
 
-const isEditingName = ref(false)
+// One pencil in the header opens the edit of every field the user may change: the name
+// (contacts.name:write) and the registration, type/document/unit/department (contacts:write).
+const canEditRegistration = computed(() => authStore.hasPermission('contacts', 'write'))
+const canEdit = computed(() => canRenameContact.value || canEditRegistration.value)
+const isEditing = ref(false)
 const nameDraft = ref('')
-const isSavingName = ref(false)
+const isSaving = ref(false)
+const registrationRef = ref<InstanceType<typeof ContactRegistrationSection> | null>(null)
 
 const displayName = computed(() => props.contact.name || props.contact.phone_number)
 
@@ -116,19 +123,19 @@ function looksLikeMaskedPhone(value: string): boolean {
   return /^\*+\d{0,4}$/.test(value)
 }
 
-function startEditName() {
+function startEdit() {
   const current = props.contact.name ?? ''
   // contact.name is MaskIfPhoneNumber(profile_name) on the backend — for a
   // contact with no real name, in an org with masking on, that IS the
   // masked string. Pre-filling it would show the agent something like
   // **********1234 with nothing sensible to do with it.
   nameDraft.value = looksLikeMaskedPhone(current) ? '' : current
-  isEditingName.value = true
+  isEditing.value = true
 }
 
-// Switching contacts while the rename box is open must not leave it open:
-// otherwise saveName() below posts the stale draft to the NEW contact's id.
-watch(() => props.contact.id, () => { isEditingName.value = false })
+// Switching contacts while the edit is open must not leave it open:
+// otherwise the save below posts the stale draft to the NEW contact's id.
+watch(() => props.contact.id, () => { isEditing.value = false })
 
 async function copyText(value: string) {
   try {
@@ -139,19 +146,36 @@ async function copyText(value: string) {
   }
 }
 
-async function saveName() {
+// An empty draft means "do not rename" (a masked name starts empty), and so does an unchanged one.
+const nameChanged = computed(() => {
+  const draft = nameDraft.value.trim()
+  return canRenameContact.value && draft !== '' && draft !== (props.contact.name ?? '')
+})
+
+async function saveName(): Promise<boolean> {
   const novo = nameDraft.value.trim()
-  if (!novo) return
-  isSavingName.value = true
   try {
     await contactsService.updateName(props.contact.id, novo)
     emit('nameUpdated', novo)
-    isEditingName.value = false
     toast.success(t('contacts.nameUpdated'))
+    return true
   } catch (e) {
     toast.error(getErrorMessage(e, t('common.failedSave', { resource: t('resources.contact') })))
+    return false
+  }
+}
+
+// Save what changed, name first. The edit stays open if any part fails, so nothing typed is lost.
+async function saveAll() {
+  if (isSaving.value) return
+  isSaving.value = true
+  try {
+    let ok = true
+    if (nameChanged.value) ok = await saveName()
+    if (ok && canEditRegistration.value && registrationRef.value?.hasChanges()) ok = await registrationRef.value.save()
+    if (ok) isEditing.value = false
   } finally {
-    isSavingName.value = false
+    isSaving.value = false
   }
 }
 
@@ -333,15 +357,16 @@ async function updateContactTags(tags: string[]) {
     <ScrollArea class="flex-1">
       <div class="p-4 space-y-4">
         <!-- Contact Header -->
-        <div class="flex flex-col items-center text-center pb-4 border-b">
-          <Avatar class="h-16 w-16 mb-3">
+        <div class="flex items-start gap-3 pb-4 border-b">
+          <Avatar class="h-16 w-16 shrink-0">
             <AvatarImage :src="contact.avatar_url" />
             <AvatarFallback :class="'text-lg bg-gradient-to-br text-white ' + getAvatarGradient(contact.name || contact.phone_number)">
               {{ getInitials(contact.name || contact.phone_number) }}
             </AvatarFallback>
           </Avatar>
-          <div v-if="!isEditingName" class="flex items-center gap-1">
-            <h4 id="contact-info-name" class="font-medium">{{ displayName }}</h4>
+          <div class="min-w-0 flex-1">
+          <div v-if="!(isEditing && canRenameContact)" class="flex items-center gap-1">
+            <h4 id="contact-info-name" class="font-medium break-words min-w-0">{{ displayName }}</h4>
             <IconButton
               id="contact-info-copy-name"
               :icon="Copy"
@@ -349,36 +374,15 @@ async function updateContactTags(tags: string[]) {
               class="h-6 w-6"
               @click="copyText(displayName)"
             />
-            <IconButton
-              v-if="canRenameContact"
-              id="contact-info-edit-name"
-              :icon="Pencil"
-              :label="$t('contacts.editName')"
-              class="h-6 w-6"
-              @click="startEditName"
-            />
           </div>
           <div v-else class="flex items-center gap-1">
             <Input
               id="contact-info-name-input"
               v-model="nameDraft"
-              class="h-8 w-44"
-              :disabled="isSavingName"
-              @keyup.enter="saveName"
-            />
-            <IconButton
-              id="contact-info-save-name"
-              :icon="Check"
-              :label="$t('contacts.saveName')"
-              class="h-6 w-6"
-              :disabled="isSavingName || !nameDraft.trim()"
-              @click="saveName"
-            />
-            <IconButton
-              :icon="X"
-              :label="$t('common.cancel')"
-              class="h-6 w-6"
-              @click="isEditingName = false"
+              class="h-8"
+              :placeholder="$t('contacts.editName')"
+              :disabled="isSaving"
+              @keyup.enter="saveAll"
             />
           </div>
           <div class="flex items-center gap-1 text-sm text-muted-foreground mt-1">
@@ -392,6 +396,30 @@ async function updateContactTags(tags: string[]) {
               @click="copyText(contact.phone_number)"
             />
           </div>
+          <!-- Registration: type and document always; unit/department only for a colaborador -->
+          <ContactRegistrationSection
+            ref="registrationRef"
+            :contact="contact"
+            :editing="isEditing && canEditRegistration"
+            @updated="(registration) => emit('registrationUpdated', registration)"
+            @submit="saveAll"
+          />
+          <div v-if="isEditing" class="flex justify-end gap-2 mt-3">
+            <Button type="button" variant="ghost" size="sm" :disabled="isSaving" @click="isEditing = false">{{ $t('common.cancel') }}</Button>
+            <Button id="contact-info-save-name" type="button" size="sm" :disabled="isSaving" @click="saveAll">
+              <Loader2 v-if="isSaving" class="h-3.5 w-3.5 mr-1 animate-spin" />
+              {{ $t('common.save') }}
+            </Button>
+          </div>
+          </div>
+          <IconButton
+            v-if="canEdit && !isEditing"
+            id="contact-info-edit-name"
+            :icon="Pencil"
+            :label="$t('contacts.editContact')"
+            class="h-7 w-7 shrink-0"
+            @click="startEdit"
+          />
         </div>
 
         <!-- Tags Section (always shown) -->
