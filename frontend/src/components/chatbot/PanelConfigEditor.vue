@@ -7,7 +7,8 @@ import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { CONTACT_PANEL_FIELDS, isContactPanelField } from '@/lib/contact-registration'
 
 export interface PanelField {
   key: string
@@ -64,6 +65,17 @@ const unassignedVariables = computed(() =>
   props.availableVariables.filter((v) => !assignedKeys.value.has(v.key)),
 )
 
+// The contact's own registration data, shown from the contact as it is now (not from the session).
+const unassignedContactFields = computed(() =>
+  CONTACT_PANEL_FIELDS.filter((f) => !assignedKeys.value.has(f.key)),
+)
+
+// Friendly name of a registration field; session variables keep their key.
+function contactFieldName(key: string): string {
+  const f = CONTACT_PANEL_FIELDS.find((c) => c.key === key)
+  return f ? t(f.labelKey) : key
+}
+
 function addSection() {
   const sections = [...props.panelConfig.sections, {
     id: `section_${Date.now()}`,
@@ -100,7 +112,9 @@ function addField(sectionIndex: number, variableKey: string | number | bigint | 
         ...s.fields,
         {
           key: variableKey,
-          label: variableKey.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase()),
+          label: isContactPanelField(variableKey)
+            ? contactFieldName(variableKey)
+            : variableKey.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase()),
           order: s.fields.length + 1,
         },
       ],
@@ -220,15 +234,28 @@ function setField(sectionIndex: number, fieldIndex: number, patch: Partial<Panel
                 <SelectValue :placeholder="t('chatbot.panel.addFieldPlaceholder')" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem
-                  v-for="v in unassignedVariables"
-                  :key="v.key"
-                  :value="v.key"
-                >
-                  {{ v.key }}
-                </SelectItem>
+                <SelectGroup v-if="unassignedVariables.length > 0">
+                  <SelectLabel class="text-[10px]">{{ t('chatbot.panel.groupVariables') }}</SelectLabel>
+                  <SelectItem
+                    v-for="v in unassignedVariables"
+                    :key="v.key"
+                    :value="v.key"
+                  >
+                    {{ v.key }}
+                  </SelectItem>
+                </SelectGroup>
+                <SelectGroup v-if="unassignedContactFields.length > 0">
+                  <SelectLabel class="text-[10px]">{{ t('chatbot.panel.groupContact') }}</SelectLabel>
+                  <SelectItem
+                    v-for="f in unassignedContactFields"
+                    :key="f.key"
+                    :value="f.key"
+                  >
+                    {{ t(f.labelKey) }}
+                  </SelectItem>
+                </SelectGroup>
                 <div
-                  v-if="unassignedVariables.length === 0"
+                  v-if="unassignedVariables.length === 0 && unassignedContactFields.length === 0"
                   class="p-2 text-[10px] text-muted-foreground"
                 >
                   {{ t('chatbot.panel.noUnusedVariables') }}
@@ -250,7 +277,7 @@ function setField(sectionIndex: number, fieldIndex: number, patch: Partial<Panel
             class="bg-background rounded p-2 space-y-2"
           >
             <div class="flex items-center gap-1">
-              <Badge variant="secondary" class="text-[10px] font-mono">{{ field.key }}</Badge>
+              <Badge variant="secondary" class="text-[10px] font-mono">{{ contactFieldName(field.key) }}</Badge>
               <Input
                 :model-value="field.label"
                 @update:model-value="(v) => setField(sectionIdx, fieldIdx, { label: String(v ?? '') })"

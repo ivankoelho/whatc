@@ -3013,6 +3013,8 @@
       "fields": "Fields:",
       "addFieldPlaceholder": "Add field…",
       "noUnusedVariables": "No unused variables left.",
+      "groupVariables": "Flow variables",
+      "groupContact": "Contact data",
       "noFieldsAdded": "No fields added.",
       "displayLabelPlaceholder": "Display label",
       "typeText": "Text",

@@ -3002,6 +3002,8 @@
       "fields": "Campos:",
       "addFieldPlaceholder": "Adicionar campo…",
       "noUnusedVariables": "Nenhuma variável não utilizada restante.",
+      "groupVariables": "Variáveis do fluxo",
+      "groupContact": "Dados do contato",
       "noFieldsAdded": "Nenhum campo adicionado.",
       "displayLabelPlaceholder": "Rótulo de exibição",
       "typeText": "Texto",

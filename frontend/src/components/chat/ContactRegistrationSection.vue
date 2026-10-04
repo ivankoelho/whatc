@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { contactsService, unitsService, departmentsService, type Unit, type Department } from '@/services/api'
+import { contactsService, type Unit, type Department } from '@/services/api'
 import { getErrorMessage } from '@/lib/api-utils'
 import { CONTACT_TYPES, showsPlacement, placementPayload } from '@/lib/contact-registration'
 import type { Contact } from '@/stores/contacts'
@@ -13,7 +13,7 @@ import type { Contact } from '@/stores/contacts'
 // The registration rows of a contact (type and document; unit and department only for a
 // colaborador). It sits under the name and phone in the header of the panel. The pencil, the Save
 // and Cancel buttons and `editing` belong to the parent: one edit covers the name too.
-const props = defineProps<{ contact: Contact; editing: boolean }>()
+const props = defineProps<{ contact: Contact; editing: boolean; units: Unit[]; departments: Department[] }>()
 const emit = defineEmits<{
   submit: []
   updated: [registration: Pick<Contact, 'contact_type' | 'cpf_cnpj' | 'unit_id' | 'department_id'>]
@@ -22,26 +22,11 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 const NONE = 'none' // the Select cannot hold an empty value
-const units = ref<Unit[]>([])
-const departments = ref<Department[]>([])
 const form = ref({ contact_type: 'cliente' as string, cpf_cnpj: '', unit_id: NONE, department_id: NONE })
 
 const type = computed(() => props.contact.contact_type || 'cliente')
-const unitName = computed(() => units.value.find(u => u.id === props.contact.unit_id)?.name)
-const departmentName = computed(() => departments.value.find(d => d.id === props.contact.department_id)?.name)
-
-// Both lists are optional context: a user without units/departments access gets empty selects.
-async function fetchPlacementOptions() {
-  try {
-    const res = await unitsService.list()
-    units.value = ((res.data as any).data || res.data).units || []
-  } catch { /* no access */ }
-  try {
-    const res = await departmentsService.list()
-    departments.value = ((res.data as any).data || res.data).departments || []
-  } catch { /* no access */ }
-}
-onMounted(fetchPlacementOptions)
+const unitName = computed(() => props.units.find(u => u.id === props.contact.unit_id)?.name)
+const departmentName = computed(() => props.departments.find(d => d.id === props.contact.department_id)?.name)
 
 // The form starts from the contact every time it opens.
 watch(() => props.editing, (editing) => {
