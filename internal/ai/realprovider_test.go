@@ -309,6 +309,42 @@ func runScenarios(t *testing.T, name string, p ai.Provider, model, key string) {
 		record(t, name, "8_final_text_observed", verdictObserved, "final text: "+res.Response.Text)
 	})
 
+	// 9: the loop's last round (steps exhausted) is a plain-text request. With MaxSteps 1 and a
+	// request that makes the model use a tool, the second request must carry no tools and no
+	// tool_choice, show the exchange as flattened data, and the provider must answer with text only.
+	t.Run("9_final_round_without_tools", func(t *testing.T) {
+		rec := &recordingProvider{Provider: p}
+		tools := newStubTools()
+		res, err := ai.RunToolLoop(ctx, rec, baseReq(model, "Are you open right now? Check the business hours."), tools, ai.Limits{MaxSteps: 1})
+		if err != nil {
+			record(t, name, "9_final_round_without_tools", verdictDivergent, fmt.Sprintf("error kind=%s: %v (requests seen=%d)", ai.KindOf(err), err, len(rec.reqs)))
+			return
+		}
+		if len(rec.reqs) != 2 || res.ToolCalls < 1 {
+			record(t, name, "9_final_round_without_tools", verdictNotValidated, fmt.Sprintf("the step limit was not reached (requests=%d, tool calls=%d): the model did not use the tool", len(rec.reqs), res.ToolCalls))
+			return
+		}
+		r1, r2 := rec.reqs[0], rec.reqs[1]
+		var flat, native bool
+		for _, m := range r2.Messages {
+			if m.Role == ai.RoleAssistant && strings.Contains(m.Content, "[tool_call ") && strings.Contains(m.Content, "[tool_result ") {
+				flat = true
+			}
+			if m.Role == ai.RoleTool || len(m.ToolCalls) > 0 || len(m.ToolResults) > 0 {
+				native = true
+			}
+		}
+		resp2 := rec.resps[1]
+		evidence := fmt.Sprintf("request#1: tools=%d tool_choice=%q | request#2: tools=%d tool_choice=%q flattened_history=%t native_tool_history=%t messages=%d | response#2: tool_calls=%d text_len=%d finish=%s",
+			len(r1.Tools), r1.ToolChoice, len(r2.Tools), r2.ToolChoice, flat, native, len(r2.Messages), len(resp2.ToolCalls), len(resp2.Text), resp2.Finish)
+		ok := len(r1.Tools) > 0 && len(r2.Tools) == 0 && r2.ToolChoice == "" && flat && !native && len(resp2.ToolCalls) == 0 && strings.TrimSpace(resp2.Text) != ""
+		verdict := verdictValidated
+		if !ok {
+			verdict = verdictDivergent
+		}
+		record(t, name, "9_final_round_without_tools", verdict, evidence)
+	})
+
 	switch name {
 	case ai.ProviderGroq:
 		groqScenarios(t, name, p, model)
@@ -416,4 +452,21 @@ func rawGeminiToolProbe(model, key, keyword string) (int, string) {
 	_ = json.Unmarshal(raw, &e)
 	msg := strings.ReplaceAll(e.Error.Message, key, "[redacted]")
 	return resp.StatusCode, msg
+}
+
+// recordingProvider keeps every request the loop sends and every answer it gets, as evidence of
+// what actually went over the wire boundary.
+type recordingProvider struct {
+	ai.Provider
+	reqs  []ai.Request
+	resps []*ai.Response
+}
+
+func (r *recordingProvider) Complete(ctx context.Context, req ai.Request) (*ai.Response, error) {
+	r.reqs = append(r.reqs, req)
+	resp, err := r.Provider.Complete(ctx, req)
+	if err == nil {
+		r.resps = append(r.resps, resp)
+	}
+	return resp, err
 }
