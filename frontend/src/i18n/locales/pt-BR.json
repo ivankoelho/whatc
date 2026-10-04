@@ -831,6 +831,10 @@
     "noPermissionsSeeded": "Nenhuma permissão disponível. Verifique se as permissões foram inicializadas no banco de dados."
   },
   "teams": {
+    "unit": "Unidade",
+    "department": "Departamento",
+    "placementHint": "Usados pelo nó de transferência do fluxo configurado como cadastro do contato.",
+    "placementConflict": "Outra equipe ativa tem a mesma unidade e departamento ({teams}). Com duas equipes para o par, o roteamento automático pelo cadastro não escolhe nenhuma e usa a equipe alternativa do nó.",
     "title": "Equipes",
     "subtitle": "Organize os agentes em equipes",
     "addTeam": "Adicionar equipe",
@@ -2963,6 +2967,11 @@
       "tags": "Tags na transferência",
       "tagsPlaceholder": "orçamento, foto",
       "tagsHint": "Aplicadas ao contato ao chegar nesta transferência (separadas por vírgula).",
+      "destination": "Destino",
+      "destinationTeam": "Equipe fixa",
+      "destinationPlacement": "Cadastro do contato (unidade e departamento)",
+      "destinationPlacementHint": "Para colaboradores: vai para a equipe marcada com a unidade e o departamento do contato. Sem cadastro, sem equipe ou com mais de uma equipe para o par, usa a equipe abaixo.",
+      "fallbackTeam": "Se não houver equipe",
       "finalMessageOptional": "Mensagem final (opcional)",
       "finalMessagePlaceholder": "Enviada quando o fluxo termina. Deixe em branco para término silencioso.",
       "targetFlow": "Fluxo de destino",
