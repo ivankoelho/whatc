@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/test/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -117,8 +118,7 @@ func TestFlowTransfer_ContactPlacementFallsBackWithTheRightReason(t *testing.T) 
 			e.place(t, models.ContactTypeColaborador, &e.unit.ID, &e.dept.ID)
 		}, models.RoutingReasonNoTeamForPlacement},
 		{"a team of another organization does not count", func(t *testing.T, e placementEnv) {
-			other := models.Organization{BaseModel: models.BaseModel{ID: uuid.New()}, Name: "Outra " + uuid.NewString()[:6]}
-			require.NoError(t, e.app.DB.Create(&other).Error)
+			other := testutil.CreateTestOrganization(t, e.app.DB)
 			e.team(t, func(tm *models.Team) { tm.OrganizationID = other.ID })
 			e.place(t, models.ContactTypeColaborador, &e.unit.ID, &e.dept.ID)
 		}, models.RoutingReasonNoTeamForPlacement},
@@ -168,6 +168,26 @@ func TestFlowTransfer_FallbackTeamMustBeAnActiveTeamOfTheOrganization(t *testing
 	inactive.place(t, models.ContactTypeColaborador, &inactive.unit.ID, &inactive.dept.ID)
 	tr := inactive.run(t, map[string]any{"destination": "contact_placement", "fallback_team_id": team.ID.String()})
 	assert.Nil(t, tr.TeamID, "an inactive fallback team is not used")
+}
+
+// A fallback_team_id that points at a live team of ANOTHER organization is rejected: the contact
+// goes to the general queue, never to a foreign team. The same fallback of its own organization works.
+func TestFlowTransfer_FallbackTeamOfAnotherOrganizationIsRejected(t *testing.T) {
+	e := newPlacementEnv(t)
+	other := testutil.CreateTestOrganization(t, e.app.DB)
+	foreign := e.team(t, func(tm *models.Team) { tm.OrganizationID = other.ID; tm.UnitID, tm.DepartmentID = nil, nil })
+	e.place(t, models.ContactTypeColaborador, &e.unit.ID, &e.dept.ID) // nobody of this organization has the pair
+
+	tr := e.run(t, map[string]any{"destination": "contact_placement", "fallback_team_id": foreign.ID.String()})
+	assert.Nil(t, tr.TeamID, "a team of another organization is never the destination")
+	assert.Equal(t, models.RoutingReasonNoTeamForPlacement, reasonOf(tr))
+
+	own := newPlacementEnv(t)
+	mine := own.team(t, func(tm *models.Team) { tm.UnitID, tm.DepartmentID = nil, nil })
+	own.place(t, models.ContactTypeColaborador, &own.unit.ID, &own.dept.ID)
+	tr = own.run(t, map[string]any{"destination": "contact_placement", "fallback_team_id": mine.ID.String()})
+	require.NotNil(t, tr.TeamID)
+	assert.Equal(t, mine.ID, *tr.TeamID)
 }
 
 // The original behavior is untouched: no destination, "team" and an unknown value all mean the fixed team.
