@@ -228,11 +228,14 @@ func TestLoop_StepLimitEndsWithAToollessAnswer(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "wrapping up", res.Response.Text)
 	require.Len(t, p.requests, 3)
-	assert.Equal(t, ai.ToolChoiceNone, p.requests[2].ToolChoice)
+	assert.Nil(t, p.requests[2].Tools, "the last round declares no tools")
+	assert.Empty(t, p.requests[2].ToolChoice, "and does not depend on tool_choice none")
 	assert.NotEqual(t, ai.ToolChoiceNone, p.requests[1].ToolChoice)
-	assert.Len(t, p.requests[2].Tools, 1, "tools stay declared, the history refers to them")
+	assert.Len(t, p.requests[1].Tools, 1)
 }
 
+// Defense in depth: the real adapters drop tool calls on a request without Tools, but a fake (or a
+// future adapter that does not) must still not get a tool run out of the last round.
 func TestLoop_StillAskingAfterTheLastChanceFails(t *testing.T) {
 	var ran []string
 	p := &scripted{answers: []func(ai.Request) (*ai.Response, error){

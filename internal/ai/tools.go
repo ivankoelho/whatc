@@ -45,7 +45,8 @@ type ToolResult struct {
 }
 
 // ToolChoice is deliberately limited to auto/none: forcing a tool is not needed by the current
-// scope and will be reconsidered when a real tool requires it. "" means auto.
+// scope and will be reconsidered when a real tool requires it. "" means auto. The adapters support
+// "none", but the tool loop does not depend on it: its last round simply declares no tools.
 type ToolChoice string
 
 const (

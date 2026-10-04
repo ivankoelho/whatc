@@ -109,6 +109,7 @@ func RunToolLoop(ctx context.Context, p Provider, req Request, r ToolResolver, l
 		req.Tools = nil
 	}
 	req.Messages = append([]Message(nil), req.Messages...)
+	start := len(req.Messages) // what the loop appends after this is what the last round flattens
 
 	call := func(r Request) (*Response, error) {
 		if err := ctx.Err(); err != nil {
@@ -156,9 +157,15 @@ func RunToolLoop(ctx context.Context, p Provider, req Request, r ToolResolver, l
 		res.Messages = append(res.Messages, asst, tool)
 	}
 
-	// Out of steps: one last answer with tools switched off, to get text for the customer.
-	req.ToolChoice = ToolChoiceNone
-	resp, err := call(req)
+	// Out of steps: one last answer, to get text for the customer. It is a plain-text request: no
+	// Tools and no ToolChoice, and the tool exchanges of this loop become data in text (see
+	// flattenToolInteractions). It depends neither on the provider honoring tool_choice "none" nor on
+	// it accepting tool messages without declared tools, and no tool call can come out of it: the
+	// adapters drop tool calls on a request without Tools. res.Messages keeps the real exchange.
+	final := req
+	final.Messages = append(append([]Message(nil), req.Messages[:start]...), flattenToolInteractions(req.Messages[start:])...)
+	final.Tools, final.ToolChoice = nil, ""
+	resp, err := call(final)
 	if err != nil {
 		return res, err
 	}
