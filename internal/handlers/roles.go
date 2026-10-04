@@ -57,6 +57,11 @@ type PermissionResponse struct {
 	Action      string    `json:"action"`
 	Description string    `json:"description"`
 	Key         string    `json:"key"` // "resource:action"
+	// Presentation metadata (functional group on the permissions screen); never
+	// read by authorization.
+	Group      string `json:"group"`
+	GroupOrder int    `json:"group_order"`
+	SortOrder  int    `json:"sort_order"`
 }
 
 // ListRoles returns all roles for the organization
@@ -389,12 +394,16 @@ func (a *App) ListPermissions(r *fastglue.Request) error {
 
 	response := make([]PermissionResponse, len(permissions))
 	for i, p := range permissions {
+		group, groupOrder, sortOrder := models.PermissionPresentation(p.Resource, p.Action)
 		response[i] = PermissionResponse{
 			ID:          p.ID,
 			Resource:    p.Resource,
 			Action:      p.Action,
 			Description: p.Description,
 			Key:         p.Resource + ":" + p.Action,
+			Group:       group,
+			GroupOrder:  groupOrder,
+			SortOrder:   sortOrder,
 		}
 	}
 

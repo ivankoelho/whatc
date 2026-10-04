@@ -401,5 +401,39 @@ func TestApp_ListPermissions_Success(t *testing.T) {
 		assert.NotEmpty(t, perm.Resource)
 		assert.NotEmpty(t, perm.Action)
 		assert.Equal(t, perm.Resource+":"+perm.Action, perm.Key)
+		assert.NotEmpty(t, perm.Group)
+		assert.Positive(t, perm.GroupOrder)
+	}
+}
+
+// The functional grouping is presentation only: every catalog key is still
+// listed, each with a real group, and system roles keep their permissions.
+func TestApp_ListPermissions_KeepsEveryCatalogKeyWithAGroup(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	testutil.GetOrCreateTestPermissions(t, app.DB)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("list-perms-groups")))
+
+	req := testutil.NewGETRequest(t)
+	req.RequestCtx.SetUserValue("user_id", user.ID)
+	req.RequestCtx.SetUserValue("organization_id", org.ID)
+	require.NoError(t, app.ListPermissions(req))
+
+	var resp struct {
+		Data struct {
+			Permissions []handlers.PermissionResponse `json:"permissions"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &resp))
+
+	got := map[string]handlers.PermissionResponse{}
+	for _, p := range resp.Data.Permissions {
+		got[p.Key] = p
+	}
+	for _, p := range models.DefaultPermissions() {
+		key := p.Resource + ":" + p.Action
+		r, ok := got[key]
+		require.True(t, ok, "permission %s missing from the API", key)
+		assert.NotEqual(t, models.PermissionGroupOther, r.Group, "%s has no functional group", key)
 	}
 }
