@@ -104,8 +104,11 @@ defineExpose({ save, hasChanges })
       <dt class="text-muted-foreground">{{ $t('contacts.type') }}</dt>
       <dd class="min-w-0 break-words" data-testid="contact-registration-type">{{ $t('contacts.types.' + type) }}</dd>
 
-      <dt class="text-muted-foreground">{{ $t('contacts.document') }}</dt>
-      <dd class="min-w-0 break-words" data-testid="contact-registration-document">{{ contact.cpf_cnpj || $t('contacts.notInformed') }}</dd>
+      <!-- no document: nothing to show (the edit form still has the field) -->
+      <template v-if="contact.cpf_cnpj">
+        <dt class="text-muted-foreground">{{ $t('contacts.document') }}</dt>
+        <dd class="min-w-0 break-words" data-testid="contact-registration-document">{{ contact.cpf_cnpj }}</dd>
+      </template>
 
       <template v-if="showsPlacement(type)">
         <dt class="text-muted-foreground">{{ $t('contacts.unit') }}</dt>
