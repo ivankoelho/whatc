@@ -294,14 +294,14 @@ func TestContact_PlacementSetAndClear(t *testing.T) {
 	e := newPhase2Env(t)
 	unit := e.unit(t, "Loja 01")
 	dept := e.department(t, "TI")
-	contact := testutil.CreateTestContact(t, e.app.DB, e.org.ID)
+	contact := testutil.CreateTestContactWith(t, e.app.DB, e.org.ID, testutil.WithContactType(models.ContactTypeColaborador))
 
 	status, c := e.updateContact(t, contact.ID.String(), map[string]any{"unit_id": unit.ID.String(), "department_id": dept.ID.String()})
 	require.Equal(t, fasthttp.StatusOK, status)
 	assert.Equal(t, &unit.ID, c.UnitID)
 
-	// Absent fields are left alone.
-	status, c = e.updateContact(t, contact.ID.String(), map[string]any{"contact_type": "fornecedor"})
+	// Absent fields are left alone (the type stays colaborador).
+	status, c = e.updateContact(t, contact.ID.String(), map[string]any{"cpf_cnpj": validCPF})
 	require.Equal(t, fasthttp.StatusOK, status)
 	assert.Equal(t, &unit.ID, c.UnitID)
 	assert.Equal(t, &dept.ID, c.DepartmentID)

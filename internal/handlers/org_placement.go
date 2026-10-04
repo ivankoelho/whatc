@@ -75,3 +75,22 @@ func (a *App) isPlacementInUse(column string, id uuid.UUID) bool {
 	}
 	return false
 }
+
+// applyContactPlacement writes a contact's unit/department into a map-based update. Only a
+// colaborador has them: for any other final type they are cleared, whatever the payload said, so
+// the server decides the persisted state and nothing hidden is left behind (the unit and
+// department of a contact scope the Knowledge the AI sees and the campaign segments). A clear is
+// only written when there is something to clear (the request sent one, or the contact has one),
+// so an edit that touches neither stays an ordinary edit.
+func applyContactPlacement(updates map[string]any, p orgPlacement, finalType models.ContactType, hasUnit, hasDepartment bool) {
+	if finalType == models.ContactTypeColaborador {
+		p.apply(updates)
+		return
+	}
+	if p.UnitSet || hasUnit {
+		updates["unit_id"] = nil
+	}
+	if p.DepartmentSet || hasDepartment {
+		updates["department_id"] = nil
+	}
+}

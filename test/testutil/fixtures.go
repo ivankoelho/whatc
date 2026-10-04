@@ -234,6 +234,21 @@ func WithPhoneNumber(phone string) ContactOption {
 	}
 }
 
+// WithContactType sets the contact type.
+func WithContactType(t models.ContactType) ContactOption {
+	return func(c *models.Contact) {
+		c.ContactType = t
+	}
+}
+
+// WithContactPlacement sets the unit and department directly, bypassing the API (to build rows
+// the API no longer produces, such as a non-colaborador with a unit).
+func WithContactPlacement(unitID, departmentID *uuid.UUID) ContactOption {
+	return func(c *models.Contact) {
+		c.UnitID, c.DepartmentID = unitID, departmentID
+	}
+}
+
 // CreateTestContactWith creates a test contact with options.
 func CreateTestContactWith(t *testing.T, db *gorm.DB, orgID uuid.UUID, opts ...ContactOption) *models.Contact {
 	t.Helper()
