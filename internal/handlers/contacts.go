@@ -215,9 +215,13 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 
 		phoneNumber := c.PhoneNumber
 		profileName := c.ProfileName
+		cpfCNPJ := c.CPFCNPJ // masked like the detail response (buildContactResponse)
 		if shouldMask {
 			phoneNumber = utils.MaskPhoneNumber(phoneNumber)
 			profileName = utils.MaskIfPhoneNumber(profileName)
+			if cpfCNPJ != "" {
+				cpfCNPJ = utils.MaskPhoneNumber(cpfCNPJ)
+			}
 		}
 
 		serviceWindowOpen := c.LastInboundAt != nil && time.Since(*c.LastInboundAt) < 24*time.Hour
@@ -227,6 +231,7 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 			PhoneNumber:        phoneNumber,
 			Name:               profileName,
 			ProfileName:        profileName,
+			CPFCNPJ:            cpfCNPJ,
 			Status:             "active",
 			ContactStatus:      c.ContactStatus,
 			ContactType:        c.ContactType,
