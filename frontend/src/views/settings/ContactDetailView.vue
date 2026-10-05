@@ -90,6 +90,8 @@ const { showLeaveDialog, confirmLeave, cancelLeave } = useUnsavedChangesGuard(ha
 
 const canWrite = computed(() => authStore.hasPermission('contacts', 'write'))
 const canDelete = computed(() => authStore.hasPermission('contacts', 'delete'))
+// An inactive department is not offered for a new choice; the one already chosen stays listed.
+const departmentOptions = computed(() => departments.value.filter(d => d.active || d.id === form.value.department_id))
 
 const form = ref({
   profile_name: '',
@@ -375,7 +377,7 @@ onMounted(async () => {
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem :value="NONE">{{ $t('contacts.noneSelected') }}</SelectItem>
-                <SelectItem v-for="d in departments" :key="d.id" :value="d.id">{{ d.name }}</SelectItem>
+                <SelectItem v-for="d in departmentOptions" :key="d.id" :value="d.id">{{ d.name }}</SelectItem>
               </SelectContent>
             </Select>
           </div>

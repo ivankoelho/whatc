@@ -27,6 +27,8 @@ const form = ref({ contact_type: 'cliente' as string, cpf_cnpj: '', unit_id: NON
 const type = computed(() => props.contact.contact_type || 'cliente')
 const unitName = computed(() => props.units.find(u => u.id === props.contact.unit_id)?.name)
 const departmentName = computed(() => props.departments.find(d => d.id === props.contact.department_id)?.name)
+// An inactive department is not offered for a new choice; the one already chosen stays listed.
+const departmentOptions = computed(() => props.departments.filter(d => d.active || d.id === form.value.department_id))
 
 // The form starts from the contact every time it opens.
 watch(() => props.editing, (editing) => {
@@ -138,7 +140,7 @@ defineExpose({ save, hasChanges })
             <SelectTrigger data-testid="contact-registration-department-select"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem :value="NONE">{{ $t('contacts.noneSelected') }}</SelectItem>
-              <SelectItem v-for="d in departments" :key="d.id" :value="d.id">{{ d.name }}</SelectItem>
+              <SelectItem v-for="d in departmentOptions" :key="d.id" :value="d.id">{{ d.name }}</SelectItem>
             </SelectContent>
           </Select>
         </div>
