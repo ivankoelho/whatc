@@ -212,3 +212,12 @@ func TestClient_ListarLojas_ErrorStatus(t *testing.T) {
 	_, err := New(testLog(), srv.URL).ListarLojas(context.Background(), "bad")
 	assert.Error(t, err)
 }
+
+func TestClient_ListarLojas_OkFalseIsAnError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":false,"lojas":[]}`))
+	}))
+	defer srv.Close()
+	_, err := New(testLog(), srv.URL).ListarLojas(context.Background(), "k")
+	assert.Error(t, err)
+}

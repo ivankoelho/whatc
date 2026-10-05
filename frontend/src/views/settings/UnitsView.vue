@@ -12,9 +12,10 @@ import { PageHeader, DataTable, CrudFormDialog, DeleteConfirmDialog, IconButton,
 import { unitsService, type Unit } from '@/services/api'
 import { useCrudState } from '@/composables/useCrudState'
 import { toast } from 'vue-sonner'
-import { Plus, Building2, Pencil, Trash2, Link2 } from 'lucide-vue-next'
+import { Plus, Building2, Pencil, Trash2, Link2, Download } from 'lucide-vue-next'
 import { getErrorMessage } from '@/lib/api-utils'
 import UnitXProcessLojaDialog from '@/components/settings/UnitXProcessLojaDialog.vue'
+import UnitXProcessImportDialog from '@/components/settings/UnitXProcessImportDialog.vue'
 
 const { t } = useI18n()
 
@@ -61,6 +62,9 @@ function openX2Dialog(unit: Unit) {
   x2Unit.value = unit
   x2DialogOpen.value = true
 }
+
+// Create units from the X2 stores (its own dialog; the link above is a different operation).
+const x2ImportOpen = ref(false)
 
 function openEditDialog(unit: Unit) {
   baseOpenEditDialog(unit, (u) => ({
@@ -130,6 +134,7 @@ async function confirmDelete() {
     <PageHeader :title="$t('units.title')" :description="$t('units.subtitle')" :icon="Building2" icon-gradient="bg-gradient-to-br from-blue-500 to-cyan-600 shadow-blue-500/20" back-link="/settings">
       <template #actions>
         <Button variant="outline" size="sm" @click="openCreateDialog"><Plus class="h-4 w-4 mr-2" />{{ $t('units.addUnit') }}</Button>
+        <Button variant="outline" size="sm" data-testid="units-import-x2" @click="x2ImportOpen = true"><Download class="h-4 w-4 mr-2" />{{ $t('units.import.button') }}</Button>
       </template>
     </PageHeader>
 
@@ -199,6 +204,7 @@ async function confirmDelete() {
     </ScrollArea>
 
     <UnitXProcessLojaDialog v-model:open="x2DialogOpen" :unit="x2Unit" @saved="fetchUnits" />
+    <UnitXProcessImportDialog v-model:open="x2ImportOpen" @imported="fetchUnits" />
 
     <CrudFormDialog
       v-model:open="isDialogOpen"

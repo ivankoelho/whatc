@@ -22,8 +22,10 @@ type Unit struct {
 	Metadata        JSONB      `gorm:"type:jsonb;default:'{}'" json:"metadata"`
 
 	// XProcessCodEmpresa is the X2 store (cod_empresa) this unit stands for. It is set
-	// ONLY by an administrator choosing the store (PUT /api/units/{id}/xprocess-loja),
-	// never inferred from names or CNPJ, and it is unique per organization. column: is
+	// ONLY by an administrator choosing the store: linking a unit (PUT
+	// /api/units/{id}/xprocess-loja) or importing the store as a new unit (POST
+	// /api/units/xprocess-import). Never inferred from names or CNPJ, and it is unique
+	// per organization. column: is
 	// explicit because GORM would split "XProcess" into x_process_cod_empresa.
 	XProcessCodEmpresa *string `gorm:"column:xprocess_cod_empresa;size:20;uniqueIndex:idx_units_org_xprocess_loja,where:xprocess_cod_empresa IS NOT NULL AND deleted_at IS NULL" json:"xprocess_cod_empresa,omitempty"`
 }
