@@ -178,7 +178,13 @@ export function useFlowGraphSimulation(
     // Seed built-in template variables so preview matches what the
     // backend's runChatGraph will produce (phone_number is always
     // populated server-side from the session).
-    state.variables = { phone_number: '+15555550100', contact_name: 'Preview User' }
+    state.variables = {
+      phone_number: '+15555550100',
+      contact_name: 'Preview User',
+      contact_type: 'colaborador',
+      contact_unit: 'Matriz',
+      contact_department: 'TI',
+    }
     state.messages = []
     state.executionLog = []
     state.currentRetryCount = 0

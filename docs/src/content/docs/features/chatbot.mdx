@@ -295,6 +295,10 @@ config (URL, headers, body) — no capture step required:
 | Variable | Value |
 |---|---|
 | `{{phone_number}}` | The contact's WhatsApp number in E.164 format (e.g. `+919876543210`). |
+| `{{contact_name}}` | The contact's profile name. |
+| `{{contact_type}}` | `cliente`, `fornecedor` or `colaborador` — handy in conditions (`contact_type == "colaborador"`). |
+| `{{contact_unit}}` | Name of the contact's unit. Empty unless the contact is a `colaborador` with a unit. |
+| `{{contact_department}}` | Name of the contact's department. Empty unless the contact is a `colaborador` with a department. |
 | `{{_flow_id}}` | UUID of the running flow. |
 | `{{_flow_name}}` | Human-readable name of the flow. |
 

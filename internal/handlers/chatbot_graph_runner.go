@@ -88,14 +88,16 @@ func (a *App) runChatGraph(
 		flowResponseData: flowResponseData,
 	}
 
-	// Seed built-in template variables so {{phone_number}} / {{contact_name}}
-	// work in any outgoing message without needing an upstream api_call.
+	// Seed built-in template variables so {{phone_number}} / {{contact_name}} (and the
+	// registration ones, see seedContactRegistrationVars) work in any outgoing message
+	// without needing an upstream api_call.
 	if session.SessionData == nil {
 		session.SessionData = models.JSONB{}
 	}
 	session.SessionData["phone_number"] = session.PhoneNumber
 	if contact != nil {
 		session.SessionData["contact_name"] = contact.ProfileName
+		a.seedContactRegistrationVars(session.SessionData, contact)
 	}
 
 	if session.CurrentStep == "" {
@@ -1103,4 +1105,40 @@ func buttonsFromConfig(cfg map[string]any) []map[string]any {
 		}
 	}
 	return out
+}
+
+// seedContactRegistrationVars puts the contact's registration into the session as built-in
+// variables, read from the contact row (never from the conversation):
+//
+//	{{contact_type}}        cliente | fornecedor | colaborador (use it in conditions)
+//	{{contact_unit}}        name of the contact's unit, "" when there is none
+//	{{contact_department}}  name of the contact's department, "" when there is none
+//
+// Unit and department only exist for a colaborador (the server clears them for any other type), so
+// the two names are "" otherwise. They are always set, so a missing value renders as empty text
+// instead of a literal {{...}}. Names are looked up inside the contact's organization; an inactive
+// unit/department still shows the name of the link the contact already has.
+func (a *App) seedContactRegistrationVars(data models.JSONB, contact *models.Contact) {
+	contactType := string(contact.ContactType)
+	if contactType == "" {
+		contactType = string(models.ContactTypeCliente)
+	}
+	data["contact_type"] = contactType
+	data["contact_unit"] = ""
+	data["contact_department"] = ""
+	if contact.ContactType != models.ContactTypeColaborador {
+		return
+	}
+	if contact.UnitID != nil {
+		var u models.Unit
+		if err := a.DB.Select("name").Where("id = ? AND organization_id = ?", *contact.UnitID, contact.OrganizationID).First(&u).Error; err == nil {
+			data["contact_unit"] = u.Name
+		}
+	}
+	if contact.DepartmentID != nil {
+		var d models.Department
+		if err := a.DB.Select("name").Where("id = ? AND organization_id = ?", *contact.DepartmentID, contact.OrganizationID).First(&d).Error; err == nil {
+			data["contact_department"] = d.Name
+		}
+	}
 }
