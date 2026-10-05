@@ -192,7 +192,9 @@ const router = createRouter({
           path: 'settings',
           name: 'settings',
           component: () => import('@/views/settings/SettingsView.vue'),
-          meta: { permission: 'settings.general' }
+          // Geral | Notificações | Chamadas need settings.general; Unidades and Departamentos
+          // are tabs of the same page with their own read permission.
+          meta: { anyPermission: ['settings.general', 'units', 'departments'] }
         },
         {
           path: 'settings/service',
@@ -329,7 +331,7 @@ const router = createRouter({
           path: 'settings/occurrences',
           name: 'settings-occurrences',
           component: () => import('@/views/settings/OccurrenceSettingsHubView.vue'),
-          meta: { anyPermission: ['occurrences.stages', 'occurrences.categories', 'occurrences.what_happened', 'occurrences.processes', 'occurrences.sla_policies', 'units'] }
+          meta: { anyPermission: ['occurrences.stages', 'occurrences.categories', 'occurrences.what_happened', 'occurrences.processes', 'occurrences.sla_policies'] }
         },
         {
           path: 'settings/occurrence-stages',
@@ -339,7 +341,12 @@ const router = createRouter({
         {
           path: 'settings/units',
           name: 'units',
-          redirect: () => ({ path: '/settings/occurrences', query: { tab: 'units' } })
+          redirect: () => ({ path: '/settings', query: { tab: 'units' } })
+        },
+        {
+          path: 'settings/departments',
+          name: 'departments',
+          redirect: () => ({ path: '/settings', query: { tab: 'departments' } })
         },
         {
           path: 'settings/occurrence-sla-policies',
@@ -451,7 +458,8 @@ const navigationOrder = [
     { path: '/settings/integrations', permission: 'webhooks' },
     { path: '/settings/integrations', permission: 'custom_actions' },
     { path: '/settings/occurrences', permission: 'occurrences.stages' },
-    { path: '/settings/occurrences', permission: 'units' },
+    { path: '/settings', permission: 'units' },
+    { path: '/settings', permission: 'departments' },
     { path: '/settings/occurrences', permission: 'occurrences.sla_policies' },
     { path: '/settings/occurrences', permission: 'occurrences.categories' },
     { path: '/settings/occurrences', permission: 'occurrences.what_happened' },
