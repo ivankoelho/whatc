@@ -57,7 +57,7 @@ afterEach(() => {
 beforeEach(() => {
   vi.clearAllMocks()
   route.query = {}
-  perms.granted = new Set(['settings.general:read', 'units:read', 'departments:read'])
+  perms.granted = new Set(['settings.general:read', 'occurrences:read', 'units:read', 'departments:read'])
 })
 
 describe('SettingsView tabs', () => {
@@ -86,11 +86,23 @@ describe('SettingsView tabs', () => {
   })
 
   it('a user with only units:read lands on Unidades, not on a general tab they cannot read', async () => {
-    perms.granted = new Set(['units:read'])
+    perms.granted = new Set(['units:read', 'occurrences:read'])
     await render()
     expect(tabs()).toEqual(['Unidades'])
     expect($('units-view')).not.toBeNull()
     expect(router.replace).toHaveBeenCalledWith({ query: { tab: 'units' } })
+  })
+
+  it('hides Unidades and Departamentos without occurrences:read, since their lists would answer 403', async () => {
+    perms.granted = new Set(['settings.general:read', 'units:read', 'departments:read'])
+    await render()
+    expect(tabs()).toEqual(['Geral', 'Notificações', 'Chamadas'])
+  })
+
+  it('shows only the tab whose own read permission is present (plus occurrences:read)', async () => {
+    perms.granted = new Set(['settings.general:read', 'occurrences:read', 'departments:read'])
+    await render()
+    expect(tabs()).toEqual(['Geral', 'Notificações', 'Chamadas', 'Departamentos'])
   })
 
   it('ignores ?tab=units when the user cannot read units', async () => {

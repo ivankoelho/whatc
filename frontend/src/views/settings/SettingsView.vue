@@ -36,16 +36,22 @@ const tabConfigs: SettingsTabConfig[] = [
   { value: 'units', permission: 'units' },
   { value: 'departments', permission: 'departments' },
 ]
+// The units/departments lists are served under occurrences:read (agents use them without
+// units:read/departments:read), so a tab is only useful to someone who also has that.
+const needsListAccess = ['units', 'departments']
+const canRead = (permission: string) =>
+  authStore.hasPermission(permission, 'read')
+  && (!needsListAccess.includes(permission) || authStore.hasPermission('occurrences', 'read'))
 const canSee = (value: string) => {
   const tab = tabConfigs.find(c => c.value === value)
-  return !!tab && authStore.hasPermission(tab.permission, 'read')
+  return !!tab && canRead(tab.permission)
 }
 const activeTab = computed(() =>
   resolveActiveTab(
     tabConfigs,
     typeof route.query.tab === 'string' ? route.query.tab : undefined,
     'general',
-    (permission) => authStore.hasPermission(permission, 'read'),
+    canRead,
   ),
 )
 const isSettingsTab = computed(() => !!activeTab.value && SETTINGS_TABS.includes(activeTab.value))
