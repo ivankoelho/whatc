@@ -74,7 +74,7 @@ func TestUnitsX2Import_ListShowsImportStatus(t *testing.T) {
 	e := newUnitsX2Env(t, lojaPorto, lojaSerrinha, lojaCamacari)
 	linked := e.unit(t, "UNIDADE PORTO")
 	require.NoError(t, e.app.DB.Model(&linked).Update("xprocess_cod_empresa", "40").Error)
-	e.unit(t, "ATACADAO DOS PISOS LTDA  (CAMACARI)") // same name as store 42, no link: a clash
+	e.unit(t, "ATACADAO DOS PISOS LTDA (CAMACARI)") // same name as store 42, no link: a clash
 
 	req := testutil.NewGETRequest(t)
 	testutil.SetAuthContext(req, e.org.ID, e.admin.ID)
@@ -101,13 +101,13 @@ func TestUnitsX2Import_ListShowsImportStatus(t *testing.T) {
 	assert.Equal(t, "already_imported", porto.ImportStatus)
 	assert.Equal(t, "UNIDADE PORTO", porto.UnitName)
 	assert.Equal(t, "new", serrinha.ImportStatus)
-	assert.Equal(t, "ATACADAO DOS PISOS LTDA  (SERRINHA)", serrinha.ImportName, "the name is X2's, unchanged")
+	assert.Equal(t, "ATACADAO DOS PISOS LTDA (SERRINHA)", serrinha.ImportName, "the name is X2's, spaces collapsed")
 	assert.Equal(t, "conflict", camacari.ImportStatus)
 	assert.Equal(t, "name_in_use", camacari.ConflictReason)
-	assert.Equal(t, "ATACADAO DOS PISOS LTDA  (CAMACARI)", camacari.ConflictUnit)
+	assert.Equal(t, "ATACADAO DOS PISOS LTDA (CAMACARI)", camacari.ConflictUnit)
 }
 
-// Case 2: a new store becomes a unit (X2 name unchanged, CNPJ as digits,
+// Case 2: a new store becomes a unit (X2 name, spaces collapsed, CNPJ as digits,
 // the code, active) and nothing else is invented.
 func TestUnitsX2Import_CreatesTheUnit(t *testing.T) {
 	e := newUnitsX2Env(t, lojaPorto)
@@ -121,7 +121,7 @@ func TestUnitsX2Import_CreatesTheUnit(t *testing.T) {
 	var u models.Unit
 	require.NoError(t, e.app.DB.First(&u, "id = ?", r.Unit.ID).Error)
 	assert.Equal(t, e.org.ID, u.OrganizationID)
-	assert.Equal(t, "ATACADAO DOS PISOS LTDA  (PORTO)", u.Name, "not renamed: exactly what X2 has")
+	assert.Equal(t, "ATACADAO DOS PISOS LTDA (PORTO)", u.Name, "not renamed: what X2 has, spaces collapsed")
 	assert.Equal(t, "58675622000361", u.CNPJ)
 	require.NotNil(t, u.XProcessCodEmpresa)
 	assert.Equal(t, "40", *u.XProcessCodEmpresa)
@@ -292,7 +292,7 @@ func TestUnitsX2Import_InputAndEdgeCases(t *testing.T) {
 	_, resp := e.importCodes(t, e.admin.ID, "999", "43", "44")
 	assert.Equal(t, "failed", resp.result("999").Status)
 	assert.Equal(t, "not_in_x2", resp.result("999").Reason)
-	assert.Equal(t, "ATACADAO DOS PISOS   MATRIZ LTDA", resp.result("43").Unit.Name, "no parentheses: the whole name, as in X2")
+	assert.Equal(t, "ATACADAO DOS PISOS MATRIZ LTDA", resp.result("43").Unit.Name, "no parentheses: the whole name, spaces collapsed")
 	bad := resp.result("44")
 	assert.Equal(t, "created", bad.Status)
 	assert.Equal(t, "ATACADAO DOS PISOS LTDA (FEIRA)", bad.Unit.Name)

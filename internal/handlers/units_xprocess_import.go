@@ -47,11 +47,11 @@ const (
 	noteCNPJDiffers      = "cnpj_differs"
 )
 
-// unitNameFromLoja is the name a unit gets: the store name exactly as X2 has it
-// ("ATACADAO DOS PISOS LTDA  (PORTO)" stays that way). It is never shortened or
-// renamed; only surrounding whitespace is dropped.
+// unitNameFromLoja is the name a unit gets: the store name as X2 has it
+// ("ATACADAO DOS PISOS LTDA  (PORTO)" -> "ATACADAO DOS PISOS LTDA (PORTO)"). It is never
+// shortened or renamed; only runs of whitespace are collapsed to one space (and the ends trimmed).
 func unitNameFromLoja(razao string) string {
-	return strings.TrimSpace(razao)
+	return strings.Join(strings.Fields(razao), " ")
 }
 
 // lojaCNPJ is the store CNPJ as digits, "" when it is not a valid CNPJ.
