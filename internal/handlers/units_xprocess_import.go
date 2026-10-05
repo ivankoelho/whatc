@@ -47,15 +47,10 @@ const (
 	noteCNPJDiffers      = "cnpj_differs"
 )
 
-// unitNameFromLoja is the name a unit gets: what X2 puts in parentheses at the end
-// of the company name ("ATACADAO DOS PISOS LTDA  (PORTO)" -> "PORTO"); without
-// parentheses, the whole company name. Spaces are collapsed.
+// unitNameFromLoja is the name a unit gets: the store name as X2 has it
+// ("ATACADAO DOS PISOS LTDA  (PORTO)" -> "ATACADAO DOS PISOS LTDA (PORTO)"). It is never
+// shortened or renamed; only runs of whitespace are collapsed to one space (and the ends trimmed).
 func unitNameFromLoja(razao string) string {
-	if m := parenthetical.FindAllStringSubmatch(razao, -1); len(m) > 0 {
-		if n := strings.Join(strings.Fields(m[len(m)-1][1]), " "); n != "" {
-			return n
-		}
-	}
 	return strings.Join(strings.Fields(razao), " ")
 }
 

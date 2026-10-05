@@ -14,7 +14,7 @@ vi.mock('vue-sonner', () => ({ toast }))
 import UnitXProcessImportDialog from './UnitXProcessImportDialog.vue'
 
 const loja = (cod: string, razao: string, cnpj: string, extra: Partial<XProcessLoja> = {}): XProcessLoja =>
-  ({ cod_empresa: cod, razao_social_empresa: razao, cnpj_empresa: cnpj, import_status: 'new', import_name: razao.replace(/.*\((.*)\)/, '$1'), ...extra })
+  ({ cod_empresa: cod, razao_social_empresa: razao, cnpj_empresa: cnpj, import_status: 'new', import_name: razao, ...extra })
 
 const lojas = [
   loja('2', 'ATACADAO (FEIRA)', '11.111.111/0001-11', { import_status: 'already_imported', unit_name: 'FEIRA' }),
@@ -51,7 +51,7 @@ describe('UnitXProcessImportDialog', () => {
     expect($('x2-import-status-2')!.textContent).toContain('Já importada')
     expect($('x2-import-status-5')!.textContent).toContain('Conflito')
     expect(list).toContain('Unidade A')
-    expect(list).toContain('Será criada como SERRINHA')
+    expect(list).toContain('Será criada como ATACADAO (SERRINHA)')
   })
 
   it('searches by name, code and CNPJ', async () => {

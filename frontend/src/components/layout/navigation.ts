@@ -170,12 +170,12 @@ export const navigationSections: NavSection[] = [
         path: '/settings',
         icon: Settings,
         permission: 'settings.general',
-        childPermissions: ['settings.general', 'settings.chatbot', 'accounts', 'contacts', 'canned_responses', 'tags', 'knowledge', 'teams', 'users', 'roles', 'api_keys', 'webhooks', 'custom_actions', 'occurrences.stages', 'occurrences.categories', 'occurrences.what_happened', 'occurrences.processes', 'occurrences.sla_policies', 'units', 'settings.sso', 'audit_logs'],
+        childPermissions: ['settings.general', 'settings.chatbot', 'accounts', 'contacts', 'canned_responses', 'tags', 'knowledge', 'teams', 'users', 'roles', 'api_keys', 'webhooks', 'custom_actions', 'occurrences.stages', 'occurrences.categories', 'occurrences.what_happened', 'occurrences.processes', 'occurrences.sla_policies', 'units', 'departments', 'settings.sso', 'audit_logs'],
         groups: [
           {
             label: 'nav.groupOrganization',
             items: [
-              { name: 'nav.general', path: '/settings', icon: Settings, permission: 'settings.general' },
+              { name: 'nav.general', path: '/settings', icon: Settings, childPermissions: ['settings.general', 'units', 'departments'] },
               { name: 'nav.sso', path: '/settings/sso', icon: ShieldCheck, permission: 'settings.sso' },
               { name: 'nav.auditLogs', path: '/settings/audit-logs', icon: ScrollText, permission: 'audit_logs' }
             ]
@@ -195,7 +195,7 @@ export const navigationSections: NavSection[] = [
           {
             label: 'nav.groupOccurrences',
             items: [
-              { name: 'nav.groupOccurrences', path: '/settings/occurrences', icon: ClipboardList, childPermissions: ['occurrences.stages', 'occurrences.categories', 'occurrences.what_happened', 'occurrences.processes', 'occurrences.sla_policies', 'units'] }
+              { name: 'nav.groupOccurrences', path: '/settings/occurrences', icon: ClipboardList, childPermissions: ['occurrences.stages', 'occurrences.categories', 'occurrences.what_happened', 'occurrences.processes', 'occurrences.sla_policies'] }
             ]
           },
           {

@@ -106,3 +106,20 @@ func TestUnits_CNPJIsValidatedAndStoredAsDigits(t *testing.T) {
 	assert.Equal(t, fasthttp.StatusConflict, testutil.GetResponseStatusCode(req))
 	assert.Contains(t, string(testutil.GetResponseBody(req)), "CNPJ")
 }
+
+// A unit created as inactive must be stored inactive (gorm:"default:true" used to win over false).
+func TestUnits_CreateInactiveStaysInactive(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	admin := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&admin.ID))
+
+	req := testutil.NewJSONRequest(t, map[string]any{"name": "Loja Fechada", "active": false})
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	require.NoError(t, app.CreateUnit(req))
+	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var stored models.Unit
+	require.NoError(t, app.DB.Where("organization_id = ? AND name = ?", org.ID, "Loja Fechada").First(&stored).Error)
+	assert.False(t, stored.Active)
+}

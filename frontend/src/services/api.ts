@@ -1704,6 +1704,11 @@ export const unitsService = {
 
 export const departmentsService = {
   list: () => api.get<ApiEnvelope<{ departments: Department[] }>>('/departments'),
+  create: (data: { name: string; active: boolean }) =>
+    api.post<ApiEnvelope<Department>>('/departments', data),
+  update: (id: string, data: { name: string; active: boolean }) =>
+    api.put<ApiEnvelope<Department>>(`/departments/${id}`, data),
+  delete: (id: string) => api.delete<ApiEnvelope<{ deleted: boolean }>>(`/departments/${id}`),
 }
 
 // ---- Knowledge base (Fase 8B-2). The screens consume the API of 8B-1 as is, plus the
