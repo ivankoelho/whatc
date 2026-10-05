@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
+import { selectableOptions } from '@/lib/placement-options'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -96,6 +97,8 @@ function changeContact() {
 const saleChannel = ref('')
 const unitId = ref('')
 const units = ref<Unit[]>([])
+// An inactive unit/department is not offered for a new link; the one already linked stays listed.
+const unitOptions = computed(() => selectableOptions(units.value, unitId.value))
 // NFs and cupons/pedidos, each with its products and optional file.
 const documents = ref<DocumentDraft[]>([newDocumentDraft()])
 const filledDocuments = computed(() => documents.value.filter(d => !isBlankDraft(d)))
@@ -454,7 +457,7 @@ function goToProtocol() {
             <Select v-model="unitId">
               <SelectTrigger><SelectValue :placeholder="t('occurrences.unitPlaceholder')" /></SelectTrigger>
               <SelectContent>
-                <SelectItem v-for="u in units" :key="u.id" :value="u.id">{{ u.name }}</SelectItem>
+                <SelectItem v-for="u in unitOptions" :key="u.id" :value="u.id">{{ u.name }}</SelectItem>
               </SelectContent>
             </Select>
           </div>

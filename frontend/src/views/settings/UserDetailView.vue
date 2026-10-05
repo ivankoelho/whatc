@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useRolesStore } from '@/stores/roles'
 import { toast } from 'vue-sonner'
 import { getErrorMessage } from '@/lib/api-utils'
+import { selectableOptions } from '@/lib/placement-options'
 import { unitsService, departmentsService, type Unit, type Department } from '@/services/api'
 import { useUnsavedChangesGuard } from '@/composables/useUnsavedChangesGuard'
 import DetailPageLayout from '@/components/shared/DetailPageLayout.vue'
@@ -71,6 +72,9 @@ const isMember = computed(() => user.value?.is_member || false)
 
 const units = ref<Unit[]>([])
 const departments = ref<Department[]>([])
+// An inactive unit/department is not offered for a new link; the one already linked stays listed.
+const unitOptions = computed(() => selectableOptions(units.value, form.value.unit_id))
+const departmentOptions = computed(() => selectableOptions(departments.value, form.value.department_id))
 const NONE = 'none' // the Select cannot hold an empty value
 
 const form = ref({
@@ -300,7 +304,7 @@ onMounted(async () => {
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem :value="NONE">{{ $t('users.noneSelected') }}</SelectItem>
-                <SelectItem v-for="u in units" :key="u.id" :value="u.id">{{ u.name }}</SelectItem>
+                <SelectItem v-for="u in unitOptions" :key="u.id" :value="u.id">{{ u.name }}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -310,7 +314,7 @@ onMounted(async () => {
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem :value="NONE">{{ $t('users.noneSelected') }}</SelectItem>
-                <SelectItem v-for="d in departments" :key="d.id" :value="d.id">{{ d.name }}</SelectItem>
+                <SelectItem v-for="d in departmentOptions" :key="d.id" :value="d.id">{{ d.name }}</SelectItem>
               </SelectContent>
             </Select>
           </div>

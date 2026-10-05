@@ -71,6 +71,14 @@ func (a *App) CreateUnit(r *fastglue.Request) error {
 		a.Log.Error("Failed to create unit", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create unit", nil, "")
 	}
+	// Active has gorm:"default:true", so Create skips a false (zero value) and the row would be
+	// stored active. Persist the requested value explicitly.
+	if !req.Active {
+		if err := a.DB.Model(&unit).Update("active", false).Error; err != nil {
+			a.Log.Error("Failed to create unit as inactive", "error", err)
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create unit", nil, "")
+		}
+	}
 
 	return r.SendEnvelope(unit)
 }

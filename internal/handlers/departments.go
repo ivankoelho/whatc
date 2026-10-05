@@ -50,6 +50,14 @@ func (a *App) CreateDepartment(r *fastglue.Request) error {
 		a.Log.Error("Failed to create department", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create department", nil, "")
 	}
+	// Active has gorm:"default:true", so Create skips a false (zero value) and the row would be
+	// stored active. Persist the requested value explicitly.
+	if !req.Active {
+		if err := a.DB.Model(&department).Update("active", false).Error; err != nil {
+			a.Log.Error("Failed to create department as inactive", "error", err)
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create department", nil, "")
+		}
+	}
 
 	return r.SendEnvelope(department)
 }

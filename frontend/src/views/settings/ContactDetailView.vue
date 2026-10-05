@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useTagsStore } from '@/stores/tags'
 import { useUsersStore } from '@/stores/users'
+import { selectableOptions } from '@/lib/placement-options'
 import { contactsService, accountsService, unitsService, departmentsService, type Tag, type Unit, type Department } from '@/services/api'
 import type { Contact } from '@/stores/contacts'
 import { toast } from 'vue-sonner'
@@ -90,6 +91,9 @@ const { showLeaveDialog, confirmLeave, cancelLeave } = useUnsavedChangesGuard(ha
 
 const canWrite = computed(() => authStore.hasPermission('contacts', 'write'))
 const canDelete = computed(() => authStore.hasPermission('contacts', 'delete'))
+// An inactive unit/department is not offered for a new link; the one already linked stays listed.
+const unitOptions = computed(() => selectableOptions(units.value, form.value.unit_id))
+const departmentOptions = computed(() => selectableOptions(departments.value, form.value.department_id))
 
 const form = ref({
   profile_name: '',
@@ -364,7 +368,7 @@ onMounted(async () => {
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem :value="NONE">{{ $t('contacts.noneSelected') }}</SelectItem>
-                <SelectItem v-for="u in units" :key="u.id" :value="u.id">{{ u.name }}</SelectItem>
+                <SelectItem v-for="u in unitOptions" :key="u.id" :value="u.id">{{ u.name }}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -375,7 +379,7 @@ onMounted(async () => {
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem :value="NONE">{{ $t('contacts.noneSelected') }}</SelectItem>
-                <SelectItem v-for="d in departments" :key="d.id" :value="d.id">{{ d.name }}</SelectItem>
+                <SelectItem v-for="d in departmentOptions" :key="d.id" :value="d.id">{{ d.name }}</SelectItem>
               </SelectContent>
             </Select>
           </div>

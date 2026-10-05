@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { useTeamsStore } from '@/stores/teams'
 import { useUsersStore } from '@/stores/users'
 import { useAuthStore } from '@/stores/auth'
+import { selectableOptions } from '@/lib/placement-options'
 import { teamsService, unitsService, departmentsService, type Team, type TeamMember, type Unit, type Department } from '@/services/api'
 import { teamsSharingPlacement } from '@/lib/team-placement'
 import { toast } from 'vue-sonner'
@@ -90,6 +91,9 @@ const form = ref({
 // optional context: without access to them the selects are simply empty.
 const units = ref<Unit[]>([])
 const departments = ref<Department[]>([])
+// An inactive unit/department is not offered for a new link; the one already linked stays listed.
+const unitOptions = computed(() => selectableOptions(units.value, form.value.unit_id))
+const departmentOptions = computed(() => selectableOptions(departments.value, form.value.department_id))
 const allTeams = ref<Team[]>([])
 async function fetchPlacementContext() {
   try {
@@ -337,7 +341,7 @@ onMounted(async () => {
             <SelectTrigger data-testid="team-unit-select"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem :value="NONE">{{ $t('contacts.noneSelected') }}</SelectItem>
-              <SelectItem v-for="u in units" :key="u.id" :value="u.id">{{ u.name }}</SelectItem>
+              <SelectItem v-for="u in unitOptions" :key="u.id" :value="u.id">{{ u.name }}</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -347,7 +351,7 @@ onMounted(async () => {
             <SelectTrigger data-testid="team-department-select"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem :value="NONE">{{ $t('contacts.noneSelected') }}</SelectItem>
-              <SelectItem v-for="d in departments" :key="d.id" :value="d.id">{{ d.name }}</SelectItem>
+              <SelectItem v-for="d in departmentOptions" :key="d.id" :value="d.id">{{ d.name }}</SelectItem>
             </SelectContent>
           </Select>
           <p class="text-[11px] text-muted-foreground">{{ $t('teams.placementHint') }}</p>
