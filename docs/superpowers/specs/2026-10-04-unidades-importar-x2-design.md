@@ -20,7 +20,7 @@ Nome e CNPJ nunca identificam a loja.
 |---|---|
 | Quem | `units:write` (sem permissão nova) |
 | Mapeamento | `cod_empresa` → `xprocess_cod_empresa`; nome → `name`; `cnpj_empresa` (só dígitos, se válido) → `cnpj`; `active = true`. `type`, endereço e demais campos ficam vazios |
-| Nome | o texto entre parênteses no fim da razão social (`ATACADAO DOS PISOS LTDA  (PORTO)` → `PORTO`), espaços colapsados. Sem parênteses, a razão social inteira. Motivo: a razão social é igual em todas as lojas |
+| Nome | o nome da loja exatamente como está no X2 (`ATACADAO DOS PISOS LTDA  (PORTO)` → `ATACADAO DOS PISOS LTDA (PORTO)`), sem renomear nem abreviar; só se colapsam espaços repetidos e se tiram os das pontas. Atualizado em 2026-10-05: antes usava só o texto entre parênteses |
 | Idempotência | loja cujo código já está numa unidade da organização **não cria outra** (`already_exists`) |
 | Reimportar | nada local é sobrescrito: `name`, `type`, `active` e o resto ficam. A única escrita é preencher um CNPJ local **vazio** com o da loja (`updated`), se nenhuma outra unidade já o usar. CNPJ local diferente do X2 só gera a nota `cnpj_differs` |
 | Conflito | não é resolvido sozinho: outra unidade **sem vínculo com a loja** que tenha o mesmo CNPJ (`cnpj_in_use`) ou o mesmo nome, sem diferenciar maiúsculas (`name_in_use`). Nada é criado e a resposta traz a unidade existente |
