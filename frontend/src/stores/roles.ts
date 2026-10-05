@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { rolesService, permissionsService, type Role, type Permission } from '@/services/api'
-import { RESOURCE_LABELS } from '@/lib/constants'
+import { groupPermissions } from '@/lib/permission-groups'
 
 export interface CreateRoleData {
   name: string
@@ -30,38 +30,14 @@ export interface FetchRolesResponse {
   limit: number
 }
 
-// Group permissions by resource for the UI
-export interface PermissionGroup {
-  resource: string
-  label: string
-  permissions: Permission[]
-}
-
 export const useRolesStore = defineStore('roles', () => {
   const roles = ref<Role[]>([])
   const permissions = ref<Permission[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
 
-  // Group permissions by resource
-  const permissionGroups = computed<PermissionGroup[]>(() => {
-    const groups: Record<string, Permission[]> = {}
-
-    for (const perm of permissions.value) {
-      if (!groups[perm.resource]) {
-        groups[perm.resource] = []
-      }
-      groups[perm.resource].push(perm)
-    }
-
-    return Object.entries(groups)
-      .map(([resource, perms]) => ({
-        resource,
-        label: RESOURCE_LABELS[resource] || resource.charAt(0).toUpperCase() + resource.slice(1),
-        permissions: perms.sort((a, b) => a.action.localeCompare(b.action))
-      }))
-      .sort((a, b) => a.label.localeCompare(b.label))
-  })
+  // Functional groups (backend order) for the permissions screen
+  const permissionGroups = computed(() => groupPermissions(permissions.value))
 
   async function fetchRoles(params?: FetchRolesParams): Promise<FetchRolesResponse> {
     loading.value = true

@@ -1030,6 +1030,10 @@ export interface Permission {
   action: string
   description: string
   key: string // "resource:action"
+  // Presentation metadata from the backend catalog (functional group + order).
+  group?: string
+  group_order?: number
+  sort_order?: number
 }
 
 export interface Role {
