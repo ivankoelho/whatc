@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { selectableOptions } from '@/lib/placement-options'
 import { useI18n } from 'vue-i18n'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -98,6 +99,8 @@ const formError = ref('')
 const categories = ref<OccurrenceCategory[]>([])
 const reasons = ref<OccurrenceWhatHappened[]>([])
 const departments = ref<Department[]>([])
+// An inactive unit/department is not offered for a new link; the one already linked stays listed.
+const departmentOptions = computed(() => selectableOptions(departments.value, formData.value.department_id))
 
 const columns = computed<Column<OccurrenceProcess>[]>(() => [
   { key: 'name', label: t('occurrenceProcesses.columnName') },
@@ -414,7 +417,7 @@ async function confirmDelete() {
             <Select v-model="formData.department_id" :disabled="!canWrite">
               <SelectTrigger><SelectValue :placeholder="$t('occurrenceProcesses.selectDepartment')" /></SelectTrigger>
               <SelectContent>
-                <SelectItem v-for="d in departments" :key="d.id" :value="d.id">{{ d.name }}</SelectItem>
+                <SelectItem v-for="d in departmentOptions" :key="d.id" :value="d.id">{{ d.name }}</SelectItem>
               </SelectContent>
             </Select>
           </div>
