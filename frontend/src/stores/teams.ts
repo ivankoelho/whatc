@@ -7,6 +7,8 @@ export interface CreateTeamData {
   description?: string
   assignment_strategy?: 'round_robin' | 'load_balanced' | 'manual'
   per_agent_timeout_secs?: number
+  unit_id?: string
+  department_id?: string
 }
 
 export interface UpdateTeamData {
@@ -15,6 +17,8 @@ export interface UpdateTeamData {
   assignment_strategy?: 'round_robin' | 'load_balanced' | 'manual'
   per_agent_timeout_secs?: number
   is_active?: boolean
+  unit_id?: string
+  department_id?: string
 }
 
 export interface FetchTeamsParams {

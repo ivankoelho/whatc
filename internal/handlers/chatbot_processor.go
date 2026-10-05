@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,7 +12,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/ai"
+	"github.com/shridarpatil/whatomate/internal/aitools"
+	"github.com/shridarpatil/whatomate/internal/businesshours"
 	"github.com/shridarpatil/whatomate/internal/contactutil"
+	"github.com/shridarpatil/whatomate/internal/knowledge"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 )
@@ -214,6 +217,14 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	// Clear chatbot tracking since client has replied
 	a.ClearContactChatbotTracking(contact.ID)
 
+	// A tap on the confirmation button of something the AI proposed (Fase 9D): consumed here, it never
+	// reaches the chatbot as a message. It is handled before the other checks because it must be
+	// answered (or deliberately ignored) even if a transfer meanwhile became active.
+	if isAIToolConfirmationButton(buttonID) {
+		a.handleAIToolConfirmationTap(account, contact, buttonID, msg.ID)
+		return
+	}
+
 	// Check for active agent transfer - skip chatbot processing if transferred
 	if a.hasActiveAgentTransfer(account.OrganizationID, contact.ID) {
 		a.Log.Info("Contact has active agent transfer, skipping chatbot processing",
@@ -396,13 +407,18 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	// If no keyword matched, try AI response if enabled
 	if settings.AI.Enabled && settings.AI.Provider != "" && settings.AI.APIKey != "" {
 		a.Log.Info("Attempting AI response", "provider", settings.AI.Provider, "model", settings.AI.Model)
-		aiResponse, err := a.generateAIResponse(settings, session, messageText)
+		reply, err := a.generateAIReply(settings, session, messageText, aiFeatureChatbotReply)
+		aiResponse := reply.Text
 		if err != nil {
 			a.Log.Error("AI response failed", "error", err, "provider", settings.AI.Provider, "model", settings.AI.Model)
 			// Fall through to default response
 		} else if aiResponse != "" {
 			a.Log.Info("AI response generated successfully", "response_length", len(aiResponse))
-			if err := a.sendAndSaveTextMessage(account, contact, aiResponse); err != nil {
+			if len(reply.Buttons) > 0 { // the server's confirmation message, with its buttons
+				if err := a.sendAndSaveInteractiveButtons(account, contact, aiResponse, reply.Buttons); err != nil {
+					a.Log.Error("Failed to send AI confirmation", "error", err, "contact", contact.PhoneNumber)
+				}
+			} else if err := a.sendAndSaveTextMessage(account, contact, aiResponse); err != nil {
 				a.Log.Error("Failed to send AI response", "error", err, "contact", contact.PhoneNumber)
 			}
 			a.logSessionMessage(session.ID, models.DirectionOutgoing, aiResponse, "ai_response")
@@ -849,25 +865,97 @@ type ApiResponse struct {
 	ResponseData map[string]any // Full API response data
 }
 
-// fetchApiResponse fetches a response from an external API, supporting message + buttons
-// and response_mapping for storing API data in session variables.
-//
-// Mirrors fetchAPIContext in seeding implicit variables (phone_number) so flow-step
-// API templates can interpolate {{phone_number}} just like AI-context API templates.
-func (a *App) generateAIResponse(settings *models.ChatbotSettings, session *models.ChatbotSession, userMessage string) (string, error) {
+// generateAIResponse answers userMessage with the organization's configured AI
+// provider. It assembles the system prompt (configured prompt + matched context)
+// and the recent conversation, then calls the provider through the neutral
+// ai.Provider interface (completeAI), which also writes the usage log. feature
+// says which part of Whatc is asking (see aiFeature* constants).
+func (a *App) generateAIResponse(settings *models.ChatbotSettings, session *models.ChatbotSession, userMessage string, feature string) (string, error) {
+	reply, err := a.generateAIReply(settings, session, userMessage, feature)
+	return reply.Text, err
+}
+
+// aiReply is what the AI path wants said to the customer: normally just text, but when the AI
+// proposed an action that needs the customer's confirmation, the SERVER's confirmation message with
+// its buttons. In that case the model's own text is discarded: it never reaches the customer.
+type aiReply struct {
+	Text    string
+	Buttons []map[string]any
+}
+
+// generateAIReply is generateAIResponse with the confirmation case (Fase 9D). Only chatbot_reply can
+// produce buttons; the flow's ai_response node keeps going through generateAIResponse and gets text.
+func (a *App) generateAIReply(settings *models.ChatbotSettings, session *models.ChatbotSession, userMessage string, feature string) (aiReply, error) {
 	// Build context from AIContext entries
 	contextData := a.buildAIContext(settings.OrganizationID, session, userMessage)
 
-	switch settings.AI.Provider {
-	case models.AIProviderOpenAI:
-		return a.generateOpenAIResponse(settings, session, userMessage, contextData)
-	case models.AIProviderAnthropic:
-		return a.generateAnthropicResponse(settings, session, userMessage, contextData)
-	case models.AIProviderGoogle:
-		return a.generateGoogleResponse(settings, session, userMessage, contextData)
-	default:
-		return "", fmt.Errorf("unsupported AI provider: %s", settings.AI.Provider)
+	system := settings.AI.SystemPrompt
+	if contextData != "" {
+		if system != "" {
+			system += "\n\n" + contextData
+		} else {
+			system = contextData
+		}
 	}
+
+	// Knowledge (Fase 8B-3): only when it is on globally AND for this organization. The block
+	// goes after the AIContext and never fails the reply (see buildKnowledgeBlock). With it
+	// off, nothing is queried and the system prompt is exactly what it was.
+	var kb knowledge.Block
+	if a.knowledgeRAGEnabled(settings.OrganizationID) {
+		kb = a.buildKnowledgeBlock(settings, session, userMessage)
+	}
+	if kb.Text != "" {
+		if system != "" {
+			system += "\n\n"
+		}
+		system += kb.Text
+	}
+
+	var messages []ai.Message
+	if settings.AI.IncludeHistory && session != nil {
+		for _, msg := range a.getSessionHistory(session.ID, settings.AI.HistoryLimit) {
+			role := ai.RoleUser
+			if msg.Direction == models.DirectionOutgoing {
+				role = ai.RoleAssistant
+			}
+			messages = append(messages, ai.Message{Role: role, Content: msg.Message})
+		}
+	}
+	messages = append(messages, ai.Message{Role: ai.RoleUser, Content: userMessage})
+
+	out := &aiCallOut{}
+	meta := aiCallMeta{Feature: feature, OrgID: settings.OrganizationID, KnowledgeSources: kb.Sources, Out: out}
+	if session != nil {
+		meta.Account = session.WhatsAppAccount
+		contactID, sessionID := session.ContactID, session.ID
+		meta.ContactID, meta.SessionID = &contactID, &sessionID
+		// The scope of a tool run comes from the session, never from the model. Dormant unless
+		// ai_tools.enabled is on and an organization enabled a catalog tool (see governedTools).
+		meta.Tools = &aiToolsRun{
+			Scope: aitools.Scope{OrganizationID: settings.OrganizationID, ContactID: &contactID, SessionID: &sessionID, WhatsAppAccount: session.WhatsAppAccount},
+			Actor: aitools.AIActor(feature),
+		}
+	}
+
+	resp, err := a.completeAI(context.Background(), settings, meta, ai.Request{
+		Model:       settings.AI.Model,
+		System:      system,
+		Messages:    messages,
+		MaxTokens:   settings.AI.MaxTokens,
+		Temperature: settings.AI.Temperature,
+	})
+	if out.Pending != nil && feature == aiFeatureChatbotReply {
+		// the AI proposed an action: what the customer sees is the server's confirmation, never the
+		// model's words (it may not claim the action happened). It also wins over an error in a later
+		// step of the run: the proposal already exists and the customer must be able to answer it.
+		text, buttons := aiConfirmationButtons(out.Pending)
+		return aiReply{Text: text, Buttons: buttons}, nil
+	}
+	if err != nil {
+		return aiReply{}, err
+	}
+	return aiReply{Text: resp.Text}, nil
 }
 
 // buildAIContext fetches and combines all AI context data
@@ -961,328 +1049,6 @@ func (a *App) fetchAPIContext(apiConfig models.JSONB, session *models.ChatbotSes
 	}
 
 	return string(respBody), nil
-}
-
-// generateOpenAIResponse generates a response using OpenAI API
-func (a *App) generateOpenAIResponse(settings *models.ChatbotSettings, session *models.ChatbotSession, userMessage string, contextData string) (string, error) {
-	url := "https://api.openai.com/v1/chat/completions"
-
-	// Build messages array
-	messages := []map[string]string{}
-
-	// Build system prompt with context
-	systemPrompt := settings.AI.SystemPrompt
-	if contextData != "" {
-		if systemPrompt != "" {
-			systemPrompt = systemPrompt + "\n\n" + contextData
-		} else {
-			systemPrompt = contextData
-		}
-	}
-
-	// Add system prompt if configured
-	if systemPrompt != "" {
-		messages = append(messages, map[string]string{
-			"role":    "system",
-			"content": systemPrompt,
-		})
-	}
-
-	// Add conversation history if enabled
-	if settings.AI.IncludeHistory && session != nil {
-		history := a.getSessionHistory(session.ID, settings.AI.HistoryLimit)
-		for _, msg := range history {
-			role := "user"
-			if msg.Direction == models.DirectionOutgoing {
-				role = "assistant"
-			}
-			messages = append(messages, map[string]string{
-				"role":    role,
-				"content": msg.Message,
-			})
-		}
-	}
-
-	// Add current user message
-	messages = append(messages, map[string]string{
-		"role":    "user",
-		"content": userMessage,
-	})
-
-	payload := map[string]any{
-		"model":      settings.AI.Model,
-		"messages":   messages,
-		"max_tokens": settings.AI.MaxTokens,
-	}
-
-	if settings.AI.Temperature > 0 {
-		payload["temperature"] = settings.AI.Temperature
-	}
-
-	jsonPayload, err := json.Marshal(payload)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal payload: %w", err)
-	}
-
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonPayload))
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+settings.AI.APIKey)
-
-	resp, err := a.HTTPClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, _ := io.ReadAll(resp.Body)
-
-	if resp.StatusCode != 200 {
-		var errResp struct {
-			Error struct {
-				Message string `json:"message"`
-			} `json:"error"`
-		}
-		_ = json.Unmarshal(body, &errResp)
-		return "", fmt.Errorf("OpenAI API error: %s", errResp.Error.Message)
-	}
-
-	var result struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return "", fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	if len(result.Choices) > 0 {
-		return strings.TrimSpace(result.Choices[0].Message.Content), nil
-	}
-
-	return "", fmt.Errorf("no response from OpenAI")
-}
-
-// generateAnthropicResponse generates a response using Anthropic API
-func (a *App) generateAnthropicResponse(settings *models.ChatbotSettings, session *models.ChatbotSession, userMessage string, contextData string) (string, error) {
-	url := "https://api.anthropic.com/v1/messages"
-
-	// Build messages array
-	messages := []map[string]string{}
-
-	// Add conversation history if enabled
-	if settings.AI.IncludeHistory && session != nil {
-		history := a.getSessionHistory(session.ID, settings.AI.HistoryLimit)
-		for _, msg := range history {
-			role := "user"
-			if msg.Direction == models.DirectionOutgoing {
-				role = "assistant"
-			}
-			messages = append(messages, map[string]string{
-				"role":    role,
-				"content": msg.Message,
-			})
-		}
-	}
-
-	// Add current user message
-	messages = append(messages, map[string]string{
-		"role":    "user",
-		"content": userMessage,
-	})
-
-	payload := map[string]any{
-		"model":      settings.AI.Model,
-		"messages":   messages,
-		"max_tokens": settings.AI.MaxTokens,
-	}
-
-	// Build system prompt with context
-	systemPrompt := settings.AI.SystemPrompt
-	if contextData != "" {
-		if systemPrompt != "" {
-			systemPrompt = systemPrompt + "\n\n" + contextData
-		} else {
-			systemPrompt = contextData
-		}
-	}
-
-	// Add system prompt if configured
-	if systemPrompt != "" {
-		payload["system"] = systemPrompt
-	}
-
-	if settings.AI.Temperature > 0 {
-		payload["temperature"] = settings.AI.Temperature
-	}
-
-	jsonPayload, err := json.Marshal(payload)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal payload: %w", err)
-	}
-
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonPayload))
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", settings.AI.APIKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
-
-	resp, err := a.HTTPClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, _ := io.ReadAll(resp.Body)
-
-	if resp.StatusCode != 200 {
-		var errResp struct {
-			Error struct {
-				Message string `json:"message"`
-			} `json:"error"`
-		}
-		_ = json.Unmarshal(body, &errResp)
-		return "", fmt.Errorf("anthropic API error: %s", errResp.Error.Message)
-	}
-
-	var result struct {
-		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"content"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return "", fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	for _, content := range result.Content {
-		if content.Type == "text" {
-			return strings.TrimSpace(content.Text), nil
-		}
-	}
-
-	return "", fmt.Errorf("no text response from Anthropic")
-}
-
-// generateGoogleResponse generates a response using Google Gemini API
-func (a *App) generateGoogleResponse(settings *models.ChatbotSettings, session *models.ChatbotSession, userMessage string, contextData string) (string, error) {
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
-		settings.AI.Model, settings.AI.APIKey)
-
-	// Build contents array
-	contents := []map[string]any{}
-
-	// Add conversation history if enabled
-	if settings.AI.IncludeHistory && session != nil {
-		history := a.getSessionHistory(session.ID, settings.AI.HistoryLimit)
-		for _, msg := range history {
-			role := "user"
-			if msg.Direction == models.DirectionOutgoing {
-				role = "model"
-			}
-			contents = append(contents, map[string]any{
-				"role": role,
-				"parts": []map[string]string{
-					{"text": msg.Message},
-				},
-			})
-		}
-	}
-
-	// Add current user message
-	contents = append(contents, map[string]any{
-		"role": "user",
-		"parts": []map[string]string{
-			{"text": userMessage},
-		},
-	})
-
-	payload := map[string]any{
-		"contents": contents,
-		"generationConfig": map[string]any{
-			"maxOutputTokens": settings.AI.MaxTokens,
-		},
-	}
-
-	// Build system prompt with context
-	systemPrompt := settings.AI.SystemPrompt
-	if contextData != "" {
-		if systemPrompt != "" {
-			systemPrompt = systemPrompt + "\n\n" + contextData
-		} else {
-			systemPrompt = contextData
-		}
-	}
-
-	// Add system instruction if configured
-	if systemPrompt != "" {
-		payload["systemInstruction"] = map[string]any{
-			"parts": []map[string]string{
-				{"text": systemPrompt},
-			},
-		}
-	}
-
-	if settings.AI.Temperature > 0 {
-		payload["generationConfig"].(map[string]any)["temperature"] = settings.AI.Temperature
-	}
-
-	jsonPayload, err := json.Marshal(payload)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal payload: %w", err)
-	}
-
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonPayload))
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := a.HTTPClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, _ := io.ReadAll(resp.Body)
-
-	if resp.StatusCode != 200 {
-		var errResp struct {
-			Error struct {
-				Message string `json:"message"`
-			} `json:"error"`
-		}
-		_ = json.Unmarshal(body, &errResp)
-		return "", fmt.Errorf("google AI API error: %s", errResp.Error.Message)
-	}
-
-	var result struct {
-		Candidates []struct {
-			Content struct {
-				Parts []struct {
-					Text string `json:"text"`
-				} `json:"parts"`
-			} `json:"content"`
-		} `json:"candidates"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return "", fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	if len(result.Candidates) > 0 && len(result.Candidates[0].Content.Parts) > 0 {
-		return strings.TrimSpace(result.Candidates[0].Content.Parts[0].Text), nil
-	}
-
-	return "", fmt.Errorf("no response from Google AI")
 }
 
 // getSessionHistory retrieves recent messages from the session
@@ -1669,53 +1435,10 @@ func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *mode
 	})
 }
 
-// isWithinBusinessHours checks if current time is within configured business hours
+// isWithinBusinessHours checks if current time is within configured business hours. The rule
+// lives in internal/businesshours so the AI's get_business_hours tool shares it.
 func (a *App) isWithinBusinessHours(businessHours models.JSONBArray) bool {
-	now := time.Now()
-	currentDay := int(now.Weekday()) // 0 = Sunday, 1 = Monday, etc.
-	currentTime := now.Format("15:04")
-
-	for _, bh := range businessHours {
-		bhMap, ok := bh.(map[string]any)
-		if !ok {
-			continue
-		}
-
-		// Get day (0-6, Sunday-Saturday)
-		day, ok := bhMap["day"].(float64)
-		if !ok {
-			continue
-		}
-
-		if int(day) != currentDay {
-			continue
-		}
-
-		// Check if enabled for this day
-		enabled, ok := bhMap["enabled"].(bool)
-		if !ok || !enabled {
-			return false // Day exists but is disabled
-		}
-
-		// Get start and end times
-		startTime, ok := bhMap["start_time"].(string)
-		if !ok {
-			continue
-		}
-		endTime, ok := bhMap["end_time"].(string)
-		if !ok {
-			continue
-		}
-
-		// Compare times (simple string comparison works for HH:MM format)
-		if currentTime >= startTime && currentTime <= endTime {
-			return true
-		}
-		return false // Found the day but outside hours
-	}
-
-	// If no matching day found, assume outside business hours
-	return false
+	return businesshours.Within(businessHours, time.Now())
 }
 
 // replyToMessageIDString renders a message's reply target for webhook payloads.

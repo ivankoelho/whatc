@@ -199,3 +199,232 @@ func TestLoad_EnvMapsMultiWordKeys(t *testing.T) {
 	assert.Equal(t, "admin@example.com", cfg.DefaultAdmin.Email)
 	assert.Equal(t, "db.internal", cfg.Database.Host)
 }
+
+// --- xprocess.discovery_enabled: OFF unless explicitly true ---
+
+func TestLoad_XProcessDiscoveryIsOffWhenAbsent(t *testing.T) {
+	cfg, err := config.Load(writeConfig(t, ""))
+	require.NoError(t, err)
+	assert.False(t, cfg.XProcess.DiscoveryEnabled)
+
+	cfg, err = config.Load(writeConfig(t, "[xprocess]\n"))
+	require.NoError(t, err)
+	assert.False(t, cfg.XProcess.DiscoveryEnabled, "an empty [xprocess] section does not enable it")
+
+	cfg, err = config.Load("")
+	require.NoError(t, err)
+	assert.False(t, cfg.XProcess.DiscoveryEnabled, "no config file at all does not enable it")
+}
+
+func TestLoad_XProcessDiscoveryCanBeEnabledFromFileOrEnv(t *testing.T) {
+	cfg, err := config.Load(writeConfig(t, "[xprocess]\ndiscovery_enabled = true\n"))
+	require.NoError(t, err)
+	assert.True(t, cfg.XProcess.DiscoveryEnabled)
+
+	cfg, err = config.Load(writeConfig(t, "[xprocess]\ndiscovery_enabled = false\n"))
+	require.NoError(t, err)
+	assert.False(t, cfg.XProcess.DiscoveryEnabled)
+
+	t.Setenv("WHATOMATE_XPROCESS__DISCOVERY_ENABLED", "true")
+	cfg, err = config.Load(writeConfig(t, ""))
+	require.NoError(t, err)
+	assert.True(t, cfg.XProcess.DiscoveryEnabled, "the environment can enable it")
+
+	// The environment overrides the file in both directions.
+	cfg, err = config.Load(writeConfig(t, "[xprocess]\ndiscovery_enabled = false\n"))
+	require.NoError(t, err)
+	assert.True(t, cfg.XProcess.DiscoveryEnabled)
+}
+
+func TestLoad_XProcessDiscoveryNeverBecomesTrueByAccident(t *testing.T) {
+	for _, v := range []string{"", "false", "0", "False"} {
+		t.Setenv("WHATOMATE_XPROCESS__DISCOVERY_ENABLED", v)
+		cfg, err := config.Load(writeConfig(t, ""))
+		require.NoError(t, err, "value %q", v)
+		assert.False(t, cfg.XProcess.DiscoveryEnabled, "value %q", v)
+	}
+	// Garbage is a configuration error (the server refuses to start), never "on".
+	t.Setenv("WHATOMATE_XPROCESS__DISCOVERY_ENABLED", "banana")
+	_, err := config.Load(writeConfig(t, ""))
+	assert.Error(t, err)
+}
+
+// --- knowledge.rag_enabled: OFF unless explicitly true ---
+
+func TestLoad_KnowledgeRAGIsOffWhenAbsent(t *testing.T) {
+	cfg, err := config.Load(writeConfig(t, ""))
+	require.NoError(t, err)
+	assert.False(t, cfg.Knowledge.RAGEnabled)
+
+	cfg, err = config.Load(writeConfig(t, "[knowledge]\n"))
+	require.NoError(t, err)
+	assert.False(t, cfg.Knowledge.RAGEnabled, "an empty [knowledge] section does not enable it")
+
+	cfg, err = config.Load("")
+	require.NoError(t, err)
+	assert.False(t, cfg.Knowledge.RAGEnabled, "no config file at all does not enable it")
+}
+
+func TestLoad_KnowledgeRAGCanBeEnabledFromFileOrEnv(t *testing.T) {
+	cfg, err := config.Load(writeConfig(t, "[knowledge]\nrag_enabled = true\n"))
+	require.NoError(t, err)
+	assert.True(t, cfg.Knowledge.RAGEnabled)
+
+	t.Setenv("WHATOMATE_KNOWLEDGE__RAG_ENABLED", "true")
+	cfg, err = config.Load(writeConfig(t, ""))
+	require.NoError(t, err)
+	assert.True(t, cfg.Knowledge.RAGEnabled, "the environment can enable it")
+
+	cfg, err = config.Load(writeConfig(t, "[knowledge]\nrag_enabled = false\n"))
+	require.NoError(t, err)
+	assert.True(t, cfg.Knowledge.RAGEnabled, "the environment overrides the file")
+}
+
+func TestLoad_KnowledgeRAGNeverBecomesTrueByAccident(t *testing.T) {
+	for _, v := range []string{"", "false", "0", "False"} {
+		t.Setenv("WHATOMATE_KNOWLEDGE__RAG_ENABLED", v)
+		cfg, err := config.Load(writeConfig(t, ""))
+		require.NoError(t, err, "value %q", v)
+		assert.False(t, cfg.Knowledge.RAGEnabled, "value %q", v)
+	}
+	t.Setenv("WHATOMATE_KNOWLEDGE__RAG_ENABLED", "banana")
+	_, err := config.Load(writeConfig(t, ""))
+	assert.Error(t, err, "garbage is a configuration error, never 'on'")
+}
+
+// --- ai_tools.enabled: OFF unless explicitly true ---
+
+func TestLoad_AIToolsAreOffWhenAbsent(t *testing.T) {
+	cfg, err := config.Load(writeConfig(t, ""))
+	require.NoError(t, err)
+	assert.False(t, cfg.AITools.Enabled)
+
+	cfg, err = config.Load(writeConfig(t, "[ai_tools]\n"))
+	require.NoError(t, err)
+	assert.False(t, cfg.AITools.Enabled, "an empty [ai_tools] section does not enable it")
+
+	cfg, err = config.Load("")
+	require.NoError(t, err)
+	assert.False(t, cfg.AITools.Enabled, "no config file at all does not enable it")
+}
+
+func TestLoad_AIToolsCanBeEnabledFromFileOrEnv(t *testing.T) {
+	cfg, err := config.Load(writeConfig(t, "[ai_tools]\nenabled = true\n"))
+	require.NoError(t, err)
+	assert.True(t, cfg.AITools.Enabled)
+
+	t.Setenv("WHATOMATE_AI_TOOLS__ENABLED", "true")
+	cfg, err = config.Load(writeConfig(t, ""))
+	require.NoError(t, err)
+	assert.True(t, cfg.AITools.Enabled, "the environment can enable it")
+}
+
+func TestLoad_AIToolsNeverBecomeTrueByAccident(t *testing.T) {
+	for _, v := range []string{"", "false", "0", "False"} {
+		t.Setenv("WHATOMATE_AI_TOOLS__ENABLED", v)
+		cfg, err := config.Load(writeConfig(t, ""))
+		require.NoError(t, err, "value %q", v)
+		assert.False(t, cfg.AITools.Enabled, "value %q", v)
+	}
+	t.Setenv("WHATOMATE_AI_TOOLS__ENABLED", "banana")
+	_, err := config.Load(writeConfig(t, ""))
+	assert.Error(t, err, "garbage is a configuration error, never 'on'")
+}
+
+func TestLoad_AIToolsProvidersAreEmptyByDefaultAndNothingIsValidated(t *testing.T) {
+	cfg, err := config.Load(writeConfig(t, ""))
+	require.NoError(t, err)
+	assert.Empty(t, cfg.AITools.Providers)
+	for _, p := range []string{"openai", "anthropic", "google", "groq", ""} {
+		assert.False(t, cfg.AITools.ProviderValidated(p), p)
+	}
+}
+
+func TestLoad_AIToolsProvidersFromFileAndEnv(t *testing.T) {
+	cfg, err := config.Load(writeConfig(t, "[ai_tools]\nproviders = [\"groq\", \"Google\"]\n"))
+	require.NoError(t, err)
+	assert.True(t, cfg.AITools.ProviderValidated("groq"))
+	assert.True(t, cfg.AITools.ProviderValidated("GOOGLE"), "case does not matter")
+	assert.False(t, cfg.AITools.ProviderValidated("openai"))
+
+	t.Setenv("WHATOMATE_AI_TOOLS__PROVIDERS", "openai, anthropic")
+	cfg, err = config.Load(writeConfig(t, ""))
+	require.NoError(t, err)
+	assert.True(t, cfg.AITools.ProviderValidated("openai"))
+	assert.True(t, cfg.AITools.ProviderValidated("anthropic"), "comma separated, spaces ignored")
+	assert.False(t, cfg.AITools.ProviderValidated("groq"))
+
+	t.Setenv("WHATOMATE_AI_TOOLS__PROVIDERS", "")
+	cfg, err = config.Load(writeConfig(t, "[ai_tools]\nproviders = [\"groq\"]\n"))
+	require.NoError(t, err)
+	assert.False(t, cfg.AITools.ProviderValidated(""), "an empty name is never validated")
+}
+
+// --- ai_tools write switch and confirmation parameters (Fase 9D) ---
+
+func TestLoad_AIToolsWriteIsOffByDefaultAndNeverByAccident(t *testing.T) {
+	cfg, err := config.Load(writeConfig(t, ""))
+	require.NoError(t, err)
+	assert.False(t, cfg.AITools.WriteEnabled)
+
+	cfg, err = config.Load(writeConfig(t, "[ai_tools]\nwrite_enabled = true\n"))
+	require.NoError(t, err)
+	assert.True(t, cfg.AITools.WriteEnabled)
+
+	for _, v := range []string{"", "false", "0", "False"} {
+		t.Setenv("WHATOMATE_AI_TOOLS__WRITE_ENABLED", v)
+		cfg, err := config.Load(writeConfig(t, ""))
+		require.NoError(t, err, "value %q", v)
+		assert.False(t, cfg.AITools.WriteEnabled, "value %q", v)
+	}
+	t.Setenv("WHATOMATE_AI_TOOLS__WRITE_ENABLED", "banana")
+	_, err = config.Load(writeConfig(t, ""))
+	assert.Error(t, err, "garbage is a configuration error, never 'on'")
+}
+
+func TestAIToolsConfig_DefaultsAreExactlyTheApprovedNumbers(t *testing.T) {
+	cfg, err := config.Load(writeConfig(t, ""))
+	require.NoError(t, err)
+	c := cfg.AITools
+	assert.Equal(t, 10*time.Minute, c.ConfirmationTTL())
+	assert.Equal(t, 3, c.ProposalLimitPerWindow())
+	assert.Equal(t, 60*time.Minute, c.ProposalWindow())
+	assert.Equal(t, 30*time.Minute, c.DeclineCooldown())
+	assert.Equal(t, 30*time.Second, c.ReconcileInterval())
+	assert.Equal(t, 60*time.Second, c.ReconcileMinAge())
+	assert.Equal(t, 3, c.ReconcileAttempts())
+}
+
+func TestAIToolsConfig_ValuesComeFromFileAndEnvAndFallBackWhenOutOfBounds(t *testing.T) {
+	cfg, err := config.Load(writeConfig(t, "[ai_tools]\nconfirmation_ttl_minutes = 5\nproposal_limit = 7\nproposal_window_minutes = 120\n"+
+		"decline_cooldown_minutes = 0\nreconcile_interval_seconds = 0\nreconcile_min_age_seconds = 90\nreconcile_max_attempts = 5\n"))
+	require.NoError(t, err)
+	c := cfg.AITools
+	assert.Equal(t, 5*time.Minute, c.ConfirmationTTL())
+	assert.Equal(t, 7, c.ProposalLimitPerWindow())
+	assert.Equal(t, 120*time.Minute, c.ProposalWindow())
+	assert.Equal(t, time.Duration(0), c.DeclineCooldown(), "0 means no cooldown, not 'unset'")
+	assert.Equal(t, time.Duration(0), c.ReconcileInterval(), "0 turns the reconciler off")
+	assert.Equal(t, 90*time.Second, c.ReconcileMinAge())
+	assert.Equal(t, 5, c.ReconcileAttempts())
+
+	// outside the bounds: the default, never the bad value
+	cfg, err = config.Load(writeConfig(t, "[ai_tools]\nconfirmation_ttl_minutes = 0\nproposal_limit = 99\nproposal_window_minutes = -5\n"+
+		"decline_cooldown_minutes = 99999\nreconcile_interval_seconds = 99999\nreconcile_min_age_seconds = 1\nreconcile_max_attempts = 0\n"))
+	require.NoError(t, err)
+	c = cfg.AITools
+	assert.Equal(t, 10*time.Minute, c.ConfirmationTTL())
+	assert.Equal(t, 3, c.ProposalLimitPerWindow())
+	assert.Equal(t, 60*time.Minute, c.ProposalWindow())
+	assert.Equal(t, 30*time.Minute, c.DeclineCooldown())
+	assert.Equal(t, 30*time.Second, c.ReconcileInterval())
+	assert.Equal(t, 60*time.Second, c.ReconcileMinAge())
+	assert.Equal(t, 3, c.ReconcileAttempts())
+}
+
+func TestAIToolsConfig_EnvironmentOverridesTheFile(t *testing.T) {
+	t.Setenv("WHATOMATE_AI_TOOLS__CONFIRMATION_TTL_MINUTES", "20")
+	cfg, err := config.Load(writeConfig(t, "[ai_tools]\nconfirmation_ttl_minutes = 5\n"))
+	require.NoError(t, err)
+	assert.Equal(t, 20*time.Minute, cfg.AITools.ConfirmationTTL())
+}

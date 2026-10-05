@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, computed } from 'vue'
+import { onMounted, computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -12,8 +12,10 @@ import { PageHeader, DataTable, CrudFormDialog, DeleteConfirmDialog, IconButton,
 import { unitsService, type Unit } from '@/services/api'
 import { useCrudState } from '@/composables/useCrudState'
 import { toast } from 'vue-sonner'
-import { Plus, Building2, Pencil, Trash2 } from 'lucide-vue-next'
+import { Plus, Building2, Pencil, Trash2, Link2, Download } from 'lucide-vue-next'
 import { getErrorMessage } from '@/lib/api-utils'
+import UnitXProcessLojaDialog from '@/components/settings/UnitXProcessLojaDialog.vue'
+import UnitXProcessImportDialog from '@/components/settings/UnitXProcessImportDialog.vue'
 
 const { t } = useI18n()
 
@@ -48,9 +50,21 @@ const columns = computed<Column<Unit>[]>(() => [
   { key: 'name', label: t('units.columnName') },
   { key: 'cnpj', label: t('units.columnCnpj') },
   { key: 'type', label: t('units.columnType') },
+  { key: 'x2', label: t('units.columnX2') },
   { key: 'active', label: t('units.columnActive'), align: 'center' },
   { key: 'actions', label: t('common.actions'), align: 'right' },
 ])
+
+// Administrative link to an X2 store (picked by hand in its own dialog).
+const x2DialogOpen = ref(false)
+const x2Unit = ref<Unit | null>(null)
+function openX2Dialog(unit: Unit) {
+  x2Unit.value = unit
+  x2DialogOpen.value = true
+}
+
+// Create units from the X2 stores (its own dialog; the link above is a different operation).
+const x2ImportOpen = ref(false)
 
 function openEditDialog(unit: Unit) {
   baseOpenEditDialog(unit, (u) => ({
@@ -120,6 +134,7 @@ async function confirmDelete() {
     <PageHeader :title="$t('units.title')" :description="$t('units.subtitle')" :icon="Building2" icon-gradient="bg-gradient-to-br from-blue-500 to-cyan-600 shadow-blue-500/20" back-link="/settings">
       <template #actions>
         <Button variant="outline" size="sm" @click="openCreateDialog"><Plus class="h-4 w-4 mr-2" />{{ $t('units.addUnit') }}</Button>
+        <Button variant="outline" size="sm" data-testid="units-import-x2" @click="x2ImportOpen = true"><Download class="h-4 w-4 mr-2" />{{ $t('units.import.button') }}</Button>
       </template>
     </PageHeader>
 
@@ -159,11 +174,16 @@ async function confirmDelete() {
                 <template #cell-type="{ item: unit }">
                   <span class="text-muted-foreground">{{ unit.type || '—' }}</span>
                 </template>
+                <template #cell-x2="{ item: unit }">
+                  <span v-if="unit.xprocess_cod_empresa" class="tabular-nums" data-testid="unit-x2-store">X2 {{ unit.xprocess_cod_empresa }}</span>
+                  <span v-else class="text-muted-foreground">—</span>
+                </template>
                 <template #cell-active="{ item: unit }">
                   <Badge :variant="unit.active ? 'success' : 'secondary'">{{ unit.active ? $t('common.yes') : $t('common.no') }}</Badge>
                 </template>
                 <template #cell-actions="{ item: unit }">
                   <div class="flex items-center justify-end gap-1">
+                    <IconButton :icon="Link2" :label="$t('units.x2LinkAction')" class="h-8 w-8" data-testid="unit-x2-link" @click="openX2Dialog(unit)" />
                     <IconButton :icon="Pencil" :label="$t('units.editUnit')" class="h-8 w-8" @click="openEditDialog(unit)" />
                     <IconButton :label="$t('units.deleteTitle')" class="h-8 w-8" @click="openDeleteDialog(unit)">
                       <Trash2 class="h-4 w-4 text-destructive" />
@@ -182,6 +202,9 @@ async function confirmDelete() {
         </div>
       </div>
     </ScrollArea>
+
+    <UnitXProcessLojaDialog v-model:open="x2DialogOpen" :unit="x2Unit" @saved="fetchUnits" />
+    <UnitXProcessImportDialog v-model:open="x2ImportOpen" @imported="fetchUnits" />
 
     <CrudFormDialog
       v-model:open="isDialogOpen"

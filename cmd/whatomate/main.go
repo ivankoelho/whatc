@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/google/uuid"
 	"net/http"
 	"os"
 	"os/signal"
@@ -45,6 +46,8 @@ func main() {
 		runServer(os.Args[2:])
 	case "worker":
 		runWorker(os.Args[2:])
+	case "knowledge":
+		runKnowledge(os.Args[2:])
 	case "version":
 		fmt.Printf("Whatomate %s (built %s)\n", Version, BuildTime)
 	case "help", "-h", "--help":
@@ -65,6 +68,7 @@ Usage:
 Commands:
   server    Start the API server (with optional embedded workers)
   worker    Start background workers only (no API server)
+  knowledge Knowledge base tools (knowledge import-manuals | reindex -org <id>)
   version   Show version information
   help      Show this help message
 
@@ -202,6 +206,16 @@ func runServer(args []string) {
 			lo.Fatal("XProcess integration permission backfill failed", "error", err)
 		}
 
+		// Same window: knowledge is a new resource; only the system admin role gets it.
+		if err := database.BackfillKnowledgePermissions(db, lo); err != nil {
+			lo.Fatal("Knowledge permissions backfill failed", "error", err)
+		}
+
+		// Same window: ai_tools is a new resource; only the system admin role gets it.
+		if err := database.BackfillAIToolsPermissions(db, lo); err != nil {
+			lo.Fatal("AI tools permissions backfill failed", "error", err)
+		}
+
 		// Same window: occurrences.processes is a new resource added after the
 		// what-happened backfill above, so it needs its own guard rather than
 		// piggybacking on that one's already-migrated check.
@@ -228,6 +242,13 @@ func runServer(args []string) {
 		if err := database.EnsureBrandingSettingsRow(db); err != nil {
 			lo.Fatal("Branding settings seed failed", "error", err)
 		}
+
+		// Encrypt AI provider API keys that were stored in plaintext. Idempotent,
+		// verified, never logs a key; with an empty app.encryption_key it changes
+		// nothing and says so.
+		if _, _, err := database.EncryptChatbotAIKeys(db, cfg.App.EncryptionKey, lo); err != nil {
+			lo.Fatal("AI API key encryption failed", "error", err)
+		}
 	}
 
 	// Connect to Redis
@@ -236,6 +257,14 @@ func runServer(args []string) {
 		lo.Fatal("Failed to connect to Redis", "error", err)
 	}
 	lo.Info("Connected to Redis")
+
+	// Drop cached chatbot settings once per start: entries written by an older
+	// version held the AI API key in plaintext, and must not outlive the upgrade.
+	if n, err := handlers.FlushChatbotSettingsCache(context.Background(), rdb); err != nil {
+		lo.Warn("Failed to flush chatbot settings cache", "error", err)
+	} else if n > 0 {
+		lo.Info("Flushed cached chatbot settings", "entries", n)
+	}
 
 	// Initialize job queue
 	jobQueue := queue.NewRedisQueue(rdb, lo)
@@ -280,6 +309,14 @@ func runServer(args []string) {
 	// delivery — without it the hub would fall back to legacy (insecure) behaviour.
 	wsHub.SetConversationAuthorizer(app.CanViewConversationByID)
 
+	// Presence reaper: releases an agent's attendances only after they stay
+	// disconnected past the grace period (reconnects within it change nothing).
+	presenceReaper := handlers.NewPresenceReaper(app, handlers.DefaultPresenceGrace, 10*time.Second)
+	wsHub.SetPresenceListener(func(orgID, userID uuid.UUID, online bool) {
+		presenceReaper.OnPresenceChange(orgID, userID, online)
+		app.BroadcastAgentPresence(orgID, userID, online)
+	})
+
 	// Initialize S3 client for call recordings (optional)
 	var s3Client *storage.S3Client
 	if cfg.Calling.RecordingEnabled && cfg.Storage.S3Bucket != "" {
@@ -294,6 +331,9 @@ func runServer(args []string) {
 
 	// Initialize shared assignment engine (used by both chat and call transfers)
 	assigner := assignment.New(db, rdb, lo)
+	// Presence-aware eligibility: an agent without a live WebSocket never
+	// receives new attendances or calls, whatever their persisted flag says.
+	assigner.SetPresence(wsHub.IsUserOnline)
 	app.Assigner = assigner
 
 	// Initialize CallManager (per-org calling_enabled DB setting controls access)
@@ -353,6 +393,15 @@ func runServer(args []string) {
 	go slaProcessor.Start(slaCtx)
 	lo.Info("SLA processor started")
 
+	// Start presence reaper (sweeps every 10s; grace is 60s)
+	presenceCtx, presenceCancel := context.WithCancel(context.Background())
+	go presenceReaper.Start(presenceCtx)
+
+	// AI tool reconciler (Fase 9D): closes confirmations a crash left in "confirmed". Recovery only,
+	// never an authorization; ai_tools.reconcile_interval_seconds = 0 turns it off.
+	aiToolReconciler := handlers.NewAIToolReconciler(app)
+	go aiToolReconciler.Start(presenceCtx)
+
 	// Start XProcess reconciler (checks once daily, first tick after 2am)
 	xprocessReconciler := handlers.NewXProcessReconciler(app, 15*time.Minute, 2)
 	xprocessCtx, xprocessCancel := context.WithCancel(context.Background())
@@ -402,6 +451,9 @@ func runServer(args []string) {
 	lo.Info("Stopping SLA processor...")
 	slaCancel()
 	slaProcessor.Stop()
+	presenceCancel()
+	presenceReaper.Stop()
+	aiToolReconciler.Stop()
 	lo.Info("SLA processor stopped")
 
 	// Stop XProcess reconciler
@@ -810,10 +862,32 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.PUT("/api/xprocess-integration", app.UpsertXProcessIntegration)
 	g.POST("/api/xprocess-integration/test", app.TestXProcessIntegrationConnection)
 
+	// AI tools governance (Fase 9B): which catalog tools the organization enabled
+	g.GET("/api/ai-tools", app.ListAITools)
+	g.GET("/api/ai-tools/calls", app.ListAIToolCalls)
+	g.GET("/api/ai-tools/confirmations", app.ListAIToolConfirmations)
+	g.PUT("/api/ai-tools/{name}", app.SetAIToolEnabled)
+
+	// Knowledge base (Fase 8A)
+	g.GET("/api/knowledge/search", app.SearchKnowledge)
+	g.GET("/api/knowledge/documents", app.ListKnowledgeDocuments)
+	g.POST("/api/knowledge/documents", app.CreateKnowledgeDocument)
+	g.GET("/api/knowledge/documents/{id}", app.GetKnowledgeDocument)
+	g.GET("/api/knowledge/documents/{id}/chunks", app.ListKnowledgeChunks)
+	g.POST("/api/knowledge/documents/{id}/reindex", app.ReindexKnowledgeDocument)
+	g.POST("/api/knowledge/reindex", app.ReindexKnowledge)
+	g.GET("/api/knowledge/status", app.KnowledgeIndexStatus)
+	g.GET("/api/knowledge/scopes", app.KnowledgeScopes)
+	g.PUT("/api/knowledge/documents/{id}", app.UpdateKnowledgeDocument)
+	g.DELETE("/api/knowledge/documents/{id}", app.DeleteKnowledgeDocument)
+
 	// CRM — unidades
 	g.GET("/api/units", app.ListUnits)
+	g.GET("/api/units/xprocess-lojas", app.ListUnitXProcessLojas)
+	g.POST("/api/units/xprocess-import", app.ImportUnitsFromXProcess)
 	g.POST("/api/units", app.CreateUnit)
 	g.PUT("/api/units/{id}", app.UpdateUnit)
+	g.PUT("/api/units/{id}/xprocess-loja", app.SetUnitXProcessLoja)
 	g.DELETE("/api/units/{id}", app.DeleteUnit)
 
 	// CRM — departamentos
@@ -914,6 +988,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/chatbot/import", app.ChatbotImport)
 
 	// AI Contexts
+	g.POST("/api/chatbot/ai/models", app.ListAIModels)
 	g.GET("/api/chatbot/ai-contexts", app.ListAIContexts)
 	g.POST("/api/chatbot/ai-contexts", app.CreateAIContext)
 	g.GET("/api/chatbot/ai-contexts/{id}", app.GetAIContext)

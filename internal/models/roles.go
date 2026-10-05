@@ -97,6 +97,8 @@ const (
 	ResourceDepartments             = "departments"
 	ResourceSalesOpportunities      = "sales_opportunities"
 	ResourceXProcessIntegration     = "xprocess_integration"
+	ResourceKnowledge               = "knowledge"
+	ResourceAITools                 = "ai_tools"
 )
 
 // PermissionAction constants for available actions
@@ -225,6 +227,14 @@ func DefaultPermissions() []Permission {
 		// X2 ERP Integration
 		{Resource: ResourceXProcessIntegration, Action: ActionRead, Description: "View the X2 ERP integration settings"},
 		{Resource: ResourceXProcessIntegration, Action: ActionWrite, Description: "Configure the X2 ERP integration credential"},
+
+		// Knowledge base (Fase 8A). Admin only until the management screen defines who else.
+		{Resource: ResourceKnowledge, Action: ActionRead, Description: "Search and read the knowledge base"},
+		{Resource: ResourceKnowledge, Action: ActionWrite, Description: "Create, edit and archive knowledge documents"},
+
+		// AI tools governance (Fase 9B). Admin only: who may let the chatbot's AI use a tool.
+		{Resource: ResourceAITools, Action: ActionRead, Description: "View which AI tools are enabled"},
+		{Resource: ResourceAITools, Action: ActionWrite, Description: "Enable or disable AI tools for the organization"},
 
 		// Canned Responses
 		{Resource: ResourceCannedResponses, Action: ActionRead, Description: "View canned responses"},

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -33,6 +34,14 @@ type ChatbotSettingsResponse struct {
 	AIModel                      string            `json:"ai_model"`
 	AIMaxTokens                  int               `json:"ai_max_tokens"`
 	AISystemPrompt               string            `json:"ai_system_prompt"`
+	// AIAPIKeyConfigured says whether a key is stored. The key itself is never
+	// returned, not even masked: the UI only needs to know there is one.
+	AIAPIKeyConfigured bool `json:"ai_api_key_configured"`
+	// KnowledgeEnabled is the organization's own switch for Knowledge in the AI replies;
+	// KnowledgeRAGAvailable says whether the SERVER allows it at all (knowledge.rag_enabled,
+	// read-only: no request can change it). Knowledge is used only when both are true.
+	KnowledgeEnabled      bool `json:"knowledge_enabled"`
+	KnowledgeRAGAvailable bool `json:"knowledge_rag_available"`
 	// SLA Settings
 	SLAEnabled             bool     `json:"sla_enabled"`
 	SLAResponseMinutes     int      `json:"sla_response_minutes"`
@@ -184,11 +193,15 @@ func (a *App) GetChatbotSettings(r *fastglue.Request) error {
 		StrictConversationVisibility: settings.AgentAssignment.StrictConversationVisibility,
 		SignWithAgentName:            settings.AgentAssignment.SignWithAgentName,
 		// AI
-		AIEnabled:      settings.AI.Enabled,
-		AIProvider:     settings.AI.Provider,
-		AIModel:        settings.AI.Model,
-		AIMaxTokens:    settings.AI.MaxTokens,
-		AISystemPrompt: settings.AI.SystemPrompt,
+		AIEnabled:          settings.AI.Enabled,
+		AIProvider:         settings.AI.Provider,
+		AIModel:            settings.AI.Model,
+		AIMaxTokens:        settings.AI.MaxTokens,
+		AISystemPrompt:     settings.AI.SystemPrompt,
+		AIAPIKeyConfigured: settings.AI.APIKey != "",
+		// Knowledge
+		KnowledgeEnabled:      settings.KnowledgeEnabled,
+		KnowledgeRAGAvailable: a.Config != nil && a.Config.Knowledge.RAGEnabled,
 		// SLA Settings
 		SLAEnabled:                 settings.SLA.Enabled,
 		SLAResponseMinutes:         settings.SLA.ResponseMinutes,
@@ -313,6 +326,9 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		AIModel                      *string            `json:"ai_model"`
 		AIMaxTokens                  *int               `json:"ai_max_tokens"`
 		AISystemPrompt               *string            `json:"ai_system_prompt"`
+		// KnowledgeEnabled turns Knowledge on for this organization's AI replies (needs
+		// settings.chatbot:write; it also takes the global knowledge.rag_enabled to have effect).
+		KnowledgeEnabled *bool `json:"knowledge_enabled"`
 		// SLA Settings
 		SLAEnabled                 *bool     `json:"sla_enabled"`
 		SLAResponseMinutes         *int      `json:"sla_response_minutes"`
@@ -408,6 +424,23 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 	aiTouched := req.AIEnabled != nil || req.AIProvider != nil || req.AIAPIKey != nil ||
 		req.AIModel != nil || req.AIMaxTokens != nil || req.AISystemPrompt != nil
 
+	// The AI provider, model and above all the API key are credentials-level
+	// configuration: changing them needs settings.chatbot:write. (The rest of
+	// this endpoint keeps its existing access rules.)
+	if aiTouched {
+		if !a.HasPermission(userID, models.ResourceSettingsChatbot, models.ActionWrite, orgID) {
+			return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Insufficient permissions", nil, "")
+		}
+		if req.AIProvider != nil && *req.AIProvider != "" && !isSupportedAIProvider(string(*req.AIProvider)) {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Unsupported AI provider", nil, "")
+		}
+	}
+
+	// Letting the AI read the organization's Knowledge is as sensitive as the AI settings.
+	if req.KnowledgeEnabled != nil && !a.HasPermission(userID, models.ResourceSettingsChatbot, models.ActionWrite, orgID) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Insufficient permissions", nil, "")
+	}
+
 	// Update fields if provided
 	if req.Enabled != nil {
 		settings.IsEnabled = *req.Enabled
@@ -471,6 +504,9 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 	}
 
 	// AI Settings
+	if req.KnowledgeEnabled != nil {
+		settings.KnowledgeEnabled = *req.KnowledgeEnabled
+	}
 	if req.AIEnabled != nil {
 		settings.AI.Enabled = *req.AIEnabled
 	}
@@ -478,7 +514,16 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		settings.AI.Provider = *req.AIProvider
 	}
 	if req.AIAPIKey != nil && *req.AIAPIKey != "" {
-		settings.AI.APIKey = *req.AIAPIKey
+		enc, err := a.encryptAIKey(*req.AIAPIKey)
+		if errors.Is(err, ErrAIEncryptionKeyUnavailable) {
+			return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable,
+				"AI API keys cannot be stored: app.encryption_key is not configured on the server", nil, aiEncryptionKeyErrorType)
+		}
+		if err != nil {
+			a.Log.Error("Failed to encrypt AI API key", "error", err)
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to store AI API key", nil, "")
+		}
+		settings.AI.APIKey = enc
 	}
 	if req.AIModel != nil {
 		settings.AI.Model = *req.AIModel

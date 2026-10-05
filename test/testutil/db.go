@@ -109,6 +109,7 @@ func runMigrations(db *gorm.DB) error {
 		&models.WhatsAppFlow{},
 		// Chatbot models
 		&models.ChatbotSettings{},
+		&models.AIUsageLog{},
 		&models.KeywordRule{},
 		&models.ChatbotFlow{},
 		&models.ChatbotFlowStep{},
@@ -159,6 +160,13 @@ func runMigrations(db *gorm.DB) error {
 		// X2 ERP integration
 		&models.XProcessIntegration{},
 		&models.SalesOpportunityXProcessLink{},
+		// Knowledge base
+		&models.KnowledgeDocument{},
+		&models.KnowledgeChunk{},
+		// AI tools governance
+		&models.AIToolSetting{},
+		&models.AIToolCall{},
+		&models.AIToolConfirmation{},
 	)
 }
 
@@ -184,6 +192,10 @@ func cleanupTables(db *gorm.DB) {
 		"chatbot_flows",
 		"keyword_rules",
 		"chatbot_settings",
+		"ai_usage_logs",
+		"ai_tool_confirmations",
+		"ai_tool_calls",
+		"ai_tool_settings",
 		"ai_contexts",
 		"agent_transfers",
 		// WhatsApp tables
@@ -222,6 +234,8 @@ func cleanupTables(db *gorm.DB) {
 		// X2 ERP integration
 		"xprocess_integrations",
 		"sales_opportunity_xprocess_links",
+		"knowledge_chunks",
+		"knowledge_documents",
 		// Roles and permissions
 		"role_permissions",
 		"custom_roles",
@@ -260,6 +274,7 @@ func TruncateTables(db *gorm.DB) {
 		"chatbot_flows",
 		"keyword_rules",
 		"chatbot_settings",
+		"ai_usage_logs",
 		"ai_contexts",
 		"agent_transfers",
 		"messages",
@@ -287,6 +302,8 @@ func TruncateTables(db *gorm.DB) {
 		"branding_settings",
 		"xprocess_integrations",
 		"sales_opportunity_xprocess_links",
+		"knowledge_chunks",
+		"knowledge_documents",
 		"role_permissions",
 		"custom_roles",
 		"permissions",

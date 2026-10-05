@@ -258,25 +258,3 @@ func TestFindContactUnscoped_MatchesBrazilianLegacyForm(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, existing.ID, got.ID)
 }
-
-func TestNormalizeDocumento_ValidCPF(t *testing.T) {
-	got, err := NormalizeDocumento("123.456.789-00")
-	require.NoError(t, err)
-	assert.Equal(t, "12345678900", got)
-}
-
-func TestNormalizeDocumento_ValidCNPJ(t *testing.T) {
-	got, err := NormalizeDocumento("07.378.783/0001-90")
-	require.NoError(t, err)
-	assert.Equal(t, "07378783000190", got)
-}
-
-func TestNormalizeDocumento_InvalidLength(t *testing.T) {
-	_, err := NormalizeDocumento("123456789") // 9 digits — neither CPF nor CNPJ
-	assert.Error(t, err)
-}
-
-func TestNormalizeDocumento_Empty(t *testing.T) {
-	_, err := NormalizeDocumento("")
-	assert.Error(t, err)
-}

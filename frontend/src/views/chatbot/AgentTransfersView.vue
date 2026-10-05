@@ -20,7 +20,7 @@ import { useTeamsStore } from '@/stores/teams'
 import { toast } from 'vue-sonner'
 import { useRouter } from 'vue-router'
 import { UserX, Play, MessageSquare, User, Clock, Loader2, Users, UserPlus, AlertTriangle, CheckCircle2, XCircle } from 'lucide-vue-next'
-import { getErrorMessage } from '@/lib/api-utils'
+import { getErrorMessage, isConflictError } from '@/lib/api-utils'
 
 const { t } = useI18n()
 
@@ -192,7 +192,13 @@ async function pickNextTransfer() {
       toast.info(t('agentTransfers.noTransfersInQueueInfo'))
     }
   } catch (error) {
-    toast.error(getErrorMessage(error, t('agentTransfers.failedPickTransfer')))
+    if (isConflictError(error)) {
+      // Someone else took it first: show the real queue, not a stale one.
+      toast.warning(t('agentTransfers.changedByAnother'))
+      await fetchTransfers()
+    } else {
+      toast.error(getErrorMessage(error, t('agentTransfers.failedPickTransfer')))
+    }
   } finally {
     isPicking.value = false
   }
@@ -258,7 +264,13 @@ async function assignTransfer() {
     assignDialogOpen.value = false
     await fetchTransfers()
   } catch (error) {
-    toast.error(getErrorMessage(error, t('agentTransfers.failedAssignTransfer')))
+    if (isConflictError(error)) {
+      toast.warning(t('agentTransfers.changedByAnother'))
+      assignDialogOpen.value = false
+      await fetchTransfers()
+    } else {
+      toast.error(getErrorMessage(error, t('agentTransfers.failedAssignTransfer')))
+    }
   } finally {
     isAssigning.value = false
   }

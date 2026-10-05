@@ -18,6 +18,8 @@ import MessageButtonsEditor from '@/components/shared/MessageButtonsEditor.vue'
 import type { ButtonConfig } from '@/types/flow-preview'
 import { validateWhatsAppButtons } from '@/lib/whatsappButtons'
 import { toast } from 'vue-sonner'
+import { getErrorMessage } from '@/lib/api-utils'
+import { knowledgeRagSwitch } from '@/lib/knowledge'
 import { Bot, Loader2, Brain, X, Clock, AlertTriangle, UserPlus, MessageSquare, Users } from 'lucide-vue-next'
 import { chatbotService } from '@/services/api'
 import { useUsersStore } from '@/stores/users'
@@ -101,22 +103,68 @@ const aiSettings = ref({
   ai_enabled: false,
   ai_provider: '',
   ai_api_key: '',
+  // Whether a key is stored. The key itself is never sent to the browser.
+  ai_api_key_configured: false,
   ai_model: '',
   ai_max_tokens: 500,
-  ai_system_prompt: ''
+  ai_system_prompt: '',
+  // Knowledge in the AI replies: the organization's own switch, and whether the SERVER allows it (read-only)
+  knowledge_enabled: false,
+  knowledge_rag_available: false
 })
 
 const isAIEnabled = ref(false)
+const knowledgeSwitch = computed(() => knowledgeRagSwitch(aiSettings.value.knowledge_rag_available))
 
+// Static suggestions only for the providers that had them before; Groq has none
+// on purpose: its models always come from the provider's own list.
 const aiProviders = [
   { value: 'openai', label: 'OpenAI', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'] },
   { value: 'anthropic', label: 'Anthropic', models: ['claude-3-5-sonnet-latest', 'claude-3-5-haiku-latest', 'claude-3-opus-latest'] },
-  { value: 'google', label: 'Google AI', models: ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-1.5-flash-8b'] }
+  { value: 'google', label: 'Google AI', models: ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-1.5-flash-8b'] },
+  { value: 'groq', label: 'Groq', models: [] as string[] }
 ]
+
+// Models loaded from the provider (POST /chatbot/ai/models), per provider.
+const loadedModels = ref<Record<string, string[]>>({})
+const isLoadingModels = ref(false)
 
 const availableModels = computed(() => {
   const provider = aiProviders.find(p => p.value === aiSettings.value.ai_provider)
-  return provider?.models || []
+  const list = loadedModels.value[aiSettings.value.ai_provider] ?? provider?.models ?? []
+  // Keep the saved model selectable even if the provider no longer lists it.
+  const current = aiSettings.value.ai_model
+  return current && !list.includes(current) ? [current, ...list] : list
+})
+
+const canLoadModels = computed(() =>
+  !!aiSettings.value.ai_provider &&
+  (!!aiSettings.value.ai_api_key || aiSettings.value.ai_api_key_configured)
+)
+
+async function loadAIModels() {
+  const provider = aiSettings.value.ai_provider
+  if (!provider) return
+  isLoadingModels.value = true
+  try {
+    const response = await chatbotService.listAIModels(provider, aiSettings.value.ai_api_key || undefined)
+    const data = response.data.data || response.data
+    loadedModels.value = { ...loadedModels.value, [provider]: (data.models || []).map((m: { id: string }) => m.id) }
+    toast.success(t('chatbotSettings.modelsLoaded', { count: loadedModels.value[provider].length }))
+  } catch (error) {
+    toast.error(getErrorMessage(error, t('chatbotSettings.failedLoadModels')))
+  } finally {
+    isLoadingModels.value = false
+  }
+}
+
+// A key (typed or saved) belongs to one provider: switching provider drops the
+// typed key and the previous provider's model so they are never mixed.
+watch(() => aiSettings.value.ai_provider, (next, prev) => {
+  if (prev !== undefined && prev !== '' && next !== prev) {
+    aiSettings.value.ai_api_key = ''
+    aiSettings.value.ai_model = ''
+  }
 })
 
 watch(isAIEnabled, (newValue) => {
@@ -224,9 +272,12 @@ onMounted(async () => {
         ai_enabled: aiEnabledValue,
         ai_provider: chatbotData.settings.ai_provider || '',
         ai_api_key: '',
+        ai_api_key_configured: chatbotData.settings.ai_api_key_configured === true,
         ai_model: chatbotData.settings.ai_model || '',
         ai_max_tokens: chatbotData.settings.ai_max_tokens || 500,
-        ai_system_prompt: chatbotData.settings.ai_system_prompt || ''
+        ai_system_prompt: chatbotData.settings.ai_system_prompt || '',
+        knowledge_enabled: chatbotData.settings.knowledge_enabled === true,
+        knowledge_rag_available: chatbotData.settings.knowledge_rag_available === true
       }
 
       const slaEnabledValue = chatbotData.settings.sla_enabled === true
@@ -334,17 +385,21 @@ async function saveAISettings() {
       ai_provider: aiSettings.value.ai_provider,
       ai_model: aiSettings.value.ai_model,
       ai_max_tokens: aiSettings.value.ai_max_tokens,
-      ai_system_prompt: aiSettings.value.ai_system_prompt
+      ai_system_prompt: aiSettings.value.ai_system_prompt,
+      knowledge_enabled: aiSettings.value.knowledge_enabled
     }
     if (aiSettings.value.ai_api_key) {
       payload.ai_api_key = aiSettings.value.ai_api_key
     }
     await chatbotService.updateSettings(payload)
     toast.success(t('chatbotSettings.aiSettingsSaved'))
+    if (aiSettings.value.ai_api_key) aiSettings.value.ai_api_key_configured = true
     aiSettings.value.ai_api_key = ''
     refreshActivityLog(aiLogKey)
-  } catch (error) {
-    toast.error(t('chatbotSettings.aiSaveFailed'))
+  } catch (error: any) {
+    toast.error(error?.response?.data?.error_type === 'AIEncryptionKeyUnavailable'
+      ? t('chatbotSettings.aiEncryptionKeyMissing')
+      : t('chatbotSettings.aiSaveFailed'))
   } finally {
     isSubmitting.value = false
   }
@@ -924,7 +979,20 @@ function removeEscalationUser(userId: string) {
                       </Select>
                     </div>
                     <div class="space-y-2">
-                      <Label>{{ $t('chatbotSettings.model') }}</Label>
+                      <div class="flex items-center justify-between">
+                        <Label>{{ $t('chatbotSettings.model') }}</Label>
+                        <Button
+                          variant="link"
+                          size="sm"
+                          class="h-auto p-0 text-xs"
+                          :disabled="!canLoadModels || isLoadingModels"
+                          data-testid="load-ai-models"
+                          @click="loadAIModels"
+                        >
+                          <Loader2 v-if="isLoadingModels" class="mr-1 h-3 w-3 animate-spin" />
+                          {{ $t('chatbotSettings.loadModels') }}
+                        </Button>
+                      </div>
                       <Select v-model="aiSettings.ai_model" :disabled="!aiSettings.ai_provider">
                         <SelectTrigger>
                           <SelectValue :placeholder="$t('chatbotSettings.selectModel') + '...'" />
@@ -946,6 +1014,12 @@ function removeEscalationUser(userId: string) {
                       :placeholder="$t('chatbotSettings.apiKeyPlaceholder') + '...'"
                     />
                     <p class="text-xs text-muted-foreground">{{ $t('chatbotSettings.apiKeyHint') }}</p>
+                    <p v-if="aiSettings.ai_api_key_configured && !aiSettings.ai_api_key" class="text-xs text-emerald-600" data-testid="ai-key-saved">
+                      {{ $t('chatbotSettings.apiKeySaved') }}
+                    </p>
+                    <p v-if="aiSettings.ai_provider && !availableModels.length" class="text-xs text-muted-foreground">
+                      {{ $t('chatbotSettings.loadModelsHint') }}
+                    </p>
                   </div>
 
                   <div class="space-y-2">
@@ -959,6 +1033,19 @@ function removeEscalationUser(userId: string) {
                       v-model="aiSettings.ai_system_prompt"
                       :placeholder="$t('chatbotSettings.systemPromptPlaceholder') + '...'"
                       :rows="3"
+                    />
+                  </div>
+
+                  <div class="flex items-center justify-between gap-4 py-2" data-testid="chatbot-knowledge-switch">
+                    <div>
+                      <p class="font-medium">{{ $t('chatbotSettings.knowledgeTitle') }}</p>
+                      <p class="text-sm text-muted-foreground">{{ $t('chatbotSettings.knowledgeDesc') }}</p>
+                      <p class="text-xs text-muted-foreground mt-1">{{ $t(knowledgeSwitch.hint === 'ready' ? 'chatbotSettings.knowledgeReady' : 'chatbotSettings.knowledgeServerOff') }}</p>
+                    </div>
+                    <Switch
+                      :checked="aiSettings.knowledge_enabled"
+                      :disabled="knowledgeSwitch.disabled"
+                      @update:checked="aiSettings.knowledge_enabled = $event"
                     />
                   </div>
                 </div>

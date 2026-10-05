@@ -29,6 +29,19 @@ type Config struct {
 	Cookie       CookieConfig       `koanf:"cookie"`
 	Calling      CallingConfig      `koanf:"calling"`
 	TTS          TTSConfig          `koanf:"tts"`
+	XProcess     XProcessConfig     `koanf:"xprocess"`
+	Knowledge    KnowledgeConfig    `koanf:"knowledge"`
+	AITools      AIToolsConfig      `koanf:"ai_tools"`
+}
+
+// XProcessConfig holds the switches of the X2 (XProcess) integration.
+type XProcessConfig struct {
+	// DiscoveryEnabled turns on the automatic discovery and linking of X2 orders to
+	// converted opportunities (see handlers.discoverXProcessOrders). It is OFF unless
+	// it is set to true: an absent key or an empty value mean false, and an unparseable
+	// value makes the configuration fail to load (it never turns the switch on).
+	// Reconciling existing links and linking by hand never depend on it.
+	DiscoveryEnabled bool `koanf:"discovery_enabled"`
 }
 
 type TTSConfig struct {
@@ -322,4 +335,100 @@ func setDefaults(cfg *Config) {
 	if cfg.Calling.TransferTimeoutSecs == 0 {
 		cfg.Calling.TransferTimeoutSecs = 120
 	}
+}
+
+// AIToolsConfig holds the global switch of AI tool calling in the chatbot (Fase 9B).
+type AIToolsConfig struct {
+	// Enabled lets the chatbot's AI use tools, but only the ones an administrator enabled for
+	// the organization. It is OFF unless it is set to true: an absent key or an empty value mean
+	// false, and an unparseable value makes the configuration fail to load (it never turns the
+	// switch on). With it off the chatbot behaves exactly as before.
+	Enabled bool `koanf:"enabled"`
+	// Providers lists the AI providers whose tool calling was validated against the real API
+	// (Fase 9C gate). It is EMPTY by default: with no provider listed, tools never run. A provider
+	// is added only after its validation result is recorded as validated. Names are the provider
+	// ids (openai, anthropic, google, groq); in the environment, comma separated.
+	Providers []string `koanf:"providers"`
+
+	// WriteEnabled is the extra switch for tools that change data (Fase 9D). OFF unless set to true.
+	// Even with it on, a write tool needs the customer's confirmation for every action.
+	WriteEnabled bool `koanf:"write_enabled"`
+
+	// Confirmation and reconciliation parameters. A pointer means "not set": the defaults apply,
+	// and so does a value outside its bounds (see the methods below). Nothing is hard-coded beyond
+	// the defaults.
+	ConfirmationTTLMinutes   *int `koanf:"confirmation_ttl_minutes"`
+	ProposalLimit            *int `koanf:"proposal_limit"`
+	ProposalWindowMinutes    *int `koanf:"proposal_window_minutes"`
+	DeclineCooldownMinutes   *int `koanf:"decline_cooldown_minutes"`
+	ReconcileIntervalSeconds *int `koanf:"reconcile_interval_seconds"`
+	ReconcileMinAgeSeconds   *int `koanf:"reconcile_min_age_seconds"`
+	ReconcileMaxAttempts     *int `koanf:"reconcile_max_attempts"`
+}
+
+func boundedInt(v *int, def, min, max int) int {
+	if v == nil || *v < min || *v > max {
+		return def
+	}
+	return *v
+}
+
+// ConfirmationTTL is how long a proposal waits for the customer (default 10 min, 1 to 60). It is
+// also the oldest a confirmed action may be when the reconciler picks it up.
+func (c AIToolsConfig) ConfirmationTTL() time.Duration {
+	return time.Duration(boundedInt(c.ConfirmationTTLMinutes, 10, 1, 60)) * time.Minute
+}
+
+// ProposalLimitPerWindow is how many proposals one contact may get in the window (default 3, 1 to 20).
+func (c AIToolsConfig) ProposalLimitPerWindow() int { return boundedInt(c.ProposalLimit, 3, 1, 20) }
+
+// ProposalWindow is the window of the limit (default 60 min, 1 to 1440).
+func (c AIToolsConfig) ProposalWindow() time.Duration {
+	return time.Duration(boundedInt(c.ProposalWindowMinutes, 60, 1, 1440)) * time.Minute
+}
+
+// DeclineCooldown is the pause after the customer said no (default 30 min, 0 to 1440; 0 = none).
+func (c AIToolsConfig) DeclineCooldown() time.Duration {
+	return time.Duration(boundedInt(c.DeclineCooldownMinutes, 30, 0, 1440)) * time.Minute
+}
+
+// ReconcileInterval is how often the reconciler sweeps (default 30 s, 0 to 3600; 0 = off).
+func (c AIToolsConfig) ReconcileInterval() time.Duration {
+	return time.Duration(boundedInt(c.ReconcileIntervalSeconds, 30, 0, 3600)) * time.Second
+}
+
+// ReconcileMinAge is how long an action must have been "confirmed" before the reconciler touches it
+// (default 60 s, 10 to 3600).
+func (c AIToolsConfig) ReconcileMinAge() time.Duration {
+	return time.Duration(boundedInt(c.ReconcileMinAgeSeconds, 60, 10, 3600)) * time.Second
+}
+
+// ReconcileAttempts is how many times one confirmation is reconciled before it fails (default 3, 1 to 10).
+func (c AIToolsConfig) ReconcileAttempts() int { return boundedInt(c.ReconcileMaxAttempts, 3, 1, 10) }
+
+// ProviderValidated says whether tools may run with the given provider (case-insensitive).
+func (c AIToolsConfig) ProviderValidated(provider string) bool {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if provider == "" {
+		return false
+	}
+	// an environment variable arrives as one string ("groq, google"), a file as a list: accept both
+	for _, entry := range c.Providers {
+		for _, p := range strings.Split(entry, ",") {
+			if strings.ToLower(strings.TrimSpace(p)) == provider {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// KnowledgeConfig holds the global switch of the Knowledge base in the chatbot (Fase 8B-3).
+type KnowledgeConfig struct {
+	// RAGEnabled makes the chatbot's AI replies consult the Knowledge base, but only for
+	// organizations that also turned it on (ChatbotSettings.knowledge_enabled): both must
+	// be true. It is OFF unless it is set to true: an absent key or an empty value mean
+	// false, and an unparseable value makes the configuration fail to load (it never turns
+	// the switch on). With it off the chatbot behaves exactly as before.
+	RAGEnabled bool `koanf:"rag_enabled"`
 }

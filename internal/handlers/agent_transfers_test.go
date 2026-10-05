@@ -162,8 +162,9 @@ func TestApp_ListAgentTransfers_AgentRoleFiltering(t *testing.T) {
 
 	// Create transfers: one assigned to agent, one to other agent, one unassigned
 	_ = createTestTransfer(t, app, org.ID, contact.ID, account.Name, models.TransferStatusActive, &agent.ID)
-	_ = createTestTransfer(t, app, org.ID, contact.ID, account.Name, models.TransferStatusActive, &otherAgent.ID)
-	_ = createTestTransfer(t, app, org.ID, contact.ID, account.Name, models.TransferStatusActive, nil) // Unassigned (general queue)
+	// One active attendance per contact is a database invariant, so each gets its own contact.
+	_ = createTestTransfer(t, app, org.ID, testutil.CreateTestContact(t, app.DB, org.ID).ID, account.Name, models.TransferStatusActive, &otherAgent.ID)
+	_ = createTestTransfer(t, app, org.ID, testutil.CreateTestContact(t, app.DB, org.ID).ID, account.Name, models.TransferStatusActive, nil) // Unassigned (general queue)
 
 	req := testutil.NewGETRequest(t)
 	testutil.SetAuthContext(req, org.ID, agent.ID)
@@ -200,7 +201,11 @@ func TestApp_ListAgentTransfers_Pagination(t *testing.T) {
 
 	// Create multiple transfers
 	for i := 0; i < 5; i++ {
-		createTestTransfer(t, app, org.ID, contact.ID, account.Name, models.TransferStatusActive, nil)
+		c := contact
+		if i > 0 { // one active attendance per contact
+			c = testutil.CreateTestContact(t, app.DB, org.ID)
+		}
+		createTestTransfer(t, app, org.ID, c.ID, account.Name, models.TransferStatusActive, nil)
 	}
 
 	// Request with limit and offset
@@ -693,7 +698,7 @@ func TestApp_PickNextTransfer_FIFO(t *testing.T) {
 
 	transfer2 := &models.AgentTransfer{
 		OrganizationID:  org.ID,
-		ContactID:       contact.ID,
+		ContactID:       testutil.CreateTestContact(t, app.DB, org.ID).ID, // one active attendance per contact
 		WhatsAppAccount: account.Name,
 		PhoneNumber:     "2222222222",
 		Status:          models.TransferStatusActive,
@@ -746,7 +751,7 @@ func TestApp_PickNextTransfer_TeamFiltering(t *testing.T) {
 	require.NoError(t, app.DB.Create(teamTransfer).Error)
 
 	// Create transfer in general queue
-	generalTransfer := createTestTransfer(t, app, org.ID, contact.ID, account.Name, models.TransferStatusActive, nil)
+	generalTransfer := createTestTransfer(t, app, org.ID, testutil.CreateTestContact(t, app.DB, org.ID).ID, account.Name, models.TransferStatusActive, nil)
 
 	// Pick from team queue specifically
 	req := testutil.NewJSONRequest(t, nil)
@@ -852,7 +857,7 @@ func TestApp_ReturnAgentTransfersToQueue(t *testing.T) {
 
 	// Create transfers assigned to the agent
 	transfer1 := createTestTransfer(t, app, org.ID, contact.ID, account.Name, models.TransferStatusActive, &agent.ID)
-	transfer2 := createTestTransfer(t, app, org.ID, contact.ID, account.Name, models.TransferStatusActive, &agent.ID)
+	transfer2 := createTestTransfer(t, app, org.ID, testutil.CreateTestContact(t, app.DB, org.ID).ID, account.Name, models.TransferStatusActive, &agent.ID)
 
 	// Return transfers to queue
 	count := app.ReturnAgentTransfersToQueue(agent.ID, org.ID)

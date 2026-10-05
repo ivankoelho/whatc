@@ -701,9 +701,14 @@ func (a *App) AddRecipientsFromContacts(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Can only add recipients to draft campaigns", nil, "")
 	}
 
+	// Every filter is optional and they combine with AND; at least one is required
+	// so a request can never mean "the whole contact base" by accident.
 	var req struct {
-		DDDs   []string `json:"ddds" validate:"required"`
-		DryRun bool     `json:"dry_run"`
+		DDDs         []string `json:"ddds"`
+		ContactType  string   `json:"contact_type"`
+		UnitID       *string  `json:"unit_id"`
+		DepartmentID *string  `json:"department_id"`
+		DryRun       bool     `json:"dry_run"`
 	}
 	if err := a.decodeRequest(r, &req); err != nil {
 		return nil
@@ -716,19 +721,52 @@ func (a *App) AddRecipientsFromContacts(r *fastglue.Request) error {
 		}
 		prefixes = append(prefixes, "55"+ddd)
 	}
-	if len(prefixes) == 0 {
-		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "At least one DDD is required", nil, "")
+	if req.ContactType != "" && !models.ContactType(req.ContactType).IsValid() {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "contact_type must be one of: cliente, fornecedor, colaborador", nil, "")
+	}
+	// An empty string means "no filter" here (it is not a clear-the-field request).
+	nonEmpty := func(s *string) *string {
+		if s == nil || *s == "" {
+			return nil
+		}
+		return s
+	}
+	placement, ok := a.parseOrgPlacement(r, orgID, nonEmpty(req.UnitID), nonEmpty(req.DepartmentID))
+	if !ok {
+		return nil
+	}
+	if len(prefixes) == 0 && req.ContactType == "" && placement.UnitID == nil && placement.DepartmentID == nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "At least one filter is required: ddds, contact_type, unit_id or department_id", nil, "")
+	}
+
+	query := a.DB.Select("phone_number", "profile_name").
+		Where("organization_id = ?", orgID).
+		Where(`NOT EXISTS (SELECT 1 FROM bulk_message_recipients b
+			WHERE b.campaign_id = ? AND b.deleted_at IS NULL
+			AND regexp_replace(b.phone_number, '\D', '', 'g') = regexp_replace(contacts.phone_number, '\D', '', 'g'))`, id)
+	if len(prefixes) > 0 {
+		query = query.Where(`left(regexp_replace(phone_number, '\D', '', 'g'), 4) IN ?`, prefixes)
+	}
+	if req.ContactType != "" {
+		query = query.Where("contact_type = ?", req.ContactType)
+	}
+	if placement.UnitID != nil {
+		query = query.Where("unit_id = ?", *placement.UnitID)
+	}
+	if placement.DepartmentID != nil {
+		query = query.Where("department_id = ?", *placement.DepartmentID)
+	}
+	// Same rule the worker applies at send time: an opted-out contact never gets a
+	// MARKETING template. Leaving them out here keeps the totals and the failure
+	// count honest instead of listing them as "failed" later.
+	var tmpl models.Template
+	if err := a.DB.Select("category").First(&tmpl, "id = ?", campaign.TemplateID).Error; err == nil && strings.EqualFold(tmpl.Category, "MARKETING") {
+		query = query.Where("marketing_opt_out = ?", false)
 	}
 
 	var contacts []models.Contact
-	if err := a.DB.Select("phone_number", "profile_name").
-		Where("organization_id = ?", orgID).
-		Where("left(regexp_replace(phone_number, '\\D', '', 'g'), 4) IN ?", prefixes).
-		Where(`NOT EXISTS (SELECT 1 FROM bulk_message_recipients b
-			WHERE b.campaign_id = ? AND b.deleted_at IS NULL
-			AND regexp_replace(b.phone_number, '\D', '', 'g') = regexp_replace(contacts.phone_number, '\D', '', 'g'))`, id).
-		Find(&contacts).Error; err != nil {
-		a.Log.Error("Failed to load contacts by DDD", "error", err)
+	if err := query.Find(&contacts).Error; err != nil {
+		a.Log.Error("Failed to load contacts for campaign segment", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to load contacts", nil, "")
 	}
 

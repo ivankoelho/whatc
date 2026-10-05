@@ -12,7 +12,7 @@ import { contactsService, chatbotService, messagesService, customActionsService,
 import { useTagsStore } from '@/stores/tags'
 import { TagBadge } from '@/components/ui/tag-badge'
 import { getTagColorClass } from '@/lib/constants'
-import { getErrorMessage } from '@/lib/api-utils'
+import { getErrorMessage, isConflictError } from '@/lib/api-utils'
 import { compressImage } from '@/lib/imageCompression'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -874,6 +874,14 @@ function handleMobileBack() {
   router.push('/chat')
 }
 
+// 409 from a send means another agent owns this conversation (or just claimed
+// it); the message was NOT sent. Say that, instead of a generic failure.
+function sendFailureMessage(error: unknown): string {
+  return isConflictError(error)
+    ? t('chat.conversationOwnedByAnother')
+    : getErrorMessage(error, t('chat.sendMessageFailed'))
+}
+
 async function sendMessage() {
   if (!messageInput.value.trim() || !contactsStore.currentContact) return
 
@@ -892,7 +900,7 @@ async function sendMessage() {
     await nextTick()
     scrollToBottom()
   } catch (error) {
-    toast.error(getErrorMessage(error, t('chat.sendMessageFailed')))
+    toast.error(sendFailureMessage(error))
   } finally {
     isSending.value = false
   }
@@ -927,7 +935,7 @@ async function retryMessage(message: Message) {
 
     toast.success(t('chat.messageSent'))
   } catch (error) {
-    toast.error(getErrorMessage(error, t('chat.sendMessageFailed')))
+    toast.error(sendFailureMessage(error))
   } finally {
     retryingMessageId.value = null
   }
@@ -1167,7 +1175,7 @@ async function sendCannedResponse() {
     await nextTick()
     scrollToBottom()
   } catch (error) {
-    toast.error(getErrorMessage(error, t('chat.sendMessageFailed')))
+    toast.error(sendFailureMessage(error))
   } finally {
     isSendingCanned.value = false
   }
@@ -2813,6 +2821,7 @@ async function sendMediaMessage() {
       @close="isInfoPanelOpen = false"
       @tags-updated="(tags) => contactsStore.updateContactTags(contactsStore.currentContact!.id, tags)"
       @name-updated="(name) => contactsStore.updateContactName(contactsStore.currentContact!.id, name)"
+      @registration-updated="(registration) => contactsStore.updateContactRegistration(contactsStore.currentContact!.id, registration)"
     />
 
     <!-- Template Params Dialog -->

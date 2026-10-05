@@ -11,16 +11,18 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Skeleton } from '@/components/ui/skeleton'
 import { PageHeader, DataTable, ErrorState, DeleteConfirmDialog, type Column } from '@/components/shared'
-import { TrendingUp, Briefcase, Target, CheckCircle2, XCircle, Percent, AlertTriangle, Wallet, PiggyBank, TrendingDown, Trash2 } from 'lucide-vue-next'
+import { TrendingUp, Briefcase, Target, CheckCircle2, XCircle, Percent, AlertTriangle, Wallet, PiggyBank, TrendingDown, Trash2, Pencil } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { salesOpportunitiesService } from '@/services/api'
 import type { SalesOpportunity } from '@/services/api'
 import { getErrorMessage } from '@/lib/api-utils'
 import { formatDate } from '@/lib/utils'
 import { formatCurrency } from '@/lib/currency'
+import { formatQuantity } from '@/lib/salesUnits'
 import { Doughnut } from '@/lib/charts'
 import SalesOpportunityBoard from '@/components/sales/SalesOpportunityBoard.vue'
 import LoseSalesOpportunityDialog from '@/components/sales/LoseSalesOpportunityDialog.vue'
+import SalesOpportunityDetailsDialog from '@/components/sales/SalesOpportunityDetailsDialog.vue'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -149,10 +151,13 @@ const allColumns = computed<Column<SalesOpportunity>[]>(() => {
     { key: 'contact', label: t('sales.columnContact') },
     { key: 'stage', label: t('sales.columnStage') },
     { key: 'estimated_value', label: t('sales.columnEstimatedValue') },
+    { key: 'quantity', label: t('sales.columnQuantity') },
+    { key: 'realized', label: t('sales.columnRealized') },
     { key: 'status', label: t('sales.columnStatus') },
     { key: 'conversion_source', label: t('sales.columnConversionSource') },
     { key: 'closed_at', label: t('sales.columnClosedDate') },
     { key: 'loss_reason', label: t('sales.columnLossReason') },
+    ...(authStore.hasPermission('sales_opportunities', 'write') ? [{ key: 'actions', label: '', width: 'w-10' }] : []),
   )
   return cols
 })
@@ -221,6 +226,19 @@ async function handleConvert(opportunity: SalesOpportunity) {
   } catch (e) {
     toast.error(getErrorMessage(e, t('sales.conversionFailed')))
   }
+}
+
+// Quantity/realized editing: an open opportunity takes the estimates, a converted one
+// the realized values (the dialog decides by status); lost/cancelled are read-only.
+const detailsOpen = ref(false)
+const detailsTarget = ref<SalesOpportunity | null>(null)
+function openDetails(opportunity: SalesOpportunity) {
+  detailsTarget.value = opportunity
+  detailsOpen.value = true
+}
+function handleDetailsSaved() {
+  boardRef.value?.refresh()
+  fetchWallet()
 }
 
 const loseDialogOpen = ref(false)
@@ -459,6 +477,28 @@ onMounted(fetchWallet)
                 <template #cell-estimated_value="{ item }">
                   {{ formatCurrency(item.estimated_value) }}
                 </template>
+                <template #cell-quantity="{ item }">
+                  {{ formatQuantity(item.estimated_quantity, item.unit_of_measure) }}
+                </template>
+                <template #cell-realized="{ item }">
+                  <span v-if="item.status === 'convertida'">
+                    {{ formatCurrency(item.realized_value) }}<span v-if="item.realized_quantity != null"> · {{ formatQuantity(item.realized_quantity, item.unit_of_measure) }}</span>
+                  </span>
+                  <span v-else>—</span>
+                </template>
+                <template #cell-actions="{ item }">
+                  <Button
+                    v-if="item.status === 'aberta' || item.status === 'convertida'"
+                    data-testid="sales-wallet-edit-details"
+                    variant="ghost"
+                    size="icon"
+                    class="h-7 w-7"
+                    :title="$t('sales.editDetails')"
+                    @click="openDetails(item)"
+                  >
+                    <Pencil class="h-3.5 w-3.5" />
+                  </Button>
+                </template>
                 <template #cell-status="{ item }">
                   <Badge :variant="item.status === 'convertida' ? 'success' : item.status === 'aberta' ? 'outline' : 'destructive'">
                     {{ $t(STATUS_BADGE_LABEL_KEY[item.status]) }}
@@ -482,6 +522,13 @@ onMounted(fetchWallet)
         </ScrollArea>
       </TabsContent>
     </Tabs>
+
+    <SalesOpportunityDetailsDialog
+      v-if="detailsTarget"
+      v-model:open="detailsOpen"
+      :opportunity="detailsTarget"
+      @saved="handleDetailsSaved"
+    />
 
     <LoseSalesOpportunityDialog
       v-model:open="loseDialogOpen"

@@ -5,11 +5,12 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useTagsStore } from '@/stores/tags'
 import { useUsersStore } from '@/stores/users'
-import { contactsService, accountsService, type Tag } from '@/services/api'
+import { contactsService, accountsService, unitsService, departmentsService, type Tag, type Unit, type Department } from '@/services/api'
 import type { Contact } from '@/stores/contacts'
 import { toast } from 'vue-sonner'
 import { getErrorMessage } from '@/lib/api-utils'
 import { getTagColorClass } from '@/lib/constants'
+import { CONTACT_TYPES, showsPlacement, placementPayload } from '@/lib/contact-registration'
 import { useUnsavedChangesGuard } from '@/composables/useUnsavedChangesGuard'
 import DetailPageLayout from '@/components/shared/DetailPageLayout.vue'
 import MetadataPanel from '@/components/shared/MetadataPanel.vue'
@@ -81,6 +82,9 @@ const tagSelectorOpen = ref(false)
 const agentSelectorOpen = ref(false)
 
 const accounts = ref<{ id: string; name: string; phone_number: string }[]>([])
+const units = ref<Unit[]>([])
+const departments = ref<Department[]>([])
+const NONE = 'none' // the Select cannot hold an empty value
 
 const { showLeaveDialog, confirmLeave, cancelLeave } = useUnsavedChangesGuard(hasChanges)
 
@@ -91,6 +95,10 @@ const form = ref({
   profile_name: '',
   phone_number: '',
   whatsapp_account: '',
+  contact_type: 'cliente' as string,
+  cpf_cnpj: '',
+  unit_id: NONE as string,
+  department_id: NONE as string,
   tags: [] as string[],
   assigned_user_id: '' as string,
 })
@@ -129,6 +137,10 @@ function syncForm() {
     profile_name: contact.value.profile_name || '',
     phone_number: contact.value.phone_number,
     whatsapp_account: contact.value.whatsapp_account || '',
+    contact_type: contact.value.contact_type || 'cliente',
+    cpf_cnpj: contact.value.cpf_cnpj || '',
+    unit_id: contact.value.unit_id || NONE,
+    department_id: contact.value.department_id || NONE,
     tags: contact.value.tags ? [...contact.value.tags] : [],
     assigned_user_id: contact.value.assigned_user_id || '',
   }
@@ -147,7 +159,18 @@ async function save() {
     const payload: Record<string, any> = {
       profile_name: form.value.profile_name,
       whatsapp_account: form.value.whatsapp_account,
+      contact_type: form.value.contact_type,
+      ...placementPayload(
+        form.value.contact_type,
+        form.value.unit_id === NONE ? '' : form.value.unit_id,
+        form.value.department_id === NONE ? '' : form.value.department_id,
+      ),
       tags: form.value.tags,
+    }
+    // Only send the document when it was edited: with number masking on, the
+    // value shown is masked and must not be written back.
+    if (form.value.cpf_cnpj !== (contact.value.cpf_cnpj || '')) {
+      payload.cpf_cnpj = form.value.cpf_cnpj
     }
     if (form.value.assigned_user_id) {
       payload.assigned_user_id = form.value.assigned_user_id
@@ -207,6 +230,19 @@ function selectAgent(userId: string | null) {
   agentSelectorOpen.value = false
 }
 
+async function fetchPlacementOptions() {
+  // Both lists are optional context; a user without units/departments access
+  // simply gets empty selects.
+  try {
+    const res = await unitsService.list()
+    units.value = ((res.data as any).data || res.data).units || []
+  } catch { /* no access */ }
+  try {
+    const res = await departmentsService.list()
+    departments.value = ((res.data as any).data || res.data).departments || []
+  } catch { /* no access */ }
+}
+
 async function fetchAccounts() {
   try {
     const response = await accountsService.list()
@@ -221,6 +257,7 @@ onMounted(async () => {
   await Promise.all([
     loadContact(),
     fetchAccounts(),
+    fetchPlacementOptions(),
     tagsStore.fetchTags().catch(() => {}),
     usersStore.fetchUsers().catch(() => {}),
   ])
@@ -302,6 +339,43 @@ onMounted(async () => {
                 <SelectItem v-for="account in accounts" :key="account.id" :value="account.name">
                   {{ account.name }} ({{ account.phone_number }})
                 </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div class="space-y-1.5">
+            <Label class="text-xs">{{ $t('contacts.type') }}</Label>
+            <Select v-model="form.contact_type" :disabled="!canWrite">
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem v-for="ct in CONTACT_TYPES" :key="ct" :value="ct">{{ $t('contacts.types.' + ct) }}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div class="space-y-1.5">
+            <Label class="text-xs">{{ $t('contacts.document') }}</Label>
+            <Input v-model="form.cpf_cnpj" :disabled="!canWrite" :placeholder="$t('contacts.documentPlaceholder')" />
+          </div>
+
+          <div v-if="showsPlacement(form.contact_type)" class="space-y-1.5">
+            <Label class="text-xs">{{ $t('contacts.unit') }}</Label>
+            <Select v-model="form.unit_id" :disabled="!canWrite">
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem :value="NONE">{{ $t('contacts.noneSelected') }}</SelectItem>
+                <SelectItem v-for="u in units" :key="u.id" :value="u.id">{{ u.name }}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div v-if="showsPlacement(form.contact_type)" class="space-y-1.5">
+            <Label class="text-xs">{{ $t('contacts.department') }}</Label>
+            <Select v-model="form.department_id" :disabled="!canWrite">
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem :value="NONE">{{ $t('contacts.noneSelected') }}</SelectItem>
+                <SelectItem v-for="d in departments" :key="d.id" :value="d.id">{{ d.name }}</SelectItem>
               </SelectContent>
             </Select>
           </div>

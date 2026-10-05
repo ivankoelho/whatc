@@ -7,11 +7,14 @@ import { Plus, Sparkles } from 'lucide-vue-next'
 import {
   salesOpportunitiesService,
   salesOpportunityXProcessCandidatesService,
+  salesOpportunityXProcessLinkService,
+  type SalesOpportunityXProcessLink,
   type SalesOpportunity,
   type SalesOpportunityStage,
   type SalesOpportunityXProcessCandidate,
 } from '@/services/api'
 import { formatCurrency } from '@/lib/currency'
+import { formatQuantity } from '@/lib/salesUnits'
 import { formatDate } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth'
 import CreateSalesOpportunityDialog from '@/components/sales/CreateSalesOpportunityDialog.vue'
@@ -36,8 +39,25 @@ const linkDialogOpen = ref(false)
 const linkDialogOpportunityId = ref('')
 const linkDialogPrefill = ref<{ numPedido: string; documento: string } | null>(null)
 
+// The X2 order of each opportunity that has one (number, status and freight).
+// Freight is the order's own figure, shown apart: the confirmed value never includes it.
+const linksByOpportunity = ref<Record<string, SalesOpportunityXProcessLink | null>>({})
+
+async function loadLink(opp: SalesOpportunity) {
+  if (!opp.xprocess_num_pedido) return
+  try {
+    const res = await salesOpportunityXProcessLinkService.get(opp.id)
+    linksByOpportunity.value[opp.id] = res.data.data
+  } catch {
+    linksByOpportunity.value[opp.id] = null
+  }
+}
+
 async function loadCandidates(opp: SalesOpportunity) {
-  if (opp.status !== 'aberta') return
+  // Open ones, and converted ones with no order linked yet: an agent may convert
+  // before the X2 order exists (X2 is D-1) and link it when it shows up.
+  const convertedWithoutOrder = opp.status === 'convertida' && !opp.xprocess_num_pedido
+  if (opp.status !== 'aberta' && !convertedWithoutOrder) return
   try {
     const res = await salesOpportunityXProcessCandidatesService.list(opp.id)
     candidatesByOpportunity.value[opp.id] = res.data.data.candidates
@@ -50,6 +70,12 @@ async function loadCandidates(opp: SalesOpportunity) {
 function openLinkDialog(opp: SalesOpportunity, candidate: SalesOpportunityXProcessCandidate) {
   linkDialogOpportunityId.value = opp.id
   linkDialogPrefill.value = { numPedido: candidate.num_pedido, documento: opp.contact?.cpf_cnpj ?? '' }
+  linkDialogOpen.value = true
+}
+
+function openRegisterDialog(opp: SalesOpportunity) {
+  linkDialogOpportunityId.value = opp.id
+  linkDialogPrefill.value = null
   linkDialogOpen.value = true
 }
 
@@ -99,7 +125,10 @@ async function load() {
   try {
     const res = await salesOpportunitiesService.list({ contact_id: props.contactId })
     opportunities.value = res.data.data.opportunities
-    for (const opp of opportunities.value) loadCandidates(opp)
+    for (const opp of opportunities.value) {
+      loadCandidates(opp)
+      loadLink(opp)
+    }
   } finally {
     loading.value = false
   }
@@ -135,8 +164,46 @@ defineExpose({ refresh: load })
           <Badge :variant="statusVariant(opp)" class="shrink-0 text-xs">{{ statusLabel(opp) }}</Badge>
         </div>
         <p class="text-sm mt-1 font-semibold">{{ formatCurrency(opp.estimated_value) }}</p>
+        <p v-if="opp.estimated_quantity != null" class="text-xs mt-0.5 text-muted-foreground">
+          {{ formatQuantity(opp.estimated_quantity, opp.unit_of_measure) }}
+        </p>
+        <p v-if="opp.status === 'convertida' && (opp.realized_value != null || opp.realized_quantity != null)" class="text-xs mt-0.5 text-muted-foreground">
+          {{ t('sales.realizedLabel') }}: {{ formatCurrency(opp.realized_value) }}<span v-if="opp.realized_quantity != null"> · {{ formatQuantity(opp.realized_quantity, opp.unit_of_measure) }}</span>
+        </p>
         <p v-if="opp.interest" class="text-xs mt-0.5 truncate text-muted-foreground">{{ opp.interest }}</p>
         <p v-if="conversionSourceLabel(opp)" class="text-xs mt-0.5 text-muted-foreground">{{ conversionSourceLabel(opp) }}</p>
+
+        <!-- The X2 order tied to this opportunity. Freight is the order's own
+             figure, apart from the confirmed value above (which never includes it). -->
+        <div v-if="linksByOpportunity[opp.id]" class="mt-1 text-xs text-muted-foreground" data-testid="sales-xprocess-link-summary">
+          <p>
+            {{ t('xprocessLink.numPedido') }} {{ linksByOpportunity[opp.id]!.num_pedido }}
+            <span v-if="linksByOpportunity[opp.id]!.status_xprocess"> · {{ linksByOpportunity[opp.id]!.status_xprocess }}</span>
+            <span v-if="linksByOpportunity[opp.id]!.valor_frete != null" data-testid="sales-xprocess-freight">
+              · {{ t('xprocessLink.valorFrete') }} {{ formatCurrency(linksByOpportunity[opp.id]!.valor_frete) }}
+            </span>
+          </p>
+          <!-- The store of the order: the local unit when an administrator mapped it,
+               else the X2 code (clearly an X2 code, not a unit). Never required. -->
+          <p v-if="linksByOpportunity[opp.id]!.cod_empresa" data-testid="sales-xprocess-store">
+            {{ t('xprocessLink.loja') }}: {{ linksByOpportunity[opp.id]!.unit_name || t('xprocessLink.lojaX2', { cod: linksByOpportunity[opp.id]!.cod_empresa }) }}
+          </p>
+          <p v-if="linksByOpportunity[opp.id]!.link_source === 'auto'" :title="linksByOpportunity[opp.id]!.match_reason">
+            {{ t('xprocessLink.autoLinked') }}
+          </p>
+        </div>
+
+        <!-- Converted before the order existed (X2 is D-1): register its number by hand. -->
+        <Button
+          v-if="canLinkXProcess && opp.status === 'convertida' && !opp.xprocess_num_pedido"
+          variant="outline"
+          size="sm"
+          class="h-6 px-2 mt-1 text-xs"
+          data-testid="sales-xprocess-register-converted"
+          @click.stop.prevent="openRegisterDialog(opp)"
+        >
+          {{ t('xprocessLink.register') }}
+        </Button>
 
         <!-- Spec item G: purchase found for this customer after the
              opportunity was opened, not yet linked to anything. Linking is
@@ -152,6 +219,9 @@ defineExpose({ refresh: load })
             {{ t('sales.xprocessCandidateHint', { date: formatDate(candidate.data_venda) }) }}
           </p>
           <p class="text-muted-foreground mt-0.5">{{ t('xprocessLink.numPedido') }} {{ candidate.num_pedido }} · {{ formatCurrency(candidate.valor_vendido) }}</p>
+          <p v-if="candidate.cod_empresa" class="text-muted-foreground" data-testid="sales-candidate-store">
+            {{ t('xprocessLink.loja') }}: {{ candidate.unit_name || t('xprocessLink.lojaX2', { cod: candidate.cod_empresa }) }}
+          </p>
           <Button v-if="canLinkXProcess" variant="outline" size="sm" class="h-6 px-2 mt-1 text-xs" @click="openLinkDialog(opp, candidate)">
             {{ t('sales.xprocessCandidateLink') }}
           </Button>

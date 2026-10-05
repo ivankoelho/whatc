@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useRolesStore } from '@/stores/roles'
 import { toast } from 'vue-sonner'
 import { getErrorMessage } from '@/lib/api-utils'
+import { unitsService, departmentsService, type Unit, type Department } from '@/services/api'
 import { useUnsavedChangesGuard } from '@/composables/useUnsavedChangesGuard'
 import DetailPageLayout from '@/components/shared/DetailPageLayout.vue'
 import MetadataPanel from '@/components/shared/MetadataPanel.vue'
@@ -68,6 +69,10 @@ const isSuperAdmin = computed(() => authStore.user?.is_super_admin || false)
 const isSelf = computed(() => user.value?.id === currentUserId.value)
 const isMember = computed(() => user.value?.is_member || false)
 
+const units = ref<Unit[]>([])
+const departments = ref<Department[]>([])
+const NONE = 'none' // the Select cannot hold an empty value
+
 const form = ref({
   full_name: '',
   email: '',
@@ -76,6 +81,8 @@ const form = ref({
   is_active: true,
   is_super_admin: false,
   xprocess_seller_code: '',
+  unit_id: NONE as string,
+  department_id: NONE as string,
 })
 
 const breadcrumbs = computed(() => [
@@ -113,6 +120,8 @@ function syncForm() {
     is_active: user.value.is_active,
     is_super_admin: user.value.is_super_admin || false,
     xprocess_seller_code: user.value.xprocess_seller_code || '',
+    unit_id: user.value.unit_id || NONE,
+    department_id: user.value.department_id || NONE,
   }
 }
 
@@ -145,6 +154,13 @@ async function save() {
       is_active: form.value.is_active,
       xprocess_seller_code: form.value.xprocess_seller_code || undefined,
     }
+    // Only send what changed: unit and department take users:write on the server.
+    if (form.value.unit_id !== (user.value.unit_id || NONE)) {
+      data.unit_id = form.value.unit_id === NONE ? '' : form.value.unit_id
+    }
+    if (form.value.department_id !== (user.value.department_id || NONE)) {
+      data.department_id = form.value.department_id === NONE ? '' : form.value.department_id
+    }
     if (form.value.password) data.password = form.value.password
     if (isSuperAdmin.value) data.is_super_admin = form.value.is_super_admin
 
@@ -172,8 +188,19 @@ async function deleteUser() {
   deleteDialogOpen.value = false
 }
 
+async function fetchPlacementOptions() {
+  try {
+    const res = await unitsService.list()
+    units.value = ((res.data as any).data || res.data).units || []
+  } catch { /* no access */ }
+  try {
+    const res = await departmentsService.list()
+    departments.value = ((res.data as any).data || res.data).departments || []
+  } catch { /* no access */ }
+}
+
 onMounted(async () => {
-  await Promise.all([loadUser(), rolesStore.fetchRoles()])
+  await Promise.all([loadUser(), rolesStore.fetchRoles(), fetchPlacementOptions()])
 })
 </script>
 
@@ -264,6 +291,26 @@ onMounted(async () => {
                     <Badge v-if="role.is_system" variant="secondary" class="text-xs">{{ $t('users.system') }}</Badge>
                   </div>
                 </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div class="space-y-1.5">
+            <Label class="text-xs">{{ $t('users.unit') }}</Label>
+            <Select v-model="form.unit_id" :disabled="!canWrite || isMember">
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem :value="NONE">{{ $t('users.noneSelected') }}</SelectItem>
+                <SelectItem v-for="u in units" :key="u.id" :value="u.id">{{ u.name }}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div class="space-y-1.5">
+            <Label class="text-xs">{{ $t('users.department') }}</Label>
+            <Select v-model="form.department_id" :disabled="!canWrite || isMember">
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem :value="NONE">{{ $t('users.noneSelected') }}</SelectItem>
+                <SelectItem v-for="d in departments" :key="d.id" :value="d.id">{{ d.name }}</SelectItem>
               </SelectContent>
             </Select>
           </div>

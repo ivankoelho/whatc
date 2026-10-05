@@ -70,8 +70,8 @@ type ClientInactivityConfig struct {
 // AIConfig holds AI provider settings
 type AIConfig struct {
 	Enabled        bool       `gorm:"column:ai_enabled;default:false" json:"ai_enabled"`
-	Provider       AIProvider `gorm:"column:ai_provider;size:20" json:"ai_provider"` // openai, anthropic, google
-	APIKey         string     `gorm:"column:ai_api_key;type:text" json:"-"`          // encrypted
+	Provider       AIProvider `gorm:"column:ai_provider;size:20" json:"ai_provider"` // openai, anthropic, google, groq
+	APIKey         string     `gorm:"column:ai_api_key;type:text" json:"-"`          // ciphertext ("enc:..."); decrypted only by handlers.resolveAIAPIKey
 	Model          string     `gorm:"column:ai_model;size:100" json:"ai_model"`
 	MaxTokens      int        `gorm:"column:ai_max_tokens;default:500" json:"ai_max_tokens"`
 	Temperature    float64    `gorm:"column:ai_temperature;type:decimal(3,2);default:0.7" json:"ai_temperature"`
@@ -129,6 +129,13 @@ type ChatbotSettings struct {
 	SLA              SLAConfig              `gorm:"embedded"`
 	ClientInactivity ClientInactivityConfig `gorm:"embedded"`
 	AI               AIConfig               `gorm:"embedded"`
+
+	// KnowledgeEnabled lets this organization's chatbot AI replies use the Knowledge base
+	// (Fase 8B-3). It only counts on the organization's DEFAULT row (whats_app_account = '')
+	// and only together with the global knowledge.rag_enabled: both must be true. Opt-in:
+	// the column is added NOT NULL DEFAULT false, so every existing organization starts
+	// with it off.
+	KnowledgeEnabled bool `gorm:"column:knowledge_enabled;not null;default:false" json:"knowledge_enabled"`
 
 	// Session settings
 	SessionTimeoutMins int        `gorm:"default:30" json:"session_timeout_minutes"`
@@ -332,9 +339,12 @@ type AgentTransfer struct {
 	TeamID              *uuid.UUID     `gorm:"type:uuid;index" json:"team_id,omitempty"`          // Team queue (null = general queue)
 	TransferredByUserID *uuid.UUID     `gorm:"type:uuid" json:"transferred_by_user_id,omitempty"` // User who initiated the transfer (null for system)
 	Notes               string         `gorm:"type:text" json:"notes"`
-	TransferredAt       time.Time      `gorm:"autoCreateTime" json:"transferred_at"`
-	ResumedAt           *time.Time     `json:"resumed_at,omitempty"`
-	ResumedBy           *uuid.UUID     `gorm:"type:uuid" json:"resumed_by,omitempty"`
+	// RoutingReason is why a flow transfer node routed here (the RoutingReason* constants); NULL
+	// when the transfer did not come from a flow transfer node.
+	RoutingReason *string    `gorm:"size:50" json:"routing_reason,omitempty"`
+	TransferredAt time.Time  `gorm:"autoCreateTime" json:"transferred_at"`
+	ResumedAt     *time.Time `json:"resumed_at,omitempty"`
+	ResumedBy     *uuid.UUID `gorm:"type:uuid" json:"resumed_by,omitempty"`
 
 	// SLA Tracking (embedded - all fields stored in same table)
 	SLA SLATracking `gorm:"embedded"`

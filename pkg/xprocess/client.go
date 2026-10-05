@@ -65,6 +65,9 @@ type PedidoItem struct {
 	CodVendedor string  `json:"cod_vendedor"`
 	Status      string  `json:"status"`
 	Total       string  `json:"total"` // BR decimal, comma separator — see ParseDecimalBR
+	// VlFrete is the freight allotted to this line (BR decimal). It is NOT part of
+	// Total (Total = Subtotal - Desconto); the pedido's freight is the sum over its lines.
+	VlFrete   string  `json:"vl_frete"`
 	DataVenda   *string `json:"data_venda"`
 }
 
@@ -230,6 +233,8 @@ type PedidoResumo struct {
 	Status      string
 	DataVenda   *string
 	ValorTotal  float64
+	// ValorFrete is the sum of the lines' freight, kept apart from ValorTotal.
+	ValorFrete float64
 	Itens       []PedidoItem
 }
 
@@ -256,6 +261,13 @@ func SummarizePedido(items []PedidoItem) (PedidoResumo, error) {
 			return PedidoResumo{}, fmt.Errorf("xprocess: failed to parse item total %q: %w", item.Total, err)
 		}
 		resumo.ValorTotal += v
+	}
+	// Freight is informational: an empty or malformed value counts as zero instead of
+	// failing the whole reconciliation.
+	for _, item := range items {
+		if f, err := ParseDecimalBR(item.VlFrete); err == nil {
+			resumo.ValorFrete += f
+		}
 	}
 	return resumo, nil
 }
@@ -285,4 +297,51 @@ func GroupPedidos(items []PedidoItem) ([]PedidoResumo, error) {
 		resumos = append(resumos, resumo)
 	}
 	return resumos, nil
+}
+
+// Loja is one store (company) of GET /api/lojas. The API has no "active" flag and no
+// pagination (32 stores in the real sample), and cnpj_empresa comes with punctuation.
+type Loja struct {
+	CodEmpresa         string `json:"cod_empresa"`
+	RazaoSocialEmpresa string `json:"razao_social_empresa"`
+	CNPJEmpresa        string `json:"cnpj_empresa"`
+}
+
+type lojasResponse struct {
+	OK    bool   `json:"ok"`
+	Lojas []Loja `json:"lojas"`
+}
+
+// ListarLojas returns every store of the X2 company (GET /api/lojas, read-only).
+// Like everything else in X2 it is a D-1 snapshot.
+func (c *Client) ListarLojas(ctx context.Context, apiKey string) ([]Loja, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/lojas", nil)
+	if err != nil {
+		return nil, fmt.Errorf("xprocess: failed to build request: %w", err)
+	}
+	req.Header.Set("x-api-key", apiKey)
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("xprocess: request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, fmt.Errorf("xprocess: failed to read response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("xprocess: unexpected status %d: %s", resp.StatusCode, truncate(string(body), 300))
+	}
+
+	var parsed lojasResponse
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return nil, fmt.Errorf("xprocess: failed to parse response: %w", err)
+	}
+	// "ok": false with a 2xx status would otherwise read as "no stores".
+	if !parsed.OK {
+		return nil, fmt.Errorf("xprocess: stores response is not ok: %s", truncate(string(body), 300))
+	}
+	return parsed.Lojas, nil
 }

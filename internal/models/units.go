@@ -8,7 +8,7 @@ import "github.com/google/uuid"
 // them costs a UI change, not a second migration.
 type Unit struct {
 	BaseModel
-	OrganizationID uuid.UUID `gorm:"type:uuid;index;not null;uniqueIndex:idx_units_org_name,where:deleted_at IS NULL;uniqueIndex:idx_units_org_cnpj,where:cnpj <> '' AND deleted_at IS NULL" json:"organization_id"`
+	OrganizationID uuid.UUID `gorm:"type:uuid;index;not null;uniqueIndex:idx_units_org_name,where:deleted_at IS NULL;uniqueIndex:idx_units_org_cnpj,where:cnpj <> '' AND deleted_at IS NULL;uniqueIndex:idx_units_org_xprocess_loja,where:xprocess_cod_empresa IS NOT NULL AND deleted_at IS NULL" json:"organization_id"`
 	Name           string    `gorm:"size:255;not null;uniqueIndex:idx_units_org_name,where:deleted_at IS NULL" json:"name"`
 	// Code is the legacy store code, kept in the table but no longer edited:
 	// CNPJ replaced it as the unit's identifier for integrations.
@@ -20,6 +20,14 @@ type Unit struct {
 	Phone           string     `gorm:"size:50" json:"phone,omitempty"`
 	BusinessHoursID *uuid.UUID `gorm:"type:uuid" json:"business_hours_id,omitempty"`
 	Metadata        JSONB      `gorm:"type:jsonb;default:'{}'" json:"metadata"`
+
+	// XProcessCodEmpresa is the X2 store (cod_empresa) this unit stands for. It is set
+	// ONLY by an administrator choosing the store: linking a unit (PUT
+	// /api/units/{id}/xprocess-loja) or importing the store as a new unit (POST
+	// /api/units/xprocess-import). Never inferred from names or CNPJ, and it is unique
+	// per organization. column: is
+	// explicit because GORM would split "XProcess" into x_process_cod_empresa.
+	XProcessCodEmpresa *string `gorm:"column:xprocess_cod_empresa;size:20;uniqueIndex:idx_units_org_xprocess_loja,where:xprocess_cod_empresa IS NOT NULL AND deleted_at IS NULL" json:"xprocess_cod_empresa,omitempty"`
 }
 
 func (Unit) TableName() string { return "units" }

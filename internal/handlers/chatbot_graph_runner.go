@@ -720,7 +720,7 @@ func (a *App) execChatAIResponse(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome,
 		userMessage = processTemplate(tmpl, ctx.session.SessionData)
 	}
 
-	answer, err := a.generateAIResponse(settings, ctx.session, userMessage)
+	answer, err := a.generateAIResponse(settings, ctx.session, userMessage, aiFeatureChatbotNode)
 	if err != nil {
 		a.Log.Error("ai_response node generateAIResponse failed",
 			"node", node.ID, "session", ctx.session.ID, "error", err)
@@ -753,8 +753,13 @@ func (a *App) execChatAIResponse(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome,
 //	{
 //	  "body":    "Connecting you to a human…",  // optional
 //	  "team_id": "<uuid>",                       // empty or "_general" = queue
-//	  "notes":   "Last seen {{last_query}}"      // optional; templated
+//	  "notes":   "Last seen {{last_query}}",     // optional; templated
+//	  "destination": "team" | "contact_placement",   // absent = "team"
+//	  "fallback_team_id": "<uuid>"               // contact_placement only; empty = queue
 //	}
+//
+// "contact_placement" sends the contact to the team tagged with its unit + department; see
+// routeFlowTransfer.
 func (a *App) execChatTransfer(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, error) {
 	if body := stringFromConfig(node.Config, "body", "message", "text"); body != "" {
 		message := processTemplate(body, ctx.session.SessionData)
@@ -777,18 +782,7 @@ func (a *App) execChatTransfer(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, e
 		a.addContactTags(ctx.contact, tags)
 	}
 
-	teamIDStr := stringFromConfig(node.Config, "team_id")
-	if teamIDStr != "" && teamIDStr != "_general" {
-		if parsed, err := uuid.Parse(teamIDStr); err == nil {
-			a.createTransferToTeam(ctx.account, ctx.contact, parsed, notes, models.TransferSourceFlow)
-		} else {
-			a.Log.Warn("transfer node has invalid team_id, falling back to queue",
-				"node", node.ID, "team_id", teamIDStr, "error", err)
-			a.createTransferToQueue(ctx.account, ctx.contact, models.TransferSourceFlow)
-		}
-	} else {
-		a.createTransferToQueue(ctx.account, ctx.contact, models.TransferSourceFlow)
-	}
+	a.routeFlowTransfer(node, ctx, notes)
 
 	ctx.session.Status = models.SessionStatusCompleted
 	return nodeOutcome{yield: true}, nil

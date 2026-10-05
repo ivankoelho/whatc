@@ -219,7 +219,7 @@ export const accountsService = {
 }
 
 export const contactsService = {
-  list: (params?: { search?: string; page?: number; limit?: number; tags?: string; status?: string }) =>
+  list: (params?: { search?: string; page?: number; limit?: number; tags?: string; status?: string; contact_type?: string; unit_id?: string; department_id?: string }) =>
     api.get('/contacts', { params }),
   statusCounts: () => api.get('/contacts/counts'),
   updateStatus: (id: string, status: 'new' | 'in_progress' | 'resolved') =>
@@ -394,8 +394,8 @@ export const campaignsService = {
   getRecipients: (id: string) => api.get(`/campaigns/${id}/recipients`),
   addRecipients: (id: string, recipients: Array<{ phone_number: string; recipient_name?: string; template_params?: Record<string, any> }>) =>
     api.post(`/campaigns/${id}/recipients/import`, { recipients }),
-  addRecipientsFromContacts: (id: string, ddds: string[], dryRun = false) =>
-    api.post(`/campaigns/${id}/recipients/from-contacts`, { ddds, dry_run: dryRun }),
+  addRecipientsFromContacts: (id: string, filters: { ddds?: string[]; contact_type?: string; unit_id?: string; department_id?: string }, dryRun = false) =>
+    api.post(`/campaigns/${id}/recipients/from-contacts`, { ...filters, dry_run: dryRun }),
   deleteRecipient: (campaignId: string, recipientId: string) =>
     api.delete(`/campaigns/${campaignId}/recipients/${recipientId}`),
   // Media
@@ -414,6 +414,10 @@ export const chatbotService = {
   // Settings
   getSettings: () => api.get('/chatbot/settings'),
   updateSettings: (data: any) => api.put('/chatbot/settings', data),
+  // Models offered by the provider itself. apiKey is optional: without it the
+  // saved key is used (server side, only for the provider it belongs to).
+  listAIModels: (provider: string, apiKey?: string) =>
+    api.post('/chatbot/ai/models', { provider, ...(apiKey ? { api_key: apiKey } : {}) }),
 
   // Keywords
   listKeywords: (params?: { search?: string; page?: number; limit?: number }) =>
@@ -845,6 +849,8 @@ export interface Team {
   assignment_strategy: 'round_robin' | 'load_balanced' | 'manual'
   per_agent_timeout_secs: number
   is_active: boolean
+  unit_id?: string
+  department_id?: string
   member_count: number
   members?: TeamMember[]
   created_by_id?: string
@@ -883,6 +889,8 @@ export const teamsService = {
     description?: string
     assignment_strategy?: 'round_robin' | 'load_balanced' | 'manual'
     per_agent_timeout_secs?: number
+    unit_id?: string
+    department_id?: string
   }) => api.post<{ team: Team }>('/teams', data),
   update: (id: string, data: {
     name?: string
@@ -890,6 +898,8 @@ export const teamsService = {
     assignment_strategy?: 'round_robin' | 'load_balanced' | 'manual'
     per_agent_timeout_secs?: number
     is_active?: boolean
+    unit_id?: string
+    department_id?: string
   }) => api.put<{ team: Team }>(`/teams/${id}`, data),
   delete: (id: string) => api.delete(`/teams/${id}`),
   // Members
@@ -1020,6 +1030,10 @@ export interface Permission {
   action: string
   description: string
   key: string // "resource:action"
+  // Presentation metadata from the backend catalog (functional group + order).
+  group?: string
+  group_order?: number
+  sort_order?: number
 }
 
 export interface Role {
@@ -1383,6 +1397,8 @@ export interface Unit {
   cnpj?: string
   type?: string
   active: boolean
+  // The X2 store this unit stands for; set only by an administrator (units screen).
+  xprocess_cod_empresa?: string
 }
 
 export interface Department {
@@ -1529,6 +1545,12 @@ export interface SalesOpportunity {
   interest?: string
   estimated_value?: number
   estimated_quantity?: number
+  xprocess_num_pedido?: string
+  xprocess_documento?: string
+  unit_of_measure?: 'UN' | 'M' | 'M2' | 'KG' | 'PCT' | 'CX'
+  // What actually happened. realized_value is overwritten by X2 when the order is reconciled.
+  realized_value?: number
+  realized_quantity?: number
   direcionamento?: SalesDirecionamento
   conversion_source?: SalesConversionSource
   loss_reason?: SalesLossReason
@@ -1549,7 +1571,7 @@ export interface SalesOpportunity {
 export interface SalesOpportunityEvent {
   id: string
   sales_opportunity_id: string
-  type: 'opened' | 'stage_changed' | 'direcionamento_changed' | 'converted' | 'lost' | 'cancelled' | 'retriggered'
+  type: 'opened' | 'stage_changed' | 'direcionamento_changed' | 'converted' | 'lost' | 'cancelled' | 'retriggered' | 'xprocess_linked'
   from_stage?: SalesOpportunityStage
   to_stage?: SalesOpportunityStage
   source: 'manual' | 'xprocess' | 'system'
@@ -1561,7 +1583,7 @@ export interface SalesOpportunityEvent {
 export const salesOpportunitiesService = {
   list: (params?: Record<string, string>) =>
     api.get<ApiEnvelope<{ opportunities: SalesOpportunity[]; total: number; has_more: boolean }>>('/sales-opportunities', { params }),
-  create: (data: { contact_id: string; interest?: string; estimated_value?: number }) =>
+  create: (data: { contact_id: string; interest?: string; estimated_value?: number; estimated_quantity?: number; unit_of_measure?: string }) =>
     api.post<ApiEnvelope<SalesOpportunity>>('/sales-opportunities', data),
   // Permanent delete, regardless of stage/status — super admin only, the
   // backend 403s anyone else even with sales_opportunities:delete granted.
@@ -1571,9 +1593,10 @@ export const salesOpportunitiesService = {
     api.put<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/stage`, { stage }),
   changeDirecionamento: (id: string, direcionamento: SalesDirecionamento) =>
     api.put<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/direcionamento`, { direcionamento }),
-  updateDetails: (id: string, details: { interest?: string; estimated_value?: number; estimated_quantity?: number }) =>
+  updateDetails: (id: string, details: { interest?: string; estimated_value?: number; estimated_quantity?: number; unit_of_measure?: string; realized_value?: number; realized_quantity?: number }) =>
     api.put<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/details`, details),
-  convert: (id: string) => api.post<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/convert`),
+  convert: (id: string, realized?: { realized_value?: number; realized_quantity?: number }) =>
+    api.post<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/convert`, realized),
   lose: (id: string, lossReason: SalesLossReason, lossNotes?: string) =>
     api.post<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/lose`, { loss_reason: lossReason, loss_notes: lossNotes }),
   listEvents: (id: string) =>
@@ -1587,6 +1610,13 @@ export interface SalesOpportunityXProcessLink {
   documento: string
   status_xprocess?: string
   valor_vendido?: number
+  // Freight of the order, apart from valor_vendido (which never includes it).
+  valor_frete?: number
+  cod_empresa?: string
+  link_source?: 'agent' | 'auto'
+  unit_id?: string
+  unit_name?: string
+  match_reason?: string
   last_checked_at?: string
   resolved_at?: string
   pending_review: boolean
@@ -1606,6 +1636,7 @@ export const salesOpportunityXProcessLinkService = {
 export interface SalesOpportunityXProcessCandidate {
   num_pedido: string
   cod_empresa: string
+  unit_name?: string
   status: string
   valor_vendido: number
   data_venda: string
@@ -1620,6 +1651,38 @@ export const salesOpportunityXProcessCandidatesService = {
 // backend (see docs/superpowers/specs/2026-09-04-helpdesk-unidade-departamento-sla-design.md).
 // List-only: this MVP only needs them to populate the "Abrir protocolo" form
 // dropdowns, not the CRUD settings screens (still unbuilt on the frontend).
+export interface XProcessLoja {
+  cod_empresa: string
+  razao_social_empresa: string
+  cnpj_empresa: string
+  unit_id?: string
+  unit_name?: string
+  // A presentation hint ("this looks like that unit"), never saved by itself.
+  suggested_unit_id?: string
+  suggested_unit_name?: string
+  // What importing the store would do (same rule as the server's import).
+  import_status?: 'new' | 'already_imported' | 'conflict'
+  import_name?: string // the name the unit would get
+  conflict_reason?: 'cnpj_in_use' | 'name_in_use'
+  conflict_unit_id?: string
+  conflict_unit_name?: string
+}
+
+export interface XProcessImportResult {
+  cod_empresa: string
+  status: 'created' | 'updated' | 'already_exists' | 'conflict' | 'failed'
+  reason?: string
+  notes?: string[]
+  x2_store?: { cod_empresa: string; razao_social_empresa: string; cnpj_empresa: string }
+  unit?: Unit
+  existing_unit?: { id: string; name: string; cnpj?: string }
+}
+
+export interface XProcessImportResponse {
+  summary: { selected: number; created: number; updated: number; already_exists: number; conflicts: number; failed: number }
+  results: XProcessImportResult[]
+}
+
 export const unitsService = {
   list: () => api.get<ApiEnvelope<{ units: Unit[] }>>('/units'),
   create: (data: { name: string; cnpj?: string; type?: string; active: boolean }) =>
@@ -1627,10 +1690,155 @@ export const unitsService = {
   update: (id: string, data: { name: string; cnpj?: string; type?: string; active: boolean }) =>
     api.put<ApiEnvelope<Unit>>(`/units/${id}`, data),
   delete: (id: string) => api.delete<ApiEnvelope<{ deleted: boolean }>>(`/units/${id}`),
+  // X2 stores next to the units already linked to them (units:write; calls X2).
+  listXProcessLojas: () => api.get<ApiEnvelope<{ lojas: XProcessLoja[] }>>('/units/xprocess-lojas'),
+  // Link, change or clear (cod_empresa "") the X2 store of a unit. fill_cnpj copies the
+  // store CNPJ into an EMPTY unit CNPJ; it never blocks the link.
+  setXProcessLoja: (id: string, data: { cod_empresa: string; fill_cnpj?: boolean }) =>
+    api.put<ApiEnvelope<{ unit: Unit; cnpj_filled: boolean; cnpj_note: string }>>(`/units/${id}/xprocess-loja`, data),
+  // Create the unit of each X2 store (units:write). Idempotent; clashes come back as
+  // "conflict" results, never as a second unit.
+  importXProcess: (cod_empresa: string[]) =>
+    api.post<ApiEnvelope<XProcessImportResponse>>('/units/xprocess-import', { cod_empresa }),
 }
 
 export const departmentsService = {
   list: () => api.get<ApiEnvelope<{ departments: Department[] }>>('/departments'),
+}
+
+// ---- Knowledge base (Fase 8B-2). The screens consume the API of 8B-1 as is, plus the
+// read-only /knowledge/scopes (units and departments as Knowledge needs them, so the
+// screens do not depend on occurrences:read).
+export type KnowledgeSourceType = 'faq' | 'article' | 'process' | 'text' | 'markdown' | 'manual_html'
+export type KnowledgeStatus = 'active' | 'archived'
+export type KnowledgeArchivedBy = '' | 'user' | 'import'
+export type KnowledgeVisibility = 'organization' | 'unit' | 'department'
+
+export interface KnowledgeDocument {
+  id: string
+  organization_id: string
+  // The server omits a null scope from the JSON: these keys may be ABSENT, not only null.
+  unit_id?: string | null
+  department_id?: string | null
+  visibility: KnowledgeVisibility
+  source_type: KnowledgeSourceType
+  title: string
+  origin?: string
+  body?: string // only on GET by id
+  content_hash?: string
+  status: KnowledgeStatus
+  archived_by: KnowledgeArchivedBy
+  created_at: string
+  updated_at: string
+}
+
+// PUT is the complete representation: unit_id and department_id are ALWAYS present (UUID or null).
+export interface KnowledgeDocumentInput {
+  title?: string
+  body?: string
+  source_type?: Exclude<KnowledgeSourceType, 'manual_html'>
+  unit_id: string | null
+  department_id: string | null
+  status?: KnowledgeStatus
+  expected_updated_at?: string
+}
+
+export interface KnowledgeListParams {
+  page?: number
+  limit?: number
+  search?: string
+  source_type?: string
+  status?: string
+  unit_id?: string
+  department_id?: string
+}
+
+export interface KnowledgeChunk {
+  id: string
+  chunk_index: number
+  heading: string
+  content: string
+  char_count: number
+  index_version: number
+}
+
+export interface KnowledgeCitation {
+  title: string
+  heading?: string
+  source_type: KnowledgeSourceType
+  origin?: string
+  anchor?: string
+}
+
+export interface KnowledgeHit {
+  document_id: string
+  chunk_id: string
+  title: string
+  heading?: string
+  content: string
+  score: number
+  citation: KnowledgeCitation
+}
+
+export interface KnowledgeScopeItem {
+  id: string
+  name: string
+  active: boolean
+}
+
+export interface KnowledgeScopes {
+  can_choose_context: boolean
+  units: KnowledgeScopeItem[]
+  departments: KnowledgeScopeItem[]
+  own: { unit_id: string | null; department_id: string | null }
+}
+
+export interface KnowledgeIndexStatus {
+  documents: number
+  chunks: number
+  stale_chunks: number
+  index_version: number
+}
+
+export interface KnowledgeReindexResult {
+  documents: number
+  chunks: number
+  skipped: number
+  stale_remaining: number
+}
+
+export interface KnowledgeSearchParams {
+  q: string
+  limit?: number
+  unit_id?: string
+  department_id?: string
+}
+
+// Empty filters are not sent (an empty unit_id would be a malformed parameter).
+function knowledgeParams<T extends object>(params: T): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ''))
+}
+
+export const knowledgeService = {
+  list: (params: KnowledgeListParams = {}) =>
+    api.get<ApiEnvelope<{ documents: KnowledgeDocument[]; total: number; page: number; limit: number }>>(
+      '/knowledge/documents', { params: knowledgeParams(params) }),
+  get: (id: string) => api.get<ApiEnvelope<KnowledgeDocument>>(`/knowledge/documents/${id}`),
+  create: (data: KnowledgeDocumentInput) => api.post<ApiEnvelope<KnowledgeDocument>>('/knowledge/documents', data),
+  update: (id: string, data: KnowledgeDocumentInput) =>
+    api.put<ApiEnvelope<KnowledgeDocument>>(`/knowledge/documents/${id}`, data),
+  remove: (id: string) => api.delete<ApiEnvelope<{ message: string }>>(`/knowledge/documents/${id}`),
+  chunks: (id: string) =>
+    api.get<ApiEnvelope<{ chunks: KnowledgeChunk[]; total: number }>>(`/knowledge/documents/${id}/chunks`),
+  reindexDocument: (id: string) =>
+    api.post<ApiEnvelope<{ chunks: number; index_version: number }>>(`/knowledge/documents/${id}/reindex`),
+  reindex: (onlyStale: boolean) =>
+    api.post<ApiEnvelope<KnowledgeReindexResult>>('/knowledge/reindex', null, { params: { only_stale: onlyStale } }),
+  status: () => api.get<ApiEnvelope<KnowledgeIndexStatus>>('/knowledge/status'),
+  scopes: () => api.get<ApiEnvelope<KnowledgeScopes>>('/knowledge/scopes'),
+  // Strict mode only: the administrative search tool. The relaxed strategy of the chatbot is not exposed.
+  search: (params: KnowledgeSearchParams) =>
+    api.get<ApiEnvelope<{ results: KnowledgeHit[] }>>('/knowledge/search', { params: knowledgeParams(params) }),
 }
 
 export const occurrenceCategoriesService = {

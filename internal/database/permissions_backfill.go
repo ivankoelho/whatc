@@ -710,3 +710,103 @@ func BackfillXProcessIntegrationPermission(db *gorm.DB, lo logf.Logger) error {
 	lo.Info("xprocess_integration backfill complete", "links_granted", res.RowsAffected)
 	return nil
 }
+
+// BackfillKnowledgePermissions grants knowledge:{read,write} to the system
+// "admin" role ONLY (Fase 8A). FixSystemRolePermissions skips roles that already
+// have permissions, so existing organizations would never receive the new
+// resource otherwise. Idempotent per organization: an organization where any
+// live role already holds a knowledge permission is skipped, so an admin who
+// later revokes it is not re-granted on every boot. Purely additive.
+func BackfillKnowledgePermissions(db *gorm.DB, lo logf.Logger) error {
+	var seeded int64
+	if err := db.Model(&models.Permission{}).
+		Where("resource = ?", models.ResourceKnowledge).
+		Count(&seeded).Error; err != nil {
+		return fmt.Errorf("failed to count the knowledge permissions: %w", err)
+	}
+	if seeded == 0 {
+		lo.Warn("knowledge permissions not seeded yet, did nothing")
+		return nil
+	}
+
+	res := db.Exec(`
+		INSERT INTO role_permissions (custom_role_id, permission_id)
+		SELECT r.id, target.id
+		FROM custom_roles r
+		CROSS JOIN permissions target
+		WHERE r.deleted_at IS NULL
+		  AND r.is_system = true
+		  AND r.name = 'admin'
+		  AND target.resource = ?
+		  AND NOT EXISTS (
+		    SELECT 1
+		    FROM custom_roles r2
+		    JOIN role_permissions rp2 ON rp2.custom_role_id = r2.id
+		    JOIN permissions p2 ON p2.id = rp2.permission_id
+		    WHERE r2.organization_id = r.organization_id
+		      AND r2.deleted_at IS NULL
+		      AND p2.resource = ?
+		  )
+		ON CONFLICT DO NOTHING`,
+		models.ResourceKnowledge, models.ResourceKnowledge,
+	)
+	if res.Error != nil {
+		return fmt.Errorf("failed to grant the knowledge permissions: %w", res.Error)
+	}
+	if res.RowsAffected == 0 {
+		lo.Info("knowledge permissions backfill: nothing pending")
+		return nil
+	}
+	lo.Info("knowledge permissions backfill complete", "links_granted", res.RowsAffected)
+	return nil
+}
+
+// BackfillAIToolsPermissions grants ai_tools:{read,write} to the system "admin" role ONLY
+// (Fase 9B), the same way as BackfillKnowledgePermissions: FixSystemRolePermissions skips roles
+// that already have permissions, so existing organizations would never receive the new resource
+// otherwise. Idempotent per organization: an organization where any live role already holds an
+// ai_tools permission is skipped, so an admin who later revokes it is not re-granted on every
+// boot. Purely additive.
+func BackfillAIToolsPermissions(db *gorm.DB, lo logf.Logger) error {
+	var seeded int64
+	if err := db.Model(&models.Permission{}).
+		Where("resource = ?", models.ResourceAITools).
+		Count(&seeded).Error; err != nil {
+		return fmt.Errorf("failed to count the ai_tools permissions: %w", err)
+	}
+	if seeded == 0 {
+		lo.Warn("ai_tools permissions not seeded yet, did nothing")
+		return nil
+	}
+
+	res := db.Exec(`
+		INSERT INTO role_permissions (custom_role_id, permission_id)
+		SELECT r.id, target.id
+		FROM custom_roles r
+		CROSS JOIN permissions target
+		WHERE r.deleted_at IS NULL
+		  AND r.is_system = true
+		  AND r.name = 'admin'
+		  AND target.resource = ?
+		  AND NOT EXISTS (
+		    SELECT 1
+		    FROM custom_roles r2
+		    JOIN role_permissions rp2 ON rp2.custom_role_id = r2.id
+		    JOIN permissions p2 ON p2.id = rp2.permission_id
+		    WHERE r2.organization_id = r.organization_id
+		      AND r2.deleted_at IS NULL
+		      AND p2.resource = ?
+		  )
+		ON CONFLICT DO NOTHING`,
+		models.ResourceAITools, models.ResourceAITools,
+	)
+	if res.Error != nil {
+		return fmt.Errorf("failed to grant the ai_tools permissions: %w", res.Error)
+	}
+	if res.RowsAffected == 0 {
+		lo.Info("ai_tools permissions backfill: nothing pending")
+		return nil
+	}
+	lo.Info("ai_tools permissions backfill complete", "links_granted", res.RowsAffected)
+	return nil
+}

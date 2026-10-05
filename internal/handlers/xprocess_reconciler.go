@@ -56,6 +56,16 @@ func (a *App) reconcileXProcessLink(client *xprocess.Client, apiKey string, link
 		a.Log.Error("xprocess reconciliation: failed to encode itens", "link_id", link.ID, "error", err)
 	}
 
+	// One X2 order must never feed two opportunities. If an OLDER link of another
+	// opportunity already tracks this exact order, this (newer) link changes nothing
+	// and is left for a person; the older one keeps being reconciled.
+	if a.xprocessOrderHeldByOlderLink(link, resumo.CodEmpresa) {
+		a.Log.Warn("xprocess reconciliation: order already tracked by an older link of another opportunity; leaving this one alone",
+			"link_id", link.ID, "opportunity_id", link.SalesOpportunityID, "cod_empresa", resumo.CodEmpresa, "num_pedido", link.NumPedido)
+		a.DB.Model(link).Update("last_checked_at", now)
+		return
+	}
+
 	updates := map[string]any{
 		"last_checked_at":       now,
 		"consecutive_not_found": 0,
@@ -63,7 +73,9 @@ func (a *App) reconcileXProcessLink(client *xprocess.Client, apiKey string, link
 		"cod_vendedor":          resumo.CodVendedor,
 		"status_xprocess":       resumo.Status,
 		"valor_vendido":         resumo.ValorTotal,
-		"itens":                 itensJSON,
+		// Freight is recorded apart and never added to valor_vendido / realized_value.
+		"valor_frete": resumo.ValorFrete,
+		"itens":       itensJSON,
 	}
 
 	switch resumo.Status {
@@ -71,12 +83,14 @@ func (a *App) reconcileXProcessLink(client *xprocess.Client, apiKey string, link
 		if opp.Status == models.SalesOpportunityStatusAberta {
 			a.convertXProcessOpportunity(&opp, link)
 		}
+		a.setRealizedValueFromXProcess(&opp, resumo.ValorTotal)
 		// resolved_at stays nil — keep checking until FECHADO or CANCELADO.
 
 	case "FECHADO":
 		if opp.Status == models.SalesOpportunityStatusAberta {
 			a.convertXProcessOpportunity(&opp, link)
 		}
+		a.setRealizedValueFromXProcess(&opp, resumo.ValorTotal)
 		firstClosedAt := link.FirstClosedAt
 		if firstClosedAt == nil {
 			updates["first_closed_at"] = now
@@ -95,7 +109,35 @@ func (a *App) reconcileXProcessLink(client *xprocess.Client, apiKey string, link
 		updates["resolved_at"] = now
 	}
 
-	a.DB.Model(link).Updates(updates)
+	err = a.DB.Model(link).Updates(updates).Error
+	if err != nil && isUniqueViolation(err) {
+		// The unique index on open (cod_empresa, num_pedido) refused the company code:
+		// another link holds the order. Keep reconciling this link without it.
+		delete(updates, "cod_empresa")
+		err = a.DB.Model(link).Updates(updates).Error
+	}
+	if err != nil {
+		a.Log.Error("xprocess reconciliation: failed to update link", "link_id", link.ID, "error", err)
+	}
+}
+
+// setRealizedValueFromXProcess records X2's order total as the opportunity's
+// realized_value. X2 is the official source of what was actually sold, so on a
+// valid reconciliation (order found, not cancelled, positive total) it replaces
+// a manually entered realized_value. Only a converted opportunity is touched,
+// and never estimated_value or realized_quantity (X2 does not return quantities
+// yet). A manual edit made while the link is still being re-checked is
+// overwritten on the next round, by design.
+func (a *App) setRealizedValueFromXProcess(opp *models.SalesOpportunity, total float64) {
+	if total <= 0 {
+		return
+	}
+	if err := a.DB.Model(&models.SalesOpportunity{}).
+		Where("id = ? AND organization_id = ? AND status = ?", opp.ID, opp.OrganizationID, models.SalesOpportunityStatusConvertida).
+		Where("realized_value IS DISTINCT FROM ?", total).
+		Update("realized_value", total).Error; err != nil {
+		a.Log.Error("xprocess reconciliation: failed to record realized value", "opportunity_id", opp.ID, "error", err)
+	}
 }
 
 // convertXProcessOpportunity mirrors ConvertSalesOpportunity's own DB
@@ -194,6 +236,8 @@ func (a *App) RunXProcessReconciliation() {
 		a.Log.Error("xprocess reconciliation: failed to load integrations", "error", err)
 		return
 	}
+	discoveryEnabled := a.Config.XProcess.DiscoveryEnabled
+	a.Log.Info("xprocess reconciliation: sweep starting", "integrations", len(integrations), "discovery_enabled", discoveryEnabled)
 	for i := range integrations {
 		integ := integrations[i]
 		integ.DecryptSecrets(a.Config.App.EncryptionKey)
@@ -203,15 +247,21 @@ func (a *App) RunXProcessReconciliation() {
 			a.Log.Error("xprocess reconciliation: failed to load pending links", "org_id", integ.OrganizationID, "error", err)
 			continue
 		}
-		if len(links) == 0 {
-			continue
-		}
-
 		client := xprocess.New(a.Log, integ.BaseURL)
 		for j := range links {
 			a.reconcileXProcessLink(client, integ.APIKey, &links[j])
 		}
-		a.Log.Info("xprocess reconciliation: organization done", "org_id", integ.OrganizationID, "links_checked", len(links))
+		if len(links) > 0 {
+			a.Log.Info("xprocess reconciliation: organization done", "org_id", integ.OrganizationID, "links_checked", len(links))
+		}
+
+		// Discovery runs after the sweep, and also when there were no pending links:
+		// a converted opportunity with no link at all is exactly what it looks for.
+		// It is OFF unless xprocess.discovery_enabled is true; the sweep above and
+		// linking by hand never depend on the switch.
+		if discoveryEnabled {
+			a.discoverXProcessOrders(client, integ.APIKey, integ.OrganizationID)
+		}
 	}
 }
 

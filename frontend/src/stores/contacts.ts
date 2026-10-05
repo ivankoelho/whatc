@@ -2,6 +2,8 @@ import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import { contactsService, messagesService } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
+import { useTransfersStore } from '@/stores/transfers'
+import { isConflictError } from '@/lib/api-utils'
 
 // Phones are stored without leading + or whitespace (see CreateContact in
 // internal/handlers/contacts.go). Strip them from a digit-only query so a user
@@ -15,6 +17,7 @@ function normalizeContactSearch(raw: string): string {
   return trimmed
 }
 
+export type ContactType = 'cliente' | 'fornecedor' | 'colaborador'
 export type ContactStatus = 'new' | 'in_progress' | 'resolved'
 export type ContactStatusFilter = 'all' | ContactStatus
 
@@ -24,6 +27,9 @@ export interface Contact {
   name: string
   profile_name?: string
   cpf_cnpj?: string
+  contact_type?: ContactType
+  unit_id?: string
+  department_id?: string
   avatar_url?: string
   // `status` is legacy and always "active"; contact_status is the real
   // service state of the conversation.
@@ -284,6 +290,11 @@ export const useContactsStore = defineStore('contacts', () => {
       return newMessage
     } catch (error) {
       console.error('Failed to send message:', error)
+      // 409: another agent owns this conversation (or won the claim). Nothing
+      // was sent; reload the queue/ownership so the UI shows the real state.
+      if (isConflictError(error)) {
+        useTransfersStore().fetchTransfers().catch(() => {})
+      }
       throw error
     }
   }
@@ -425,6 +436,19 @@ export const useContactsStore = defineStore('contacts', () => {
     }
     if (currentContact.value?.id === contactId) {
       currentContact.value = { ...currentContact.value, name, profile_name: name }
+    }
+  }
+
+  // The registration fields of a contact (type, document, unit, department) after an edit. A
+  // cleared unit/department arrives as undefined and replaces the old value.
+  type ContactRegistration = Pick<Contact, 'contact_type' | 'cpf_cnpj' | 'unit_id' | 'department_id'>
+  function updateContactRegistration(contactId: string, registration: ContactRegistration) {
+    const contact = contacts.value.find(c => c.id === contactId)
+    if (contact) {
+      Object.assign(contact, registration)
+    }
+    if (currentContact.value?.id === contactId) {
+      currentContact.value = { ...currentContact.value, ...registration }
     }
   }
 
@@ -571,6 +595,7 @@ export const useContactsStore = defineStore('contacts', () => {
     updateMessageReactions,
     updateContactTags,
     updateContactName,
+    updateContactRegistration,
     typingByContact,
     applyAgentTyping,
     clearTyping

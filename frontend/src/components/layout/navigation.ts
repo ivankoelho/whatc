@@ -170,7 +170,7 @@ export const navigationSections: NavSection[] = [
         path: '/settings',
         icon: Settings,
         permission: 'settings.general',
-        childPermissions: ['settings.general', 'settings.chatbot', 'accounts', 'contacts', 'canned_responses', 'tags', 'teams', 'users', 'roles', 'api_keys', 'webhooks', 'custom_actions', 'occurrences.stages', 'occurrences.categories', 'occurrences.what_happened', 'occurrences.processes', 'occurrences.sla_policies', 'units', 'settings.sso', 'audit_logs'],
+        childPermissions: ['settings.general', 'settings.chatbot', 'accounts', 'contacts', 'canned_responses', 'tags', 'knowledge', 'teams', 'users', 'roles', 'api_keys', 'webhooks', 'custom_actions', 'occurrences.stages', 'occurrences.categories', 'occurrences.what_happened', 'occurrences.processes', 'occurrences.sla_policies', 'units', 'settings.sso', 'audit_logs'],
         groups: [
           {
             label: 'nav.groupOrganization',
@@ -189,7 +189,7 @@ export const navigationSections: NavSection[] = [
           {
             label: 'nav.groupService',
             items: [
-              { name: 'nav.groupService', path: '/settings/service', icon: Bot, childPermissions: ['settings.chatbot', 'canned_responses', 'tags', 'contacts'] }
+              { name: 'nav.groupService', path: '/settings/service', icon: Bot, childPermissions: ['settings.chatbot', 'canned_responses', 'tags', 'contacts', 'knowledge'] }
             ]
           },
           {

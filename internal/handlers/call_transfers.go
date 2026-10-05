@@ -309,6 +309,9 @@ func (a *App) InitiateAgentTransfer(r *fastglue.Request) error {
 		if memberCount == 0 {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Agent is not a member of the specified team", nil, "")
 		}
+		if !a.isAgentEligible(orgID, agentID) {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Agent is not available to receive calls", nil, "")
+		}
 		targetAgentID = &agentID
 	}
 

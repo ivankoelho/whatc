@@ -3,6 +3,7 @@ import { useTransfersStore } from '@/stores/transfers'
 import { useCallingStore } from '@/stores/calling'
 import { useAuthStore } from '@/stores/auth'
 import { useNotesStore } from '@/stores/notes'
+import { useUsersStore } from '@/stores/users'
 import { contactsService } from '@/services/api'
 import { toast } from 'vue-sonner'
 import router from '@/router'
@@ -59,6 +60,11 @@ const WS_TYPE_AGENT_TRANSFER = 'agent_transfer'
 const WS_TYPE_AGENT_TRANSFER_RESUME = 'agent_transfer_resume'
 const WS_TYPE_AGENT_TRANSFER_ASSIGN = 'agent_transfer_assign'
 const WS_TYPE_TRANSFER_ESCALATION = 'transfer_escalation'
+
+// Agent state types. Presence = has a live connection; availability = the
+// manual available/away toggle.
+const WS_TYPE_AGENT_PRESENCE = 'agent_presence'
+const WS_TYPE_AGENT_AVAILABILITY = 'agent_availability'
 
 // Campaign types
 const WS_TYPE_CAMPAIGN_STATS_UPDATE = 'campaign_stats_update'
@@ -274,6 +280,17 @@ class WebSocketService {
           break
         case WS_TYPE_AGENT_TRANSFER_ASSIGN:
           this.handleAgentTransferAssign(message.payload)
+          break
+        case WS_TYPE_AGENT_PRESENCE:
+          useUsersStore().applyPresence(message.payload.user_id, !!message.payload.online)
+          break
+        case WS_TYPE_AGENT_AVAILABILITY:
+          useUsersStore().applyAvailability(message.payload.user_id, !!message.payload.is_available)
+          // Another tab/device of this same user toggled it: keep this tab's
+          // toggle in step with the backend instead of showing a stale state.
+          if (message.payload.user_id === useAuthStore().user?.id) {
+            useAuthStore().setAvailability(!!message.payload.is_available)
+          }
           break
         case WS_TYPE_TRANSFER_ESCALATION:
           this.handleTransferEscalation(message.payload)

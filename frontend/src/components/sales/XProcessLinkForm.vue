@@ -76,7 +76,20 @@ async function onRegistered() {
             <dt class="text-muted-foreground">{{ t('xprocessLink.valorConfirmado') }}</dt>
             <dd>{{ formatCurrency(link.valor_vendido) }}</dd>
           </template>
+          <!-- The order's store: the local unit when mapped, else the X2 code. -->
+          <template v-if="link.cod_empresa">
+            <dt class="text-muted-foreground">{{ t('xprocessLink.loja') }}</dt>
+            <dd data-testid="xprocess-link-store">{{ link.unit_name || t('xprocessLink.lojaX2', { cod: link.cod_empresa }) }}</dd>
+          </template>
+          <!-- Freight is the order's own figure; the confirmed value above never includes it. -->
+          <template v-if="link.valor_frete != null">
+            <dt class="text-muted-foreground">{{ t('xprocessLink.valorFrete') }}</dt>
+            <dd data-testid="xprocess-link-freight">{{ formatCurrency(link.valor_frete) }}</dd>
+          </template>
         </dl>
+        <p v-if="link?.link_source === 'auto'" class="text-xs text-muted-foreground" :title="link.match_reason">
+          {{ t('xprocessLink.autoLinked') }}
+        </p>
         <p v-if="link?.pending_review" class="text-sm text-amber-600">{{ t('xprocessLink.pendingReview') }}</p>
         <!-- Bug: expanding used to render nothing at all here for a closed
              opportunity that never had a pedido registered (no dl, since no

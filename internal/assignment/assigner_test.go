@@ -3,6 +3,7 @@ package assignment_test
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 
@@ -330,14 +331,14 @@ func TestGetAvailableAgents_ReturnsAvailableMinusExcluded(t *testing.T) {
 
 	setUnavailable(t, db, agents[1].ID)
 
-	got := a.GetAvailableAgents(team.ID, []uuid.UUID{agents[2].ID})
+	got := a.GetAvailableAgents(team.ID, org.ID, []uuid.UUID{agents[2].ID})
 	// agents[0] available, [1] unavailable, [2] excluded, [3] available → expect [0] and [3].
 	assert.ElementsMatch(t, []uuid.UUID{agents[0].ID, agents[3].ID}, got)
 }
 
 func TestGetAvailableAgents_NonexistentTeamReturnsNil(t *testing.T) {
 	a, _ := newAssigner(t)
-	assert.Nil(t, a.GetAvailableAgents(uuid.New(), nil))
+	assert.Nil(t, a.GetAvailableAgents(uuid.New(), uuid.New(), nil))
 }
 
 // --- ResolvePerAgentTimeout ---
@@ -369,32 +370,24 @@ func TestChatLoadCounter_CountsActiveTransfersPerAgent(t *testing.T) {
 	org := testutil.CreateTestOrganization(t, db)
 	a1 := testutil.CreateTestUser(t, db, org.ID)
 	a2 := testutil.CreateTestUser(t, db, org.ID)
-	contact := testutil.CreateTestContact(t, db, org.ID)
 
-	// 2 active transfers for a1, 1 for a2, 1 completed for a1 (must not count).
-	for range 2 {
+	// One active attendance per contact is a database invariant, so each
+	// transfer gets its own contact. 2 active for a1, 1 for a2, 1 completed
+	// for a1 (must not count).
+	mk := func(agent uuid.UUID, status models.TransferStatus) {
+		contact := testutil.CreateTestContact(t, db, org.ID)
 		require.NoError(t, db.Create(&models.AgentTransfer{
 			BaseModel:      models.BaseModel{ID: uuid.New()},
 			OrganizationID: org.ID,
 			ContactID:      contact.ID,
-			AgentID:        &a1.ID,
-			Status:         models.TransferStatusActive,
+			AgentID:        &agent,
+			Status:         status,
 		}).Error)
 	}
-	require.NoError(t, db.Create(&models.AgentTransfer{
-		BaseModel:      models.BaseModel{ID: uuid.New()},
-		OrganizationID: org.ID,
-		ContactID:      contact.ID,
-		AgentID:        &a2.ID,
-		Status:         models.TransferStatusActive,
-	}).Error)
-	require.NoError(t, db.Create(&models.AgentTransfer{
-		BaseModel:      models.BaseModel{ID: uuid.New()},
-		OrganizationID: org.ID,
-		ContactID:      contact.ID,
-		AgentID:        &a1.ID,
-		Status:         models.TransferStatusResumed, // not "active" → must NOT count
-	}).Error)
+	mk(a1.ID, models.TransferStatusActive)
+	mk(a1.ID, models.TransferStatusActive)
+	mk(a2.ID, models.TransferStatusActive)
+	mk(a1.ID, models.TransferStatusResumed) // not "active" → must NOT count
 
 	loads := assignment.ChatLoadCounter(db, org.ID, []uuid.UUID{a1.ID, a2.ID})
 	assert.Equal(t, int64(2), loads[a1.ID])
@@ -481,4 +474,166 @@ func TestIsAgentOnActiveCall_IgnoresCallLogsOrphanedByARestart(t *testing.T) {
 	// Same row, but left behind by a restart hours ago: must not block the agent forever.
 	require.NoError(t, db.Model(&log).UpdateColumn("created_at", time.Now().Add(-4*time.Hour)).Error)
 	assert.False(t, assignment.IsAgentOnActiveCall(db, agent.ID))
+}
+
+// --- Presence-aware eligibility ---
+
+func presenceOf(online ...uuid.UUID) assignment.PresenceFunc {
+	set := make(map[uuid.UUID]bool, len(online))
+	for _, id := range online {
+		set[id] = true
+	}
+	return func(_, userID uuid.UUID) bool { return set[userID] }
+}
+
+func TestAssignToTeam_RoundRobin_SkipsDisconnectedAgents(t *testing.T) {
+	a, db := newAssigner(t)
+	org := testutil.CreateTestOrganization(t, db)
+	team, agents := createTeam(t, db, org.ID, models.AssignmentStrategyRoundRobin, 2, 0)
+	// Both flagged available in the DB, but only agents[1] has a live connection.
+	a.SetPresence(presenceOf(agents[1].ID))
+
+	for range 3 {
+		got := a.AssignToTeam(team.ID, org.ID, nil, nil)
+		require.NotNil(t, got)
+		assert.Equal(t, agents[1].ID, *got, "an agent with no live connection must never be picked")
+	}
+}
+
+func TestAssignToTeam_AllDisconnectedReturnsNil(t *testing.T) {
+	a, db := newAssigner(t)
+	org := testutil.CreateTestOrganization(t, db)
+	team, _ := createTeam(t, db, org.ID, models.AssignmentStrategyRoundRobin, 2, 0)
+	a.SetPresence(presenceOf())
+
+	assert.Nil(t, a.AssignToTeam(team.ID, org.ID, nil, nil))
+}
+
+func TestAssignToTeam_LoadBalanced_SkipsDisconnectedAgents(t *testing.T) {
+	a, db := newAssigner(t)
+	org := testutil.CreateTestOrganization(t, db)
+	team, agents := createTeam(t, db, org.ID, models.AssignmentStrategyLoadBalanced, 2, 0)
+	a.SetPresence(presenceOf(agents[1].ID))
+	// agents[0] has the lowest load but is disconnected.
+	counter := func(_ *gorm.DB, _ uuid.UUID, ids []uuid.UUID) map[uuid.UUID]int64 {
+		return map[uuid.UUID]int64{agents[0].ID: 0, agents[1].ID: 5}
+	}
+
+	got := a.AssignToTeam(team.ID, org.ID, nil, counter)
+	require.NotNil(t, got)
+	assert.Equal(t, agents[1].ID, *got)
+}
+
+func TestGetAvailableAgents_ExcludesDisconnected(t *testing.T) {
+	a, db := newAssigner(t)
+	org := testutil.CreateTestOrganization(t, db)
+	team, agents := createTeam(t, db, org.ID, models.AssignmentStrategyRoundRobin, 3, 0)
+	a.SetPresence(presenceOf(agents[0].ID, agents[2].ID))
+
+	got := a.GetAvailableAgents(team.ID, org.ID, nil)
+	assert.ElementsMatch(t, []uuid.UUID{agents[0].ID, agents[2].ID}, got)
+}
+
+func TestIsAgentEligible_AvailabilityAndPresenceAreIndependent(t *testing.T) {
+	a, db := newAssigner(t)
+	org := testutil.CreateTestOrganization(t, db)
+	u := testutil.CreateTestUser(t, db, org.ID)
+
+	a.SetPresence(presenceOf(u.ID))
+	assert.True(t, a.IsAgentEligible(org.ID, u.ID), "connected + available")
+
+	setUnavailable(t, db, u.ID)
+	assert.True(t, a.IsConnected(org.ID, u.ID), "away does not mean disconnected")
+	assert.False(t, a.IsAgentEligible(org.ID, u.ID), "connected but away")
+
+	require.NoError(t, db.Model(&models.User{}).Where("id = ?", u.ID).Update("is_available", true).Error)
+	a.SetPresence(presenceOf())
+	assert.False(t, a.IsAgentEligible(org.ID, u.ID), "available flag but no live connection")
+
+	a.SetPresence(presenceOf(u.ID))
+	setInactive(t, db, u.ID)
+	assert.False(t, a.IsAgentEligible(org.ID, u.ID), "inactive user")
+}
+
+// --- Round-robin concurrency ---
+
+func TestAssignToTeam_RoundRobin_ConcurrentAssignmentsAreSpreadEvenly(t *testing.T) {
+	a, db := newAssigner(t)
+	org := testutil.CreateTestOrganization(t, db)
+	const agentCount, calls = 4, 40
+	team, agents := createTeam(t, db, org.ID, models.AssignmentStrategyRoundRobin, agentCount, 0)
+
+	picked := make(chan uuid.UUID, calls)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for range calls {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			if got := a.AssignToTeam(team.ID, org.ID, nil, nil); got != nil {
+				picked <- *got
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(picked)
+
+	counts := map[uuid.UUID]int{}
+	total := 0
+	for id := range picked {
+		counts[id]++
+		total++
+	}
+	assert.Equal(t, calls, total, "every concurrent assignment must resolve to an agent")
+	for _, ag := range agents {
+		assert.Equal(t, calls/agentCount, counts[ag.ID],
+			"simultaneous assignments must not pile onto the same 'oldest' agent")
+	}
+}
+
+func TestAssignToTeam_RoundRobin_ConcurrentWithOneConnectedAgentNeverDropsAssignment(t *testing.T) {
+	a, db := newAssigner(t)
+	org := testutil.CreateTestOrganization(t, db)
+	team, agents := createTeam(t, db, org.ID, models.AssignmentStrategyRoundRobin, 3, 0)
+	a.SetPresence(presenceOf(agents[2].ID))
+
+	var wg sync.WaitGroup
+	results := make(chan *uuid.UUID, 10)
+	for range 10 {
+		wg.Add(1)
+		go func() { defer wg.Done(); results <- a.AssignToTeam(team.ID, org.ID, nil, nil) }()
+	}
+	wg.Wait()
+	close(results)
+	for r := range results {
+		require.NotNil(t, r)
+		assert.Equal(t, agents[2].ID, *r)
+	}
+}
+
+// Calls and chat share one Assigner: the call-transfer rotation (CallLoadCounter,
+// excluded agents already tried) must apply the same presence rule as chat.
+func TestAssignToTeam_CallRotation_UsesSamePresenceRuleAsChat(t *testing.T) {
+	a, db := newAssigner(t)
+	org := testutil.CreateTestOrganization(t, db)
+	team, agents := createTeam(t, db, org.ID, models.AssignmentStrategyLoadBalanced, 3, 0)
+	a.SetPresence(presenceOf(agents[1].ID, agents[2].ID)) // agents[0] is disconnected
+
+	// agents[0] has the lowest call load but is not connected.
+	got := a.AssignToTeam(team.ID, org.ID, nil, assignment.CallLoadCounter)
+	require.NotNil(t, got)
+	assert.NotEqual(t, agents[0].ID, *got, "a disconnected agent must not be rung")
+
+	// Rotation: agents already tried are excluded, and the disconnected one still is not offered.
+	got = a.AssignToTeam(team.ID, org.ID, []uuid.UUID{agents[1].ID}, assignment.CallLoadCounter)
+	require.NotNil(t, got)
+	assert.Equal(t, agents[2].ID, *got)
+
+	got = a.AssignToTeam(team.ID, org.ID, []uuid.UUID{agents[1].ID, agents[2].ID}, assignment.CallLoadCounter)
+	assert.Nil(t, got, "only the disconnected agent is left: nobody to ring")
+
+	// The broadcast fallback uses the same rule.
+	assert.ElementsMatch(t, []uuid.UUID{agents[2].ID}, a.GetAvailableAgents(team.ID, org.ID, []uuid.UUID{agents[1].ID}))
 }

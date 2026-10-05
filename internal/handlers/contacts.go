@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -30,6 +31,9 @@ type ContactResponse struct {
 	Name        string    `json:"name"`
 	ProfileName string    `json:"profile_name"`
 	CPFCNPJ     string    `json:"cpf_cnpj,omitempty"`
+	ContactType  models.ContactType `json:"contact_type"`
+	UnitID       *uuid.UUID         `json:"unit_id,omitempty"`
+	DepartmentID *uuid.UUID         `json:"department_id,omitempty"`
 	AvatarURL   string    `json:"avatar_url"`
 	// Status is a legacy field, always "active". Kept untouched so existing
 	// integrations do not break; ContactStatus is the real service state.
@@ -121,8 +125,14 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 			search = search[:1000]
 		}
 		searchPattern := "%" + search + "%"
-		// Use ILIKE for case-insensitive search on profile_name
-		query = query.Where("phone_number LIKE ? OR profile_name ILIKE ?", searchPattern, searchPattern)
+		// Use ILIKE for case-insensitive search on profile_name. A search with 3+
+		// digits also matches the CPF/CNPJ, which is stored digits-only, so the
+		// term is compared without its mask ("529.982" finds 52998224725).
+		if digits := contactutil.NormalizePhone(search); len(digits) >= 3 {
+			query = query.Where("phone_number LIKE ? OR profile_name ILIKE ? OR cpfcnpj LIKE ?", searchPattern, searchPattern, "%"+digits+"%")
+		} else {
+			query = query.Where("phone_number LIKE ? OR profile_name ILIKE ?", searchPattern, searchPattern)
+		}
 	}
 
 	// Filter by tags (comma-separated, matches contacts that have ANY of the specified tags)
@@ -148,6 +158,23 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 
 	if statusParam != "" {
 		query = query.Where("contact_status = ?", statusParam)
+	}
+
+	if v := string(r.RequestCtx.QueryArgs().Peek("contact_type")); v != "" {
+		if !models.ContactType(v).IsValid() {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest,
+				"contact_type must be one of: cliente, fornecedor, colaborador", nil, "")
+		}
+		query = query.Where("contact_type = ?", v)
+	}
+	for param, column := range map[string]string{"unit_id": "unit_id", "department_id": "department_id"} {
+		if v := string(r.RequestCtx.QueryArgs().Peek(param)); v != "" {
+			id, err := uuid.Parse(v)
+			if err != nil {
+				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid "+param, nil, "")
+			}
+			query = query.Where(column+" = ?", id)
+		}
 	}
 
 	// Order by last message time (most recent first)
@@ -188,9 +215,13 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 
 		phoneNumber := c.PhoneNumber
 		profileName := c.ProfileName
+		cpfCNPJ := c.CPFCNPJ // masked like the detail response (buildContactResponse)
 		if shouldMask {
 			phoneNumber = utils.MaskPhoneNumber(phoneNumber)
 			profileName = utils.MaskIfPhoneNumber(profileName)
+			if cpfCNPJ != "" {
+				cpfCNPJ = utils.MaskPhoneNumber(cpfCNPJ)
+			}
 		}
 
 		serviceWindowOpen := c.LastInboundAt != nil && time.Since(*c.LastInboundAt) < 24*time.Hour
@@ -200,8 +231,12 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 			PhoneNumber:        phoneNumber,
 			Name:               profileName,
 			ProfileName:        profileName,
+			CPFCNPJ:            cpfCNPJ,
 			Status:             "active",
 			ContactStatus:      c.ContactStatus,
+			ContactType:        c.ContactType,
+			UnitID:             c.UnitID,
+			DepartmentID:       c.DepartmentID,
 			Tags:               tags,
 			Metadata:           c.Metadata,
 			LastMessageAt:      c.LastMessageAt,
@@ -682,6 +717,9 @@ func (a *App) SendMessage(r *fastglue.Request) error {
 	ctx := context.Background()
 	message, err := a.SendOutgoingMessage(ctx, msgReq, opts)
 	if err != nil {
+		if errors.Is(err, ErrConversationOwned) {
+			return r.SendErrorEnvelope(fasthttp.StatusConflict, "This conversation is assigned to another agent", nil, "")
+		}
 		a.Log.Error("Failed to send message", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to send message", nil, "")
 	}
@@ -870,6 +908,9 @@ func (a *App) SendMediaMessage(r *fastglue.Request) error {
 	ctx := context.Background()
 	message, err := a.SendOutgoingMessage(ctx, msgReq, opts)
 	if err != nil {
+		if errors.Is(err, ErrConversationOwned) {
+			return r.SendErrorEnvelope(fasthttp.StatusConflict, "This conversation is assigned to another agent", nil, "")
+		}
 		a.Log.Error("Failed to send message", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to send message", nil, "")
 	}
@@ -1442,21 +1483,11 @@ type CreateContactRequest struct {
 	ProfileName     string         `json:"profile_name"`
 	WhatsAppAccount string         `json:"whatsapp_account"`
 	CPFCNPJ         string         `json:"cpf_cnpj"`
+	ContactType     string         `json:"contact_type"`
+	UnitID          *string        `json:"unit_id"`
+	DepartmentID    *string        `json:"department_id"`
 	Tags            []string       `json:"tags"`
 	Metadata        map[string]any `json:"metadata"`
-}
-
-// normalizeDocument strips everything but digits from a CPF/CNPJ. No check
-// digit validation in this phase — it is cadastral text, not a value any
-// decision is made from yet.
-func normalizeDocument(doc string) string {
-	digits := make([]byte, 0, len(doc))
-	for i := 0; i < len(doc); i++ {
-		if doc[i] >= '0' && doc[i] <= '9' {
-			digits = append(digits, doc[i])
-		}
-	}
-	return string(digits)
 }
 
 // CreateContact creates a new contact or restores a soft-deleted one
@@ -1478,6 +1509,27 @@ func (a *App) CreateContact(r *fastglue.Request) error {
 
 	if req.PhoneNumber == "" {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "phone_number is required", nil, "")
+	}
+
+	document, docErr := contactutil.NormalizeDocumento(req.CPFCNPJ)
+	if docErr != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, docErr.Error(), nil, "")
+	}
+	contactType := models.ContactTypeCliente
+	if req.ContactType != "" {
+		contactType = models.ContactType(req.ContactType)
+		if !contactType.IsValid() {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "contact_type must be one of: cliente, fornecedor, colaborador", nil, "")
+		}
+	}
+	placement, ok := a.parseOrgPlacement(r, orgID, req.UnitID, req.DepartmentID)
+	if !ok {
+		return nil
+	}
+
+	// Only a colaborador has a unit/department (see applyContactPlacement).
+	if contactType != models.ContactTypeColaborador {
+		placement = orgPlacement{}
 	}
 
 	// Canonical digits-only identity (see contactutil.NormalizePhone).
@@ -1515,14 +1567,19 @@ func (a *App) CreateContact(r *fastglue.Request) error {
 		if req.WhatsAppAccount != "" {
 			updates["whats_app_account"] = req.WhatsAppAccount
 		}
-		if req.CPFCNPJ != "" {
-			// Column is physically named "cpfcnpj" (GORM's default snake_case
-			// for the all-caps field CPFCNPJ) -- a map's keys are literal SQL
-			// column names to GORM, unlike a struct's, which it resolves by
-			// reflection. "cpf_cnpj" here would target a column that doesn't
-			// exist.
-			updates["cpfcnpj"] = normalizeDocument(req.CPFCNPJ)
+		if document != "" {
+			// Column is physically named "cpfcnpj" (GORM snake_case of the acronym).
+			// A map's keys are literal SQL column names, so "cpf_cnpj" would miss it.
+			updates["cpfcnpj"] = document
 		}
+		if req.ContactType != "" {
+			updates["contact_type"] = string(contactType)
+		}
+		claimedType := existingContact.ContactType
+		if req.ContactType != "" {
+			claimedType = contactType
+		}
+		applyContactPlacement(updates, placement, claimedType, existingContact.UnitID != nil, existingContact.DepartmentID != nil)
 		if req.Tags != nil {
 			tagsArray := make(models.JSONBArray, len(req.Tags))
 			for i, tag := range req.Tags {
@@ -1557,7 +1614,10 @@ func (a *App) CreateContact(r *fastglue.Request) error {
 		PhoneNumber:     normalizedPhone,
 		ProfileName:     req.ProfileName,
 		WhatsAppAccount: req.WhatsAppAccount,
-		CPFCNPJ:         normalizeDocument(req.CPFCNPJ),
+		CPFCNPJ:         document,
+		ContactType:     contactType,
+		UnitID:          placement.UnitID,
+		DepartmentID:    placement.DepartmentID,
 		AssignedUserID:  &userID,
 	}
 
@@ -1591,6 +1651,9 @@ type UpdateContactRequest struct {
 	ProfileName        *string         `json:"profile_name"`
 	WhatsAppAccount    *string         `json:"whatsapp_account"`
 	CPFCNPJ            *string         `json:"cpf_cnpj"`
+	ContactType        *string         `json:"contact_type"`
+	UnitID             *string         `json:"unit_id"`
+	DepartmentID       *string         `json:"department_id"`
 	Tags               []string        `json:"tags"`
 	Metadata           *map[string]any `json:"metadata"`
 	AssignedUserID     *uuid.UUID      `json:"assigned_user_id"`
@@ -1646,12 +1709,30 @@ func (a *App) UpdateContact(r *fastglue.Request) error {
 		updates["whats_app_account"] = *req.WhatsAppAccount
 	}
 	if req.CPFCNPJ != nil {
-		// Column is physically named "cpfcnpj" (GORM's default snake_case for
-		// the all-caps field CPFCNPJ) -- a map's keys are literal SQL column
-		// names to GORM, unlike a struct's, which it resolves by reflection.
-		// "cpf_cnpj" here would target a column that doesn't exist.
-		updates["cpfcnpj"] = normalizeDocument(*req.CPFCNPJ)
+		document, err := contactutil.NormalizeDocumento(*req.CPFCNPJ)
+		if err != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, err.Error(), nil, "")
+		}
+		// Physical column name, see CreateContact.
+		updates["cpfcnpj"] = document
 	}
+	if req.ContactType != nil {
+		ct := models.ContactType(*req.ContactType)
+		if !ct.IsValid() {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "contact_type must be one of: cliente, fornecedor, colaborador", nil, "")
+		}
+		updates["contact_type"] = string(ct)
+	}
+	placement, ok := a.parseOrgPlacement(r, orgID, req.UnitID, req.DepartmentID)
+	if !ok {
+		return nil
+	}
+	// The final type decides: a colaborador keeps what was sent, any other type ends with none.
+	finalType := contact.ContactType
+	if req.ContactType != nil {
+		finalType = models.ContactType(*req.ContactType)
+	}
+	applyContactPlacement(updates, placement, finalType, contact.UnitID != nil, contact.DepartmentID != nil)
 	if req.Tags != nil {
 		tagsArray := make(models.JSONBArray, len(req.Tags))
 		for i, tag := range req.Tags {
@@ -1681,8 +1762,12 @@ func (a *App) UpdateContact(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update contact", nil, "")
 	}
 
-	// Reload contact
-	a.DB.First(contact, contactID)
+	// Reload into a fresh struct: scanning a NULL (a cleared unit_id, say) into a
+	// struct that still holds the old value would leave the old value in place.
+	var reloaded models.Contact
+	if err := a.DB.First(&reloaded, contactID).Error; err == nil {
+		contact = &reloaded
+	}
 
 	a.logAudit(orgID, userID,
 		"contact", contact.ID, models.AuditActionUpdated, &oldContact, contact)
@@ -1775,6 +1860,9 @@ func (a *App) buildContactResponse(contact *models.Contact, orgID uuid.UUID) Con
 		Name:               profileName,
 		ProfileName:        profileName,
 		CPFCNPJ:            cpfCNPJ,
+		ContactType:        contact.ContactType,
+		UnitID:             contact.UnitID,
+		DepartmentID:       contact.DepartmentID,
 		Status:             "active",
 		ContactStatus:      contact.ContactStatus,
 		Tags:               tags,

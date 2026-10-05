@@ -3,10 +3,12 @@ package database
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/config"
+	"github.com/shridarpatil/whatomate/internal/knowledge"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/postgres"
@@ -71,6 +73,15 @@ func GetMigrationModels() []MigrationModel {
 		{"WhatsAppAccount", &models.WhatsAppAccount{}},
 		{"XProcessIntegration", &models.XProcessIntegration{}},
 		{"SalesOpportunityXProcessLink", &models.SalesOpportunityXProcessLink{}},
+
+		// Knowledge base (Fase 8A)
+		{"KnowledgeDocument", &models.KnowledgeDocument{}},
+		{"KnowledgeChunk", &models.KnowledgeChunk{}},
+
+		// AI tools governance (Fase 9B)
+		{"AIToolSetting", &models.AIToolSetting{}},
+		{"AIToolCall", &models.AIToolCall{}},
+		{"AIToolConfirmation", &models.AIToolConfirmation{}},
 		{"Contact", &models.Contact{}},
 		{"Tag", &models.Tag{}},
 		{"Message", &models.Message{}},
@@ -84,6 +95,7 @@ func GetMigrationModels() []MigrationModel {
 
 		// Chatbot models
 		{"ChatbotSettings", &models.ChatbotSettings{}},
+		{"AIUsageLog", &models.AIUsageLog{}},
 		{"KeywordRule", &models.KeywordRule{}},
 		{"ChatbotFlow", &models.ChatbotFlow{}},
 		// ChatbotFlowStep table is no longer managed by AutoMigrate — the
@@ -200,6 +212,16 @@ func RunMigrationWithProgress(db *gorm.DB, adminCfg *config.DefaultAdminConfig) 
 		currentStep++
 	}
 
+	// One active transfer per contact. Never auto-fixes data: with duplicates
+	// present the index is skipped and the offending rows are reported.
+	if _, dups, err := EnsureActiveTransferUniqueness(silentDB); err != nil {
+		fmt.Printf("\n  \033[31m✗ Active transfer index failed\033[0m\n\n")
+		return err
+	} else if len(dups) > 0 {
+		fmt.Printf("\n  \033[33m! %s NOT created: %d contact(s) have more than one active transfer.\n    Resolve them manually (nothing was changed) and re-run the migration:\033[0m\n%s",
+			ActiveTransferIndexName, len(dups), FormatActiveTransferDuplicates(dups))
+	}
+
 	// Seed permissions (always run, will skip if already seeded)
 	printProgress(currentStep, totalSteps)
 	if err := SeedPermissionsAndRoles(silentDB); err != nil {
@@ -263,6 +285,11 @@ func repeatChar(char string, n int) string {
 
 // getIndexes returns all index creation SQL statements
 func getIndexes() []string {
+	// Both the server migration and CreateIndexes (used by tests) read THIS list.
+	return append(coreIndexes(), knowledge.SchemaSQL...)
+}
+
+func coreIndexes() []string {
 	return []string{
 		// Expand phone_number columns to support group JIDs (e.g., 120363422675615917@g.us)
 		`ALTER TABLE contacts ALTER COLUMN phone_number TYPE varchar(50)`,
@@ -281,6 +308,32 @@ func getIndexes() []string {
 			ALTER TABLE contacts ADD CONSTRAINT chk_contacts_contact_status
 				CHECK (contact_status IN ('new','in_progress','resolved'));
 		EXCEPTION WHEN duplicate_object THEN NULL;
+		END $$`,
+		`DO $$ BEGIN
+			ALTER TABLE contacts ADD CONSTRAINT chk_contacts_contact_type
+				CHECK (contact_type IN ('cliente','fornecedor','colaborador'));
+		EXCEPTION WHEN duplicate_object THEN NULL;
+		END $$`,
+		// Opportunity unit of measure: nullable, closed list generated from
+		// models.SalesUnitsOfMeasure. Dropped and re-added so a longer list takes
+		// effect on the next start (existing rows only hold NULL or listed values).
+		`ALTER TABLE sales_opportunities DROP CONSTRAINT IF EXISTS chk_sales_opp_unit_of_measure`,
+		salesUnitCheckSQL(),
+		// An X2 order may be tracked by only ONE open link: the same (cod_empresa,
+		// num_pedido) can never feed two opportunities at once. cod_empresa is only
+		// known after the first answer from X2, so unchecked links are not covered
+		// (the handlers check num_pedido+documento for those). Created only when no
+		// duplicate open links exist yet, so an upgrade never fails on old data.
+		`DO $$ BEGIN
+			IF EXISTS (SELECT 1 FROM sales_opportunity_xprocess_links
+				WHERE cod_empresa IS NOT NULL AND resolved_at IS NULL AND deleted_at IS NULL
+				GROUP BY organization_id, cod_empresa, num_pedido HAVING count(*) > 1) THEN
+				RAISE NOTICE 'idx_sales_opp_xlink_open_order not created: duplicate open links exist';
+			ELSE
+				CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_opp_xlink_open_order
+					ON sales_opportunity_xprocess_links (organization_id, cod_empresa, num_pedido)
+					WHERE cod_empresa IS NOT NULL AND resolved_at IS NULL AND deleted_at IS NULL;
+			END IF;
 		END $$`,
 		// Composite index matching the ListContacts filter + ordering exactly
 		`CREATE INDEX IF NOT EXISTS idx_contacts_org_status_lastmsg ON contacts(organization_id, contact_status, last_message_at DESC NULLS LAST)`,
@@ -338,6 +391,12 @@ func CreateIndexes(db *gorm.DB) error {
 		if err := db.Exec(idx).Error; err != nil {
 			return fmt.Errorf("failed to create index: %w", err)
 		}
+	}
+	if _, dups, err := EnsureActiveTransferUniqueness(db); err != nil {
+		return err
+	} else if len(dups) > 0 {
+		fmt.Printf("WARNING: %s not created, %d contact(s) have duplicate active transfers:\n%s",
+			ActiveTransferIndexName, len(dups), FormatActiveTransferDuplicates(dups))
 	}
 	return nil
 }
@@ -865,4 +924,15 @@ func SeedDefaultWidgetsForOrg(db *gorm.DB, orgID, userID uuid.UUID) error {
 	}
 
 	return nil
+}
+
+// salesUnitCheckSQL builds the CHECK for sales_opportunities.unit_of_measure from
+// the single list of valid units.
+func salesUnitCheckSQL() string {
+	quoted := make([]string, len(models.SalesUnitsOfMeasure))
+	for i, u := range models.SalesUnitsOfMeasure {
+		quoted[i] = "'" + string(u) + "'"
+	}
+	return "ALTER TABLE sales_opportunities ADD CONSTRAINT chk_sales_opp_unit_of_measure " +
+		"CHECK (unit_of_measure IS NULL OR unit_of_measure IN (" + strings.Join(quoted, ",") + "))"
 }

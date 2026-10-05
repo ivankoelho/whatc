@@ -38,6 +38,26 @@ type Hub struct {
 	// unit tests or before wiring), no gate is applied and legacy behaviour is
 	// preserved; production always injects it via SetConversationAuthorizer.
 	authorize ConversationAuthorizer
+
+	// onPresence, when set, is told when a user's FIRST connection opens or
+	// their LAST one closes (not on every tab). It runs in its own goroutine so
+	// a slow listener can never stall the hub loop.
+	onPresence PresenceListener
+}
+
+// PresenceListener receives presence transitions: online=true when the user
+// went from zero to one live connections, false on the reverse.
+type PresenceListener func(orgID, userID uuid.UUID, online bool)
+
+// SetPresenceListener injects the presence listener. Set once at startup.
+func (h *Hub) SetPresenceListener(fn PresenceListener) {
+	h.onPresence = fn
+}
+
+func (h *Hub) notifyPresence(orgID, userID uuid.UUID, online bool) {
+	if h.onPresence != nil {
+		go h.onPresence(orgID, userID, online)
+	}
 }
 
 // SetConversationAuthorizer injects the authorization function used to gate
@@ -77,8 +97,17 @@ func (h *Hub) Run() {
 // registerClient adds a client to the hub
 func (h *Hub) registerClient(client *Client) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
+	cameOnline := h.addClientLocked(client)
+	h.mu.Unlock()
 
+	if cameOnline {
+		h.notifyPresence(client.organizationID, client.userID, true)
+	}
+}
+
+// addClientLocked registers the client and reports whether it is the user's
+// first live connection. Caller holds h.mu.
+func (h *Hub) addClientLocked(client *Client) (firstConnection bool) {
 	orgClients, ok := h.clients[client.organizationID]
 	if !ok {
 		orgClients = make(map[uuid.UUID]map[*Client]struct{})
@@ -92,6 +121,7 @@ func (h *Hub) registerClient(client *Client) {
 	}
 
 	// Add this client to the set (allows multiple tabs)
+	firstConnection = len(userClients) == 0
 	userClients[client] = struct{}{}
 
 	h.log.Info("WebSocket client registered",
@@ -99,13 +129,23 @@ func (h *Hub) registerClient(client *Client) {
 		"org_id", client.organizationID,
 		"user_connections", len(userClients),
 		"total_clients", h.countClients())
+	return firstConnection
 }
 
 // unregisterClient removes a client from the hub
 func (h *Hub) unregisterClient(client *Client) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
+	wentOffline := h.removeClientLocked(client)
+	h.mu.Unlock()
 
+	if wentOffline {
+		h.notifyPresence(client.organizationID, client.userID, false)
+	}
+}
+
+// removeClientLocked removes the client and reports whether that was the
+// user's last live connection. Caller holds h.mu.
+func (h *Hub) removeClientLocked(client *Client) (lastConnection bool) {
 	if orgClients, ok := h.clients[client.organizationID]; ok {
 		if userClients, ok := orgClients[client.userID]; ok {
 			if _, exists := userClients[client]; exists {
@@ -115,6 +155,7 @@ func (h *Hub) unregisterClient(client *Client) {
 				// Clean up empty user map
 				if len(userClients) == 0 {
 					delete(orgClients, client.userID)
+					lastConnection = true
 				}
 
 				// Clean up empty org map
@@ -129,6 +170,7 @@ func (h *Hub) unregisterClient(client *Client) {
 		"user_id", client.userID,
 		"org_id", client.organizationID,
 		"total_clients", h.countClients())
+	return lastConnection
 }
 
 // broadcastMessage sends a message to all relevant clients

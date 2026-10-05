@@ -79,6 +79,7 @@ const (
 	AIProviderOpenAI    AIProvider = "openai"
 	AIProviderAnthropic AIProvider = "anthropic"
 	AIProviderGoogle    AIProvider = "google"
+	AIProviderGroq      AIProvider = "groq"
 )
 
 // MatchType represents keyword matching strategies
@@ -148,6 +149,27 @@ const (
 	// messaged the customer first. Without this record the chatbot would take
 	// over the customer's reply.
 	TransferSourceAgentInitiated TransferSource = "agent_initiated"
+
+	// TransferSourceAIConfirmed marks a transfer the chatbot's AI proposed and the CUSTOMER
+	// confirmed (Fase 9D). TransferredByUserID stays NULL: nobody on the staff did it.
+	TransferSourceAIConfirmed TransferSource = "ai_confirmed"
+)
+
+// Why a flow's transfer node sent the contact where it did (agent_transfers.routing_reason). A
+// closed set, so the history can be audited and grouped; never free text. NULL on transfers that
+// did not come from a flow transfer node.
+const (
+	// RoutingReasonTeamFixed: the node's fixed team (or the general queue), the original behavior.
+	RoutingReasonTeamFixed = "team_fixed"
+	// RoutingReasonContactPlacement: the contact's unit + department matched exactly one team.
+	RoutingReasonContactPlacement = "contact_placement"
+	// RoutingReasonNoContactPlacement: the contact is not a colaborador or lacks the unit or the department.
+	RoutingReasonNoContactPlacement = "no_contact_placement"
+	// RoutingReasonNoTeamForPlacement: no active team is tagged with the contact's unit + department.
+	RoutingReasonNoTeamForPlacement = "no_team_for_contact_placement"
+	// RoutingReasonAmbiguousPlacement: more than one active team is tagged with the pair; nothing is
+	// chosen automatically, the node's fallback is used.
+	RoutingReasonAmbiguousPlacement = "ambiguous_contact_placement"
 )
 
 // CampaignStatus represents bulk message campaign states
@@ -246,3 +268,22 @@ const (
 	ActionTypeURL        ActionType = "url"
 	ActionTypeJavascript ActionType = "javascript"
 )
+
+// ContactType says what a contact is to the company. New types are added here
+// and to the chk_contacts_contact_type constraint in database/postgres.go.
+type ContactType string
+
+const (
+	ContactTypeCliente     ContactType = "cliente"
+	ContactTypeFornecedor  ContactType = "fornecedor"
+	ContactTypeColaborador ContactType = "colaborador"
+)
+
+// IsValid reports whether t is one of the known contact types.
+func (t ContactType) IsValid() bool {
+	switch t {
+	case ContactTypeCliente, ContactTypeFornecedor, ContactTypeColaborador:
+		return true
+	}
+	return false
+}

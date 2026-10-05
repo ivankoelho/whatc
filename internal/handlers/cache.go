@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/websocket"
 	"gorm.io/gorm"
@@ -44,7 +45,10 @@ const (
 	tagsCachePrefix            = "tags:"
 )
 
-// chatbotSettingsCache is used for caching since AI.APIKey has json:"-" tag
+// chatbotSettingsCache is used for caching since AI.APIKey has json:"-" tag.
+// AIAPIKey holds the key exactly as stored in the database, i.e. ENCRYPTED:
+// plaintext never goes into Redis. The only place a key is decrypted is
+// resolveAIAPIKey, right before a provider call.
 type chatbotSettingsCache struct {
 	models.ChatbotSettings
 	AIAPIKey string `json:"ai_api_key_cache"`
@@ -60,7 +64,7 @@ func (a *App) getChatbotSettingsCached(orgID uuid.UUID, whatsAppAccount string) 
 	if err == nil && cached != "" {
 		var cacheData chatbotSettingsCache
 		if err := json.Unmarshal([]byte(cached), &cacheData); err == nil {
-			// Restore the API key from the cache wrapper
+			// Restore the (still encrypted) API key from the cache wrapper
 			cacheData.AI.APIKey = cacheData.AIAPIKey
 			return &cacheData.ChatbotSettings, nil
 		}
@@ -77,7 +81,8 @@ func (a *App) getChatbotSettingsCached(orgID uuid.UUID, whatsAppAccount string) 
 		return nil, result.Error
 	}
 
-	// Cache the result (include AI APIKey explicitly since it has json:"-" tag)
+	// Cache the result (include AI APIKey explicitly since it has json:"-" tag;
+	// it is the encrypted value, see chatbotSettingsCache)
 	cacheData := chatbotSettingsCache{
 		ChatbotSettings: settings,
 		AIAPIKey:        settings.AI.APIKey,
@@ -791,4 +796,19 @@ func (a *App) InvalidateTagsCache(orgID uuid.UUID) {
 	ctx := context.Background()
 	cacheKey := fmt.Sprintf("%s%s", tagsCachePrefix, orgID.String())
 	a.Redis.Del(ctx, cacheKey)
+}
+
+// FlushChatbotSettingsCache removes every cached chatbot settings entry. Run at
+// startup so entries written by an older version, which cached the AI API key in
+// plaintext, do not outlive the upgrade; the cache repopulates on demand.
+func FlushChatbotSettingsCache(ctx context.Context, rdb *redis.Client) (int, error) {
+	var removed int
+	iter := rdb.Scan(ctx, 0, settingsCachePrefix+"*", 200).Iterator()
+	for iter.Next(ctx) {
+		if err := rdb.Del(ctx, iter.Val()).Err(); err != nil {
+			return removed, err
+		}
+		removed++
+	}
+	return removed, iter.Err()
 }

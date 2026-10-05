@@ -158,3 +158,66 @@ func TestGroupPedidos_GroupsByEmpresaAndNumPedido(t *testing.T) {
 	assert.Equal(t, "1", resumos[1].CodEmpresa)
 	assert.InDelta(t, 61.6, resumos[1].ValorTotal, 0.0001)
 }
+
+// Freight is informational and separate from the total: Total = Subtotal - Desconto,
+// and the pedido's freight is the sum of the lines' vl_frete (values from a real
+// 8-line order: they add up to exactly 100,00).
+func TestSummarizePedido_SumsFreightSeparatelyFromTotal(t *testing.T) {
+	items := []PedidoItem{
+		{CodEmpresa: "40", NumPedido: "1", Status: "SEPARACAO", Total: "1000,50", VlFrete: "0,87"},
+		{CodEmpresa: "40", NumPedido: "1", Status: "SEPARACAO", Total: "500,00", VlFrete: "99,13"},
+	}
+	r, err := SummarizePedido(items)
+	require.NoError(t, err)
+	assert.InDelta(t, 1500.50, r.ValorTotal, 1e-9, "freight is not part of the total")
+	assert.InDelta(t, 100.00, r.ValorFrete, 1e-9)
+}
+
+func TestSummarizePedido_MissingOrMalformedFreightCountsAsZero(t *testing.T) {
+	items := []PedidoItem{
+		{NumPedido: "1", Status: "FECHADO", Total: "10,0"},
+		{NumPedido: "1", Status: "FECHADO", Total: "5,0", VlFrete: "n/a"},
+		{NumPedido: "1", Status: "FECHADO", Total: "5,0", VlFrete: "2,5"},
+	}
+	r, err := SummarizePedido(items)
+	require.NoError(t, err)
+	assert.InDelta(t, 20.0, r.ValorTotal, 1e-9)
+	assert.InDelta(t, 2.5, r.ValorFrete, 1e-9)
+}
+
+func TestClient_ListarLojas_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/lojas", r.URL.Path)
+		assert.Equal(t, "test-key", r.Header.Get("x-api-key"))
+		_, _ = w.Write([]byte(`{"ok":true,"total":2,"lojas":[
+			{"cod_empresa":"40","razao_social_empresa":"ATACADAO DOS PISOS LTDA  (PORTO)","cnpj_empresa":"58.675.622/0003-61","data_referencia_dados":"2026-10-01T01:18:33"},
+			{"cod_empresa":"41","razao_social_empresa":"ATACADAO DOS PISOS LTDA  (SERRINHA)","cnpj_empresa":"58.675.622/0005-23","data_referencia_dados":"2026-10-01T01:18:33"}
+		]}`))
+	}))
+	defer srv.Close()
+
+	lojas, err := New(testLog(), srv.URL).ListarLojas(context.Background(), "test-key")
+	require.NoError(t, err)
+	require.Len(t, lojas, 2)
+	assert.Equal(t, Loja{CodEmpresa: "40", RazaoSocialEmpresa: "ATACADAO DOS PISOS LTDA  (PORTO)", CNPJEmpresa: "58.675.622/0003-61"}, lojas[0])
+}
+
+func TestClient_ListarLojas_ErrorStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"detail":"invalid key"}`))
+	}))
+	defer srv.Close()
+	_, err := New(testLog(), srv.URL).ListarLojas(context.Background(), "bad")
+	assert.Error(t, err)
+}
+
+func TestClient_ListarLojas_OkFalseIsAnError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":false,"lojas":[]}`))
+	}))
+	defer srv.Close()
+	_, err := New(testLog(), srv.URL).ListarLojas(context.Background(), "k")
+	assert.Error(t, err)
+}

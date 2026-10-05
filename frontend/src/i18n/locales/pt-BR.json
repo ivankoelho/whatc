@@ -292,6 +292,7 @@
     "apiKeys": "Chaves de API",
     "webhooks": "Webhooks",
     "xprocessIntegration": "ERP X2",
+    "knowledge": "Conhecimento",
     "customActions": "Ações personalizadas",
     "occurrenceStages": "Etapas de ocorrência",
     "units": "Unidades",
@@ -508,7 +509,8 @@
     "generalSection": "Geral",
     "serviceWindowExpired": "A janela de mensagens de 24 horas expirou. Somente mensagens de modelo podem ser enviadas até o cliente responder.",
     "sendTemplateAction": "Enviar modelo",
-    "retrySending": "Tentar enviar novamente"
+    "retrySending": "Tentar enviar novamente",
+    "conversationOwnedByAnother": "Esta conversa está atribuída a outro agente. Sua mensagem não foi enviada."
   },
   "contacts": {
     "title": "Contatos",
@@ -555,6 +557,17 @@
     "never": "Nunca",
     "created": "Criado",
     "selectTags": "Selecionar etiquetas...",
+    "type": "Tipo",
+    "types": { "cliente": "Cliente", "fornecedor": "Fornecedor", "colaborador": "Colaborador" },
+    "document": "CPF / CNPJ",
+    "documentPlaceholder": "Opcional",
+    "registration": "Cadastro",
+    "registrationSaved": "Cadastro atualizado",
+    "notInformed": "Não informado",
+    "defined": "Definido",
+    "unit": "Unidade",
+    "department": "Departamento",
+    "noneSelected": "Nenhuma",
     "tagsSelected": "etiquetas selecionadas",
     "searchTags": "Buscar etiquetas...",
     "noTagsFound": "Nenhuma etiqueta encontrada",
@@ -752,6 +765,9 @@
     "passwordPlaceholder": "Digite a senha",
     "keepExisting": "(deixe em branco para manter a atual)",
     "selectRole": "Selecionar função",
+    "unit": "Unidade",
+    "department": "Departamento",
+    "noneSelected": "Nenhuma",
     "xprocessSellerCode": "Código de vendedor XProcess",
     "xprocessSellerCodePlaceholder": "ex.: V042",
     "accountActive": "Conta ativa",
@@ -768,7 +784,10 @@
     "updateMemberRole": "Atualizar função",
     "updateMemberRoleTitle": "Atualizar função do membro",
     "updateMemberRoleDesc": "Altere a função deste membro nesta organização.",
-    "memberRoleUpdated": "Função do membro atualizada"
+    "memberRoleUpdated": "Função do membro atualizada",
+    "presenceOffline": "Offline",
+    "presenceAway": "Online, ausente",
+    "presenceAvailable": "Online, disponível"
   },
   "roles": {
     "title": "Funções e permissões",
@@ -812,6 +831,10 @@
     "noPermissionsSeeded": "Nenhuma permissão disponível. Verifique se as permissões foram inicializadas no banco de dados."
   },
   "teams": {
+    "unit": "Unidade",
+    "department": "Departamento",
+    "placementHint": "Usados pelo nó de transferência do fluxo configurado como cadastro do contato.",
+    "placementConflict": "Outra equipe ativa tem a mesma unidade e departamento ({teams}). Com duas equipes para o par, o roteamento automático pelo cadastro não escolhe nenhuma e usa a equipe alternativa do nó.",
     "title": "Equipes",
     "subtitle": "Organize os agentes em equipes",
     "addTeam": "Adicionar equipe",
@@ -1365,6 +1388,118 @@
     "fetchErrorTitle": "Falha ao carregar ações personalizadas",
     "fetchErrorDescription": "Algo deu errado ao carregar suas ações personalizadas. Tente novamente."
   },
+  "knowledge": {
+    "title": "Base de conhecimento",
+    "subtitle": "Documentos, manuais e procedimentos que a organização pode pesquisar",
+    "create": "Novo documento",
+    "createTitle": "Novo documento",
+    "createDesc": "Adicione uma FAQ, artigo, processo ou texto à base de conhecimento.",
+    "editTitle": "Editar documento",
+    "editDesc": "Altere o conteúdo ou o escopo. Salvar reconstrói os trechos pesquisáveis.",
+    "editManualDesc": "Manual importado: aqui só o escopo e o status podem ser alterados.",
+    "documents": "Documentos",
+    "documentsDesc": "Documentos ativos do seu contexto. Abra um para ver o conteúdo e os trechos.",
+    "searchTitles": "Buscar por título...",
+    "colTitle": "Título",
+    "colType": "Tipo",
+    "colScope": "Escopo",
+    "colStatus": "Status",
+    "colUpdated": "Atualizado",
+    "types": { "faq": "FAQ", "article": "Artigo", "process": "Processo", "text": "Texto", "markdown": "Markdown", "manual_html": "Manual" },
+    "status": { "active": "Ativo", "archived": "Arquivado" },
+    "allTypes": "Todos os tipos",
+    "allStatuses": "Todos os status",
+    "anyUnit": "qualquer unidade",
+    "anyDepartment": "qualquer departamento",
+    "perPage": "página",
+    "clearFilters": "Limpar filtros",
+    "filterScope": "Escopo",
+    "filterContext": "Contexto",
+    "unit": "Unidade",
+    "department": "Departamento",
+    "inactive": "inativa",
+    "noUnit": "Sem unidade",
+    "noDepartment": "Sem departamento",
+    "scopeLabel": "Escopo",
+    "scopeHelp": "Quem pode encontrar este documento. Sem unidade e sem departamento, ele vale para toda a organização.",
+    "scopeOrganization": "Toda a organização",
+    "noDocuments": "Nenhum documento ainda",
+    "noDocumentsDesc": "Crie um documento ou importe os manuais pela linha de comando.",
+    "noMatching": "Nenhum documento encontrado",
+    "noMatchingDesc": "Tente outros filtros ou limpe-os.",
+    "cliHint": "Os documentos de manual vêm da importação. Para criar ou atualizar, use a linha de comando:",
+    "archive": "Arquivar",
+    "reactivate": "Reativar",
+    "archived": "Documento arquivado",
+    "reactivated": "Documento reativado",
+    "archivedByImport": "arquivado pela importação",
+    "archivedByUser": "arquivado por um usuário",
+    "created": "Documento criado",
+    "updated": "Documento atualizado",
+    "deleted": "Documento excluído",
+    "deleteTitle": "Excluir documento",
+    "deleteDesc": "Excluir \"{name}\"? Ele sai da busca imediatamente.",
+    "deleteManualDesc": "Excluir \"{name}\"? Ele vem de um manual importado: a próxima importação o cria de novo. Para retirá-lo de vez, arquive.",
+    "fieldTitle": "Título",
+    "fieldTitlePh": "ex.: Como emitir uma nota fiscal",
+    "fieldType": "Tipo",
+    "fieldStatus": "Status",
+    "fieldBody": "Conteúdo",
+    "fieldBodyPh": "Escreva o texto ou carregue um arquivo .txt / .md",
+    "upload": "Carregar arquivo de texto ou Markdown",
+    "uploadType": "Só são aceitos arquivos de texto (.txt) e Markdown (.md).",
+    "uploadSize": "O arquivo tem mais de {max} caracteres.",
+    "errTitleRequired": "O título é obrigatório.",
+    "errTitleTooLong": "O título é longo demais.",
+    "errBodyRequired": "O conteúdo é obrigatório.",
+    "errBodyTooLong": "O conteúdo passa de {max} caracteres.",
+    "manualReadOnly": "Este conteúdo é gerenciado pela importação: altere o HTML e importe de novo. Aqui só o escopo e o status podem ser editados.",
+    "conflict": "Este documento foi alterado por outra pessoa depois que você o abriu. Recarregue a versão atual para continuar; nada foi sobrescrito.",
+    "conflictToast": "O documento foi alterado por outra pessoa. A lista foi recarregada; tente de novo.",
+    "reloadCurrent": "Recarregar a versão atual",
+    "gone": "Este documento não está mais disponível.",
+    "forbidden": "Você não tem permissão para esta ação.",
+    "loadFailed": "Não foi possível carregar os documentos.",
+    "loadDocumentFailed": "Não foi possível carregar o documento.",
+    "saveFailed": "Não foi possível salvar o documento.",
+    "deleteFailed": "Não foi possível excluir o documento.",
+    "scopesFailed": "Não foi possível carregar as unidades e departamentos.",
+    "reindexFailed": "Não foi possível reindexar.",
+    "searchFailed": "A busca falhou.",
+    "panelDesc": "Conteúdo e trechos pesquisáveis",
+    "tabContent": "Conteúdo",
+    "tabChunks": "Trechos",
+    "origin": "Origem",
+    "noChunks": "Este documento não tem trechos. Reindexe para reconstruí-los.",
+    "chars": "{count} caracteres",
+    "stale": "obsoleto",
+    "reindexDocument": "Reindexar",
+    "reindexedDocument": "Reindexado: {count} trechos",
+    "reindexStale": "Reindexar obsoletos",
+    "reindexAll": "Reindexar tudo",
+    "reindexAllTitle": "Reindexar todos os documentos?",
+    "reindexAllDesc": "Todos os trechos da organização são reconstruídos, um documento por vez. Pode demorar.",
+    "reindexResult": "Reindexados {documents} documentos ({chunks} trechos); {skipped} ignorados; {remaining} obsoletos restantes.",
+    "staleBanner": "{count} trechos foram gerados por uma estratégia de indexação mais antiga (atual: v{version}). Reindexe para deixar as buscas consistentes.",
+    "indexSummary": "{documents} documentos · {chunks} trechos · índice v{version}",
+    "searchTool": "Testar busca",
+    "searchToolDesc": "Ferramenta manual de busca da base de conhecimento (correspondência exata). Não usa o chatbot.",
+    "searchQuery": "Busca",
+    "searchPh": "ex.: \"emitir nota\" ou não-conformidade",
+    "searchLimit": "Resultados",
+    "searchRun": "Buscar",
+    "searchInitial": "Digite uma consulta e clique em Buscar.",
+    "searchEmpty": "Nenhum resultado.",
+    "searchEmptyHint": "Palavras muito comuns são ignoradas: uma consulta só com elas não encontra nada.",
+    "score": "score",
+    "scoreHelp": "Relevância lexical, comparável apenas dentro desta resposta. Não é uma probabilidade.",
+    "contextUnit": "Contexto: unidade",
+    "contextDepartment": "Contexto: departamento",
+    "contextFixed": "Seu contexto: {context}.",
+    "contextGlobalOnly": "somente conteúdo global",
+    "contextChooseHelp": "Deixe a unidade e o departamento vazios para buscar só o conteúdo disponível a todos.",
+    "contextOutOfReach": "Este contexto está fora do seu alcance."
+  },
   "xprocessIntegration": {
     "title": "Integração ERP X2",
     "description": "Conecte o Whatc ao ERP X2",
@@ -1917,8 +2052,11 @@
     "pricePerMessage": "Preço por mensagem (R$)",
     "costEstimateNote": "A Meta cobra por mensagem entregue. A faixa considera de 85% a 100% de entrega. Confira o valor na sua fatura da Meta.",
     "byDDD": "Por DDD",
+    "bySegment": "Segmentar",
+    "segmentAny": "Qualquer",
+    "optOutNote": "Em templates de marketing, contatos que pediram para não receber marketing ficam de fora.",
     "dddNeedsNoParams": "Este modelo tem variáveis. Use o envio de CSV para preenchê-las por destinatário.",
-    "dddHint": "DDDs separados por vírgula. Todos os contatos com esses DDDs serão adicionados.",
+    "dddHint": "Os filtros se combinam: o contato precisa atender a todos. DDDs separados por vírgula.",
     "dddPreview": "{added} contatos serão adicionados; {skipped} com ocorrência ativa ficarão de fora.",
     "activeOccurrenceNote": "Contatos com ocorrência ativa nunca entram em campanhas.",
     "dddCheck": "Verificar",
@@ -2065,6 +2203,10 @@
     "maxTokens": "Máximo de tokens",
     "systemPrompt": "Prompt do sistema (opcional)",
     "systemPromptPlaceholder": "Você é um assistente prestativo de atendimento ao cliente",
+    "knowledgeTitle": "Usar a base de conhecimento nas respostas da IA",
+    "knowledgeDesc": "A IA pode consultar os documentos da base de conhecimento disponíveis para a unidade e o departamento do cliente e usá-los para responder. Nada é acrescentado à mensagem que o cliente recebe.",
+    "knowledgeReady": "Disponível neste servidor.",
+    "knowledgeServerOff": "Desligado neste servidor (knowledge.rag_enabled). Peça a quem administra o servidor para habilitar.",
     "maxButtonsError": "Máximo de 10 botões permitidos",
     "greetingButtonsRequired": "Todos os botões de saudação devem ter um título",
     "fallbackButtonsRequired": "Todos os botões de fallback devem ter um título",
@@ -2074,7 +2216,13 @@
     "aiSettingsSaved": "Configurações de IA salvas",
     "slaSettingsSaved": "Configurações de SLA salvas",
     "aiSaveFailed": "Falha ao salvar configurações de IA",
-    "slaSaveFailed": "Falha ao salvar configurações de SLA"
+    "aiEncryptionKeyMissing": "O servidor não tem app.encryption_key configurada, então a chave de API de IA não foi salva. Peça a um administrador para configurá-la.",
+    "slaSaveFailed": "Falha ao salvar configurações de SLA",
+    "loadModels": "Carregar modelos",
+    "modelsLoaded": "{count} modelos carregados do provedor",
+    "failedLoadModels": "Não foi possível carregar os modelos do provedor",
+    "apiKeySaved": "Há uma chave de API salva. Ela nunca é exibida novamente; digite uma nova para substituí-la.",
+    "loadModelsHint": "Informe a chave de API e clique em \"Carregar modelos\" para ver os modelos deste provedor."
   },
   "agentTransfers": {
     "title": "Transferências",
@@ -2157,7 +2305,8 @@
     "fetchError": "Falha ao carregar transferências. Tente novamente.",
     "confirmResumeTitle": "Retomar chatbot",
     "confirmResumeDescription": "Tem certeza de que deseja retomar o chatbot para este contato? A transferência para o agente será encerrada e o chatbot assumirá.",
-    "confirmResumeLabel": "Retomar"
+    "confirmResumeLabel": "Retomar",
+    "changedByAnother": "Outra pessoa já assumiu ou alterou este atendimento. A lista foi atualizada."
   },
   "occurrences": {
     "title": "Ocorrências",
@@ -2351,6 +2500,80 @@
     "columnName": "Nome",
     "columnCode": "Código",
     "columnType": "Tipo",
+    "columnX2": "Loja X2",
+    "x2LinkAction": "Vincular a uma loja do X2",
+    "x2DialogTitle": "Loja do X2",
+    "x2DialogDesc": "Escolha a loja do X2 que esta unidade representa. Nada é salvo até você apertar Salvar; a sugestão é só uma dica pelos nomes.",
+    "x2Search": "Buscar por código, nome ou CNPJ",
+    "x2NoStores": "Nenhuma loja encontrada",
+    "x2Suggestion": "Sugestão",
+    "x2SuggestionHint": "O nome parece com o desta unidade. É só uma dica: não é salva.",
+    "x2LinkedTo": "Vinculada a {unit}",
+    "x2FillCnpj": "Preencher o CNPJ da unidade com o CNPJ da loja",
+    "x2FillCnpjHint": "Só preenche um CNPJ vazio e nunca substitui um existente.",
+    "x2FillCnpjHasCnpj": "Esta unidade já tem CNPJ, que é mantido.",
+    "x2Clear": "Remover vínculo",
+    "x2Linked": "Unidade vinculada à loja do X2",
+    "x2Cleared": "Vínculo removido",
+    "x2CnpjFilled": "CNPJ da unidade preenchido com o da loja",
+    "x2CnpjNote": { "unit_has_cnpj": "A unidade já tinha CNPJ, então ele foi mantido.", "store_cnpj_invalid": "O CNPJ da loja no X2 não é válido, então não foi copiado.", "cnpj_in_use": "Outra unidade já usa esse CNPJ, então ele não foi copiado.", "cnpj_update_failed": "Não foi possível salvar o CNPJ." },
+    "x2LoadFailed": "Não foi possível carregar as lojas do X2",
+    "x2LoadFailedHint": "O X2 não respondeu. Um vínculo já salvo continua funcionando; tente de novo para alterá-lo.",
+    "x2SaveFailed": "Falha ao salvar o vínculo",
+    "import": {
+      "button": "Importar do X2",
+      "title": "Importar unidades do X2",
+      "description": "Escolha as lojas do X2 que ainda não têm unidade no Whatc. Cada uma vira uma unidade; nada é criado até você confirmar.",
+      "search": "Buscar por código, nome ou CNPJ",
+      "available": "Lojas disponíveis no X2",
+      "noStores": "Nenhuma loja encontrada",
+      "loadFailed": "Não foi possível carregar as lojas do X2",
+      "loadFailedHint": "O X2 não respondeu. Nenhuma unidade foi alterada; tente de novo.",
+      "selectedCount": "Lojas selecionadas: {count}",
+      "resultDescription": "O que aconteceu com cada loja escolhida.",
+      "willBeNamed": "Será criada como {name}",
+      "linkedUnit": "Unidade: {unit}",
+      "status": {
+        "new": "Nova",
+        "already_imported": "Já importada",
+        "conflict": "Conflito"
+      },
+      "conflictReason": {
+        "cnpj_in_use": "A unidade {unit} já usa o CNPJ desta loja e não está vinculada a ela.",
+        "name_in_use": "Já existe uma unidade chamada {unit}, sem vínculo com esta loja."
+      },
+      "importSelected": "Importar selecionadas",
+      "importing": "Importando...",
+      "importFailed": "Falha ao importar as unidades",
+      "resultTitle": "Resultado da importação",
+      "summary": {
+        "created": "Criadas",
+        "updated": "Atualizadas",
+        "already_exists": "Já existentes",
+        "conflicts": "Conflitos",
+        "failed": "Falhas"
+      },
+      "result": {
+        "created": "Criada",
+        "updated": "CNPJ preenchido",
+        "already_exists": "Já existia",
+        "conflict": "Conflito",
+        "failed": "Falhou"
+      },
+      "reason": {
+        "cnpj_in_use": "Outra unidade ({unit}) já usa o CNPJ desta loja. Nada foi criado.",
+        "name_in_use": "Já existe uma unidade chamada {unit}. Nada foi criado.",
+        "not_in_x2": "Esta loja não existe mais no X2.",
+        "create_failed": "Não foi possível criar a unidade."
+      },
+      "note": {
+        "store_cnpj_invalid": "O CNPJ da loja no X2 não é válido: a unidade foi criada sem CNPJ.",
+        "cnpj_differs": "O CNPJ da unidade é diferente do X2 e foi mantido.",
+        "cnpj_in_use": "O CNPJ do X2 já é de outra unidade e não foi preenchido."
+      },
+      "backToList": "Voltar à lista",
+      "close": "Fechar"
+    },
     "columnActive": "Ativa",
     "noUnitsYet": "Nenhuma unidade ainda",
     "noUnitsYetDesc": "Adicione a primeira unidade/loja.",
@@ -2798,6 +3021,11 @@
       "tags": "Tags na transferência",
       "tagsPlaceholder": "orçamento, foto",
       "tagsHint": "Aplicadas ao contato ao chegar nesta transferência (separadas por vírgula).",
+      "destination": "Destino",
+      "destinationTeam": "Equipe fixa",
+      "destinationPlacement": "Cadastro do contato (unidade e departamento)",
+      "destinationPlacementHint": "Para colaboradores: vai para a equipe marcada com a unidade e o departamento do contato. Sem cadastro, sem equipe ou com mais de uma equipe para o par, usa a equipe abaixo.",
+      "fallbackTeam": "Se não houver equipe",
       "finalMessageOptional": "Mensagem final (opcional)",
       "finalMessagePlaceholder": "Enviada quando o fluxo termina. Deixe em branco para término silencioso.",
       "targetFlow": "Fluxo de destino",
@@ -2828,6 +3056,8 @@
       "fields": "Campos:",
       "addFieldPlaceholder": "Adicionar campo…",
       "noUnusedVariables": "Nenhuma variável não utilizada restante.",
+      "groupVariables": "Variáveis do fluxo",
+      "groupContact": "Dados do contato",
       "noFieldsAdded": "Nenhum campo adicionado.",
       "displayLabelPlaceholder": "Rótulo de exibição",
       "typeText": "Texto",
@@ -3545,6 +3775,22 @@
     "direcionamentoChanged": "Direcionamento atualizado",
     "direcionamentoChangeFailed": "Falha ao atualizar o direcionamento",
     "estimatedValueInvalid": "Informe um valor numérico válido",
+    "quantityInvalid": "Informe números válidos, não negativos (quantidades com até 3 casas decimais)",
+    "estimatedQuantity": "Quantidade estimada",
+    "unit": "Unidade",
+    "unitNone": "Sem unidade",
+    "units": { "UN": "Unidade", "M": "Metro", "M2": "Metro quadrado", "KG": "Quilograma", "PCT": "Pacote", "CX": "Caixa" },
+    "columnQuantity": "Quantidade",
+    "columnRealized": "Realizado",
+    "realizedLabel": "Realizado",
+    "realizedValue": "Valor realizado",
+    "realizedQuantity": "Quantidade realizada",
+    "realizedValueX2Note": "Quando o X2 tem o pedido, o total dele substitui este valor.",
+    "editDetails": "Editar detalhes",
+    "editEstimatedDesc": "A expectativa comercial desta oportunidade.",
+    "editRealizedDesc": "O que foi efetivamente vendido.",
+    "detailsSaved": "Detalhes salvos",
+    "detailsSaveFailed": "Falha ao salvar os detalhes",
     "estimatedValueChanged": "Valor estimado atualizado",
     "estimatedValueChangeFailed": "Falha ao atualizar o valor estimado",
     "dashboardTitle": "Dashboard de Vendas",
@@ -3603,7 +3849,682 @@
     "notRegistered": "Nenhum pedido X2 registrado para esta oportunidade.",
     "status": "Status no X2",
     "valorConfirmado": "Valor confirmado",
+    "valorFrete": "Frete",
+    "loja": "Loja",
+    "lojaX2": "Loja X2 {cod}",
+    "autoLinked": "Vinculado automaticamente (passe o mouse para ver o motivo)",
     "editButton": "Editar pedido",
     "dialogDescription": "Informe o número do pedido gerado no X2 e o CPF/CNPJ do cliente. A confirmação com o X2 roda automaticamente no dia seguinte."
+  },
+  "permissionCatalog": {
+    "groups": {
+      "admin": "Administração e Acesso",
+      "service": "Atendimento e Conversas",
+      "crm": "SAC / CRM",
+      "sales": "Vendas",
+      "whatsapp": "WhatsApp e Automação",
+      "ai": "Inteligência Artificial e Conhecimento",
+      "integrations": "Integrações",
+      "analytics": "Analytics",
+      "calls": "Chamadas",
+      "other": "Outras"
+    },
+    "resources": {
+      "users": {
+        "label": "Usuários",
+        "description": "Gerencie as pessoas que podem acessar o Whatc."
+      },
+      "teams": {
+        "label": "Equipes",
+        "description": "Organize os atendentes em equipes de atendimento."
+      },
+      "roles": {
+        "label": "Funções",
+        "description": "Defina o que cada função pode ver e fazer."
+      },
+      "organizations": {
+        "label": "Organizações",
+        "description": "Gerencie as organizações e seus membros."
+      },
+      "audit_logs": {
+        "label": "Registros de auditoria",
+        "description": "Consulte o histórico de alterações feitas no sistema."
+      },
+      "settings_general": {
+        "label": "Configurações gerais",
+        "description": "Ajustes gerais da organização."
+      },
+      "settings_sso": {
+        "label": "Login único (SSO)",
+        "description": "Configure o login por provedores externos."
+      },
+      "chat": {
+        "label": "Conversas",
+        "description": "Acompanhe e responda as conversas dos clientes."
+      },
+      "chat_assign": {
+        "label": "Atribuição de conversas",
+        "description": "Defina qual atendente cuida de cada conversa."
+      },
+      "conversations": {
+        "label": "Visibilidade de conversas",
+        "description": "Controle quais conversas de outras pessoas ficam visíveis."
+      },
+      "contacts": {
+        "label": "Contatos",
+        "description": "Gerencie a base de contatos."
+      },
+      "contacts_name": {
+        "label": "Nome do contato",
+        "description": "Corrigir o nome de um contato durante o atendimento."
+      },
+      "tags": {
+        "label": "Etiquetas",
+        "description": "Classifique contatos e conversas com etiquetas."
+      },
+      "transfers": {
+        "label": "Transferências",
+        "description": "Passe atendimentos entre atendentes e equipes."
+      },
+      "canned_responses": {
+        "label": "Respostas rápidas",
+        "description": "Mensagens prontas para agilizar o atendimento."
+      },
+      "occurrences": {
+        "label": "Ocorrências",
+        "description": "Registre e acompanhe os protocolos do SAC."
+      },
+      "occurrences_stages": {
+        "label": "Etapas do funil",
+        "description": "Configure as etapas pelas quais a ocorrência passa."
+      },
+      "occurrences_categories": {
+        "label": "Categorias de ocorrência",
+        "description": "Classifique as ocorrências por categoria."
+      },
+      "occurrences_what_happened": {
+        "label": "O que aconteceu",
+        "description": "Motivos usados para descrever o que ocorreu em cada caso."
+      },
+      "occurrences_sla_policies": {
+        "label": "SLA de ocorrências",
+        "description": "Prazos de atendimento das ocorrências."
+      },
+      "occurrences_processes": {
+        "label": "Processos de ocorrência",
+        "description": "Processos e mensagens automáticas de cada tipo de caso."
+      },
+      "units": {
+        "label": "Unidades",
+        "description": "Lojas e filiais onde a empresa atua."
+      },
+      "departments": {
+        "label": "Departamentos",
+        "description": "Setores internos que tratam as ocorrências."
+      },
+      "sales_opportunities": {
+        "label": "Oportunidades de venda",
+        "description": "Funil comercial e carteira de oportunidades."
+      },
+      "accounts": {
+        "label": "Contas do WhatsApp",
+        "description": "Números do WhatsApp conectados ao Whatc."
+      },
+      "templates": {
+        "label": "Modelos de mensagem",
+        "description": "Modelos de mensagem aprovados pela Meta."
+      },
+      "campaigns": {
+        "label": "Campanhas",
+        "description": "Envios em massa para listas de contatos."
+      },
+      "flows_whatsapp": {
+        "label": "Flows do WhatsApp",
+        "description": "Formulários interativos dentro do WhatsApp."
+      },
+      "flows_chatbot": {
+        "label": "Fluxos do chatbot",
+        "description": "Fluxos de conversa automática do chatbot."
+      },
+      "chatbot_keywords": {
+        "label": "Palavras-chave",
+        "description": "Regras que disparam respostas por palavra-chave."
+      },
+      "settings_chatbot": {
+        "label": "Configurações do chatbot",
+        "description": "Mensagens, horários e regras gerais do chatbot."
+      },
+      "chatbot_ai": {
+        "label": "Contextos de IA",
+        "description": "Instruções que orientam as respostas da IA."
+      },
+      "knowledge": {
+        "label": "Base de conhecimento",
+        "description": "Documentos que a IA e a equipe consultam."
+      },
+      "ai_tools": {
+        "label": "Ferramentas de IA",
+        "description": "Ações que a IA do chatbot pode executar."
+      },
+      "xprocess_integration": {
+        "label": "ERP X2",
+        "description": "Conexão com o ERP X2 da empresa."
+      },
+      "webhooks": {
+        "label": "Webhooks",
+        "description": "Avisos automáticos enviados a outros sistemas."
+      },
+      "api_keys": {
+        "label": "Chaves de API",
+        "description": "Chaves para outros sistemas acessarem o Whatc."
+      },
+      "custom_actions": {
+        "label": "Ações personalizadas",
+        "description": "Botões que disparam ações em sistemas externos."
+      },
+      "analytics": {
+        "label": "Painéis e análises",
+        "description": "Painéis com os indicadores da operação."
+      },
+      "analytics_agents": {
+        "label": "Desempenho dos atendentes",
+        "description": "Indicadores de produtividade dos atendentes."
+      },
+      "call_logs": {
+        "label": "Histórico de chamadas",
+        "description": "Registro das chamadas realizadas e recebidas."
+      },
+      "ivr_flows": {
+        "label": "Fluxos de URA",
+        "description": "Menus de atendimento por voz."
+      },
+      "call_transfers": {
+        "label": "Transferência de chamadas",
+        "description": "Chamadas encaminhadas entre atendentes."
+      },
+      "outgoing_calls": {
+        "label": "Chamadas ativas",
+        "description": "Chamadas iniciadas pelos atendentes."
+      }
+    },
+    "permissions": {
+      "users_read": {
+        "label": "Visualizar usuários",
+        "description": "Consultar usuários, status e informações básicas."
+      },
+      "users_write": {
+        "label": "Criar e editar usuários",
+        "description": "Cadastrar usuários e alterar seus dados e funções."
+      },
+      "users_delete": {
+        "label": "Excluir usuários",
+        "description": "Remover usuários do sistema."
+      },
+      "teams_read": {
+        "label": "Visualizar equipes",
+        "description": "Consultar as equipes e seus membros."
+      },
+      "teams_write": {
+        "label": "Criar e editar equipes",
+        "description": "Cadastrar equipes e alterar membros e regras de atendimento."
+      },
+      "teams_delete": {
+        "label": "Excluir equipes",
+        "description": "Remover equipes."
+      },
+      "roles_read": {
+        "label": "Visualizar funções",
+        "description": "Consultar as funções e suas permissões."
+      },
+      "roles_write": {
+        "label": "Criar e editar funções",
+        "description": "Criar funções e alterar o que cada uma pode fazer."
+      },
+      "roles_delete": {
+        "label": "Excluir funções",
+        "description": "Remover funções que não têm usuários."
+      },
+      "settings_general_read": {
+        "label": "Visualizar configurações gerais",
+        "description": "Consultar os ajustes gerais da organização."
+      },
+      "settings_general_write": {
+        "label": "Editar configurações gerais",
+        "description": "Alterar os ajustes gerais da organização."
+      },
+      "settings_chatbot_read": {
+        "label": "Visualizar configurações do chatbot",
+        "description": "Consultar mensagens, horários e regras do chatbot."
+      },
+      "settings_chatbot_write": {
+        "label": "Editar configurações do chatbot",
+        "description": "Alterar mensagens, horários e regras do chatbot."
+      },
+      "settings_sso_read": {
+        "label": "Visualizar login único (SSO)",
+        "description": "Consultar os provedores de login configurados."
+      },
+      "settings_sso_write": {
+        "label": "Editar login único (SSO)",
+        "description": "Configurar os provedores de login externos."
+      },
+      "accounts_read": {
+        "label": "Visualizar contas do WhatsApp",
+        "description": "Consultar os números conectados."
+      },
+      "accounts_write": {
+        "label": "Criar e editar contas do WhatsApp",
+        "description": "Conectar números e alterar suas configurações."
+      },
+      "accounts_delete": {
+        "label": "Excluir contas do WhatsApp",
+        "description": "Desconectar e remover números do WhatsApp."
+      },
+      "templates_read": {
+        "label": "Visualizar modelos de mensagem",
+        "description": "Consultar os modelos e seu status de aprovação."
+      },
+      "templates_write": {
+        "label": "Criar e editar modelos",
+        "description": "Criar modelos e enviá-los para aprovação da Meta."
+      },
+      "templates_delete": {
+        "label": "Excluir modelos",
+        "description": "Remover modelos de mensagem."
+      },
+      "templates_sync": {
+        "label": "Sincronizar modelos com a Meta",
+        "description": "Buscar na Meta os modelos e o status atualizado."
+      },
+      "flows_whatsapp_read": {
+        "label": "Visualizar Flows do WhatsApp",
+        "description": "Consultar os formulários interativos."
+      },
+      "flows_whatsapp_write": {
+        "label": "Criar e editar Flows do WhatsApp",
+        "description": "Montar e alterar formulários interativos."
+      },
+      "flows_whatsapp_delete": {
+        "label": "Excluir Flows do WhatsApp",
+        "description": "Remover formulários interativos."
+      },
+      "flows_chatbot_read": {
+        "label": "Visualizar fluxos do chatbot",
+        "description": "Consultar os fluxos de conversa automática."
+      },
+      "flows_chatbot_write": {
+        "label": "Criar e editar fluxos do chatbot",
+        "description": "Montar e alterar os fluxos de conversa automática."
+      },
+      "flows_chatbot_delete": {
+        "label": "Excluir fluxos do chatbot",
+        "description": "Remover fluxos de conversa automática."
+      },
+      "campaigns_read": {
+        "label": "Visualizar campanhas",
+        "description": "Consultar campanhas e seus resultados."
+      },
+      "campaigns_write": {
+        "label": "Criar e editar campanhas",
+        "description": "Montar campanhas e escolher o público."
+      },
+      "campaigns_delete": {
+        "label": "Excluir campanhas",
+        "description": "Remover campanhas."
+      },
+      "campaigns_execute": {
+        "label": "Executar campanhas",
+        "description": "Iniciar, pausar e cancelar o envio de campanhas."
+      },
+      "chatbot_keywords_read": {
+        "label": "Visualizar palavras-chave",
+        "description": "Consultar as regras por palavra-chave."
+      },
+      "chatbot_keywords_write": {
+        "label": "Criar e editar palavras-chave",
+        "description": "Definir quais palavras disparam cada resposta."
+      },
+      "chatbot_keywords_delete": {
+        "label": "Excluir palavras-chave",
+        "description": "Remover regras por palavra-chave."
+      },
+      "chatbot_ai_read": {
+        "label": "Visualizar contextos de IA",
+        "description": "Consultar as instruções dadas à IA."
+      },
+      "chatbot_ai_write": {
+        "label": "Criar e editar contextos de IA",
+        "description": "Escrever e alterar as instruções que orientam a IA."
+      },
+      "chatbot_ai_delete": {
+        "label": "Excluir contextos de IA",
+        "description": "Remover contextos de IA."
+      },
+      "chat_read": {
+        "label": "Visualizar conversas",
+        "description": "Acompanhar as conversas atribuídas a você."
+      },
+      "chat_write": {
+        "label": "Enviar mensagens",
+        "description": "Responder clientes pelo atendimento."
+      },
+      "chat_assign_write": {
+        "label": "Atribuir conversas",
+        "description": "Escolher qual atendente cuida de cada conversa."
+      },
+      "conversations_view_all": {
+        "label": "Ver todas as conversas",
+        "description": "Ver e atuar em conversas de qualquer atendente."
+      },
+      "conversations_view_team": {
+        "label": "Ver conversas da equipe",
+        "description": "Ver e atuar nas conversas das equipes das quais a pessoa faz parte."
+      },
+      "contacts_read": {
+        "label": "Visualizar contatos",
+        "description": "Consultar contatos e seu histórico."
+      },
+      "contacts_write": {
+        "label": "Criar e editar contatos",
+        "description": "Cadastrar contatos e alterar seus dados."
+      },
+      "contacts_delete": {
+        "label": "Excluir contatos",
+        "description": "Remover contatos."
+      },
+      "contacts_import": {
+        "label": "Importar contatos",
+        "description": "Carregar contatos a partir de uma planilha."
+      },
+      "contacts_export": {
+        "label": "Exportar contatos",
+        "description": "Baixar a lista de contatos em planilha."
+      },
+      "contacts_name_write": {
+        "label": "Renomear contatos",
+        "description": "Corrigir o nome do contato sem poder editar o restante do cadastro."
+      },
+      "tags_read": {
+        "label": "Visualizar etiquetas",
+        "description": "Consultar as etiquetas de contatos e conversas."
+      },
+      "tags_write": {
+        "label": "Criar e editar etiquetas",
+        "description": "Criar etiquetas e aplicá-las a contatos."
+      },
+      "tags_delete": {
+        "label": "Excluir etiquetas",
+        "description": "Remover etiquetas."
+      },
+      "transfers_read": {
+        "label": "Visualizar transferências",
+        "description": "Consultar transferências e a fila de atendimento."
+      },
+      "transfers_write": {
+        "label": "Criar transferências",
+        "description": "Passar um atendimento para outro atendente ou equipe."
+      },
+      "transfers_pickup": {
+        "label": "Assumir da fila",
+        "description": "Pegar para si atendimentos que aguardam na fila."
+      },
+      "canned_responses_read": {
+        "label": "Visualizar respostas rápidas",
+        "description": "Consultar e usar as mensagens prontas."
+      },
+      "canned_responses_write": {
+        "label": "Criar e editar respostas rápidas",
+        "description": "Cadastrar e alterar mensagens prontas."
+      },
+      "canned_responses_delete": {
+        "label": "Excluir respostas rápidas",
+        "description": "Remover mensagens prontas."
+      },
+      "occurrences_read": {
+        "label": "Visualizar ocorrências",
+        "description": "Consultar ocorrências, protocolos e o quadro de etapas."
+      },
+      "occurrences_write": {
+        "label": "Criar e editar ocorrências",
+        "description": "Abrir protocolos, movê-los de etapa e registrar atendimento."
+      },
+      "occurrences_delete": {
+        "label": "Excluir ocorrências definitivamente",
+        "description": "Apagar um protocolo para sempre. Só tem efeito para super administradores."
+      },
+      "occurrences_stages_read": {
+        "label": "Visualizar etapas do funil",
+        "description": "Abrir a tela de configuração das etapas."
+      },
+      "occurrences_stages_write": {
+        "label": "Criar e editar etapas",
+        "description": "Criar etapas e mudar a ordem e as regras do funil."
+      },
+      "occurrences_stages_delete": {
+        "label": "Excluir etapas",
+        "description": "Remover etapas do funil."
+      },
+      "occurrences_categories_read": {
+        "label": "Visualizar categorias",
+        "description": "Consultar as categorias de ocorrência."
+      },
+      "occurrences_categories_write": {
+        "label": "Criar e editar categorias",
+        "description": "Cadastrar e alterar categorias de ocorrência."
+      },
+      "occurrences_categories_delete": {
+        "label": "Excluir categorias",
+        "description": "Remover categorias de ocorrência."
+      },
+      "occurrences_what_happened_read": {
+        "label": "Visualizar \"o que aconteceu\"",
+        "description": "Consultar os motivos cadastrados."
+      },
+      "occurrences_what_happened_write": {
+        "label": "Criar e editar \"o que aconteceu\"",
+        "description": "Cadastrar e alterar os motivos das ocorrências."
+      },
+      "occurrences_what_happened_delete": {
+        "label": "Excluir \"o que aconteceu\"",
+        "description": "Remover motivos cadastrados."
+      },
+      "occurrences_sla_policies_read": {
+        "label": "Visualizar SLA de ocorrências",
+        "description": "Consultar os prazos de atendimento."
+      },
+      "occurrences_sla_policies_write": {
+        "label": "Editar SLA de ocorrências",
+        "description": "Alterar os prazos de atendimento."
+      },
+      "occurrences_processes_read": {
+        "label": "Visualizar processos",
+        "description": "Consultar os processos e suas mensagens automáticas."
+      },
+      "occurrences_processes_write": {
+        "label": "Criar e editar processos",
+        "description": "Cadastrar processos e alterar as mensagens automáticas."
+      },
+      "occurrences_processes_delete": {
+        "label": "Excluir processos",
+        "description": "Remover processos de ocorrência."
+      },
+      "units_read": {
+        "label": "Visualizar unidades",
+        "description": "Consultar as unidades cadastradas."
+      },
+      "units_write": {
+        "label": "Gerenciar unidades",
+        "description": "Cadastrar e alterar unidades utilizadas pelo sistema."
+      },
+      "units_delete": {
+        "label": "Excluir unidades",
+        "description": "Remover unidades."
+      },
+      "departments_read": {
+        "label": "Visualizar departamentos",
+        "description": "Consultar os departamentos cadastrados."
+      },
+      "departments_write": {
+        "label": "Criar e editar departamentos",
+        "description": "Cadastrar e alterar departamentos."
+      },
+      "departments_delete": {
+        "label": "Excluir departamentos",
+        "description": "Remover departamentos."
+      },
+      "sales_opportunities_read": {
+        "label": "Visualizar oportunidades",
+        "description": "Consultar o funil e a própria carteira de oportunidades."
+      },
+      "sales_opportunities_write": {
+        "label": "Criar e editar oportunidades",
+        "description": "Abrir oportunidades e movê-las no funil."
+      },
+      "sales_opportunities_view_all": {
+        "label": "Ver todas as oportunidades",
+        "description": "Ver e gerenciar oportunidades de qualquer vendedor."
+      },
+      "sales_opportunities_delete": {
+        "label": "Excluir oportunidades definitivamente",
+        "description": "Apagar uma oportunidade para sempre. Só tem efeito para super administradores."
+      },
+      "knowledge_read": {
+        "label": "Consultar a base de conhecimento",
+        "description": "Buscar e ler os documentos da base."
+      },
+      "knowledge_write": {
+        "label": "Gerenciar a base de conhecimento",
+        "description": "Criar, editar e arquivar documentos da base."
+      },
+      "ai_tools_read": {
+        "label": "Visualizar ferramentas de IA",
+        "description": "Ver quais ferramentas a IA pode usar."
+      },
+      "ai_tools_write": {
+        "label": "Ligar e desligar ferramentas de IA",
+        "description": "Decidir quais ações a IA do chatbot pode executar."
+      },
+      "xprocess_integration_read": {
+        "label": "Visualizar o ERP X2",
+        "description": "Consultar a configuração da integração com o X2."
+      },
+      "xprocess_integration_write": {
+        "label": "Configurar o ERP X2",
+        "description": "Informar e alterar a credencial de acesso ao X2."
+      },
+      "webhooks_read": {
+        "label": "Visualizar webhooks",
+        "description": "Consultar os avisos enviados a outros sistemas."
+      },
+      "webhooks_write": {
+        "label": "Criar e editar webhooks",
+        "description": "Definir para onde e quando os avisos são enviados."
+      },
+      "webhooks_delete": {
+        "label": "Excluir webhooks",
+        "description": "Remover webhooks."
+      },
+      "api_keys_read": {
+        "label": "Visualizar chaves de API",
+        "description": "Consultar as chaves existentes."
+      },
+      "api_keys_write": {
+        "label": "Criar chaves de API",
+        "description": "Gerar chaves para outros sistemas."
+      },
+      "api_keys_delete": {
+        "label": "Excluir chaves de API",
+        "description": "Revogar chaves de API."
+      },
+      "custom_actions_read": {
+        "label": "Visualizar ações personalizadas",
+        "description": "Consultar as ações cadastradas."
+      },
+      "custom_actions_write": {
+        "label": "Criar e editar ações personalizadas",
+        "description": "Cadastrar e alterar ações para sistemas externos."
+      },
+      "custom_actions_delete": {
+        "label": "Excluir ações personalizadas",
+        "description": "Remover ações personalizadas."
+      },
+      "organizations_read": {
+        "label": "Visualizar organizações",
+        "description": "Consultar as organizações."
+      },
+      "organizations_write": {
+        "label": "Criar organizações",
+        "description": "Cadastrar novas organizações."
+      },
+      "organizations_delete": {
+        "label": "Excluir organizações",
+        "description": "Remover organizações."
+      },
+      "organizations_assign": {
+        "label": "Gerenciar membros da organização",
+        "description": "Adicionar e remover pessoas de uma organização."
+      },
+      "audit_logs_read": {
+        "label": "Visualizar registros de auditoria",
+        "description": "Consultar quem alterou o quê e quando."
+      },
+      "analytics_read": {
+        "label": "Visualizar painéis",
+        "description": "Abrir os painéis e indicadores."
+      },
+      "analytics_write": {
+        "label": "Criar e editar painéis",
+        "description": "Montar e alterar os widgets dos painéis."
+      },
+      "analytics_delete": {
+        "label": "Excluir widgets",
+        "description": "Remover widgets dos painéis."
+      },
+      "analytics_agents_read": {
+        "label": "Visualizar desempenho dos atendentes",
+        "description": "Consultar indicadores de produtividade dos atendentes."
+      },
+      "call_logs_read": {
+        "label": "Visualizar histórico de chamadas",
+        "description": "Consultar as chamadas registradas."
+      },
+      "ivr_flows_read": {
+        "label": "Visualizar fluxos de URA",
+        "description": "Consultar os menus de atendimento por voz."
+      },
+      "ivr_flows_write": {
+        "label": "Criar e editar fluxos de URA",
+        "description": "Montar e alterar os menus por voz."
+      },
+      "ivr_flows_delete": {
+        "label": "Excluir fluxos de URA",
+        "description": "Remover menus por voz."
+      },
+      "call_transfers_read": {
+        "label": "Visualizar transferências de chamadas",
+        "description": "Consultar chamadas transferidas."
+      },
+      "call_transfers_write": {
+        "label": "Gerenciar transferências de chamadas",
+        "description": "Aceitar e conduzir chamadas transferidas."
+      },
+      "outgoing_calls_read": {
+        "label": "Visualizar chamadas ativas",
+        "description": "Consultar o andamento das chamadas iniciadas."
+      },
+      "outgoing_calls_write": {
+        "label": "Iniciar chamadas",
+        "description": "Ligar para clientes a partir do atendimento."
+      }
+    },
+    "activeCount": "{active} de {total} permissões ativas",
+    "on": "Ligado",
+    "off": "Desligado",
+    "enableAll": "Ligar todas",
+    "disableAll": "Desligar todas",
+    "search": "Buscar permissões",
+    "searchPlaceholder": "Buscar por nome, recurso, descrição ou chave",
+    "noResults": "Nenhuma permissão encontrada para a busca.",
+    "groupToggle": "Ligar ou desligar todas as permissões de {group}"
   }
 }

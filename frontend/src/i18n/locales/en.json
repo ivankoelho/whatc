@@ -293,6 +293,7 @@
     "webhooks": "Webhooks",
     "customActions": "Custom Actions",
     "xprocessIntegration": "ERP X2",
+    "knowledge": "Knowledge",
     "occurrenceStages": "Occurrence Stages",
     "units": "Units",
     "slaPolicies": "Occurrence SLA",
@@ -521,7 +522,8 @@
     "generalSection": "General",
     "serviceWindowExpired": "The 24-hour messaging window has expired. Only template messages can be sent until the customer replies.",
     "sendTemplateAction": "Send Template",
-    "retrySending": "Retry sending"
+    "retrySending": "Retry sending",
+    "conversationOwnedByAnother": "This conversation is assigned to another agent. Your message was not sent."
   },
   "contacts": {
     "title": "Contacts",
@@ -568,6 +570,17 @@
     "never": "Never",
     "created": "Created",
     "selectTags": "Select tags...",
+    "type": "Type",
+    "types": { "cliente": "Customer", "fornecedor": "Supplier", "colaborador": "Employee" },
+    "document": "CPF / CNPJ",
+    "documentPlaceholder": "Optional",
+    "registration": "Registration",
+    "registrationSaved": "Registration updated",
+    "notInformed": "Not provided",
+    "defined": "Set",
+    "unit": "Unit",
+    "department": "Department",
+    "noneSelected": "None",
     "tagsSelected": "tags selected",
     "searchTags": "Search tags...",
     "noTagsFound": "No tags found",
@@ -765,6 +778,9 @@
     "passwordPlaceholder": "Enter password",
     "keepExisting": "(leave blank to keep existing)",
     "selectRole": "Select role",
+    "unit": "Unit",
+    "department": "Department",
+    "noneSelected": "None",
     "xprocessSellerCode": "XProcess seller code",
     "xprocessSellerCodePlaceholder": "e.g. V042",
     "accountActive": "Account Active",
@@ -781,7 +797,10 @@
     "updateMemberRole": "Update Role",
     "updateMemberRoleTitle": "Update Member Role",
     "updateMemberRoleDesc": "Change the role for this member in this organization.",
-    "memberRoleUpdated": "Member role updated"
+    "memberRoleUpdated": "Member role updated",
+    "presenceOffline": "Offline",
+    "presenceAway": "Online, away",
+    "presenceAvailable": "Online, available"
   },
   "roles": {
     "title": "Roles & Permissions",
@@ -825,6 +844,10 @@
     "noPermissionsSeeded": "No permissions available. Please check if permissions are seeded in the database."
   },
   "teams": {
+    "unit": "Unit",
+    "department": "Department",
+    "placementHint": "Used by a flow transfer node set to the contact's registration.",
+    "placementConflict": "Another active team has the same unit and department ({teams}). With two teams for the pair, automatic routing by registration picks none and uses the node's fallback team.",
     "title": "Teams",
     "subtitle": "Organize agents into teams",
     "addTeam": "Add Team",
@@ -1378,6 +1401,118 @@
     "fetchErrorTitle": "Failed to load custom actions",
     "fetchErrorDescription": "Something went wrong while loading your custom actions. Please try again."
   },
+  "knowledge": {
+    "title": "Knowledge base",
+    "subtitle": "Documents, manuals and procedures the organization can search",
+    "create": "New document",
+    "createTitle": "New document",
+    "createDesc": "Add a FAQ, article, process or text to the knowledge base.",
+    "editTitle": "Edit document",
+    "editDesc": "Change the content or the scope. Saving rebuilds the searchable chunks.",
+    "editManualDesc": "Imported manual: only the scope and the status can be changed here.",
+    "documents": "Documents",
+    "documentsDesc": "Active documents of your context. Open one to see its content and chunks.",
+    "searchTitles": "Search by title...",
+    "colTitle": "Title",
+    "colType": "Type",
+    "colScope": "Scope",
+    "colStatus": "Status",
+    "colUpdated": "Updated",
+    "types": { "faq": "FAQ", "article": "Article", "process": "Process", "text": "Text", "markdown": "Markdown", "manual_html": "Manual" },
+    "status": { "active": "Active", "archived": "Archived" },
+    "allTypes": "All types",
+    "allStatuses": "All statuses",
+    "anyUnit": "any unit",
+    "anyDepartment": "any department",
+    "perPage": "page",
+    "clearFilters": "Clear filters",
+    "filterScope": "Scope",
+    "filterContext": "Context",
+    "unit": "Unit",
+    "department": "Department",
+    "inactive": "inactive",
+    "noUnit": "No unit",
+    "noDepartment": "No department",
+    "scopeLabel": "Scope",
+    "scopeHelp": "Who can find this document. With no unit and no department it is available to the whole organization.",
+    "scopeOrganization": "Whole organization",
+    "noDocuments": "No documents yet",
+    "noDocumentsDesc": "Create a document, or import the manuals with the command line.",
+    "noMatching": "No documents match",
+    "noMatchingDesc": "Try other filters or clear them.",
+    "cliHint": "Manual documents come from the import. To create or update them, use the command line:",
+    "archive": "Archive",
+    "reactivate": "Reactivate",
+    "archived": "Document archived",
+    "reactivated": "Document reactivated",
+    "archivedByImport": "archived by the import",
+    "archivedByUser": "archived by a user",
+    "created": "Document created",
+    "updated": "Document updated",
+    "deleted": "Document deleted",
+    "deleteTitle": "Delete document",
+    "deleteDesc": "Delete \"{name}\"? It is removed from the search immediately.",
+    "deleteManualDesc": "Delete \"{name}\"? It comes from an imported manual: the next import creates it again. To retire it for good, archive it instead.",
+    "fieldTitle": "Title",
+    "fieldTitlePh": "e.g. How to issue an invoice",
+    "fieldType": "Type",
+    "fieldStatus": "Status",
+    "fieldBody": "Content",
+    "fieldBodyPh": "Write the text, or load a .txt / .md file",
+    "upload": "Load a text or Markdown file",
+    "uploadType": "Only text (.txt) and Markdown (.md) files are accepted.",
+    "uploadSize": "The file is larger than {max} characters.",
+    "errTitleRequired": "The title is required.",
+    "errTitleTooLong": "The title is too long.",
+    "errBodyRequired": "The content is required.",
+    "errBodyTooLong": "The content exceeds {max} characters.",
+    "manualReadOnly": "This content is managed by the import: change the HTML and import again. Only the scope and the status can be edited here.",
+    "conflict": "This document was changed by someone else after you opened it. Reload the current version to continue; nothing was overwritten.",
+    "conflictToast": "The document was changed by someone else. The list was reloaded; try again.",
+    "reloadCurrent": "Reload the current version",
+    "gone": "This document is no longer available.",
+    "forbidden": "You don't have permission for this action.",
+    "loadFailed": "Could not load the documents.",
+    "loadDocumentFailed": "Could not load the document.",
+    "saveFailed": "Could not save the document.",
+    "deleteFailed": "Could not delete the document.",
+    "scopesFailed": "Could not load the units and departments.",
+    "reindexFailed": "Could not reindex.",
+    "searchFailed": "The search failed.",
+    "panelDesc": "Content and searchable chunks",
+    "tabContent": "Content",
+    "tabChunks": "Chunks",
+    "origin": "Origin",
+    "noChunks": "This document has no chunks. Reindex it to rebuild them.",
+    "chars": "{count} characters",
+    "stale": "obsolete",
+    "reindexDocument": "Reindex",
+    "reindexedDocument": "Reindexed: {count} chunks",
+    "reindexStale": "Reindex obsolete",
+    "reindexAll": "Reindex all",
+    "reindexAllTitle": "Reindex every document?",
+    "reindexAllDesc": "All chunks of the organization are rebuilt, one document at a time. It may take a while.",
+    "reindexResult": "Reindexed {documents} documents ({chunks} chunks); {skipped} skipped; {remaining} obsolete remaining.",
+    "staleBanner": "{count} chunks were built by an older indexing strategy (current: v{version}). Reindex them to make searches consistent.",
+    "indexSummary": "{documents} documents · {chunks} chunks · index v{version}",
+    "searchTool": "Test search",
+    "searchToolDesc": "Manual search tool of the knowledge base (exact matching). It does not use the chatbot.",
+    "searchQuery": "Search",
+    "searchPh": "e.g. \"emitir nota\" or não-conformidade",
+    "searchLimit": "Results",
+    "searchRun": "Search",
+    "searchInitial": "Type a query and press Search.",
+    "searchEmpty": "No results.",
+    "searchEmptyHint": "Very common words are ignored: a query made only of them finds nothing.",
+    "score": "score",
+    "scoreHelp": "Lexical relevance, comparable only within this response. It is not a probability.",
+    "contextUnit": "Context: unit",
+    "contextDepartment": "Context: department",
+    "contextFixed": "Your context: {context}.",
+    "contextGlobalOnly": "global content only",
+    "contextChooseHelp": "Leave the unit and the department empty to search only the content available to everyone.",
+    "contextOutOfReach": "This context is outside your reach."
+  },
   "xprocessIntegration": {
     "title": "ERP X2 Integration",
     "description": "Connect Whatc to the X2 ERP",
@@ -1930,6 +2065,9 @@
     "pricePerMessage": "Price per message (R$)",
     "costEstimateNote": "Meta charges per delivered message. The range assumes 85% to 100% delivery. Check the price on your Meta invoice.",
     "byDDD": "By area code",
+    "bySegment": "Segment",
+    "segmentAny": "Any",
+    "optOutNote": "For marketing templates, contacts who opted out of marketing are left out.",
     "dddNeedsNoParams": "This template has variables. Use CSV upload to fill them per recipient.",
     "dddHint": "Area codes (DDD), separated by commas. All contacts with these codes are added.",
     "dddPreview": "{added} contacts will be added; {skipped} with an open occurrence will be left out.",
@@ -2078,6 +2216,10 @@
     "maxTokens": "Max Tokens",
     "systemPrompt": "System Prompt (optional)",
     "systemPromptPlaceholder": "You are a helpful customer service assistant",
+    "knowledgeTitle": "Use the knowledge base in AI replies",
+    "knowledgeDesc": "The AI may consult the documents of your knowledge base that are available to the customer's unit and department, and use them to answer. Nothing is added to the message the customer receives.",
+    "knowledgeReady": "Available on this server.",
+    "knowledgeServerOff": "Turned off on this server (knowledge.rag_enabled). Ask whoever runs the server to enable it.",
     "maxButtonsError": "Maximum 10 buttons allowed",
     "messagesSaved": "Messages settings saved",
     "agentSettingsSaved": "Agent settings saved",
@@ -2085,7 +2227,13 @@
     "aiSettingsSaved": "AI settings saved",
     "slaSettingsSaved": "SLA settings saved",
     "aiSaveFailed": "Failed to save AI settings",
-    "slaSaveFailed": "Failed to save SLA settings"
+    "aiEncryptionKeyMissing": "The server has no app.encryption_key configured, so the AI API key was not saved. Ask an administrator to set it.",
+    "slaSaveFailed": "Failed to save SLA settings",
+    "loadModels": "Load models",
+    "modelsLoaded": "{count} models loaded from the provider",
+    "failedLoadModels": "Could not load models from the provider",
+    "apiKeySaved": "An API key is saved. It is never shown again; type a new one to replace it.",
+    "loadModelsHint": "Enter the API key and click \"Load models\" to see this provider's models."
   },
   "agentTransfers": {
     "title": "Transfers",
@@ -2168,7 +2316,8 @@
     "fetchError": "Failed to load transfers. Please try again.",
     "confirmResumeTitle": "Resume Chatbot",
     "confirmResumeDescription": "Are you sure you want to resume the chatbot for this contact? The agent transfer will end and the chatbot will take over.",
-    "confirmResumeLabel": "Resume"
+    "confirmResumeLabel": "Resume",
+    "changedByAnother": "Someone else already took or changed this transfer. The list was refreshed."
   },
   "occurrences": {
     "title": "Occurrences",
@@ -2362,6 +2511,80 @@
     "columnName": "Name",
     "columnCode": "Code",
     "columnType": "Type",
+    "columnX2": "X2 store",
+    "x2LinkAction": "Link to an X2 store",
+    "x2DialogTitle": "X2 store",
+    "x2DialogDesc": "Choose the X2 store this unit stands for. Nothing is saved until you press Save; the suggestion is only a hint from the names.",
+    "x2Search": "Search by code, name or CNPJ",
+    "x2NoStores": "No store found",
+    "x2Suggestion": "Suggestion",
+    "x2SuggestionHint": "The name looks like this unit. Only a hint: it is not saved.",
+    "x2LinkedTo": "Linked to {unit}",
+    "x2FillCnpj": "Fill the unit CNPJ with the store CNPJ",
+    "x2FillCnpjHint": "Only fills an empty CNPJ and never replaces an existing one.",
+    "x2FillCnpjHasCnpj": "This unit already has a CNPJ, which is kept.",
+    "x2Clear": "Remove link",
+    "x2Linked": "Unit linked to the X2 store",
+    "x2Cleared": "Link removed",
+    "x2CnpjFilled": "Unit CNPJ filled from the store",
+    "x2CnpjNote": { "unit_has_cnpj": "The unit already had a CNPJ, so it was kept.", "store_cnpj_invalid": "The store CNPJ in X2 is not valid, so it was not copied.", "cnpj_in_use": "Another unit already uses that CNPJ, so it was not copied.", "cnpj_update_failed": "The CNPJ could not be saved." },
+    "x2LoadFailed": "Could not load the X2 stores",
+    "x2LoadFailedHint": "X2 did not answer. A link already saved keeps working; try again to change it.",
+    "x2SaveFailed": "Failed to save the link",
+    "import": {
+      "button": "Import from X2",
+      "title": "Import units from X2",
+      "description": "Pick the X2 stores that do not have a unit in Whatc yet. Each one becomes a unit; nothing is created until you confirm.",
+      "search": "Search by code, name or CNPJ",
+      "available": "Stores available in X2",
+      "noStores": "No stores found",
+      "loadFailed": "Could not load the stores from X2",
+      "loadFailedHint": "X2 did not answer. No unit was changed; try again.",
+      "selectedCount": "Stores selected: {count}",
+      "resultDescription": "What happened to each store you picked.",
+      "willBeNamed": "Will be created as {name}",
+      "linkedUnit": "Unit: {unit}",
+      "status": {
+        "new": "New",
+        "already_imported": "Already imported",
+        "conflict": "Conflict"
+      },
+      "conflictReason": {
+        "cnpj_in_use": "Unit {unit} already uses this store's CNPJ and is not linked to it.",
+        "name_in_use": "A unit named {unit} already exists and is not linked to this store."
+      },
+      "importSelected": "Import selected",
+      "importing": "Importing...",
+      "importFailed": "Failed to import the units",
+      "resultTitle": "Import result",
+      "summary": {
+        "created": "Created",
+        "updated": "Updated",
+        "already_exists": "Already existed",
+        "conflicts": "Conflicts",
+        "failed": "Failed"
+      },
+      "result": {
+        "created": "Created",
+        "updated": "CNPJ filled",
+        "already_exists": "Already existed",
+        "conflict": "Conflict",
+        "failed": "Failed"
+      },
+      "reason": {
+        "cnpj_in_use": "Another unit ({unit}) already uses this store's CNPJ. Nothing was created.",
+        "name_in_use": "A unit named {unit} already exists. Nothing was created.",
+        "not_in_x2": "This store no longer exists in X2.",
+        "create_failed": "Could not create the unit."
+      },
+      "note": {
+        "store_cnpj_invalid": "The store's CNPJ in X2 is not valid: the unit was created without a CNPJ.",
+        "cnpj_differs": "The unit's CNPJ differs from X2 and was kept.",
+        "cnpj_in_use": "The X2 CNPJ belongs to another unit and was not filled in."
+      },
+      "backToList": "Back to the list",
+      "close": "Close"
+    },
     "columnActive": "Active",
     "noUnitsYet": "No units yet",
     "noUnitsYetDesc": "Add your first unit/store.",
@@ -2809,6 +3032,11 @@
       "tags": "Tags on transfer",
       "tagsPlaceholder": "quote, photo",
       "tagsHint": "Added to the contact when it reaches this transfer (comma-separated).",
+      "destination": "Destination",
+      "destinationTeam": "Fixed team",
+      "destinationPlacement": "Contact's registration (unit and department)",
+      "destinationPlacementHint": "For colaboradores: goes to the team tagged with the contact's unit and department. With no placement, no team or more than one team for the pair, it uses the team below.",
+      "fallbackTeam": "If there is no team",
       "finalMessageOptional": "Final message (optional)",
       "finalMessagePlaceholder": "Sent when the flow ends. Leave blank for silent terminal.",
       "targetFlow": "Target flow",
@@ -2839,6 +3067,8 @@
       "fields": "Fields:",
       "addFieldPlaceholder": "Add field…",
       "noUnusedVariables": "No unused variables left.",
+      "groupVariables": "Flow variables",
+      "groupContact": "Contact data",
       "noFieldsAdded": "No fields added.",
       "displayLabelPlaceholder": "Display label",
       "typeText": "Text",
@@ -3556,6 +3786,22 @@
     "direcionamentoChanged": "Direction updated",
     "direcionamentoChangeFailed": "Failed to update the direction",
     "estimatedValueInvalid": "Enter a valid numeric value",
+    "quantityInvalid": "Enter valid non-negative numbers (up to 3 decimals for quantities)",
+    "estimatedQuantity": "Estimated quantity",
+    "unit": "Unit",
+    "unitNone": "No unit",
+    "units": { "UN": "Unit", "M": "Meter", "M2": "Square meter", "KG": "Kilogram", "PCT": "Package", "CX": "Box" },
+    "columnQuantity": "Quantity",
+    "columnRealized": "Realized",
+    "realizedLabel": "Realized",
+    "realizedValue": "Realized value",
+    "realizedQuantity": "Realized quantity",
+    "realizedValueX2Note": "When X2 has the order, its total replaces this value.",
+    "editDetails": "Edit details",
+    "editEstimatedDesc": "The commercial expectation for this opportunity.",
+    "editRealizedDesc": "What was actually sold.",
+    "detailsSaved": "Details saved",
+    "detailsSaveFailed": "Failed to save details",
     "estimatedValueChanged": "Estimated value updated",
     "estimatedValueChangeFailed": "Failed to update the estimated value",
     "dashboardTitle": "Sales Dashboard",
@@ -3614,7 +3860,682 @@
     "notRegistered": "No X2 order registered for this opportunity.",
     "status": "X2 status",
     "valorConfirmado": "Confirmed value",
+    "valorFrete": "Freight",
+    "loja": "Store",
+    "lojaX2": "X2 store {cod}",
+    "autoLinked": "Linked automatically (hover for the reason)",
     "editButton": "Edit order",
     "dialogDescription": "Enter the order number generated in X2 and the customer's CPF/CNPJ. Confirmation with X2 runs automatically the next day."
+  },
+  "permissionCatalog": {
+    "groups": {
+      "admin": "Administration and Access",
+      "service": "Service and Conversations",
+      "crm": "SAC / CRM",
+      "sales": "Sales",
+      "whatsapp": "WhatsApp and Automation",
+      "ai": "Artificial Intelligence and Knowledge",
+      "integrations": "Integrations",
+      "analytics": "Analytics",
+      "calls": "Calls",
+      "other": "Other"
+    },
+    "resources": {
+      "users": {
+        "label": "Users",
+        "description": "Manage the people who can access Whatc."
+      },
+      "teams": {
+        "label": "Teams",
+        "description": "Organize agents into service teams."
+      },
+      "roles": {
+        "label": "Roles",
+        "description": "Define what each role can see and do."
+      },
+      "organizations": {
+        "label": "Organizations",
+        "description": "Manage organizations and their members."
+      },
+      "audit_logs": {
+        "label": "Audit logs",
+        "description": "Review the history of changes made in the system."
+      },
+      "settings_general": {
+        "label": "General settings",
+        "description": "Organization-wide settings."
+      },
+      "settings_sso": {
+        "label": "Single sign-on (SSO)",
+        "description": "Configure sign-in through external providers."
+      },
+      "chat": {
+        "label": "Chat",
+        "description": "Follow and answer customer conversations."
+      },
+      "chat_assign": {
+        "label": "Conversation assignment",
+        "description": "Choose which agent handles each conversation."
+      },
+      "conversations": {
+        "label": "Conversation visibility",
+        "description": "Control which conversations of other people are visible."
+      },
+      "contacts": {
+        "label": "Contacts",
+        "description": "Manage the contact base."
+      },
+      "contacts_name": {
+        "label": "Contact name",
+        "description": "Fix a contact's name during service."
+      },
+      "tags": {
+        "label": "Tags",
+        "description": "Classify contacts and conversations with tags."
+      },
+      "transfers": {
+        "label": "Transfers",
+        "description": "Hand conversations over between agents and teams."
+      },
+      "canned_responses": {
+        "label": "Canned responses",
+        "description": "Ready-made messages to speed up service."
+      },
+      "occurrences": {
+        "label": "Occurrences",
+        "description": "Record and follow SAC cases."
+      },
+      "occurrences_stages": {
+        "label": "Pipeline stages",
+        "description": "Configure the stages an occurrence goes through."
+      },
+      "occurrences_categories": {
+        "label": "Occurrence categories",
+        "description": "Classify occurrences by category."
+      },
+      "occurrences_what_happened": {
+        "label": "What happened",
+        "description": "Reasons used to describe what happened in each case."
+      },
+      "occurrences_sla_policies": {
+        "label": "Occurrence SLA",
+        "description": "Service deadlines for occurrences."
+      },
+      "occurrences_processes": {
+        "label": "Occurrence processes",
+        "description": "Processes and automatic messages for each type of case."
+      },
+      "units": {
+        "label": "Units",
+        "description": "Stores and branches where the company operates."
+      },
+      "departments": {
+        "label": "Departments",
+        "description": "Internal sectors that handle occurrences."
+      },
+      "sales_opportunities": {
+        "label": "Sales opportunities",
+        "description": "Sales funnel and opportunity portfolio."
+      },
+      "accounts": {
+        "label": "WhatsApp accounts",
+        "description": "WhatsApp numbers connected to Whatc."
+      },
+      "templates": {
+        "label": "Message templates",
+        "description": "Message templates approved by Meta."
+      },
+      "campaigns": {
+        "label": "Campaigns",
+        "description": "Bulk sends to contact lists."
+      },
+      "flows_whatsapp": {
+        "label": "WhatsApp flows",
+        "description": "Interactive forms inside WhatsApp."
+      },
+      "flows_chatbot": {
+        "label": "Chatbot flows",
+        "description": "Automatic conversation flows of the chatbot."
+      },
+      "chatbot_keywords": {
+        "label": "Keywords",
+        "description": "Rules that trigger replies by keyword."
+      },
+      "settings_chatbot": {
+        "label": "Chatbot settings",
+        "description": "Messages, hours and general chatbot rules."
+      },
+      "chatbot_ai": {
+        "label": "AI contexts",
+        "description": "Instructions that guide the AI's answers."
+      },
+      "knowledge": {
+        "label": "Knowledge base",
+        "description": "Documents the AI and the team consult."
+      },
+      "ai_tools": {
+        "label": "AI tools",
+        "description": "Actions the chatbot AI is allowed to run."
+      },
+      "xprocess_integration": {
+        "label": "X2 ERP",
+        "description": "Connection to the company's X2 ERP."
+      },
+      "webhooks": {
+        "label": "Webhooks",
+        "description": "Automatic notices sent to other systems."
+      },
+      "api_keys": {
+        "label": "API keys",
+        "description": "Keys for other systems to access Whatc."
+      },
+      "custom_actions": {
+        "label": "Custom actions",
+        "description": "Buttons that trigger actions in external systems."
+      },
+      "analytics": {
+        "label": "Dashboards and analytics",
+        "description": "Dashboards with operation indicators."
+      },
+      "analytics_agents": {
+        "label": "Agent performance",
+        "description": "Agent productivity indicators."
+      },
+      "call_logs": {
+        "label": "Call history",
+        "description": "Record of calls made and received."
+      },
+      "ivr_flows": {
+        "label": "IVR flows",
+        "description": "Voice menu flows."
+      },
+      "call_transfers": {
+        "label": "Call transfers",
+        "description": "Calls forwarded between agents."
+      },
+      "outgoing_calls": {
+        "label": "Outgoing calls",
+        "description": "Calls started by agents."
+      }
+    },
+    "permissions": {
+      "users_read": {
+        "label": "View users",
+        "description": "Look up users, status and basic information."
+      },
+      "users_write": {
+        "label": "Create and edit users",
+        "description": "Add users and change their data and roles."
+      },
+      "users_delete": {
+        "label": "Delete users",
+        "description": "Remove users from the system."
+      },
+      "teams_read": {
+        "label": "View teams",
+        "description": "Look up teams and their members."
+      },
+      "teams_write": {
+        "label": "Create and edit teams",
+        "description": "Add teams and change members and service rules."
+      },
+      "teams_delete": {
+        "label": "Delete teams",
+        "description": "Remove teams."
+      },
+      "roles_read": {
+        "label": "View roles",
+        "description": "Look up roles and their permissions."
+      },
+      "roles_write": {
+        "label": "Create and edit roles",
+        "description": "Create roles and change what each can do."
+      },
+      "roles_delete": {
+        "label": "Delete roles",
+        "description": "Remove roles that have no users."
+      },
+      "settings_general_read": {
+        "label": "View general settings",
+        "description": "Look up the organization's general settings."
+      },
+      "settings_general_write": {
+        "label": "Edit general settings",
+        "description": "Change the organization's general settings."
+      },
+      "settings_chatbot_read": {
+        "label": "View chatbot settings",
+        "description": "Look up chatbot messages, hours and rules."
+      },
+      "settings_chatbot_write": {
+        "label": "Edit chatbot settings",
+        "description": "Change chatbot messages, hours and rules."
+      },
+      "settings_sso_read": {
+        "label": "View single sign-on (SSO)",
+        "description": "Look up the configured sign-in providers."
+      },
+      "settings_sso_write": {
+        "label": "Edit single sign-on (SSO)",
+        "description": "Configure external sign-in providers."
+      },
+      "accounts_read": {
+        "label": "View WhatsApp accounts",
+        "description": "Look up the connected numbers."
+      },
+      "accounts_write": {
+        "label": "Create and edit WhatsApp accounts",
+        "description": "Connect numbers and change their settings."
+      },
+      "accounts_delete": {
+        "label": "Delete WhatsApp accounts",
+        "description": "Disconnect and remove WhatsApp numbers."
+      },
+      "templates_read": {
+        "label": "View message templates",
+        "description": "Look up templates and their approval status."
+      },
+      "templates_write": {
+        "label": "Create and edit templates",
+        "description": "Create templates and submit them to Meta for approval."
+      },
+      "templates_delete": {
+        "label": "Delete templates",
+        "description": "Remove message templates."
+      },
+      "templates_sync": {
+        "label": "Sync templates with Meta",
+        "description": "Fetch the current templates and status from Meta."
+      },
+      "flows_whatsapp_read": {
+        "label": "View WhatsApp flows",
+        "description": "Look up the interactive forms."
+      },
+      "flows_whatsapp_write": {
+        "label": "Create and edit WhatsApp flows",
+        "description": "Build and change interactive forms."
+      },
+      "flows_whatsapp_delete": {
+        "label": "Delete WhatsApp flows",
+        "description": "Remove interactive forms."
+      },
+      "flows_chatbot_read": {
+        "label": "View chatbot flows",
+        "description": "Look up the automatic conversation flows."
+      },
+      "flows_chatbot_write": {
+        "label": "Create and edit chatbot flows",
+        "description": "Build and change automatic conversation flows."
+      },
+      "flows_chatbot_delete": {
+        "label": "Delete chatbot flows",
+        "description": "Remove automatic conversation flows."
+      },
+      "campaigns_read": {
+        "label": "View campaigns",
+        "description": "Look up campaigns and their results."
+      },
+      "campaigns_write": {
+        "label": "Create and edit campaigns",
+        "description": "Build campaigns and choose the audience."
+      },
+      "campaigns_delete": {
+        "label": "Delete campaigns",
+        "description": "Remove campaigns."
+      },
+      "campaigns_execute": {
+        "label": "Execute campaigns",
+        "description": "Start, pause and cancel campaign sends."
+      },
+      "chatbot_keywords_read": {
+        "label": "View keywords",
+        "description": "Look up keyword rules."
+      },
+      "chatbot_keywords_write": {
+        "label": "Create and edit keywords",
+        "description": "Define which words trigger each reply."
+      },
+      "chatbot_keywords_delete": {
+        "label": "Delete keywords",
+        "description": "Remove keyword rules."
+      },
+      "chatbot_ai_read": {
+        "label": "View AI contexts",
+        "description": "Look up the instructions given to the AI."
+      },
+      "chatbot_ai_write": {
+        "label": "Create and edit AI contexts",
+        "description": "Write and change the instructions that guide the AI."
+      },
+      "chatbot_ai_delete": {
+        "label": "Delete AI contexts",
+        "description": "Remove AI contexts."
+      },
+      "chat_read": {
+        "label": "View conversations",
+        "description": "Follow the conversations assigned to you."
+      },
+      "chat_write": {
+        "label": "Send messages",
+        "description": "Reply to customers in the chat."
+      },
+      "chat_assign_write": {
+        "label": "Assign conversations",
+        "description": "Choose which agent handles each conversation."
+      },
+      "conversations_view_all": {
+        "label": "View all conversations",
+        "description": "See and act on conversations of any agent."
+      },
+      "conversations_view_team": {
+        "label": "View team conversations",
+        "description": "See and act on conversations of the teams the person belongs to."
+      },
+      "contacts_read": {
+        "label": "View contacts",
+        "description": "Look up contacts and their history."
+      },
+      "contacts_write": {
+        "label": "Create and edit contacts",
+        "description": "Add contacts and change their data."
+      },
+      "contacts_delete": {
+        "label": "Delete contacts",
+        "description": "Remove contacts."
+      },
+      "contacts_import": {
+        "label": "Import contacts",
+        "description": "Load contacts from a spreadsheet."
+      },
+      "contacts_export": {
+        "label": "Export contacts",
+        "description": "Download the contact list as a spreadsheet."
+      },
+      "contacts_name_write": {
+        "label": "Rename contacts",
+        "description": "Fix a contact's name without being able to edit the rest of the record."
+      },
+      "tags_read": {
+        "label": "View tags",
+        "description": "Look up the tags on contacts and conversations."
+      },
+      "tags_write": {
+        "label": "Create and edit tags",
+        "description": "Create tags and apply them to contacts."
+      },
+      "tags_delete": {
+        "label": "Delete tags",
+        "description": "Remove tags."
+      },
+      "transfers_read": {
+        "label": "View transfers",
+        "description": "Look up transfers and the service queue."
+      },
+      "transfers_write": {
+        "label": "Create transfers",
+        "description": "Hand a conversation over to another agent or team."
+      },
+      "transfers_pickup": {
+        "label": "Pick up from the queue",
+        "description": "Take conversations that are waiting in the queue."
+      },
+      "canned_responses_read": {
+        "label": "View canned responses",
+        "description": "Look up and use the ready-made messages."
+      },
+      "canned_responses_write": {
+        "label": "Create and edit canned responses",
+        "description": "Add and change ready-made messages."
+      },
+      "canned_responses_delete": {
+        "label": "Delete canned responses",
+        "description": "Remove ready-made messages."
+      },
+      "occurrences_read": {
+        "label": "View occurrences",
+        "description": "Look up occurrences, protocols and the stage board."
+      },
+      "occurrences_write": {
+        "label": "Create and edit occurrences",
+        "description": "Open protocols, move them between stages and log service."
+      },
+      "occurrences_delete": {
+        "label": "Permanently delete occurrences",
+        "description": "Erase a protocol for good. Only takes effect for super admins."
+      },
+      "occurrences_stages_read": {
+        "label": "View pipeline stages",
+        "description": "Open the stage configuration screen."
+      },
+      "occurrences_stages_write": {
+        "label": "Create and edit stages",
+        "description": "Create stages and change the pipeline order and rules."
+      },
+      "occurrences_stages_delete": {
+        "label": "Delete stages",
+        "description": "Remove pipeline stages."
+      },
+      "occurrences_categories_read": {
+        "label": "View categories",
+        "description": "Look up occurrence categories."
+      },
+      "occurrences_categories_write": {
+        "label": "Create and edit categories",
+        "description": "Add and change occurrence categories."
+      },
+      "occurrences_categories_delete": {
+        "label": "Delete categories",
+        "description": "Remove occurrence categories."
+      },
+      "occurrences_what_happened_read": {
+        "label": "View \"what happened\"",
+        "description": "Look up the registered reasons."
+      },
+      "occurrences_what_happened_write": {
+        "label": "Create and edit \"what happened\"",
+        "description": "Add and change occurrence reasons."
+      },
+      "occurrences_what_happened_delete": {
+        "label": "Delete \"what happened\"",
+        "description": "Remove registered reasons."
+      },
+      "occurrences_sla_policies_read": {
+        "label": "View occurrence SLA",
+        "description": "Look up the service deadlines."
+      },
+      "occurrences_sla_policies_write": {
+        "label": "Edit occurrence SLA",
+        "description": "Change the service deadlines."
+      },
+      "occurrences_processes_read": {
+        "label": "View processes",
+        "description": "Look up processes and their automatic messages."
+      },
+      "occurrences_processes_write": {
+        "label": "Create and edit processes",
+        "description": "Add processes and change the automatic messages."
+      },
+      "occurrences_processes_delete": {
+        "label": "Delete processes",
+        "description": "Remove occurrence processes."
+      },
+      "units_read": {
+        "label": "View units",
+        "description": "Look up the registered units."
+      },
+      "units_write": {
+        "label": "Manage units",
+        "description": "Add and change the units used by the system."
+      },
+      "units_delete": {
+        "label": "Delete units",
+        "description": "Remove units."
+      },
+      "departments_read": {
+        "label": "View departments",
+        "description": "Look up the registered departments."
+      },
+      "departments_write": {
+        "label": "Create and edit departments",
+        "description": "Add and change departments."
+      },
+      "departments_delete": {
+        "label": "Delete departments",
+        "description": "Remove departments."
+      },
+      "sales_opportunities_read": {
+        "label": "View opportunities",
+        "description": "Look up the funnel and your own portfolio."
+      },
+      "sales_opportunities_write": {
+        "label": "Create and edit opportunities",
+        "description": "Open opportunities and move them through the funnel."
+      },
+      "sales_opportunities_view_all": {
+        "label": "View all opportunities",
+        "description": "See and manage opportunities of any seller."
+      },
+      "sales_opportunities_delete": {
+        "label": "Permanently delete opportunities",
+        "description": "Erase an opportunity for good. Only takes effect for super admins."
+      },
+      "knowledge_read": {
+        "label": "Search the knowledge base",
+        "description": "Search and read the base documents."
+      },
+      "knowledge_write": {
+        "label": "Manage the knowledge base",
+        "description": "Create, edit and archive base documents."
+      },
+      "ai_tools_read": {
+        "label": "View AI tools",
+        "description": "See which tools the AI may use."
+      },
+      "ai_tools_write": {
+        "label": "Turn AI tools on and off",
+        "description": "Decide which actions the chatbot AI may run."
+      },
+      "xprocess_integration_read": {
+        "label": "View the X2 ERP",
+        "description": "Look up the X2 integration settings."
+      },
+      "xprocess_integration_write": {
+        "label": "Configure the X2 ERP",
+        "description": "Enter and change the X2 access credential."
+      },
+      "webhooks_read": {
+        "label": "View webhooks",
+        "description": "Look up the notices sent to other systems."
+      },
+      "webhooks_write": {
+        "label": "Create and edit webhooks",
+        "description": "Define where and when notices are sent."
+      },
+      "webhooks_delete": {
+        "label": "Delete webhooks",
+        "description": "Remove webhooks."
+      },
+      "api_keys_read": {
+        "label": "View API keys",
+        "description": "Look up the existing keys."
+      },
+      "api_keys_write": {
+        "label": "Create API keys",
+        "description": "Generate keys for other systems."
+      },
+      "api_keys_delete": {
+        "label": "Delete API keys",
+        "description": "Revoke API keys."
+      },
+      "custom_actions_read": {
+        "label": "View custom actions",
+        "description": "Look up the registered actions."
+      },
+      "custom_actions_write": {
+        "label": "Create and edit custom actions",
+        "description": "Add and change actions for external systems."
+      },
+      "custom_actions_delete": {
+        "label": "Delete custom actions",
+        "description": "Remove custom actions."
+      },
+      "organizations_read": {
+        "label": "View organizations",
+        "description": "Look up organizations."
+      },
+      "organizations_write": {
+        "label": "Create organizations",
+        "description": "Add new organizations."
+      },
+      "organizations_delete": {
+        "label": "Delete organizations",
+        "description": "Remove organizations."
+      },
+      "organizations_assign": {
+        "label": "Manage organization members",
+        "description": "Add and remove people from an organization."
+      },
+      "audit_logs_read": {
+        "label": "View audit logs",
+        "description": "See who changed what and when."
+      },
+      "analytics_read": {
+        "label": "View dashboards",
+        "description": "Open dashboards and indicators."
+      },
+      "analytics_write": {
+        "label": "Create and edit dashboards",
+        "description": "Build and change dashboard widgets."
+      },
+      "analytics_delete": {
+        "label": "Delete widgets",
+        "description": "Remove dashboard widgets."
+      },
+      "analytics_agents_read": {
+        "label": "View agent performance",
+        "description": "Look up agent productivity indicators."
+      },
+      "call_logs_read": {
+        "label": "View call history",
+        "description": "Look up the recorded calls."
+      },
+      "ivr_flows_read": {
+        "label": "View IVR flows",
+        "description": "Look up the voice menus."
+      },
+      "ivr_flows_write": {
+        "label": "Create and edit IVR flows",
+        "description": "Build and change the voice menus."
+      },
+      "ivr_flows_delete": {
+        "label": "Delete IVR flows",
+        "description": "Remove voice menus."
+      },
+      "call_transfers_read": {
+        "label": "View call transfers",
+        "description": "Look up transferred calls."
+      },
+      "call_transfers_write": {
+        "label": "Manage call transfers",
+        "description": "Accept and handle transferred calls."
+      },
+      "outgoing_calls_read": {
+        "label": "View outgoing calls",
+        "description": "Look up the progress of started calls."
+      },
+      "outgoing_calls_write": {
+        "label": "Start outgoing calls",
+        "description": "Call customers from the chat."
+      }
+    },
+    "activeCount": "{active} of {total} permissions on",
+    "on": "On",
+    "off": "Off",
+    "enableAll": "Turn all on",
+    "disableAll": "Turn all off",
+    "search": "Search permissions",
+    "searchPlaceholder": "Search by name, resource, description or key",
+    "noResults": "No permission matches the search.",
+    "groupToggle": "Turn all {group} permissions on or off"
   }
 }

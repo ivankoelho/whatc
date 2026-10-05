@@ -21,6 +21,8 @@ type UserRequest struct {
 	RoleID             *uuid.UUID `json:"role_id"`
 	IsActive           *bool      `json:"is_active"`
 	XProcessSellerCode *string    `json:"xprocess_seller_code"`
+	UnitID             *string    `json:"unit_id"`
+	DepartmentID       *string    `json:"department_id"`
 }
 
 // superAdminField is used to extract is_super_admin separately from the request body.
@@ -40,15 +42,20 @@ func parseSuperAdminField(r *fastglue.Request) *bool {
 
 // UserResponse represents the response for a user (without sensitive data)
 type UserResponse struct {
-	ID             uuid.UUID    `json:"id"`
-	Email          string       `json:"email"`
-	FullName       string       `json:"full_name"`
-	RoleID         *uuid.UUID   `json:"role_id,omitempty"`
-	Role           *RoleInfo    `json:"role,omitempty"`
-	IsActive       bool         `json:"is_active"`
-	IsAvailable    bool         `json:"is_available"`
+	ID          uuid.UUID  `json:"id"`
+	Email       string     `json:"email"`
+	FullName    string     `json:"full_name"`
+	RoleID      *uuid.UUID `json:"role_id,omitempty"`
+	Role        *RoleInfo  `json:"role,omitempty"`
+	IsActive    bool       `json:"is_active"`
+	IsAvailable bool       `json:"is_available"`
+	// IsOnline is the live-connection state (presence), reported by the user
+	// list only; nil elsewhere means "not reported", not "offline".
+	IsOnline       *bool        `json:"is_online,omitempty"`
 	IsSuperAdmin   bool         `json:"is_super_admin"`
 	IsMember       bool         `json:"is_member"`
+	UnitID         *uuid.UUID   `json:"unit_id,omitempty"`
+	DepartmentID   *uuid.UUID   `json:"department_id,omitempty"`
 	OrganizationID uuid.UUID    `json:"organization_id"`
 	Settings       models.JSONB `json:"settings,omitempty"`
 	CreatedAt      string       `json:"created_at"`
@@ -167,6 +174,11 @@ func (a *App) ListUsers(r *fastglue.Request) error {
 		homeOrgMap[u.ID] = u.OrganizationID
 	}
 
+	onlineSet := make(map[uuid.UUID]struct{}, len(onlineIDs))
+	for _, id := range onlineIDs {
+		onlineSet[id] = struct{}{}
+	}
+
 	// Convert to response format, using org-specific role
 	response := make([]UserResponse, len(users))
 	for i, user := range users {
@@ -177,6 +189,8 @@ func (a *App) ListUsers(r *fastglue.Request) error {
 		}
 		resp := userToResponse(user)
 		resp.IsMember = homeOrgMap[user.ID] != orgID
+		_, online := onlineSet[user.ID]
+		resp.IsOnline = &online
 		response[i] = resp
 	}
 
@@ -248,6 +262,11 @@ func (a *App) CreateUser(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid email format", nil, "")
 	}
 
+	placement, ok := a.parseOrgPlacement(r, orgID, req.UnitID, req.DepartmentID)
+	if !ok {
+		return nil
+	}
+
 	// Determine role
 	var roleID *uuid.UUID
 	if req.RoleID != nil {
@@ -298,6 +317,8 @@ func (a *App) CreateUser(r *fastglue.Request) error {
 			"role_id":         roleID,
 			"is_active":       true,
 			"is_super_admin":  isSuperAdmin,
+			"unit_id":         placement.UnitID,
+			"department_id":   placement.DepartmentID,
 		}).Error; err != nil {
 			a.Log.Error("Failed to restore user", "error", err)
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create user", nil, "")
@@ -333,6 +354,7 @@ func (a *App) CreateUser(r *fastglue.Request) error {
 		softDeleted.RoleID = roleID
 		softDeleted.IsActive = true
 		softDeleted.IsSuperAdmin = isSuperAdmin
+		softDeleted.UnitID, softDeleted.DepartmentID = placement.UnitID, placement.DepartmentID
 
 		a.logAudit(orgID, userID,
 			"user", softDeleted.ID, models.AuditActionCreated, nil, userAuditSnapshot(&softDeleted))
@@ -348,6 +370,8 @@ func (a *App) CreateUser(r *fastglue.Request) error {
 		RoleID:         roleID,
 		IsActive:       true,
 		IsSuperAdmin:   isSuperAdmin,
+		UnitID:         placement.UnitID,
+		DepartmentID:   placement.DepartmentID,
 	}
 
 	if err := a.DB.Create(&user).Error; err != nil {
@@ -515,6 +539,24 @@ func (a *App) UpdateUser(r *fastglue.Request) error {
 
 	if req.XProcessSellerCode != nil {
 		user.XProcessSellerCode = req.XProcessSellerCode
+	}
+
+	// Where the user works is organizational data: changing it takes users:write,
+	// even on one's own profile.
+	if req.UnitID != nil || req.DepartmentID != nil {
+		if !a.HasPermission(currentUserID, models.ResourceUsers, models.ActionWrite, orgID) {
+			return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Insufficient permissions to change unit or department", nil, "")
+		}
+		placement, ok := a.parseOrgPlacement(r, orgID, req.UnitID, req.DepartmentID)
+		if !ok {
+			return nil
+		}
+		if placement.UnitSet {
+			user.UnitID = placement.UnitID
+		}
+		if placement.DepartmentSet {
+			user.DepartmentID = placement.DepartmentID
+		}
 	}
 
 	// Handle super admin update - only superadmins can change this
@@ -834,6 +876,8 @@ func userToResponse(user models.User) UserResponse {
 		IsActive:       user.IsActive,
 		IsAvailable:    user.IsAvailable,
 		IsSuperAdmin:   user.IsSuperAdmin,
+		UnitID:         user.UnitID,
+		DepartmentID:   user.DepartmentID,
 		OrganizationID: user.OrganizationID,
 		Settings:       user.Settings,
 		CreatedAt:      user.CreatedAt.Format("2006-01-02T15:04:05Z"),
@@ -936,6 +980,8 @@ func (a *App) UpdateAvailability(r *fastglue.Request) error {
 		return nil
 	}
 
+	wasAvailable := user.IsAvailable
+
 	// Only log if status is actually changing
 	if user.IsAvailable != req.IsAvailable {
 		now := time.Now()
@@ -963,6 +1009,12 @@ func (a *App) UpdateAvailability(r *fastglue.Request) error {
 	if err := a.DB.Save(&user).Error; err != nil {
 		a.Log.Error("Failed to update availability", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update availability", nil, "")
+	}
+
+	if wasAvailable != req.IsAvailable {
+		a.logAudit(orgID, userID, models.ResourceUsers, userID, models.AuditActionUpdated, nil, nil,
+			map[string]any{"field": "is_available", "old_value": wasAvailable, "new_value": req.IsAvailable})
+		a.broadcastAgentAvailability(orgID, userID, req.IsAvailable)
 	}
 
 	status := "available"
