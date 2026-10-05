@@ -230,3 +230,52 @@ func TestFlowTransfer_ContactPlacementKeepsTheActiveTransferGuard(t *testing.T) 
 	e.app.DB.Model(&models.AgentTransfer{}).Where("contact_id = ? AND status = ?", e.contact.ID, models.TransferStatusActive).Count(&n)
 	assert.Equal(t, int64(1), n)
 }
+
+// The registration variables of a flow: type, unit name and department name, read from the contact.
+func TestFlowVariables_ContactRegistration(t *testing.T) {
+	run := func(t *testing.T, typ models.ContactType, withUnit, withDept bool) models.JSONB {
+		e := newPlacementEnv(t)
+		var unit, dept *uuid.UUID
+		if withUnit {
+			unit = &e.unit.ID
+		}
+		if withDept {
+			dept = &e.dept.ID
+		}
+		e.place(t, typ, unit, dept)
+		flow := &models.ChatbotFlow{
+			BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: e.org.ID, WhatsAppAccount: e.account.Name,
+			Name: "vars", IsEnabled: true,
+			Graph: models.JSONB{
+				"version": 2, "entry_node": "m1",
+				"nodes": []any{
+					map[string]any{"id": "m1", "type": "message", "label": "m", "config": map[string]any{"message": "{{contact_unit}}"}},
+					map[string]any{"id": "e1", "type": "end", "label": "e", "config": map[string]any{}},
+				},
+				"edges": []any{map[string]any{"from": "m1", "to": "e1", "condition": "default"}},
+			},
+		}
+		require.NoError(t, e.app.DB.Create(flow).Error)
+		require.NoError(t, e.app.runChatGraph(e.account, e.contact, e.session, flow, "start", "", nil))
+		require.NoError(t, e.app.DB.First(e.session, e.session.ID).Error)
+		return e.session.SessionData
+	}
+
+	t.Run("colaborador with unit and department", func(t *testing.T) {
+		d := run(t, models.ContactTypeColaborador, true, true)
+		assert.Equal(t, "colaborador", d["contact_type"])
+		assert.Equal(t, "Feira 2", d["contact_unit"])
+		assert.Equal(t, "Expedição", d["contact_department"])
+	})
+	t.Run("colaborador with only the unit", func(t *testing.T) {
+		d := run(t, models.ContactTypeColaborador, true, false)
+		assert.Equal(t, "Feira 2", d["contact_unit"])
+		assert.Equal(t, "", d["contact_department"], "no department: empty text, never a literal placeholder")
+	})
+	t.Run("cliente has no unit or department", func(t *testing.T) {
+		d := run(t, models.ContactTypeCliente, false, false)
+		assert.Equal(t, "cliente", d["contact_type"])
+		assert.Equal(t, "", d["contact_unit"])
+		assert.Equal(t, "", d["contact_department"])
+	})
+}
