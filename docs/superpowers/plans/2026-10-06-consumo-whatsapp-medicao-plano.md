@@ -382,3 +382,16 @@ Cada critério é verificável por comando ou consulta. A entrega só fecha com 
 2. Divisão A/B/C aprovada; coleta começa em B; B não vai para produção sem autorização explícita; `record_enabled=false` desliga sem impacto funcional.
 3. Lote de 500 é limite técnico interno, não configurável; job paginado, idempotente e seguro para concorrência.
 4. Instrumentação fail-open é critério de aceite (F1, F2), em especial em `SendOutgoingMessage`, webhook da Meta e `transitionContactStatusDB`.
+
+---
+
+## Registro de execução (2026-10-07)
+
+- **Entrega A** (`42ed8ca`, `aef448f`, `deaa94f`) e **Entrega B** (`4df6cb0`…`d348fcc`): aprovadas pelo dono. Produção **não** autorizada.
+- **Entrega C:** permissão `whatsapp_usage` (catálogo 117 → 119, backfill aditivo para admin e manager), API de preços e consumo, tela Configurações › Canais › Consumo do WhatsApp, E2E e manuais (guia completo e manual dev; o guia do agente não muda: o agente não vê a tela).
+- **Divergências do plano, todas pequenas:**
+  - Os índices únicos ficaram nas tags do GORM (padrão do projeto), não na lista `getIndexes`.
+  - `auto_resolve` passou a ser usado: o SLA e a inatividade fecham o contato sem ator. `transfer` segue reservado e sem uso.
+  - Um preço já usado aceita **encerrar a vigência** (`valid_to`, não anterior à última mensagem cobrada por ele) e editar observações; sem isso não seria possível cadastrar o período seguinte.
+  - O resumo devolve `recording.enabled` e `recording.since`, para a tela dizer se a medição está ligada e desde quando (a ativação não pode ser presumida).
+- **Ativação:** `usage.record_enabled` tem default `true` (decisão do dono). Deploy técnico sem coleta: `record_enabled = false` no ambiente.
