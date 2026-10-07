@@ -321,7 +321,8 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 		if _, err := a.transitionContactStatus(req.Contact,
 			models.ContactStatusInProgress,
 			[]models.ContactStatus{models.ContactStatusNew},
-			opts.SentByUserID); err != nil {
+			opts.SentByUserID,
+			statusCause{ActorType: "agent", ActorUserID: opts.SentByUserID, Reason: statusReasonAgentReply}); err != nil {
 			a.Log.Error("Failed to auto-transition contact status", "error", err, "contact_id", req.Contact.ID)
 		}
 	}

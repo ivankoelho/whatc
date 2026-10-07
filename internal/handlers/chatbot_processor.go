@@ -1409,7 +1409,8 @@ func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *mode
 	if _, err := a.transitionContactStatus(contact,
 		models.ContactStatusInProgress,
 		[]models.ContactStatus{models.ContactStatusResolved},
-		nil); err != nil {
+		nil,
+		statusCause{ActorType: "contact", Reason: statusReasonInboundReopen}); err != nil {
 		a.Log.Error("Failed to auto-transition contact status", "error", err, "contact_id", contact.ID)
 	}
 

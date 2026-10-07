@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"time"
 
 	"github.com/google/uuid"
@@ -85,7 +86,8 @@ func (a *App) UpdateContactStatus(r *fastglue.Request) error {
 				"org_id", orgID, "contact_id", contact.ID)
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update contact status", nil, "")
 		}
-	} else if _, err := a.transitionContactStatus(contact, req.ContactStatus, nil, &userID); err != nil {
+	} else if _, err := a.transitionContactStatus(contact, req.ContactStatus, nil, &userID,
+		statusCause{ActorType: "agent", ActorUserID: &userID, Reason: statusReasonAPI}); err != nil {
 		a.Log.Error("Failed to update contact status", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update contact status", nil, "")
 	}
@@ -113,8 +115,9 @@ func (a *App) transitionContactStatus(
 	to models.ContactStatus,
 	from []models.ContactStatus,
 	actorID *uuid.UUID,
+	cause statusCause,
 ) (bool, error) {
-	changed, oldStatus, err := a.transitionContactStatusDB(a.DB, contact, to, from)
+	changed, oldStatus, err := a.transitionContactStatusDB(a.DB, contact, to, from, cause)
 	if err != nil || !changed {
 		return changed, err
 	}
@@ -137,6 +140,7 @@ func (a *App) transitionContactStatusDB(
 	contact *models.Contact,
 	to models.ContactStatus,
 	from []models.ContactStatus,
+	cause statusCause,
 ) (bool, models.ContactStatus, error) {
 	oldStatus := contact.ContactStatus
 	if oldStatus == to {
@@ -157,6 +161,7 @@ func (a *App) transitionContactStatusDB(
 	}
 
 	contact.ContactStatus = to
+	a.recordContactStatusEvent(db, contact, oldStatus, to, cause)
 	return true, oldStatus, nil
 }
 
@@ -266,7 +271,7 @@ func (a *App) releaseContactTx(
 		}
 	}
 
-	statusChanged, oldStatus, err := a.transitionContactStatusDB(tx, contact, models.ContactStatusResolved, nil)
+	statusChanged, oldStatus, err := a.transitionContactStatusDB(tx, contact, models.ContactStatusResolved, nil, resolveCause(actorID))
 	if err != nil {
 		return nil, err
 	}
@@ -283,4 +288,45 @@ func (a *App) releaseContactTx(
 		}
 		a.Log.Info("Contact released", "contact_id", contact.ID, "reason", reason)
 	}, nil
+}
+
+// Reasons of contact_status_events. A closed set: no reason is created ahead of
+// need. statusReasonTransfer is reserved (no code path moves the status on a
+// transfer today).
+const (
+	statusReasonResolveAction = "resolve_action"
+	statusReasonAutoResolve   = "auto_resolve"
+	statusReasonInboundReopen = "inbound_reopen"
+	statusReasonTransfer      = "transfer" //nolint:unused // reserved
+	statusReasonAPI           = "api"
+	statusReasonAgentReply    = "agent_reply"
+)
+
+// statusCause says who or what moved a contact's status, for the history.
+type statusCause struct {
+	ActorType   string // agent | ai | flow | system | contact
+	ActorUserID *uuid.UUID
+	Reason      string
+}
+
+// resolveCause is the cause of a release: an agent closing it, or an automatic close (SLA, inactivity).
+func resolveCause(actorID *uuid.UUID) statusCause {
+	if actorID != nil {
+		return statusCause{ActorType: "agent", ActorUserID: actorID, Reason: statusReasonResolveAction}
+	}
+	return statusCause{ActorType: "system", Reason: statusReasonAutoResolve}
+}
+
+// recordContactStatusEvent appends the transition to contact_status_events on
+// the same db/transaction as the status change. It is fail-open: the insert runs
+// in a savepoint, so a failure (logged here) neither aborts the surrounding
+// transaction nor undoes the status change. Does nothing when usage recording is off.
+func (a *App) recordContactStatusEvent(db *gorm.DB, contact *models.Contact, from, to models.ContactStatus, cause statusCause) {
+	if err := a.Usage.RecordContactStatus(context.Background(), db, models.ContactStatusEvent{
+		OrganizationID: contact.OrganizationID, ContactID: contact.ID,
+		FromStatus: string(from), ToStatus: string(to),
+		ActorType: cause.ActorType, ActorUserID: cause.ActorUserID, Reason: cause.Reason,
+	}); err != nil {
+		a.Log.Error("Failed to record contact status event", "error", err, "contact_id", contact.ID)
+	}
 }

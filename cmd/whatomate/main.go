@@ -20,6 +20,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/handlers"
 	"github.com/shridarpatil/whatomate/internal/middleware"
 	"github.com/shridarpatil/whatomate/internal/queue"
+	"github.com/shridarpatil/whatomate/internal/usage"
 	"github.com/shridarpatil/whatomate/internal/storage"
 	"github.com/shridarpatil/whatomate/internal/tts"
 	"github.com/shridarpatil/whatomate/internal/websocket"
@@ -302,6 +303,7 @@ func runServer(args []string) {
 		WSHub:      wsHub,
 		Queue:      jobQueue,
 		HTTPClient: httpClient,
+		Usage:      usage.New(db, cfg.Usage),
 	}
 
 	// Wire the conversation authorizer into the hub now that the App (which owns

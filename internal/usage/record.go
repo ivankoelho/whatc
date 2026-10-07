@@ -174,3 +174,20 @@ func (r *Recorder) AttachWamid(ctx context.Context, orgID, messageID uuid.UUID, 
 	}
 	return r.Settle(ctx, orgID, account, wamid)
 }
+
+// RecordContactStatus appends one contact status transition on db, which may be
+// an open transaction. It runs in a savepoint: if the insert fails, the error is
+// returned but the surrounding transaction stays usable, so a failure of the
+// history never undoes or blocks the status change itself.
+func (r *Recorder) RecordContactStatus(ctx context.Context, db *gorm.DB, e models.ContactStatusEvent) error {
+	if !r.Enabled() {
+		return nil
+	}
+	if e.OccurredAt.IsZero() {
+		e.OccurredAt = time.Now()
+	}
+	if db == nil {
+		db = r.DB
+	}
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error { return tx.Create(&e).Error })
+}
