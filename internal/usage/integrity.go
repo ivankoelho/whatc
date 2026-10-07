@@ -35,9 +35,24 @@ func (r *Recorder) Sweep(ctx context.Context, now time.Time) (SweepResult, error
 	if !r.Enabled() {
 		return res, nil
 	}
-	steps := []func(context.Context, time.Time, *SweepResult) error{r.sweepMissingRows, r.sweepUnlinked, r.sweepPending}
+	// Measurement starts when the first ledger row was written. Nothing before that
+	// instant is reconstructed: with an empty ledger there is no baseline yet and the
+	// job does nothing at all.
+	base, err := r.baseline(ctx)
+	if err != nil {
+		if ctx.Err() != nil {
+			return res, ctx.Err()
+		}
+		res.Errors++
+		res.LastErrText = err.Error()
+		return res, nil
+	}
+	if base == nil {
+		return res, nil
+	}
+	steps := []func(context.Context, time.Time, time.Time, *SweepResult) error{r.sweepMissingRows, r.sweepUnlinked, r.sweepPending}
 	for _, step := range steps {
-		if err := step(ctx, now, &res); err != nil {
+		if err := step(ctx, now, *base, &res); err != nil {
 			res.Errors++
 			res.LastErrText = err.Error()
 			if ctx.Err() != nil {
@@ -52,8 +67,11 @@ func (r *Recorder) Sweep(ctx context.Context, now time.Time) (SweepResult, error
 // (recording failed, or the process died between creating the message and
 // recording it). Messages younger than one interval are left alone so the
 // normal path can record them with the real origin.
-func (r *Recorder) sweepMissingRows(ctx context.Context, now time.Time, res *SweepResult) error {
+func (r *Recorder) sweepMissingRows(ctx context.Context, now, base time.Time, res *SweepResult) error {
 	from := now.Add(-r.Cfg.IntegrityWindow())
+	if from.Before(base) {
+		from = base // never before the start of the measurement
+	}
 	to := now.Add(-r.Cfg.IntegrityInterval())
 	curAt, curID := from, uuid.Nil
 	for {
@@ -126,7 +144,7 @@ type unlinkedCandidate struct {
 // sweepUnlinked records, as `unlinked`, the wamids Meta reported on for which no
 // message was found after the reconciliation wait. It keeps the known cost
 // reachable by wamid; it is not treated as a loss, and a later send/record links it.
-func (r *Recorder) sweepUnlinked(ctx context.Context, now time.Time, res *SweepResult) error {
+func (r *Recorder) sweepUnlinked(ctx context.Context, now, base time.Time, res *SweepResult) error {
 	from := now.Add(-r.Cfg.IntegrityWindow())
 	to := now.Add(-r.Cfg.UnlinkedAfter())
 	cursor := ""
@@ -142,9 +160,11 @@ func (r *Recorder) sweepUnlinked(ctx context.Context, now time.Time, res *SweepR
 			WHERE e.received_at >= ? AND e.wamid > ?
 			  AND NOT EXISTS (SELECT 1 FROM message_usage u
 			                  WHERE u.organization_id = e.organization_id AND u.whatsapp_account = e.whatsapp_account AND u.wamid = e.wamid)
+			  AND NOT EXISTS (SELECT 1 FROM messages m
+			                  WHERE m.organization_id = e.organization_id AND m.whats_app_message_id = e.wamid AND m.created_at < ?)
 			GROUP BY e.organization_id, e.whatsapp_account, e.wamid
 			HAVING MIN(e.received_at) <= ?
-			ORDER BY e.wamid LIMIT ?`, from, cursor, to, sweepBatchSize).Scan(&cands).Error; err != nil {
+			ORDER BY e.wamid LIMIT ?`, from, cursor, base, to, sweepBatchSize).Scan(&cands).Error; err != nil {
 			return err
 		}
 		for _, c := range cands {
@@ -177,7 +197,7 @@ func (r *Recorder) sweepUnlinked(ctx context.Context, now time.Time, res *SweepR
 // sweepPending re-settles `pending` rows that either passed the undelivered
 // deadline (they become `unconfirmed`) or have a delivery/failure event the
 // webhook failed to settle.
-func (r *Recorder) sweepPending(ctx context.Context, now time.Time, res *SweepResult) error {
+func (r *Recorder) sweepPending(ctx context.Context, now, _ time.Time, res *SweepResult) error {
 	deadline := now.Add(-r.Cfg.UndeliveredAfter())
 	cursor := uuid.Nil
 	for {
@@ -248,4 +268,15 @@ func (r *Recorder) sweepOnce(ctx context.Context, log Logf) {
 	if res.Inferred+res.Unlinked+res.Resettled > 0 {
 		log.Info("Usage integrity pass", "inferred", res.Inferred, "unlinked", res.Unlinked, "resettled", res.Resettled)
 	}
+}
+
+// baseline is the instant the measurement started: the creation time of the oldest
+// ledger row, or nil while the ledger is empty. It is read, never stored, so it
+// cannot drift forward: rows are only ever added after it.
+func (r *Recorder) baseline(ctx context.Context) (*time.Time, error) {
+	var first *time.Time
+	if err := r.DB.WithContext(ctx).Model(&models.MessageUsage{}).Select("MIN(created_at)").Row().Scan(&first); err != nil {
+		return nil, err
+	}
+	return first, nil
 }

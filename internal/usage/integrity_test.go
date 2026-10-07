@@ -45,6 +45,7 @@ func (f *fixture) rowOf(t *testing.T, m *models.Message) models.MessageUsage {
 
 func TestSweep_MissingRowsGetAnInferredOrigin(t *testing.T) {
 	f := newFixture(t, integrityCfg())
+	f.setBaseline(t, 30*time.Hour)
 	user := testutil.CreateTestUser(t, f.db, f.org.ID).ID
 	camp := uuid.New()
 	agentMsg := f.messageAt(t, time.Hour, func(m *models.Message) { m.SentByUserID = &user })
@@ -74,6 +75,7 @@ func TestSweep_MissingRowsGetAnInferredOrigin(t *testing.T) {
 
 func TestSweep_WindowAndGraceComeFromTheConfiguration(t *testing.T) {
 	f := newFixture(t, integrityCfg())
+	f.setBaseline(t, 30*time.Hour)
 	old := f.messageAt(t, 11*time.Hour, nil)  // before the 10 h window
 	fresh := f.messageAt(t, time.Minute, nil) // younger than the 2 min interval: the normal path owns it
 	inside := f.messageAt(t, 5*time.Minute, nil)
@@ -96,6 +98,7 @@ func TestSweep_WindowAndGraceComeFromTheConfiguration(t *testing.T) {
 
 func TestSweep_IsIdempotent(t *testing.T) {
 	f := newFixture(t, integrityCfg())
+	f.setBaseline(t, 30*time.Hour)
 	f.messageAt(t, time.Hour, nil)
 	first, err := f.rec.Sweep(context.Background(), time.Now())
 	require.NoError(t, err)
@@ -110,6 +113,7 @@ func TestSweep_IsIdempotent(t *testing.T) {
 // More messages than one batch: every page is processed, none is skipped or doubled.
 func TestSweep_PagesThroughMoreThanOneBatch(t *testing.T) {
 	f := newFixture(t, integrityCfg())
+	f.setBaseline(t, 30*time.Hour)
 	const total = 1100
 	at := time.Now().Add(-time.Hour)
 	msgs := make([]models.Message, total)
@@ -128,6 +132,7 @@ func TestSweep_PagesThroughMoreThanOneBatch(t *testing.T) {
 
 func TestSweep_ConcurrentPassesNeverDuplicate(t *testing.T) {
 	f := newFixture(t, integrityCfg())
+	f.setBaseline(t, 30*time.Hour)
 	for i := 0; i < 30; i++ {
 		f.messageAt(t, time.Hour, nil)
 	}
@@ -151,6 +156,7 @@ func (f *fixture) backdateEvents(t *testing.T, wamid string, age time.Duration) 
 
 func TestSweep_UnlinkedAfterTheConfiguredWait(t *testing.T) {
 	f := newFixture(t, integrityCfg())
+	f.setBaseline(t, 30*time.Hour)
 	ctx := context.Background()
 	price := &usage.Pricing{Billable: true, PricingModel: "PMP", Category: "utility"}
 	f.rate(t, "55", "utility", 0.09, time.Now().UTC().AddDate(0, 0, -3), nil, "BRL")
@@ -248,6 +254,7 @@ func TestSweep_DisabledDoesNothing(t *testing.T) {
 
 func TestSweep_StopsWhenTheContextIsCancelled(t *testing.T) {
 	f := newFixture(t, integrityCfg())
+	f.setBaseline(t, 30*time.Hour)
 	f.messageAt(t, time.Hour, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
