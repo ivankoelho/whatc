@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha1" //nolint:gosec // SHA-1 is mandated by the coturn TURN REST API (RFC draft)
 	"encoding/base64"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -32,6 +33,7 @@ type Config struct {
 	XProcess     XProcessConfig     `koanf:"xprocess"`
 	Knowledge    KnowledgeConfig    `koanf:"knowledge"`
 	AITools      AIToolsConfig      `koanf:"ai_tools"`
+	Usage        UsageConfig        `koanf:"usage"`
 }
 
 // XProcessConfig holds the switches of the X2 (XProcess) integration.
@@ -234,6 +236,10 @@ func Load(configPath string) (*Config, error) {
 	// Set defaults
 	setDefaults(&cfg)
 
+	if err := cfg.Usage.validate(); err != nil {
+		return nil, err
+	}
+
 	return &cfg, nil
 }
 
@@ -335,6 +341,77 @@ func setDefaults(cfg *Config) {
 	if cfg.Calling.TransferTimeoutSecs == 0 {
 		cfg.Calling.TransferTimeoutSecs = 120
 	}
+}
+
+// UsageConfig holds the operational parameters of the WhatsApp consumption
+// measurement (see docs/superpowers/specs/2026-10-06-consumo-whatsapp-medicao-design.md §9).
+// They are operational knobs, not business or billing rules: changing one never
+// alters a value already settled. A pointer means "not set": the default applies.
+// A value that is zero, negative or not a number makes the configuration fail to
+// load (it never silently falls back).
+type UsageConfig struct {
+	// RecordEnabled is the off switch of the whole recording. Absent = true.
+	RecordEnabled *bool `koanf:"record_enabled"`
+	// UnlinkedAfterMinutes: how long to wait for the internal message before creating an `unlinked` row.
+	UnlinkedAfterMinutes *int `koanf:"unlinked_after_minutes"`
+	// UnlinkedAttentionHours: age from which an `unlinked` row is highlighted (presentation only).
+	UnlinkedAttentionHours *int `koanf:"unlinked_attention_hours"`
+	// IntegrityIntervalMinutes: how often the integrity job runs.
+	IntegrityIntervalMinutes *int `koanf:"integrity_interval_minutes"`
+	// IntegrityWindowHours: how far back the integrity job looks for messages without a usage row.
+	IntegrityWindowHours *int `koanf:"integrity_window_hours"`
+	// UndeliveredAfterHours: without delivered/read/failed after this long, a message becomes `unconfirmed`.
+	UndeliveredAfterHours *int `koanf:"undelivered_after_hours"`
+}
+
+func (c UsageConfig) validate() error {
+	for name, v := range map[string]*int{
+		"unlinked_after_minutes":     c.UnlinkedAfterMinutes,
+		"unlinked_attention_hours":   c.UnlinkedAttentionHours,
+		"integrity_interval_minutes": c.IntegrityIntervalMinutes,
+		"integrity_window_hours":     c.IntegrityWindowHours,
+		"undelivered_after_hours":    c.UndeliveredAfterHours,
+	} {
+		if v != nil && *v <= 0 {
+			return fmt.Errorf("usage.%s must be a positive integer, got %d", name, *v)
+		}
+	}
+	return nil
+}
+
+func usageInt(v *int, def int) int {
+	if v == nil {
+		return def
+	}
+	return *v
+}
+
+// Enabled reports whether usage recording is on (default true).
+func (c UsageConfig) Enabled() bool { return c.RecordEnabled == nil || *c.RecordEnabled }
+
+// UnlinkedAfter is how long to wait for the internal message (default 15 min).
+func (c UsageConfig) UnlinkedAfter() time.Duration {
+	return time.Duration(usageInt(c.UnlinkedAfterMinutes, 15)) * time.Minute
+}
+
+// UnlinkedAttentionAfter is the age that highlights an `unlinked` row (default 24 h).
+func (c UsageConfig) UnlinkedAttentionAfter() time.Duration {
+	return time.Duration(usageInt(c.UnlinkedAttentionHours, 24)) * time.Hour
+}
+
+// IntegrityInterval is how often the integrity job runs (default 5 min).
+func (c UsageConfig) IntegrityInterval() time.Duration {
+	return time.Duration(usageInt(c.IntegrityIntervalMinutes, 5)) * time.Minute
+}
+
+// IntegrityWindow is how far back the integrity job looks (default 48 h).
+func (c UsageConfig) IntegrityWindow() time.Duration {
+	return time.Duration(usageInt(c.IntegrityWindowHours, 48)) * time.Hour
+}
+
+// UndeliveredAfter is the wait before a message is classified `unconfirmed` (default 72 h).
+func (c UsageConfig) UndeliveredAfter() time.Duration {
+	return time.Duration(usageInt(c.UndeliveredAfterHours, 72)) * time.Hour
 }
 
 // AIToolsConfig holds the global switch of AI tool calling in the chatbot (Fase 9B).
