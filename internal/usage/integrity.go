@@ -142,7 +142,16 @@ type unlinkedCandidate struct {
 }
 
 // sweepUnlinked records, as `unlinked`, the wamids Meta reported on for which no
-// message was found after the reconciliation wait. It keeps the known cost
+// message was found after the reconciliation wait.
+//
+// Only wamids whose SEND was witnessed after the measurement started qualify: the
+// wamid needs a recorded `sent` event dated on or after the baseline. A message
+// sent before the measurement began whose delivery or read event arrives afterwards
+// has no such event (its `sent` was never recorded), so it can never be reconstructed
+// here, whether or not its message still exists in the database. The accepted cost: a
+// post-baseline message whose `sent` webhook was lost is not recorded as `unlinked`.
+//
+// The row keeps the known cost
 // reachable by wamid; it is not treated as a loss, and a later send/record links it.
 func (r *Recorder) sweepUnlinked(ctx context.Context, now, base time.Time, res *SweepResult) error {
 	from := now.Add(-r.Cfg.IntegrityWindow())
@@ -162,9 +171,12 @@ func (r *Recorder) sweepUnlinked(ctx context.Context, now, base time.Time, res *
 			                  WHERE u.organization_id = e.organization_id AND u.whatsapp_account = e.whatsapp_account AND u.wamid = e.wamid)
 			  AND NOT EXISTS (SELECT 1 FROM messages m
 			                  WHERE m.organization_id = e.organization_id AND m.whats_app_message_id = e.wamid AND m.created_at < ?)
+			  AND EXISTS (SELECT 1 FROM message_pricing_events s
+			              WHERE s.organization_id = e.organization_id AND s.whatsapp_account = e.whatsapp_account AND s.wamid = e.wamid
+			                AND s.status = 'sent' AND s.event_at >= ?)
 			GROUP BY e.organization_id, e.whatsapp_account, e.wamid
 			HAVING MIN(e.received_at) <= ?
-			ORDER BY e.wamid LIMIT ?`, from, cursor, base, to, sweepBatchSize).Scan(&cands).Error; err != nil {
+			ORDER BY e.wamid LIMIT ?`, from, cursor, base, base, to, sweepBatchSize).Scan(&cands).Error; err != nil {
 			return err
 		}
 		for _, c := range cands {

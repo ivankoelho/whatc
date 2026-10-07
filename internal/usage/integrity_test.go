@@ -165,6 +165,9 @@ func TestSweep_UnlinkedAfterTheConfiguredWait(t *testing.T) {
 		ev.RecipientCountry = "55"
 		_, err := f.rec.RecordStatusEvent(ctx, ev)
 		require.NoError(t, err)
+		// the send was witnessed after the measurement started (a requirement of `unlinked`)
+		_, err = f.rec.RecordStatusEvent(ctx, f.event(w, "sent", time.Now().Add(-90*time.Minute), nil))
+		require.NoError(t, err)
 	}
 	f.backdateEvents(t, "w-young", 3*time.Minute) // less than the 7 min wait
 	f.backdateEvents(t, "w-old", 30*time.Minute)

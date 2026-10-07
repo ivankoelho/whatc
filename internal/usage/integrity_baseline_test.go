@@ -78,6 +78,8 @@ func TestSweep_AWamidOfAMessageBeforeTheBaselineNeverBecomesUnlinked(t *testing.
 	for _, w := range []string{"w-before", "w-nomsg"} {
 		_, err := f.rec.RecordStatusEvent(ctx, f.event(w, "delivered", time.Now().Add(-time.Hour), price))
 		require.NoError(t, err)
+		_, err = f.rec.RecordStatusEvent(ctx, f.event(w, "sent", time.Now().Add(-90*time.Minute), nil))
+		require.NoError(t, err)
 		f.backdateEvents(t, w, 30*time.Minute)
 	}
 
@@ -104,4 +106,47 @@ func TestSweep_TheBaselineDoesNotMoveForwardWhenTheJobRuns(t *testing.T) {
 	require.NoError(t, f.db.Raw("SELECT MIN(created_at) FROM message_usage").Scan(&first).Error)
 	assert.WithinDuration(t, started, first, time.Second, "the rows the job wrote are newer: the start of the measurement stays")
 	assert.Zero(t, f.countFor(t, "message_id = ?", old.ID), "so a message from before it is still ignored on later runs")
+}
+
+// The case that has NO message in the database at all: the only thing that can tell a
+// message sent before the measurement from one sent after it is whether its SEND was
+// recorded on or after the baseline. A delivery or read event alone does not qualify.
+func TestSweep_UnlinkedRequiresAWitnessedSendAfterTheBaseline(t *testing.T) {
+	f := newFixture(t, integrityCfg())
+	f.setBaseline(t, 3*time.Hour)
+	ctx := context.Background()
+	price := &usage.Pricing{Billable: true, PricingModel: "PMP", Category: "utility"}
+	rec := func(wamid, status string, at time.Time) {
+		_, err := f.rec.RecordStatusEvent(ctx, f.event(wamid, status, at, price))
+		require.NoError(t, err)
+	}
+	// sent before the measurement; only its delivery and read arrive afterwards
+	rec("w-pre-delivered-only", "delivered", time.Now().Add(-time.Hour))
+	rec("w-pre-delivered-only", "read", time.Now().Add(-30*time.Minute))
+	// its `sent` is on record, but dated before the baseline
+	rec("w-pre-old-sent", "sent", time.Now().Add(-5*time.Hour))
+	rec("w-pre-old-sent", "delivered", time.Now().Add(-time.Hour))
+	// failed events never prove a witnessed send either
+	rec("w-pre-failed", "failed", time.Now().Add(-time.Hour))
+	// control: sent after the baseline, no message in the database
+	rec("w-post-sent", "sent", time.Now().Add(-90*time.Minute))
+	rec("w-post-sent", "delivered", time.Now().Add(-time.Hour))
+	for _, w := range []string{"w-pre-delivered-only", "w-pre-old-sent", "w-pre-failed", "w-post-sent"} {
+		f.backdateEvents(t, w, 30*time.Minute)
+	}
+
+	res, err := f.rec.Sweep(ctx, time.Now())
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Unlinked)
+
+	for _, w := range []string{"w-pre-delivered-only", "w-pre-old-sent", "w-pre-failed"} {
+		assert.Zero(t, f.countFor(t, "organization_id = ? AND wamid = ?", f.org.ID, w), "%s: not witnessed after the baseline, never reconstructed", w)
+	}
+	assert.EqualValues(t, 1, f.countFor(t, "organization_id = ? AND wamid = ? AND link_state = 'unlinked'", f.org.ID, "w-post-sent"))
+
+	// and it stays that way on later passes
+	res, err = f.rec.Sweep(ctx, time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	assert.Zero(t, res.Unlinked)
+	assert.Zero(t, f.countFor(t, "organization_id = ? AND wamid = ?", f.org.ID, "w-pre-delivered-only"))
 }
