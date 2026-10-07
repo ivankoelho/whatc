@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/contactutil"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/internal/usage"
 	"github.com/shridarpatil/whatomate/internal/websocket"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -77,7 +78,10 @@ type WebhookStatus struct {
 	Timestamp    string `json:"timestamp"`
 	RecipientID  string `json:"recipient_id"`
 	Conversation *struct {
-		ID string `json:"id"`
+		ID     string `json:"id"`
+		Origin struct {
+			Type string `json:"type"`
+		} `json:"origin"`
 	} `json:"conversation,omitempty"`
 	Pricing *struct {
 		Billable     bool   `json:"billable"`
@@ -376,6 +380,10 @@ func (a *App) processStatusUpdate(phoneNumberID string, status WebhookStatus) {
 	statusValue := status.Status
 
 	a.Log.Info("Processing status update", "message_id", messageID, "status", statusValue, "phone_number_id", phoneNumberID)
+
+	// Record the event in the consumption ledger BEFORE the progression filter below,
+	// so a late `sent` carrying pricing still counts. Fail-open: never affects what follows.
+	a.recordStatusUsage(phoneNumberID, status)
 
 	// Update messages table - this also handles campaign stats via incrementCampaignStat
 	a.updateMessageStatus(messageID, statusValue, status.Errors)
@@ -703,6 +711,8 @@ func (a *App) processMessageEcho(phoneNumberID string, msg IncomingTextMessage) 
 		a.Log.Error("Failed to save echoed message", "error", err)
 		return
 	}
+	a.recordMessageUsage(context.Background(), &message, usage.Origin{ActorType: usage.ActorExternalApp, Detail: "business_app_echo"})
+	a.attachUsageWamid(context.Background(), &message, message.WhatsAppMessageID)
 
 	// Update contact's last message info
 	preview := messageText

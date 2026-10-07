@@ -20,6 +20,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/handlers"
 	"github.com/shridarpatil/whatomate/internal/middleware"
 	"github.com/shridarpatil/whatomate/internal/queue"
+	"github.com/shridarpatil/whatomate/internal/usage"
 	"github.com/shridarpatil/whatomate/internal/storage"
 	"github.com/shridarpatil/whatomate/internal/tts"
 	"github.com/shridarpatil/whatomate/internal/websocket"
@@ -216,6 +217,11 @@ func runServer(args []string) {
 			lo.Fatal("AI tools permissions backfill failed", "error", err)
 		}
 
+		// Same window: whatsapp_usage is a new resource; admin reads and writes, manager reads.
+		if err := database.BackfillWhatsAppUsagePermissions(db, lo); err != nil {
+			lo.Fatal("WhatsApp usage permissions backfill failed", "error", err)
+		}
+
 		// Same window: occurrences.processes is a new resource added after the
 		// what-happened backfill above, so it needs its own guard rather than
 		// piggybacking on that one's already-migrated check.
@@ -302,6 +308,7 @@ func runServer(args []string) {
 		WSHub:      wsHub,
 		Queue:      jobQueue,
 		HTTPClient: httpClient,
+		Usage:      usage.New(db, cfg.Usage),
 	}
 
 	// Wire the conversation authorizer into the hub now that the App (which owns
@@ -401,6 +408,11 @@ func runServer(args []string) {
 	// never an authorization; ai_tools.reconcile_interval_seconds = 0 turns it off.
 	aiToolReconciler := handlers.NewAIToolReconciler(app)
 	go aiToolReconciler.Start(presenceCtx)
+
+	// WhatsApp usage integrity job: completes the consumption ledger (messages without a row,
+	// unlinked wamids, pending rows past the deadline). Idempotent and safe to run on several
+	// replicas; usage.record_enabled = false turns it off. Windows and deadlines come from [usage].
+	go app.Usage.RunIntegrity(presenceCtx, lo)
 
 	// Start XProcess reconciler (checks once daily, first tick after 2am)
 	xprocessReconciler := handlers.NewXProcessReconciler(app, 15*time.Minute, 2)
@@ -1038,6 +1050,14 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/analytics/agents/comparison", app.GetAgentComparison)
 
 	// Meta WhatsApp Analytics
+	// WhatsApp consumption (whatsapp_usage:read|write)
+	g.GET("/api/whatsapp-usage/summary", app.GetWhatsAppUsageSummary)
+	g.GET("/api/whatsapp-usage/messages", app.ListWhatsAppUsageMessages)
+	g.POST("/api/whatsapp-usage/reprice", app.RepriceWhatsAppUsage)
+	g.GET("/api/whatsapp-rates", app.ListWhatsAppRates)
+	g.POST("/api/whatsapp-rates", app.CreateWhatsAppRate)
+	g.PUT("/api/whatsapp-rates/{id}", app.UpdateWhatsAppRate)
+	g.DELETE("/api/whatsapp-rates/{id}", app.DeleteWhatsAppRate)
 	g.GET("/api/analytics/meta", app.GetMetaAnalytics)
 	g.GET("/api/analytics/meta/accounts", app.ListMetaAccountsForAnalytics)
 	g.POST("/api/analytics/meta/refresh", app.RefreshMetaAnalyticsCache)

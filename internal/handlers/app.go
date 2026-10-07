@@ -17,6 +17,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/storage"
 	"github.com/shridarpatil/whatomate/internal/tts"
 	"github.com/shridarpatil/whatomate/internal/websocket"
+	"github.com/shridarpatil/whatomate/internal/usage"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -50,6 +51,9 @@ type App struct {
 	TTS *tts.PiperTTS
 	// S3Client for serving call recording presigned URLs (nil when not configured)
 	S3Client *storage.S3Client
+	// Usage records the WhatsApp consumption ledger and contact status history.
+	// nil or disabled (usage.record_enabled=false) = nothing is recorded.
+	Usage *usage.Recorder
 	// wg tracks background goroutines for graceful shutdown
 	wg sync.WaitGroup
 }

@@ -810,3 +810,53 @@ func BackfillAIToolsPermissions(db *gorm.DB, lo logf.Logger) error {
 	lo.Info("ai_tools permissions backfill complete", "links_granted", res.RowsAffected)
 	return nil
 }
+
+// BackfillWhatsAppUsagePermissions grants whatsapp_usage:{read,write} to the system
+// "admin" role and whatsapp_usage:read to the system "manager" role, the same split
+// SystemRolePermissions gives a fresh install. FixSystemRolePermissions skips roles
+// that already have permissions, so existing organizations would never receive the
+// new resource otherwise. Idempotent per organization: one where any live role
+// already holds a whatsapp_usage permission is skipped, so a revocation is not
+// undone on every boot. Purely additive; custom roles are never touched.
+func BackfillWhatsAppUsagePermissions(db *gorm.DB, lo logf.Logger) error {
+	var seeded int64
+	if err := db.Model(&models.Permission{}).
+		Where("resource = ?", models.ResourceWhatsAppUsage).
+		Count(&seeded).Error; err != nil {
+		return fmt.Errorf("failed to count the whatsapp_usage permissions: %w", err)
+	}
+	if seeded == 0 {
+		lo.Warn("whatsapp_usage permissions not seeded yet, did nothing")
+		return nil
+	}
+
+	res := db.Exec(`
+		INSERT INTO role_permissions (custom_role_id, permission_id)
+		SELECT r.id, target.id
+		FROM custom_roles r
+		JOIN permissions target ON target.resource = ?
+		WHERE r.deleted_at IS NULL
+		  AND r.is_system = true
+		  AND (r.name = 'admin' OR (r.name = 'manager' AND target.action = ?))
+		  AND NOT EXISTS (
+		    SELECT 1
+		    FROM custom_roles r2
+		    JOIN role_permissions rp2 ON rp2.custom_role_id = r2.id
+		    JOIN permissions p2 ON p2.id = rp2.permission_id
+		    WHERE r2.organization_id = r.organization_id
+		      AND r2.deleted_at IS NULL
+		      AND p2.resource = ?
+		  )
+		ON CONFLICT DO NOTHING`,
+		models.ResourceWhatsAppUsage, models.ActionRead, models.ResourceWhatsAppUsage,
+	)
+	if res.Error != nil {
+		return fmt.Errorf("failed to grant the whatsapp_usage permissions: %w", res.Error)
+	}
+	if res.RowsAffected == 0 {
+		lo.Info("whatsapp_usage permissions backfill: nothing pending")
+		return nil
+	}
+	lo.Info("whatsapp_usage permissions backfill complete", "links_granted", res.RowsAffected)
+	return nil
+}

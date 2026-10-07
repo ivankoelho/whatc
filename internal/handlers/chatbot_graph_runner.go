@@ -12,6 +12,7 @@ import (
 	"github.com/expr-lang/expr"
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/internal/usage"
 )
 
 // maxChatGraphIterations bounds non-blocking node chains within a single
@@ -239,7 +240,7 @@ func (a *App) execChatMessage(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 		return nodeOutcome{outcome: "default"}, nil
 	}
 	text = processTemplate(text, ctx.session.SessionData)
-	if err := a.sendAndSaveTextMessage(ctx.account, ctx.contact, text); err != nil {
+	if err := a.sendAndSaveTextMessage(a.nodeCtx(ctx, node, usage.ActorFlow, ""), ctx.account, ctx.contact, text); err != nil {
 		return nodeOutcome{}, fmt.Errorf("send message: %w", err)
 	}
 	a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, text, node.ID)
@@ -333,7 +334,7 @@ func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 			}
 		}
 	}
-	if err := a.sendAndSaveInteractiveButtons(ctx.account, ctx.contact, body, buttons); err != nil {
+	if err := a.sendAndSaveInteractiveButtons(a.nodeCtx(ctx, node, usage.ActorFlow, ""), ctx.account, ctx.contact, body, buttons); err != nil {
 		return nodeOutcome{}, fmt.Errorf("send buttons: %w", err)
 	}
 	a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, body, node.ID)
@@ -373,7 +374,7 @@ func (a *App) execChatPrompt(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, err
 			return nodeOutcome{}, fmt.Errorf("prompt node %q has no body configured", node.ID)
 		}
 		rendered := processTemplate(body, ctx.session.SessionData)
-		if err := a.sendAndSaveTextMessage(ctx.account, ctx.contact, rendered); err != nil {
+		if err := a.sendAndSaveTextMessage(a.nodeCtx(ctx, node, usage.ActorFlow, ""), ctx.account, ctx.contact, rendered); err != nil {
 			return nodeOutcome{}, fmt.Errorf("send prompt: %w", err)
 		}
 		a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, rendered, node.ID)
@@ -420,7 +421,7 @@ func (a *App) handleChatPromptInvalid(node *ChatNode, ctx *chatNodeCtx) (nodeOut
 		errorMsg = "Invalid input. Please try again."
 	}
 	errorMsg = processTemplate(errorMsg, ctx.session.SessionData)
-	if err := a.sendAndSaveTextMessage(ctx.account, ctx.contact, errorMsg); err != nil {
+	if err := a.sendAndSaveTextMessage(a.nodeCtx(ctx, node, usage.ActorFlow, ""), ctx.account, ctx.contact, errorMsg); err != nil {
 		return nodeOutcome{}, fmt.Errorf("send validation error: %w", err)
 	}
 	a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, errorMsg, node.ID)
@@ -499,7 +500,7 @@ func (a *App) execChatAPICall(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 	if tmpl := stringFromConfig(node.Config, "message_template"); tmpl != "" {
 		rendered := processTemplate(tmpl, sessionData)
 		if rendered != "" {
-			if err := a.sendAndSaveTextMessage(ctx.account, ctx.contact, rendered); err != nil {
+			if err := a.sendAndSaveTextMessage(a.nodeCtx(ctx, node, usage.ActorFlow, ""), ctx.account, ctx.contact, rendered); err != nil {
 				a.Log.Error("api_call node failed to send message_template",
 					"node", node.ID, "session", ctx.session.ID, "error", err)
 				// Still advance via http:2xx — the data fetch succeeded.
@@ -734,7 +735,7 @@ func (a *App) execChatAIResponse(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome,
 		return nodeOutcome{outcome: "default"}, nil
 	}
 
-	if err := a.sendAndSaveTextMessage(ctx.account, ctx.contact, answer); err != nil {
+	if err := a.sendAndSaveTextMessage(a.nodeCtx(ctx, node, usage.ActorAI, "chatbot_flow_node"), ctx.account, ctx.contact, answer); err != nil {
 		return nodeOutcome{}, fmt.Errorf("send ai response: %w", err)
 	}
 	a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, answer, node.ID)
@@ -765,7 +766,7 @@ func (a *App) execChatAIResponse(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome,
 func (a *App) execChatTransfer(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, error) {
 	if body := stringFromConfig(node.Config, "body", "message", "text"); body != "" {
 		message := processTemplate(body, ctx.session.SessionData)
-		if err := a.sendAndSaveTextMessage(ctx.account, ctx.contact, message); err != nil {
+		if err := a.sendAndSaveTextMessage(a.nodeCtx(ctx, node, usage.ActorFlow, ""), ctx.account, ctx.contact, message); err != nil {
 			a.Log.Error("transfer node failed to send body",
 				"node", node.ID, "session", ctx.session.ID, "error", err)
 		} else {
@@ -992,7 +993,7 @@ func (a *App) execChatWhatsAppFlow(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 	}
 
 	flowToken := fmt.Sprintf("chatbot_%s_%s_%d", ctx.session.ID.String(), node.ID, time.Now().UnixNano())
-	if err := a.sendAndSaveFlowMessage(ctx.account, ctx.contact, flowID, header, body, cta, flowToken, firstScreen); err != nil {
+	if err := a.sendAndSaveFlowMessage(a.nodeCtx(ctx, node, usage.ActorFlow, ""), ctx.account, ctx.contact, flowID, header, body, cta, flowToken, firstScreen); err != nil {
 		return nodeOutcome{}, fmt.Errorf("send whatsapp_flow: %w", err)
 	}
 	a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, body, node.ID)
@@ -1006,7 +1007,7 @@ func (a *App) execChatWhatsAppFlow(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 func (a *App) execChatEnd(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, error) {
 	if msg := stringFromConfig(node.Config, "message"); msg != "" {
 		msg = processTemplate(msg, ctx.session.SessionData)
-		if err := a.sendAndSaveTextMessage(ctx.account, ctx.contact, msg); err != nil {
+		if err := a.sendAndSaveTextMessage(a.nodeCtx(ctx, node, usage.ActorFlow, ""), ctx.account, ctx.contact, msg); err != nil {
 			return nodeOutcome{}, fmt.Errorf("send end message: %w", err)
 		}
 		a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, msg, node.ID)

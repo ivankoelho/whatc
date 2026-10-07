@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/config"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/internal/usage"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/shridarpatil/whatomate/test/testutil"
 	"github.com/stretchr/testify/assert"
@@ -901,3 +902,22 @@ func TestMatchFlowTrigger_Match(t *testing.T) {
 // =============================================================================
 // evaluateExpression (package-level, not on App)
 // =============================================================================
+
+func TestSaveIncomingMessage_ReopenWritesAnInboundReopenStatusEvent(t *testing.T) {
+	app := newProcessorTestApp(t)
+	app.Usage = usage.New(app.DB, config.UsageConfig{})
+	org, account := createProcessorTestOrg(t, app)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(contact).Update("contact_status", models.ContactStatusResolved).Error)
+	contact.ContactStatus = models.ContactStatusResolved
+
+	app.saveIncomingMessage(account, contact, "wamid."+uuid.New().String()[:16], "text", "voltei", nil, "")
+
+	var evs []models.ContactStatusEvent
+	require.NoError(t, app.DB.Where("contact_id = ?", contact.ID).Find(&evs).Error)
+	require.Len(t, evs, 1)
+	assert.Equal(t, "resolved", evs[0].FromStatus)
+	assert.Equal(t, "in_progress", evs[0].ToStatus)
+	assert.Equal(t, "contact", evs[0].ActorType)
+	assert.Equal(t, "inbound_reopen", evs[0].Reason)
+}

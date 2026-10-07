@@ -428,3 +428,46 @@ func TestAIToolsConfig_EnvironmentOverridesTheFile(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 20*time.Minute, cfg.AITools.ConfirmationTTL())
 }
+
+func TestUsageConfig_DefaultsWhenTheSectionIsAbsent(t *testing.T) {
+	cfg, err := config.Load(writeConfig(t, ""))
+	require.NoError(t, err)
+	u := cfg.Usage
+	assert.True(t, u.Enabled())
+	assert.Equal(t, 15*time.Minute, u.UnlinkedAfter())
+	assert.Equal(t, 24*time.Hour, u.UnlinkedAttentionAfter())
+	assert.Equal(t, 5*time.Minute, u.IntegrityInterval())
+	assert.Equal(t, 48*time.Hour, u.IntegrityWindow())
+	assert.Equal(t, 72*time.Hour, u.UndeliveredAfter())
+}
+
+func TestUsageConfig_ValuesOverrideTheDefaults(t *testing.T) {
+	cfg, err := config.Load(writeConfig(t, "[usage]\nrecord_enabled = false\nunlinked_after_minutes = 3\nunlinked_attention_hours = 6\n"+
+		"integrity_interval_minutes = 1\nintegrity_window_hours = 12\nundelivered_after_hours = 24\n"))
+	require.NoError(t, err)
+	u := cfg.Usage
+	assert.False(t, u.Enabled())
+	assert.Equal(t, 3*time.Minute, u.UnlinkedAfter())
+	assert.Equal(t, 6*time.Hour, u.UnlinkedAttentionAfter())
+	assert.Equal(t, time.Minute, u.IntegrityInterval())
+	assert.Equal(t, 12*time.Hour, u.IntegrityWindow())
+	assert.Equal(t, 24*time.Hour, u.UndeliveredAfter())
+}
+
+func TestUsageConfig_InvalidValuesFailTheLoad(t *testing.T) {
+	keys := []string{"unlinked_after_minutes", "unlinked_attention_hours", "integrity_interval_minutes",
+		"integrity_window_hours", "undelivered_after_hours"}
+	for _, key := range keys {
+		for _, bad := range []string{"0", "-5", `"abc"`} {
+			t.Run(key+"="+bad, func(t *testing.T) {
+				_, err := config.Load(writeConfig(t, "[usage]\n"+key+" = "+bad+"\n"))
+				require.Error(t, err, "an invalid parameter must never fall back silently")
+			})
+		}
+	}
+	t.Run("environment text", func(t *testing.T) {
+		t.Setenv("WHATOMATE_USAGE__UNDELIVERED_AFTER_HOURS", "soon")
+		_, err := config.Load(writeConfig(t, ""))
+		require.Error(t, err)
+	})
+}

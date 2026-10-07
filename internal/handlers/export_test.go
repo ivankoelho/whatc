@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,7 +19,8 @@ func (a *App) TransitionContactStatusForTest(
 	from []models.ContactStatus,
 	actorID *uuid.UUID,
 ) (bool, error) {
-	return a.transitionContactStatus(contact, to, from, actorID)
+	return a.transitionContactStatus(contact, to, from, actorID,
+		statusCause{ActorType: "agent", ActorUserID: actorID, Reason: statusReasonAPI})
 }
 
 // SenderNameForBroadcastForTest exposes senderNameForBroadcast to the external
@@ -141,4 +144,38 @@ func (a *App) GenerateAIReplyForTest(settings *models.ChatbotSettings, session *
 // HandleAIToolTapForTest exposes handleAIToolConfirmationTap.
 func (a *App) HandleAIToolTapForTest(account *models.WhatsAppAccount, contact *models.Contact, buttonID, wamid string) {
 	a.handleAIToolConfirmationTap(account, contact, buttonID, wamid)
+}
+
+// ReleaseContactInTxForTest runs the release writes inside a transaction that
+// is rolled back when rollback is true (to prove no history event outlives a
+// rolled-back status change).
+func (a *App) ReleaseContactInTxForTest(contact *models.Contact, actorID *uuid.UUID, rollback bool) error {
+	errRollback := errors.New("rollback requested")
+	err := a.DB.Transaction(func(tx *gorm.DB) error {
+		if _, err := a.releaseContactTx(tx, contact, actorID, "test"); err != nil {
+			return err
+		}
+		if rollback {
+			return errRollback
+		}
+		return nil
+	})
+	if errors.Is(err, errRollback) {
+		return nil
+	}
+	return err
+}
+
+// TransitionInTxWithBadCauseForTest changes the status inside a transaction with
+// a history cause that cannot be stored (the event insert fails), then writes
+// the contact's name in the SAME transaction. It proves the failing history
+// insert neither aborts the transaction nor undoes the status change.
+func (a *App) TransitionInTxWithBadCauseForTest(contact *models.Contact, to models.ContactStatus) error {
+	return a.DB.Transaction(func(tx *gorm.DB) error {
+		bad := statusCause{ActorType: "agent", Reason: strings.Repeat("x", 100)}
+		if _, _, err := a.transitionContactStatusDB(tx, contact, to, nil, bad); err != nil {
+			return err
+		}
+		return tx.Model(&models.Contact{}).Where("id = ?", contact.ID).Update("profile_name", "written-after").Error
+	})
 }

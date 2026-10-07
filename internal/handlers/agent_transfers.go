@@ -1573,7 +1573,7 @@ func (a *App) createTransferToQueueRouted(account *models.WhatsAppAccount, conta
 	case res.Outcome == TransferOutsideHours:
 		a.Log.Info("Outside business hours, sending out-of-hours message instead of queue transfer", "contact_id", contact.ID, "source", source)
 		if settings, _ := a.getChatbotSettingsCached(account.OrganizationID, account.Name); settings != nil && settings.BusinessHours.OutOfHoursMessage != "" {
-			_ = a.sendAndSaveTextMessage(account, contact, settings.BusinessHours.OutOfHoursMessage)
+			_ = a.sendAndSaveTextMessage(botCtx("transfer_out_of_hours"), account, contact, settings.BusinessHours.OutOfHoursMessage)
 		}
 	default:
 		a.Log.Info("Transfer created to agent queue", "transfer_id", res.TransferID, "contact_id", contact.ID, "source", source)
@@ -1628,7 +1628,7 @@ func (a *App) createTransferFromKeyword(account *models.WhatsAppAccount, contact
 		if !a.isWithinBusinessHours(settings.BusinessHours.Hours) {
 			a.Log.Info("Outside business hours, sending out of hours message instead of transfer", "contact_id", contact.ID)
 			if settings.BusinessHours.OutOfHoursMessage != "" {
-				_ = a.sendAndSaveTextMessage(account, contact, settings.BusinessHours.OutOfHoursMessage)
+				_ = a.sendAndSaveTextMessage(botCtx("transfer_out_of_hours"), account, contact, settings.BusinessHours.OutOfHoursMessage)
 			}
 			return
 		}
@@ -1689,7 +1689,7 @@ func (a *App) createTransferToTeam(account *models.WhatsAppAccount, contact *mod
 		if !a.isWithinBusinessHours(settings.BusinessHours.Hours) {
 			a.Log.Info("Outside business hours, sending out-of-hours message instead of team transfer", "contact_id", contact.ID, "team_id", teamID, "source", source)
 			if settings.BusinessHours.OutOfHoursMessage != "" {
-				_ = a.sendAndSaveTextMessage(account, contact, settings.BusinessHours.OutOfHoursMessage)
+				_ = a.sendAndSaveTextMessage(botCtx("transfer_out_of_hours"), account, contact, settings.BusinessHours.OutOfHoursMessage)
 			}
 			return
 		}

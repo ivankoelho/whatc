@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/internal/usage"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
 )
@@ -63,6 +64,7 @@ func (a *App) ReplyToOccurrence(r *fastglue.Request) error {
 		Contact: contact,
 		Type:    models.MessageTypeText,
 		Content: req.Content,
+		Origin: usage.Origin{ActorType: usage.ActorAgent, ActorUserID: &userID, OccurrenceID: &occ.ID, Detail: "occurrence_reply"},
 	}, opts); err != nil {
 		a.Log.Error("Failed to send occurrence reply", "error", err, "occurrence", occ.ID)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to send reply", nil, "")
