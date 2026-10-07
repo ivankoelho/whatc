@@ -52,16 +52,17 @@ func (r *Recorder) Settle(ctx context.Context, orgID uuid.UUID, account, wamid s
 		if err != nil {
 			return err
 		}
-		return r.settleRow(tx, row, time.Now())
+		_, err = r.settleRow(tx, row, time.Now())
+		return err
 	})
 }
 
-// settleRow recomputes and stores one locked row.
-func (r *Recorder) settleRow(tx *gorm.DB, row models.MessageUsage, now time.Time) error {
+// settleRow recomputes and stores one locked row. It reports whether anything changed.
+func (r *Recorder) settleRow(tx *gorm.DB, row models.MessageUsage, now time.Time) (bool, error) {
 	var events []models.MessagePricingEvent
 	if err := tx.Where("organization_id = ? AND whatsapp_account = ? AND wamid = ?", row.OrganizationID, row.WhatsAppAccount, row.Wamid).
 		Find(&events).Error; err != nil {
-		return err
+		return false, err
 	}
 	var rateErr error
 	s := Compute(row, events, func(country, category string, at time.Time) *models.WhatsAppRate {
@@ -72,20 +73,21 @@ func (r *Recorder) settleRow(tx *gorm.DB, row models.MessageUsage, now time.Time
 		return rate
 	}, now, r.Cfg)
 	if rateErr != nil {
-		return rateErr
+		return false, rateErr
 	}
 	if !s.DiffersFrom(row) {
-		return nil
+		return false, nil
 	}
 	var settledAt *time.Time
 	if s.BillingState != StatePending {
 		settledAt = &now
 	}
-	return tx.Model(&models.MessageUsage{}).Where("id = ?", row.ID).Updates(map[string]any{
+	err := tx.Model(&models.MessageUsage{}).Where("id = ?", row.ID).Updates(map[string]any{
 		"billing_state": string(s.BillingState), "billable": s.Billable, "billing_category": s.BillingCategory,
 		"pricing_model": s.PricingModel, "conversation_id": s.ConversationID, "meta_pricing": s.MetaPricing,
 		"meta_pricing_history": s.MetaPricingHist, "category_diverged": s.CategoryDiverged,
 		"estimated_cost": s.EstimatedCost, "estimated_currency": s.EstimatedCurrency, "rate_id": s.RateID,
 		"repriced_at": s.RepricedAt, "settled_at": settledAt,
 	}).Error
+	return err == nil, err
 }

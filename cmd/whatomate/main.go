@@ -1050,6 +1050,14 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/analytics/agents/comparison", app.GetAgentComparison)
 
 	// Meta WhatsApp Analytics
+	// WhatsApp consumption (whatsapp_usage:read|write)
+	g.GET("/api/whatsapp-usage/summary", app.GetWhatsAppUsageSummary)
+	g.GET("/api/whatsapp-usage/messages", app.ListWhatsAppUsageMessages)
+	g.POST("/api/whatsapp-usage/reprice", app.RepriceWhatsAppUsage)
+	g.GET("/api/whatsapp-rates", app.ListWhatsAppRates)
+	g.POST("/api/whatsapp-rates", app.CreateWhatsAppRate)
+	g.PUT("/api/whatsapp-rates/{id}", app.UpdateWhatsAppRate)
+	g.DELETE("/api/whatsapp-rates/{id}", app.DeleteWhatsAppRate)
 	g.GET("/api/analytics/meta", app.GetMetaAnalytics)
 	g.GET("/api/analytics/meta/accounts", app.ListMetaAccountsForAnalytics)
 	g.POST("/api/analytics/meta/refresh", app.RefreshMetaAnalyticsCache)
