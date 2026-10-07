@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/internal/usage"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
 )
@@ -91,6 +92,7 @@ func (a *App) SendOccurrenceProtocol(r *fastglue.Request) error {
 		Contact: contact,
 		Type:    models.MessageTypeText,
 		Content: body,
+		Origin: usage.Origin{ActorType: usage.ActorAgent, ActorUserID: &userID, OccurrenceID: &occ.ID, Detail: "occurrence_protocol"},
 	}, DefaultSendOptions()); err != nil {
 		a.Log.Error("Failed to send protocol", "error", err, "occurrence", occ.ID)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError,

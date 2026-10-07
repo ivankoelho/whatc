@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/internal/usage"
 	"github.com/shridarpatil/whatomate/internal/websocket"
 )
 
@@ -383,6 +384,7 @@ func (p *SLAProcessor) sendSLATextToCustomer(transfer models.AgentTransfer, labe
 		Contact: &contact,
 		Type:    models.MessageTypeText,
 		Content: message,
+		Origin:  slaOrigin,
 	}, SLASendOptions()); err != nil {
 		p.app.Log.Error("Failed to send "+label, "error", err, "phone", transfer.PhoneNumber)
 		return
@@ -650,6 +652,7 @@ func (p *SLAProcessor) sendChatbotReminder(contact models.Contact, settings mode
 		Contact: &contact,
 		Type:    models.MessageTypeText,
 		Content: settings.ClientInactivity.ReminderMessage,
+		Origin:  slaOrigin,
 	}, SLASendOptions())
 
 	if err != nil {
@@ -688,6 +691,7 @@ func (p *SLAProcessor) autoCloseChatbotSession(contact models.Contact, settings 
 				Contact: &contact,
 				Type:    models.MessageTypeText,
 				Content: settings.ClientInactivity.AutoCloseMessage,
+				Origin:  slaOrigin,
 			}, SLASendOptions())
 
 			if err != nil {
@@ -773,3 +777,6 @@ func (p *SLAProcessor) processSalesOpportunitySLA(orgID uuid.UUID, now time.Time
 		p.app.Log.Error("Failed to mark sales opportunity SLA breach", "error", err, "organization_id", orgID)
 	}
 }
+
+// slaOrigin attributes SLA/inactivity notices to the system in the consumption ledger.
+var slaOrigin = usage.Origin{ActorType: usage.ActorSystem, Detail: "sla"}
