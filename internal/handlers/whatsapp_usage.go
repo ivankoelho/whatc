@@ -220,7 +220,13 @@ func (a *App) GetWhatsAppUsageSummary(r *fastglue.Request) error {
 		return fail(err)
 	}
 
+	// Activation state: the screen must say whether measurement is on and since when,
+	// instead of letting an empty table be mistaken for "no consumption".
+	var since *time.Time
+	_ = a.DB.Model(&models.MessageUsage{}).Where("organization_id = ?", orgID).Select("MIN(created_at)").Row().Scan(&since)
+
 	resp := map[string]any{
+		"recording":                map[string]any{"enabled": a.Usage.Enabled(), "since": since},
 		"period":                   map[string]any{"from": f.from.Format("2006-01-02"), "to": f.to.Format("2006-01-02"), "timezone": loc.String()},
 		"counts":                   counts,
 		"costs":                    nonNil(costs),

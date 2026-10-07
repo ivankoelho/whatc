@@ -480,3 +480,26 @@ func TestWhatsAppUsageAPI_RepriceWithRecordingOffIsRefused(t *testing.T) {
 	code, _ := f.call(t, f.app.RepriceWhatsAppUsage, f.writer, map[string]any{}, nil, nil)
 	assert.Equal(t, 409, code)
 }
+
+func TestWhatsAppUsageAPI_SummaryReportsTheActivationState(t *testing.T) {
+	f := newAPIFixture(t)
+	type resp struct {
+		Recording struct {
+			Enabled bool       `json:"enabled"`
+			Since   *time.Time `json:"since"`
+		} `json:"recording"`
+	}
+	_, body := f.call(t, f.app.GetWhatsAppUsageSummary, f.reader, nil, nil, nil)
+	r := decodeData[resp](t, body)
+	assert.True(t, r.Recording.Enabled)
+	assert.Nil(t, r.Recording.Since, "nothing was recorded yet: the screen can say so")
+
+	f.seed(t, f.org.ID, seedRow{state: "pending"})
+	_, body = f.call(t, f.app.GetWhatsAppUsageSummary, f.reader, nil, nil, nil)
+	assert.NotNil(t, decodeData[resp](t, body).Recording.Since)
+
+	off := false
+	f.app.Usage = wausage.New(f.app.DB, config.UsageConfig{RecordEnabled: &off})
+	_, body = f.call(t, f.app.GetWhatsAppUsageSummary, f.reader, nil, nil, nil)
+	assert.False(t, decodeData[resp](t, body).Recording.Enabled)
+}
