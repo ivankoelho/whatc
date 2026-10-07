@@ -63,3 +63,24 @@ func outgoingOrigin(ctx context.Context, req OutgoingMessageRequest, opts Messag
 	}
 	return o
 }
+
+// botCtx carries the origin of an automatic (chatbot) message into a send helper.
+func botCtx(detail string) context.Context {
+	return usage.WithOrigin(context.Background(), usage.Origin{ActorType: usage.ActorFlow, Detail: detail})
+}
+
+// aiCtx carries the origin of an AI-generated message into a send helper.
+func aiCtx(detail string) context.Context {
+	return usage.WithOrigin(context.Background(), usage.Origin{ActorType: usage.ActorAI, Detail: detail})
+}
+
+// nodeCtx carries the origin of a message sent by a flow-graph node: which flow
+// and which node produced it.
+func (a *App) nodeCtx(c *chatNodeCtx, node *ChatNode, actor usage.ActorType, detail string) context.Context {
+	o := usage.Origin{ActorType: actor, FlowNodeID: node.ID, Detail: detail}
+	if c != nil && c.session != nil && c.session.CurrentFlowID != nil {
+		id := *c.session.CurrentFlowID
+		o.FlowID = &id
+	}
+	return usage.WithOrigin(context.Background(), o)
+}

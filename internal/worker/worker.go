@@ -13,6 +13,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/queue"
 	"github.com/shridarpatil/whatomate/internal/templateutil"
+	"github.com/shridarpatil/whatomate/internal/usage"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/zerodha/logf"
 	"gorm.io/gorm"
@@ -27,6 +28,8 @@ type Worker struct {
 	WhatsApp  *whatsapp.Client
 	Consumer  *queue.RedisConsumer
 	Publisher *queue.Publisher
+	// Usage records the WhatsApp consumption ledger (fail-open; nil or disabled = nothing).
+	Usage *usage.Recorder
 }
 
 // Ensure Worker implements JobHandler interface
@@ -49,6 +52,7 @@ func New(cfg *config.Config, db *gorm.DB, rdb *redis.Client, log logf.Logger) (*
 		WhatsApp:  whatsapp.New(log),
 		Consumer:  consumer,
 		Publisher: publisher,
+		Usage:     usage.New(db, cfg.Usage),
 	}, nil
 }
 
@@ -117,6 +121,7 @@ func (w *Worker) HandleRecipientJob(ctx context.Context, job *queue.RecipientJob
 
 	// Send template message
 	waMessageID, err := w.sendTemplateMessage(ctx, &account, campaign.Template, recipient, campaign.HeaderMediaID, campaign.HeaderMediaFilename)
+	sendErr := err // kept for the usage ledger: err is shadowed below
 
 	// Create Message record
 	message := models.Message{
@@ -160,6 +165,8 @@ func (w *Worker) HandleRecipientJob(ctx context.Context, job *queue.RecipientJob
 	// Save message record
 	if err := w.DB.Create(&message).Error; err != nil {
 		w.Log.Error("Failed to save message", "error", err, "recipient", job.PhoneNumber)
+	} else {
+		w.recordCampaignUsage(ctx, &message, job.CampaignID, sendErr)
 	}
 
 	// Check if campaign is complete (all recipients processed)
@@ -317,4 +324,33 @@ func (w *Worker) Close() error {
 		return w.Consumer.Close()
 	}
 	return nil
+}
+
+// recordCampaignUsage writes the ledger row of a campaign message, which the
+// worker only creates after the send. It is fail-open: nothing here may fail or
+// stall the campaign, so errors and panics are logged and swallowed.
+func (w *Worker) recordCampaignUsage(ctx context.Context, msg *models.Message, campaignID uuid.UUID, sendErr error) {
+	if !w.Usage.Enabled() {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			w.Log.Error("Usage recording panicked", "panic", fmt.Sprint(r))
+		}
+	}()
+	origin := usage.Origin{ActorType: usage.ActorCampaign, CampaignID: &campaignID, Detail: "campaign"}
+	if err := w.Usage.Record(ctx, nil, msg, origin); err != nil {
+		w.Log.Error("Usage recording failed", "op", "record", "error", err, "message_id", msg.ID)
+		return
+	}
+	var err error
+	switch {
+	case sendErr != nil:
+		err = w.Usage.MarkSendFailed(ctx, nil, msg.ID)
+	case msg.WhatsAppMessageID != "":
+		err = w.Usage.AttachWamid(ctx, msg.OrganizationID, msg.ID, msg.WhatsAppAccount, msg.WhatsAppMessageID)
+	}
+	if err != nil {
+		w.Log.Error("Usage recording failed", "op", "settle", "error", err, "message_id", msg.ID)
+	}
 }

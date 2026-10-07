@@ -18,6 +18,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/contactutil"
 	"github.com/shridarpatil/whatomate/internal/knowledge"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/internal/usage"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 )
 
@@ -254,7 +255,7 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 			if !settings.BusinessHours.AllowAutomatedOutside {
 				a.Log.Info("Outside business hours, sending out of hours message")
 				if settings.BusinessHours.OutOfHoursMessage != "" {
-					if err := a.sendAndSaveTextMessage(account, contact, settings.BusinessHours.OutOfHoursMessage); err != nil {
+					if err := a.sendAndSaveTextMessage(botCtx("out_of_hours"), account, contact, settings.BusinessHours.OutOfHoursMessage); err != nil {
 						a.Log.Error("Failed to send out of hours message", "error", err, "contact", contact.PhoneNumber)
 					}
 				}
@@ -293,7 +294,7 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 			if !a.isWithinBusinessHours(settings.BusinessHours.Hours) {
 				a.Log.Info("Outside business hours, sending out of hours message instead of transfer")
 				if settings.BusinessHours.OutOfHoursMessage != "" {
-					if err := a.sendAndSaveTextMessage(account, contact, settings.BusinessHours.OutOfHoursMessage); err != nil {
+					if err := a.sendAndSaveTextMessage(botCtx("out_of_hours"), account, contact, settings.BusinessHours.OutOfHoursMessage); err != nil {
 						a.Log.Error("Failed to send out of hours message", "error", err, "contact", contact.PhoneNumber)
 					}
 				}
@@ -302,7 +303,7 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 		}
 		// Within business hours - send transfer message and create transfer
 		if keywordResponse.Body != "" {
-			if err := a.sendAndSaveTextMessage(account, contact, keywordResponse.Body); err != nil {
+			if err := a.sendAndSaveTextMessage(botCtx("keyword"), account, contact, keywordResponse.Body); err != nil {
 				a.Log.Error("Failed to send transfer message", "error", err, "contact", contact.PhoneNumber)
 			}
 		}
@@ -368,16 +369,16 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 				}
 			}
 			if len(greetingButtons) > 0 {
-				if err := a.sendAndSaveInteractiveButtons(account, contact, settings.DefaultResponse, greetingButtons); err != nil {
+				if err := a.sendAndSaveInteractiveButtons(botCtx("default_response"), account, contact, settings.DefaultResponse, greetingButtons); err != nil {
 					a.Log.Error("Failed to send greeting buttons", "error", err, "contact", contact.PhoneNumber)
 				}
 			} else {
-				if err := a.sendAndSaveTextMessage(account, contact, settings.DefaultResponse); err != nil {
+				if err := a.sendAndSaveTextMessage(botCtx("default_response"), account, contact, settings.DefaultResponse); err != nil {
 					a.Log.Error("Failed to send greeting message", "error", err, "contact", contact.PhoneNumber)
 				}
 			}
 		} else {
-			if err := a.sendAndSaveTextMessage(account, contact, settings.DefaultResponse); err != nil {
+			if err := a.sendAndSaveTextMessage(botCtx("default_response"), account, contact, settings.DefaultResponse); err != nil {
 				a.Log.Error("Failed to send greeting message", "error", err, "contact", contact.PhoneNumber)
 			}
 		}
@@ -391,11 +392,11 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 
 		// Handle regular text response
 		if len(keywordResponse.Buttons) > 0 {
-			if err := a.sendAndSaveInteractiveButtons(account, contact, keywordResponse.Body, keywordResponse.Buttons); err != nil {
+			if err := a.sendAndSaveInteractiveButtons(botCtx("keyword"), account, contact, keywordResponse.Body, keywordResponse.Buttons); err != nil {
 				a.Log.Error("Failed to send interactive buttons", "error", err, "contact", contact.PhoneNumber)
 			}
 		} else {
-			if err := a.sendAndSaveTextMessage(account, contact, keywordResponse.Body); err != nil {
+			if err := a.sendAndSaveTextMessage(botCtx("keyword"), account, contact, keywordResponse.Body); err != nil {
 				a.Log.Error("Failed to send text message", "error", err, "contact", contact.PhoneNumber)
 			}
 		}
@@ -415,10 +416,10 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 		} else if aiResponse != "" {
 			a.Log.Info("AI response generated successfully", "response_length", len(aiResponse))
 			if len(reply.Buttons) > 0 { // the server's confirmation message, with its buttons
-				if err := a.sendAndSaveInteractiveButtons(account, contact, aiResponse, reply.Buttons); err != nil {
+				if err := a.sendAndSaveInteractiveButtons(aiCtx("chatbot_reply"), account, contact, aiResponse, reply.Buttons); err != nil {
 					a.Log.Error("Failed to send AI confirmation", "error", err, "contact", contact.PhoneNumber)
 				}
-			} else if err := a.sendAndSaveTextMessage(account, contact, aiResponse); err != nil {
+			} else if err := a.sendAndSaveTextMessage(aiCtx("chatbot_reply"), account, contact, aiResponse); err != nil {
 				a.Log.Error("Failed to send AI response", "error", err, "contact", contact.PhoneNumber)
 			}
 			a.logSessionMessage(session.ID, models.DirectionOutgoing, aiResponse, "ai_response")
@@ -442,16 +443,16 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 				}
 			}
 			if len(fallbackButtons) > 0 {
-				if err := a.sendAndSaveInteractiveButtons(account, contact, settings.FallbackMessage, fallbackButtons); err != nil {
+				if err := a.sendAndSaveInteractiveButtons(botCtx("fallback"), account, contact, settings.FallbackMessage, fallbackButtons); err != nil {
 					a.Log.Error("Failed to send fallback buttons", "error", err, "contact", contact.PhoneNumber)
 				}
 			} else {
-				if err := a.sendAndSaveTextMessage(account, contact, settings.FallbackMessage); err != nil {
+				if err := a.sendAndSaveTextMessage(botCtx("fallback"), account, contact, settings.FallbackMessage); err != nil {
 					a.Log.Error("Failed to send fallback message", "error", err, "contact", contact.PhoneNumber)
 				}
 			}
 		} else {
-			if err := a.sendAndSaveTextMessage(account, contact, settings.FallbackMessage); err != nil {
+			if err := a.sendAndSaveTextMessage(botCtx("fallback"), account, contact, settings.FallbackMessage); err != nil {
 				a.Log.Error("Failed to send fallback message", "error", err, "contact", contact.PhoneNumber)
 			}
 		}
@@ -553,8 +554,7 @@ func (a *App) matchKeywordRules(orgID uuid.UUID, accountName, messageText string
 
 // sendAndSaveTextMessage sends a text message and saves it to the database
 // Uses the unified SendOutgoingMessage for consistent behavior
-func (a *App) sendAndSaveTextMessage(account *models.WhatsAppAccount, contact *models.Contact, message string) error {
-	ctx := context.Background()
+func (a *App) sendAndSaveTextMessage(ctx context.Context, account *models.WhatsAppAccount, contact *models.Contact, message string) error {
 	_, err := a.SendOutgoingMessage(ctx, OutgoingMessageRequest{
 		Account: account,
 		Contact: contact,
@@ -567,7 +567,7 @@ func (a *App) sendAndSaveTextMessage(account *models.WhatsAppAccount, contact *m
 // sendAndSaveInteractiveButtons sends an interactive button message and saves it to the database.
 // Buttons with type "url" are automatically separated and sent as CTA URL messages,
 // since WhatsApp doesn't allow mixing reply buttons and URL buttons in the same message.
-func (a *App) sendAndSaveInteractiveButtons(account *models.WhatsAppAccount, contact *models.Contact, bodyText string, buttons []map[string]any) error {
+func (a *App) sendAndSaveInteractiveButtons(ctx context.Context, account *models.WhatsAppAccount, contact *models.Contact, bodyText string, buttons []map[string]any) error {
 	// Separate reply buttons from CTA buttons (url / phone)
 	replyButtons := make([]map[string]any, 0, len(buttons))
 	ctaButtons := make([]map[string]any, 0)
@@ -622,7 +622,6 @@ func (a *App) sendAndSaveInteractiveButtons(account *models.WhatsAppAccount, con
 			if len(waButtons) > 3 {
 				interactiveType = "list"
 			}
-			ctx := context.Background()
 			if _, err := a.SendOutgoingMessage(ctx, OutgoingMessageRequest{
 				Account:         account,
 				Contact:         contact,
@@ -650,7 +649,7 @@ func (a *App) sendAndSaveInteractiveButtons(account *models.WhatsAppAccount, con
 			if i > 0 {
 				ctaBody = btnTitle
 			}
-			if err := a.sendAndSaveCTAURLButton(account, contact, ctaBody, btnTitle, btnURL); err != nil {
+			if err := a.sendAndSaveCTAURLButton(ctx, account, contact, ctaBody, btnTitle, btnURL); err != nil {
 				return err
 			}
 		}
@@ -658,7 +657,7 @@ func (a *App) sendAndSaveInteractiveButtons(account *models.WhatsAppAccount, con
 
 	// No buttons at all — fall back to text
 	if len(replyButtons) == 0 && len(ctaButtons) == 0 {
-		return a.sendAndSaveTextMessage(account, contact, bodyText)
+		return a.sendAndSaveTextMessage(ctx, account, contact, bodyText)
 	}
 
 	return nil
@@ -666,8 +665,7 @@ func (a *App) sendAndSaveInteractiveButtons(account *models.WhatsAppAccount, con
 
 // sendAndSaveCTAURLButton sends a CTA URL button message and saves it to the database
 // Uses the unified SendOutgoingMessage for consistent behavior
-func (a *App) sendAndSaveCTAURLButton(account *models.WhatsAppAccount, contact *models.Contact, bodyText, buttonText, url string) error {
-	ctx := context.Background()
+func (a *App) sendAndSaveCTAURLButton(ctx context.Context, account *models.WhatsAppAccount, contact *models.Contact, bodyText, buttonText, url string) error {
 	_, err := a.SendOutgoingMessage(ctx, OutgoingMessageRequest{
 		Account:         account,
 		Contact:         contact,
@@ -682,8 +680,7 @@ func (a *App) sendAndSaveCTAURLButton(account *models.WhatsAppAccount, contact *
 
 // sendAndSaveFlowMessage sends a WhatsApp Flow message and saves it to the database
 // Uses the unified SendOutgoingMessage for consistent behavior
-func (a *App) sendAndSaveFlowMessage(account *models.WhatsAppAccount, contact *models.Contact, flowID, headerText, bodyText, ctaText, flowToken, firstScreen string) error {
-	ctx := context.Background()
+func (a *App) sendAndSaveFlowMessage(ctx context.Context, account *models.WhatsAppAccount, contact *models.Contact, flowID, headerText, bodyText, ctaText, flowToken, firstScreen string) error {
 	_, err := a.SendOutgoingMessage(ctx, OutgoingMessageRequest{
 		Account:         account,
 		Contact:         contact,
@@ -1376,6 +1373,7 @@ func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *mode
 		a.Log.Error("Failed to save incoming message", "error", err)
 		return
 	}
+	a.recordMessageUsage(context.Background(), &message, usage.Origin{ActorType: usage.ActorContact})
 
 	// If the chatbot will handle this conversation (enabled + no active
 	// agent transfer), pre-mark the message as read so the contact-list

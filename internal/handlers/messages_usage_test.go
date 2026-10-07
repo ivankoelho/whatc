@@ -206,3 +206,48 @@ func TestSendUsage_BrokenRecorderIsFailOpen(t *testing.T) {
 	assert.Equal(t, models.ContactStatusInProgress, c.ContactStatus, "the status transition still happened")
 	assert.Empty(t, f.usageRows(t))
 }
+
+func occurrenceForUsage(t *testing.T, f *usageSendFixture) (*models.User, models.Occurrence) {
+	t.Helper()
+	agentRole := testutil.CreateAgentRole(t, f.app.DB, f.org.ID)
+	user := testutil.CreateTestUser(t, f.app.DB, f.org.ID, testutil.WithRoleID(&agentRole.ID))
+	require.NoError(t, f.app.DB.Model(f.contact).Updates(map[string]any{
+		"assigned_user_id": user.ID, "last_inbound_at": time.Now()}).Error)
+	stage, err := f.app.InitialStageForTest(f.org.ID)
+	require.NoError(t, err)
+	occ := models.Occurrence{OrganizationID: f.org.ID, ContactID: f.contact.ID, Title: "T", StageID: stage.ID, OpenedByUserID: user.ID}
+	require.NoError(t, f.app.CreateOccurrenceForTest(&occ))
+	return user, occ
+}
+
+func TestSendUsage_OccurrenceReplyAndProtocolCarryTheOccurrence(t *testing.T) {
+	f := newUsageSendFixture(t, config.UsageConfig{})
+	user, occ := occurrenceForUsage(t, f)
+
+	reply := testutil.NewJSONRequest(t, map[string]any{"content": "resposta"})
+	testutil.SetAuthContext(reply, f.org.ID, user.ID)
+	testutil.SetPathParam(reply, "id", occ.ID.String())
+	require.NoError(t, f.app.ReplyToOccurrence(reply))
+	require.Equal(t, 200, testutil.GetResponseStatusCode(reply))
+
+	proto := testutil.NewJSONRequest(t, nil)
+	testutil.SetAuthContext(proto, f.org.ID, user.ID)
+	testutil.SetPathParam(proto, "id", occ.ID.String())
+	require.NoError(t, f.app.SendOccurrenceProtocol(proto))
+	require.Equal(t, 200, testutil.GetResponseStatusCode(proto))
+	f.app.WaitForBackgroundTasks()
+
+	rows := f.usageRows(t)
+	require.Len(t, rows, 2)
+	details := map[string]models.MessageUsage{}
+	for _, r := range rows {
+		details[r.OriginDetail] = r
+	}
+	for _, d := range []string{"occurrence_reply", "occurrence_protocol"} {
+		r, ok := details[d]
+		require.True(t, ok, d)
+		assert.Equal(t, "agent", r.ActorType)
+		assert.Equal(t, &user.ID, r.ActorUserID)
+		assert.Equal(t, &occ.ID, r.OccurrenceID)
+	}
+}

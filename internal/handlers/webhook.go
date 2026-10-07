@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/contactutil"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/internal/usage"
 	"github.com/shridarpatil/whatomate/internal/websocket"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -703,6 +704,8 @@ func (a *App) processMessageEcho(phoneNumberID string, msg IncomingTextMessage) 
 		a.Log.Error("Failed to save echoed message", "error", err)
 		return
 	}
+	a.recordMessageUsage(context.Background(), &message, usage.Origin{ActorType: usage.ActorExternalApp, Detail: "business_app_echo"})
+	a.attachUsageWamid(context.Background(), &message, message.WhatsAppMessageID)
 
 	// Update contact's last message info
 	preview := messageText
