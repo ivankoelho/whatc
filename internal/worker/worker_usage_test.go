@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"time"
 	"testing"
 
 	"github.com/shridarpatil/whatomate/internal/config"
@@ -116,4 +117,29 @@ func TestWorker_CampaignUsage_BrokenRecorderIsFailOpen(t *testing.T) {
 	w.DB.Model(&models.Message{}).Where("organization_id = ?", org.ID).Count(&n)
 	assert.EqualValues(t, 1, n, "the message record was saved")
 	assert.Empty(t, usageRows(t, w, org.ID))
+}
+
+func TestWorker_CampaignUsage_PanelSwitchOffRecordsNothingAndTheCampaignRuns(t *testing.T) {
+	w := testWorker(t)
+	w.Usage = usage.New(w.DB, config.UsageConfig{})
+	org, account, _, campaign, recipient := createTestCampaignData(t, w)
+	_, err := w.Usage.SetRecording(context.Background(), org.ID, false, time.Now())
+	require.NoError(t, err)
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		rw.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(rw).Encode(okBody)
+	}))
+	t.Cleanup(server.Close)
+	require.NoError(t, w.DB.Model(account).Update("api_version", "v21.0").Error)
+	w.WhatsApp = whatsapp.NewWithBaseURL(w.Log, server.URL)
+
+	require.NoError(t, w.HandleRecipientJob(context.Background(), &queue.RecipientJob{
+		CampaignID: campaign.ID, RecipientID: recipient.ID, OrganizationID: org.ID,
+		PhoneNumber: recipient.PhoneNumber, RecipientName: recipient.RecipientName, TemplateParams: recipient.TemplateParams,
+	}))
+
+	assert.Empty(t, usageRows(t, w, org.ID))
+	var r models.BulkMessageRecipient
+	require.NoError(t, w.DB.First(&r, recipient.ID).Error)
+	assert.Equal(t, models.MessageStatusSent, r.Status)
 }

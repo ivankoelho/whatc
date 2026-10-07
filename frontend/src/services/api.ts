@@ -1981,9 +1981,18 @@ export interface WhatsAppUsageGroup {
   costs: UsageCurrencyAmount[]
 }
 
+/** Whether anything is being recorded: the server switch (usage.record_enabled) AND the panel switch. */
+export interface WhatsAppUsageRecording {
+  enabled: boolean
+  server_enabled: boolean
+  panel_enabled: boolean
+  changed_at: string | null
+  since: string | null
+}
+
 export interface WhatsAppUsageSummary {
   period: { from: string; to: string; timezone: string }
-  recording: { enabled: boolean; since: string | null }
+  recording: WhatsAppUsageRecording
   counts: WhatsAppUsageCounts
   costs: UsageCurrencyAmount[]
   provisional_cost: UsageCurrencyAmount[]
@@ -2032,6 +2041,8 @@ export const whatsappUsageService = {
   messages: (params?: WhatsAppUsageFilters) =>
     api.get<ApiEnvelope<{ messages: WhatsAppUsageRow[]; total: number; page: number; limit: number }>>('/whatsapp-usage/messages', { params }),
   reprice: () => api.post<ApiEnvelope<{ processed: number; changed: number }>>('/whatsapp-usage/reprice', {}),
+  // The panel switch of the measurement (whatsapp_usage:write). It cannot override usage.record_enabled = false.
+  setRecording: (enabled: boolean) => api.put<ApiEnvelope<WhatsAppUsageRecording>>('/whatsapp-usage/recording', { enabled }),
 }
 
 export const whatsappRatesService = {

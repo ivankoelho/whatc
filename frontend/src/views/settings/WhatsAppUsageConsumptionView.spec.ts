@@ -7,12 +7,14 @@ import { createI18n } from 'vue-i18n'
 import ptBR from '@/i18n/locales/pt-BR.json'
 import en from '@/i18n/locales/en.json'
 
-const usage = vi.hoisted(() => ({ summary: vi.fn(), messages: vi.fn() }))
+const usage = vi.hoisted(() => ({ summary: vi.fn(), messages: vi.fn(), setRecording: vi.fn() }))
 const units = vi.hoisted(() => ({ list: vi.fn() }))
 const accounts = vi.hoisted(() => ({ list: vi.fn() }))
 vi.mock('@/services/api', () => ({ whatsappUsageService: usage, unitsService: units, accountsService: accounts }))
 const toast = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn(), warning: vi.fn() }))
 vi.mock('vue-sonner', () => ({ toast }))
+const perms = vi.hoisted(() => ({ granted: new Set<string>() }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ hasPermission: (r: string, a: string) => perms.granted.has(`${r}:${a}`) }) }))
 
 import WhatsAppUsageConsumptionView from './WhatsAppUsageConsumptionView.vue'
 
@@ -24,7 +26,7 @@ const counts = (over: Record<string, number> = {}) => ({
 function summary(over: Record<string, unknown> = {}) {
   return {
     period: { from: '2026-09-08', to: '2026-10-07', timezone: 'America/Bahia' },
-    recording: { enabled: true, since: '2026-10-01T10:00:00Z' },
+    recording: { enabled: true, server_enabled: true, panel_enabled: true, changed_at: null, since: '2026-10-01T10:00:00Z' },
     counts: counts(),
     costs: [{ currency: 'BRL', estimated_cost: 0.3, messages: 2 }, { currency: 'USD', estimated_cost: 0.05, messages: 1 }],
     provisional_cost: [],
@@ -49,6 +51,7 @@ async function render() {
 beforeEach(() => {
   document.body.innerHTML = ''
   vi.clearAllMocks()
+  perms.granted = new Set(['whatsapp_usage:read', 'whatsapp_usage:write'])
   usage.summary.mockResolvedValue({ data: { data: summary() } })
   usage.messages.mockResolvedValue({ data: { data: { messages: [], total: 0, page: 1, limit: 20 } } })
   units.list.mockResolvedValue({ data: { data: { units: [{ id: 'u1', name: 'Loja Centro', active: true }, { id: 'u2', name: 'Loja Antiga', active: false }] } } })
@@ -87,14 +90,14 @@ describe('WhatsAppUsageConsumptionView', () => {
   })
 
   it('says measurement is OFF instead of showing a misleading empty table', async () => {
-    usage.summary.mockResolvedValue({ data: { data: summary({ recording: { enabled: false, since: null }, counts: counts({ total: 0 }), costs: [] }) } })
+    usage.summary.mockResolvedValue({ data: { data: summary({ recording: { enabled: false, server_enabled: false, panel_enabled: true, changed_at: null, since: null }, counts: counts({ total: 0 }), costs: [] }) } })
     await render()
     expect($('usage-recording-off')!.textContent).toContain('A medição está desligada')
     expect($('usage-recording-since')).toBeNull()
   })
 
   it('says nothing was recorded yet, and since when it is measuring', async () => {
-    usage.summary.mockResolvedValue({ data: { data: summary({ recording: { enabled: true, since: null } }) } })
+    usage.summary.mockResolvedValue({ data: { data: summary({ recording: { enabled: true, server_enabled: true, panel_enabled: true, changed_at: null, since: null } }) } })
     await render()
     expect($('usage-recording-none')).not.toBeNull()
 
@@ -152,5 +155,78 @@ describe('WhatsAppUsageConsumptionView', () => {
     await render()
     expect(document.body.textContent).toContain('Você não tem acesso ao consumo.')
     expect(toast.error).not.toHaveBeenCalled()
+  })
+})
+
+describe('WhatsAppUsageConsumptionView: the measurement switch', () => {
+  const rec = (over: Record<string, unknown>) => ({ enabled: true, server_enabled: true, panel_enabled: true, changed_at: null, since: '2026-10-01T10:00:00Z', ...over })
+
+  it('shows the switch, on, to someone who can write', async () => {
+    await render()
+    const sw = $('usage-recording-switch')!
+    expect(sw).not.toBeNull()
+    expect(sw.getAttribute('aria-checked')).toBe('true')
+    expect($('usage-recording-card')!.textContent).toContain('Medir o consumo')
+  })
+
+  it('hides the switch from a reader: they only see the state', async () => {
+    perms.granted = new Set(['whatsapp_usage:read'])
+    await render()
+    expect($('usage-recording-switch')).toBeNull()
+    expect($('usage-recording-since')).not.toBeNull()
+  })
+
+  it('hides the switch when the server turned the measurement off, and says so', async () => {
+    usage.summary.mockResolvedValue({ data: { data: summary({ recording: rec({ enabled: false, server_enabled: false, since: null }) }) } })
+    await render()
+    expect($('usage-recording-switch')).toBeNull()
+    expect($('usage-recording-off-server')!.textContent).toContain('usage.record_enabled')
+  })
+
+  it('turns it off, tells the user and reloads the figures', async () => {
+    usage.setRecording.mockResolvedValue({ data: { data: rec({ enabled: false, panel_enabled: false }) } })
+    await render()
+    const before = usage.summary.mock.calls.length
+    $('usage-recording-switch')!.click()
+    await flushPromises()
+    expect(usage.setRecording).toHaveBeenCalledWith(false)
+    expect(toast.success).toHaveBeenCalledWith('Medição desligada.')
+    expect(usage.summary.mock.calls.length).toBeGreaterThan(before)
+  })
+
+  it('turns it back on from the off state', async () => {
+    usage.summary.mockResolvedValue({ data: { data: summary({ recording: rec({ enabled: false, panel_enabled: false, changed_at: '2026-10-07T10:00:00Z' }) }) } })
+    usage.setRecording.mockResolvedValue({ data: { data: rec({}) } })
+    await render()
+    expect($('usage-recording-switch')!.getAttribute('aria-checked')).toBe('false')
+    $('usage-recording-switch')!.click()
+    await flushPromises()
+    expect(usage.setRecording).toHaveBeenCalledWith(true)
+    expect(toast.success).toHaveBeenCalledWith('Medição ligada.')
+  })
+
+  it('explains that it was turned off on the screen, since when, and that the period is not reconstructed', async () => {
+    usage.summary.mockResolvedValue({ data: { data: summary({ recording: rec({ enabled: false, panel_enabled: false, changed_at: '2026-10-07T10:00:00Z' }) }) } })
+    await render()
+    const alert = $('usage-recording-off')!
+    expect(alert.textContent).toContain('A medição está desligada')
+    expect($('usage-recording-off-panel')!.textContent).toContain('desligada nesta tela')
+    expect($('usage-recording-off-panel')!.textContent).toContain('não incluem esse período')
+    expect($('usage-recording-off-server')).toBeNull()
+  })
+
+  it('mentions when it was last switched on again', async () => {
+    usage.summary.mockResolvedValue({ data: { data: summary({ recording: rec({ changed_at: '2026-10-07T10:00:00Z' }) }) } })
+    await render()
+    expect($('usage-recording-resumed')!.textContent).toContain('Última alteração')
+  })
+
+  it('shows an error and leaves the state alone when the server refuses', async () => {
+    usage.setRecording.mockRejectedValue({ response: { status: 409, data: { message: 'turned off on this server' } } })
+    await render()
+    $('usage-recording-switch')!.click()
+    await flushPromises()
+    expect(toast.error).toHaveBeenCalled()
+    expect(toast.success).not.toHaveBeenCalled()
   })
 })

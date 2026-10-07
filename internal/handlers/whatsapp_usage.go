@@ -226,7 +226,7 @@ func (a *App) GetWhatsAppUsageSummary(r *fastglue.Request) error {
 	_ = a.DB.Model(&models.MessageUsage{}).Where("organization_id = ?", orgID).Select("MIN(created_at)").Row().Scan(&since)
 
 	resp := map[string]any{
-		"recording":                map[string]any{"enabled": a.Usage.Enabled(), "since": since},
+		"recording":                a.recordingView(orgID, since),
 		"period":                   map[string]any{"from": f.from.Format("2006-01-02"), "to": f.to.Format("2006-01-02"), "timezone": loc.String()},
 		"counts":                   counts,
 		"costs":                    nonNil(costs),
@@ -400,4 +400,66 @@ func (a *App) RepriceWhatsAppUsage(r *fastglue.Request) error {
 	}
 	a.logAudit(orgID, userID, "whatsapp_usage", orgID, models.AuditActionUpdated, nil, map[string]any{"reprice": res})
 	return r.SendEnvelope(res)
+}
+
+// recordingView is the activation state the screen shows: whether anything is being
+// recorded for this organization (the server switch AND the panel switch), each switch
+// on its own, when the panel switch was last flipped and when the first row was written.
+func (a *App) recordingView(orgID uuid.UUID, since *time.Time) map[string]any {
+	st, _ := a.Usage.RecordingState(context.Background(), orgID)
+	server := a.Usage.Enabled()
+	return map[string]any{
+		"enabled":        server && st.Enabled,
+		"server_enabled": server,
+		"panel_enabled":  st.Enabled,
+		"changed_at":     st.ChangedAt,
+		"since":          since,
+	}
+}
+
+// WhatsAppUsageRecordingRequest is the body of the panel switch.
+type WhatsAppUsageRecordingRequest struct {
+	Enabled *bool `json:"enabled"`
+}
+
+// SetWhatsAppUsageRecording turns the recording on or off for the organization, from the
+// consumption screen. Off stops all recording for it (nothing new is written and the
+// integrity job leaves it alone); on resumes from that instant, never reconstructing
+// what happened while it was off. It cannot override usage.record_enabled = false.
+func (a *App) SetWhatsAppUsageRecording(r *fastglue.Request) error {
+	orgID, userID, err := a.requireAuth(r, models.ResourceWhatsAppUsage, models.ActionWrite)
+	if err != nil {
+		return nil
+	}
+	var req WhatsAppUsageRecordingRequest
+	if err := a.decodeRequest(r, &req); err != nil {
+		return nil
+	}
+	if req.Enabled == nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "enabled is required", nil, "")
+	}
+	if !a.Usage.Enabled() {
+		return r.SendErrorEnvelope(fasthttp.StatusConflict,
+			"Usage recording is turned off on this server (usage.record_enabled = false); the panel cannot turn it on", nil, "")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	before, _ := a.Usage.RecordingState(ctx, orgID)
+	if before.Enabled == *req.Enabled {
+		return r.SendEnvelope(a.recordingView(orgID, a.recordingSince(orgID))) // already in that state
+	}
+	if _, err := a.Usage.SetRecording(ctx, orgID, *req.Enabled, time.Now()); err != nil {
+		a.Log.Error("Failed to switch WhatsApp usage recording", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to change the measurement", nil, "")
+	}
+	a.logAudit(orgID, userID, "whatsapp_usage", orgID, models.AuditActionUpdated,
+		map[string]any{"recording_enabled": before.Enabled}, map[string]any{"recording_enabled": *req.Enabled})
+	return r.SendEnvelope(a.recordingView(orgID, a.recordingSince(orgID)))
+}
+
+// recordingSince is the creation time of the organization's oldest ledger row, if any.
+func (a *App) recordingSince(orgID uuid.UUID) *time.Time {
+	var since *time.Time
+	_ = a.DB.Model(&models.MessageUsage{}).Where("organization_id = ?", orgID).Select("MIN(created_at)").Row().Scan(&since)
+	return since
 }

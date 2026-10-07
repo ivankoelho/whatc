@@ -205,7 +205,7 @@ func TestRecord_DisabledOrNilDoesNothingAndNeverFails(t *testing.T) {
 	_, err := f.rec.RecordStatusEvent(ctx, f.event("w", "sent", time.Now(), nil))
 	require.NoError(t, err)
 	require.NoError(t, f.rec.Settle(ctx, f.org.ID, f.account, "w"))
-	require.NoError(t, f.rec.MarkSendFailed(ctx, nil, msg.ID))
+	require.NoError(t, f.rec.MarkSendFailed(ctx, nil, f.org.ID, msg.ID))
 	require.NoError(t, f.rec.AttachWamid(ctx, f.org.ID, msg.ID, f.account, "w"))
 	assert.Empty(t, f.rows(t))
 	var n int64
@@ -307,7 +307,7 @@ func TestMarkSendFailed(t *testing.T) {
 	msg := f.message(t, "", models.DirectionOutgoing)
 	ctx := context.Background()
 	require.NoError(t, f.rec.Record(ctx, nil, msg, agentOrigin(nil)))
-	require.NoError(t, f.rec.MarkSendFailed(ctx, nil, msg.ID))
+	require.NoError(t, f.rec.MarkSendFailed(ctx, nil, f.org.ID, msg.ID))
 	row := f.rows(t)[0]
 	assert.Equal(t, string(usage.StateSendFailed), row.BillingState)
 	require.NotNil(t, row.EstimatedCost)

@@ -147,6 +147,32 @@ test.describe('WhatsApp consumption', () => {
   })
 })
 
+test.describe('WhatsApp consumption measurement switch', () => {
+  test('an admin turns the measurement off and on from the screen', async ({ page }) => {
+    await loginAsAdmin(page)
+    await openConsumption(page)
+
+    const sw = page.getByTestId('usage-recording-switch')
+    await expect(sw).toBeVisible()
+    await expect(sw).toHaveAttribute('aria-checked', 'true')
+    await expect(page.getByTestId('usage-recording-off')).toHaveCount(0)
+
+    await sw.click()
+    await expect(page.getByTestId('usage-recording-off')).toBeVisible()
+    await expect(page.getByTestId('usage-recording-off-panel')).toBeVisible()
+    await expect(sw).toHaveAttribute('aria-checked', 'false')
+
+    // it is persisted: a reload still shows it off
+    await page.reload()
+    await page.waitForLoadState('networkidle')
+    await expect(page.getByTestId('usage-recording-off-panel')).toBeVisible()
+
+    await page.getByTestId('usage-recording-switch').click()
+    await expect(page.getByTestId('usage-recording-off')).toHaveCount(0)
+    await expect(page.getByTestId('usage-recording-switch')).toHaveAttribute('aria-checked', 'true')
+  })
+})
+
 test.describe('WhatsApp consumption permissions', () => {
   const permScope = createTestScope('wausage-perms')
   let api: ApiHelper
@@ -174,6 +200,8 @@ test.describe('WhatsApp consumption permissions', () => {
     await expect(page.getByRole('tab').first()).toBeVisible()
     await expect(page.getByTestId('rate-add')).toHaveCount(0)
     await expect(page.getByTestId('rate-reprice')).toHaveCount(0)
+    await openConsumption(page)
+    await expect(page.getByTestId('usage-recording-switch')).toHaveCount(0)
   })
 
   test('a user without the permission is sent away from the screen', async ({ page }) => {

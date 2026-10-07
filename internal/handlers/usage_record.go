@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/usage"
 )
@@ -44,8 +43,8 @@ func (a *App) attachUsageWamid(ctx context.Context, msg *models.Message, wamid s
 }
 
 // markUsageSendFailed records that the API refused the send.
-func (a *App) markUsageSendFailed(ctx context.Context, messageID uuid.UUID) {
-	a.failOpen("send_failed", func() error { return a.Usage.MarkSendFailed(ctx, nil, messageID) })
+func (a *App) markUsageSendFailed(ctx context.Context, msg *models.Message) {
+	a.failOpen("send_failed", func() error { return a.Usage.MarkSendFailed(ctx, nil, msg.OrganizationID, msg.ID) })
 }
 
 // outgoingOrigin resolves who originated a send: the request's explicit Origin,
