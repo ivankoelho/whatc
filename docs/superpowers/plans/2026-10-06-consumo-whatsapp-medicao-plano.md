@@ -2,7 +2,7 @@
 
 > **Para quem executar:** SUB-SKILL OBRIGATÓRIA: `superpowers:subagent-driven-development` (recomendado) ou `superpowers:executing-plans`. Os passos usam checkbox (`- [ ]`).
 >
-> **Estado: plano para revisão. Nenhum código, migration ou teste foi escrito.** Regra de trabalho: plano → revisão do dono → só então código. Sem push, PR, merge ou deploy nesta fase.
+> **Estado: plano aprovado (revisão do dono). Implementação autorizada somente para a Entrega A; parar ao concluí-la.** Histórico: plano para revisão. Nenhum código, migration ou teste foi escrito.** Regra de trabalho: plano → revisão do dono → só então código. Sem push, PR, merge ou deploy nesta fase.
 
 **Objetivo:** gravar, para cada mensagem do WhatsApp, quem a originou, o que a Meta informou sobre a cobrança e um custo estimado por tabela interna, mais o histórico de status do contato.
 
@@ -108,7 +108,7 @@ Padrão: `internal/handlers/ai_tool_reconciler.go`; fiação em `cmd/whatomate/m
 1. **Completude:** mensagens da janela `IntegrityWindowHours` sem `message_usage` → criar com `Inferred=true` (`SentByUserID` → `agent`; `campaign_id` no metadata → `campaign`; resto → `system` + `Detail=unclassified`).
 2. **`unlinked`:** wamid com eventos em `message_pricing_events`, sem linha e há mais de `UnlinkedAfterMinutes` → criar `message_usage` com `link_state=unlinked`; se a `Message` já tiver o wamid, associar (`linked`).
 3. **`unconfirmed`:** `pending` com mais de `UndeliveredAfterHours` → `Settle` (que decide `unconfirmed`).
-4. Lotes limitados (ex. 500 por passada) e idempotente; corrida com o envio é segura pelos índices únicos.
+4. **Paginado por chave** (keyset por `created_at, id`), em lotes de **500**, continuando de lote em lote até esgotar a janela; **nunca carrega a janela inteira em memória**. O 500 é um **limite técnico interno, constante privada do pacote, não configurável** (não é regra operacional nem de cobrança; pode mudar internamente se o volume pedir). Idempotente e seguro para execução concorrente (duas instâncias ou corrida com o envio): garantido pelos índices únicos e `ON CONFLICT DO NOTHING`.
 5. `SweepResult` (criadas, associadas, unconfirmed, erros) vai para o log e para contadores.
 
 ### (6) `contact_status_events`
@@ -122,9 +122,9 @@ Chamadores (todos mapeados):
 | Mudança manual (API) | `contact_status.go:88` | `api` / `agent` |
 | `releaseContactTx` → resolve | `contact_status.go:269` (usado por `contact_status.go:217`, `agent_transfers.go:671` e `:740`) | `resolve_action` ou `transfer` / `agent` ou `flow` (vem do `reason` já recebido) |
 | Reabertura por mensagem do cliente | `chatbot_processor.go:1409` | `inbound_reopen` / `contact` |
-| Primeira resposta do agente (new → in_progress) | `messages.go:321` | `agent_reply` (**novo valor**, ver nota) / `agent` |
+| Primeira resposta do agente (new → in_progress) | `messages.go:321` | `agent_reply` / `agent` |
 
-`transitionContactStatus` (117) repassa o `cause`. Nota: D§4.5 lista `reason` ∈ {`resolve_action`, `auto_resolve`, `inbound_reopen`, `transfer`, `api`}; a primeira resposta do agente (new→in_progress) é uma transição real e precisa de motivo; o plano **acrescenta `agent_reply`** e mantém `auto_resolve` reservado (hoje não há chamador). Registrar a divergência na revisão.
+`transitionContactStatus` (117) repassa o `cause`. Nota: D§4.5 lista `reason` ∈ {`resolve_action`, `auto_resolve`, `inbound_reopen`, `transfer`, `api`}; a primeira resposta do agente (new→in_progress) é uma transição real e precisa ser distinguível no histórico; **decisão aprovada:** o conjunto fechado de motivos é `agent_reply` + os 5 do design, com `auto_resolve` reservado e sem uso enquanto não houver caminho no código. **Nenhum outro motivo é criado por antecipação.**
 
 ### (7) API, permissões e UI
 
@@ -166,13 +166,13 @@ Filtros: período (fuso da organização), conta, unidade, agente, categoria, di
 
 Branch de trabalho: `feature/whatsapp-usage-measurement`, a partir de `development` (confirmar a branch antes de começar). Três entregas, cada uma com seu próprio PR (**só abertos com ordem do dono**), nesta ordem, porque **a coleta de dados é o que não pode esperar** e a tela é a última:
 
-**Entrega A — Fundação (sem efeito visível; nada grava ainda)**
+**Entrega A — Fundação (migrations, configuração, estruturas, domínio e testes da parte pura). Nada é ligado a envio, webhook ou status; a coleta NÃO começa.**
 1. Task 1: `Config.Usage` (+ validação, example, testes).
 2. Task 2: modelos, migrations, índices, testutil.
 3. Task 3: pacote `usage`: tipos, `Compute` puro, `LookupRate`, `Record`, `RecordStatusEvent`, `Settle`, `AttachWamid` (testes de unidade e de banco).
-4. Task 4: `contact_status_events` (independente do resto; entra aqui por ser pequeno e testável isolado).
 
-**Entrega B — Gravação (a medição passa a existir)**
+**Entrega B — Gravação. É o ponto formal de início da coleta real** (pontos de envio, webhook, `message_pricing_events`, integridade e histórico de status). **B não entra em produção sem autorização explícita do dono.**
+4. Task 4: `contact_status_events` (transição de status; agora parte de B).
 5. Task 5: `Origin` + ponto central (`createOutgoingMessage`/`finalizeMessageSend`) + chamadores diretos de `SendOutgoingMessage`.
 6. Task 6: contexto de origem nos 4 helpers `sendAndSave*` e nos 29 chamadores; worker de campanha; eco; entrada.
 7. Task 7: webhook (`processStatusUpdate`).
@@ -186,7 +186,7 @@ Branch de trabalho: `feature/whatsapp-usage-measurement`, a partir de `developme
 
 Cada task segue TDD (teste que falha → código mínimo → teste passa → commit). Ordem justificada: A tem a menor superfície de risco e destrava testes; B altera o caminho quente de envio e webhook, por isso vem com a regressão completa dos testes existentes de status; C só lê.
 
-Pontos de parada para revisão do dono: ao fim de A, ao fim de B (antes de qualquer deploy: B passa a gravar em produção) e ao fim de C. `usage.record_enabled=false` é o freio de emergência em B.
+Fluxo: **A → revisão → B → revisão/validação → C**. A coleta começa em B, antes da API e da tela (nada disso precisa existir para acumular dados). Pontos de parada para revisão do dono: ao fim de A (a implementação **para** ali), ao fim de B (antes de qualquer deploy: B passa a gravar em produção) e ao fim de C. `usage.record_enabled=false` é o freio de emergência em B.
 
 ---
 
@@ -359,6 +359,9 @@ Cada critério é verificável por comando ou consulta. A entrega só fecha com 
 | C4 | Nenhuma tabela ou resposta da API contém conteúdo de mensagem ou telefone completo | testes das Tasks 2 e 10 |
 | C5 | Tela acessível por Configurações › Canais, filtros e totais por moeda funcionam; E2E verde | Tasks 11 e 12 |
 | Z1 | Suítes Go (`-p 1`), Vitest, build do frontend e E2E: **nenhuma falha nova** em relação à linha de base | execução final da Task 12, relatório com a comparação |
+| F1 | **Fail-open:** falha em `usage.Record`, `RecordStatusEvent`, `Settle`, gravação de pricing ou de `contact_status_events` (erro injetado) **nunca** impede envio, recebimento, processamento do webhook (status da mensagem continua atualizado, resposta HTTP igual) nem a transição de status do contato; só gera log e contador | testes com falha injetada nas Tasks 4, 5, 6 e 7 |
+| F2 | Com `usage.record_enabled=false`, nenhum caminho grava `message_usage`, `message_pricing_events` ou `contact_status_events`, e o comportamento funcional do atendimento é idêntico ao anterior (testes existentes passam sem alteração) | testes das Tasks 4, 5, 6, 7 e 8 |
+| F3 | B só vai para produção com autorização explícita do dono | combinado de processo |
 | Z2 | Sem push, PR, merge ou deploy sem ordem explícita do dono | combinado de processo |
 
 ---
@@ -372,10 +375,10 @@ Cada critério é verificável por comando ou consulta. A entrega só fecha com 
 | 29 chamadas `sendAndSave*` (mudança grande e repetitiva) | Task 6 própria, mecânica, com teste por ponto e fallback `unclassified`; o job cobre o que escapar |
 | Falha de `go test ./internal/handlers` por tempo (dívida conhecida do CI) | Rodar por `-run` direcionado a cada task; suíte completa só na Task 12, comparada com a linha de base |
 | Campanha cria a `Message` depois do envio | Tratado na Task 6 (`AttachWamid` com wamid conhecido) e coberto pelo job |
-| Decisão pendente: motivo `agent_reply` em `contact_status_events` | Sinalizada no item 6 para a revisão do dono |
 
-## Perguntas abertas para a revisão
+## Decisões da revisão (aprovadas)
 
-1. Confirmar o motivo extra `agent_reply` (item 6), já que D§4.5 não o lista.
-2. Confirmar a divisão em três PRs (A fundação, B gravação, C leitura/UI) e o ponto de parada antes do deploy de B.
-3. O lote de 500 do job é um limite técnico interno; confirmar que não precisa ser configurável (não é regra de negócio nem de cobrança).
+1. Motivo `agent_reply` incluído; `auto_resolve` reservado, sem uso; nenhum outro motivo por antecipação.
+2. Divisão A/B/C aprovada; coleta começa em B; B não vai para produção sem autorização explícita; `record_enabled=false` desliga sem impacto funcional.
+3. Lote de 500 é limite técnico interno, não configurável; job paginado, idempotente e seguro para concorrência.
+4. Instrumentação fail-open é critério de aceite (F1, F2), em especial em `SendOutgoingMessage`, webhook da Meta e `transitionContactStatusDB`.
