@@ -367,7 +367,7 @@ func (a *App) ListWhatsAppUsageMessages(r *fastglue.Request) error {
 	if err := a.DB.Raw(`SELECT count(*) FROM message_usage WHERE `+where, args...).Scan(&total).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to load the consumption", nil, "")
 	}
-	var rows []usageRowView
+	rows := []usageRowView{} // never null in the JSON
 	if err := a.DB.Raw(`
 		SELECT message_usage.*, units.name AS unit_name, users.full_name AS agent_name
 		FROM message_usage

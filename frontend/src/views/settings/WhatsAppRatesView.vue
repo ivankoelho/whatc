@@ -56,7 +56,7 @@ async function fetchRates() {
   isLoading.value = true
   loadError.value = null
   try {
-    rates.value = (await whatsappRatesService.list()).data.data.rates
+    rates.value = (await whatsappRatesService.list()).data.data.rates ?? []
   } catch (e: any) {
     loadError.value = e?.response?.status === 403 ? 'forbidden' : 'failed'
     if (loadError.value === 'failed') toast.error(getErrorMessage(e, t('common.failedLoad', { resource: t('whatsappUsage.ratesTitle') })))

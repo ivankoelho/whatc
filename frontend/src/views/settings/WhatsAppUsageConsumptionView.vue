@@ -58,7 +58,7 @@ async function load() {
       whatsappUsageService.messages(query({ page: page.value, limit: pageSize })),
     ])
     summary.value = s.data.data
-    rows.value = m.data.data.messages
+    rows.value = m.data.data.messages ?? []
     total.value = m.data.data.total
   } catch (e: any) {
     loadError.value = e?.response?.status === 403 ? 'forbidden' : 'failed'

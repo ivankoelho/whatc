@@ -118,7 +118,7 @@ func (a *App) ListWhatsAppRates(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
-	var rates []whatsAppRateView
+	rates := []whatsAppRateView{} // never null in the JSON
 	if err := a.DB.Raw(`
 		SELECT r.*, EXISTS (SELECT 1 FROM message_usage u WHERE u.rate_id = r.id) AS in_use
 		FROM whatsapp_rates r

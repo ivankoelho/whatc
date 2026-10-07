@@ -503,3 +503,16 @@ func TestWhatsAppUsageAPI_SummaryReportsTheActivationState(t *testing.T) {
 	_, body = f.call(t, f.app.GetWhatsAppUsageSummary, f.reader, nil, nil, nil)
 	assert.False(t, decodeData[resp](t, body).Recording.Enabled)
 }
+
+// An empty list must be [] in the JSON, never null: the screens iterate over it.
+func TestWhatsAppUsageAPI_EmptyListsAreArraysNotNull(t *testing.T) {
+	f := newAPIFixture(t)
+	_, rates := f.call(t, f.app.ListWhatsAppRates, f.reader, nil, nil, nil)
+	assert.Contains(t, string(rates), `"rates":[]`)
+	_, msgs := f.call(t, f.app.ListWhatsAppUsageMessages, f.reader, nil, nil, nil)
+	assert.Contains(t, string(msgs), `"messages":[]`)
+	_, sum := f.call(t, f.app.GetWhatsAppUsageSummary, f.reader, nil, map[string]string{"group_by": "day"}, nil)
+	assert.Contains(t, string(sum), `"groups":[]`)
+	assert.Contains(t, string(sum), `"costs":[]`)
+	assert.Contains(t, string(sum), `"provisional_cost":[]`)
+}
