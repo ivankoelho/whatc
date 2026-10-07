@@ -404,6 +404,11 @@ func runServer(args []string) {
 	aiToolReconciler := handlers.NewAIToolReconciler(app)
 	go aiToolReconciler.Start(presenceCtx)
 
+	// WhatsApp usage integrity job: completes the consumption ledger (messages without a row,
+	// unlinked wamids, pending rows past the deadline). Idempotent and safe to run on several
+	// replicas; usage.record_enabled = false turns it off. Windows and deadlines come from [usage].
+	go app.Usage.RunIntegrity(presenceCtx, lo)
+
 	// Start XProcess reconciler (checks once daily, first tick after 2am)
 	xprocessReconciler := handlers.NewXProcessReconciler(app, 15*time.Minute, 2)
 	xprocessCtx, xprocessCancel := context.WithCancel(context.Background())
