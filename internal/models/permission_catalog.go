@@ -24,7 +24,7 @@ var permissionGroups = []PermissionGroup{
 	{"whatsapp", 50, []string{ResourceAccounts, ResourceTemplates, ResourceCampaigns, ResourceFlowsWhatsApp, ResourceFlowsChatbot, ResourceChatbotKeywords, ResourceSettingsChatbot}},
 	{"ai", 60, []string{ResourceChatbotAI, ResourceKnowledge, ResourceAITools}},
 	{"integrations", 70, []string{ResourceXProcessIntegration, ResourceWebhooks, ResourceAPIKeys, ResourceCustomActions}},
-	{"analytics", 80, []string{ResourceAnalytics, ResourceAnalyticsAgents}},
+	{"analytics", 80, []string{ResourceAnalytics, ResourceAnalyticsAgents, ResourceWhatsAppUsage}},
 	{"calls", 90, []string{ResourceCallLogs, ResourceIVRFlows, ResourceCallTransfers, ResourceOutgoingCalls}},
 }
 

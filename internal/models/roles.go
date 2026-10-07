@@ -75,6 +75,7 @@ const (
 	ResourceTags                    = "tags"
 	ResourceAnalytics               = "analytics"
 	ResourceAnalyticsAgents         = "analytics.agents"
+	ResourceWhatsAppUsage           = "whatsapp_usage"
 	ResourceTransfers               = "transfers"
 	ResourceWebhooks                = "webhooks"
 	ResourceAPIKeys                 = "api_keys"
@@ -208,6 +209,8 @@ func DefaultPermissions() []Permission {
 		{Resource: ResourceAnalytics, Action: ActionWrite, Description: "Create and edit dashboard widgets"},
 		{Resource: ResourceAnalytics, Action: ActionDelete, Description: "Delete dashboard widgets"},
 		{Resource: ResourceAnalyticsAgents, Action: ActionRead, Description: "View agent analytics"},
+		{Resource: ResourceWhatsAppUsage, Action: ActionRead, Description: "View WhatsApp consumption and the price table"},
+		{Resource: ResourceWhatsAppUsage, Action: ActionWrite, Description: "Edit the WhatsApp price table and reprice"},
 
 		// Transfers
 		{Resource: ResourceTransfers, Action: ActionRead, Description: "View agent transfers"},
@@ -375,6 +378,8 @@ func SystemRolePermissions() map[string][]string {
 		"tags:read", "tags:write", "tags:delete",
 		// Analytics
 		"analytics:read", "analytics.agents:read",
+		// WhatsApp consumption: the manager reads, only the admin edits prices
+		"whatsapp_usage:read",
 		// Transfers
 		"transfers:read", "transfers:write", "transfers:pickup",
 		// Webhooks

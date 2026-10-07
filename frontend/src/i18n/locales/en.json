@@ -4064,6 +4064,10 @@
         "label": "Dashboards and analytics",
         "description": "Dashboards with operation indicators."
       },
+      "whatsapp_usage": {
+        "label": "WhatsApp consumption",
+        "description": "Messages sent and received, their cost and the price table."
+      },
       "analytics_agents": {
         "label": "Agent performance",
         "description": "Agent productivity indicators."
@@ -4441,6 +4445,14 @@
       "ai_tools_write": {
         "label": "Turn AI tools on and off",
         "description": "Decide which actions the chatbot AI may run."
+      },
+      "whatsapp_usage_read": {
+        "label": "View WhatsApp consumption",
+        "description": "See the consumption, the cost per message and the price table."
+      },
+      "whatsapp_usage_write": {
+        "label": "Edit the WhatsApp price table",
+        "description": "Register prices and reprice messages."
       },
       "xprocess_integration_read": {
         "label": "View the X2 ERP",

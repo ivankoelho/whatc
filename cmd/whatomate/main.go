@@ -217,6 +217,11 @@ func runServer(args []string) {
 			lo.Fatal("AI tools permissions backfill failed", "error", err)
 		}
 
+		// Same window: whatsapp_usage is a new resource; admin reads and writes, manager reads.
+		if err := database.BackfillWhatsAppUsagePermissions(db, lo); err != nil {
+			lo.Fatal("WhatsApp usage permissions backfill failed", "error", err)
+		}
+
 		// Same window: occurrences.processes is a new resource added after the
 		// what-happened backfill above, so it needs its own guard rather than
 		// piggybacking on that one's already-migrated check.

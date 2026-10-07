@@ -4053,6 +4053,10 @@
         "label": "Painéis e análises",
         "description": "Painéis com os indicadores da operação."
       },
+      "whatsapp_usage": {
+        "label": "Consumo do WhatsApp",
+        "description": "Mensagens enviadas e recebidas, o custo e a tabela de preços."
+      },
       "analytics_agents": {
         "label": "Desempenho dos atendentes",
         "description": "Indicadores de produtividade dos atendentes."
@@ -4430,6 +4434,14 @@
       "ai_tools_write": {
         "label": "Ligar e desligar ferramentas de IA",
         "description": "Decidir quais ações a IA do chatbot pode executar."
+      },
+      "whatsapp_usage_read": {
+        "label": "Ver o consumo do WhatsApp",
+        "description": "Consultar o consumo, o custo por mensagem e a tabela de preços."
+      },
+      "whatsapp_usage_write": {
+        "label": "Editar a tabela de preços do WhatsApp",
+        "description": "Cadastrar preços e reprecificar mensagens."
       },
       "xprocess_integration_read": {
         "label": "Visualizar o ERP X2",

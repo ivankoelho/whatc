@@ -16,8 +16,8 @@ func TestPermissionCatalogGroupsEveryKey(t *testing.T) {
 			t.Errorf("%s is not mapped to a functional group", key)
 		}
 	}
-	if len(seen) != 117 {
-		t.Errorf("catalog has %d keys, want 117 (a key was added or removed: update this test on purpose)", len(seen))
+	if len(seen) != 119 {
+		t.Errorf("catalog has %d keys, want 119 (a key was added or removed: update this test on purpose)", len(seen))
 	}
 
 	owner := map[string]string{}
