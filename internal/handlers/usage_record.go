@@ -3,6 +3,8 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
@@ -83,4 +85,54 @@ func (a *App) nodeCtx(c *chatNodeCtx, node *ChatNode, actor usage.ActorType, det
 		o.FlowID = &id
 	}
 	return usage.WithOrigin(context.Background(), o)
+}
+
+// recordStatusUsage appends a Meta status event to the ledger and settles the
+// message's usage row. It runs before the message's own status is updated and is
+// fail-open: an error or panic is logged and the webhook carries on exactly as
+// it would without it (the HTTP response never depends on it).
+func (a *App) recordStatusUsage(phoneNumberID string, status WebhookStatus) {
+	if !a.Usage.Enabled() {
+		return
+	}
+	switch status.Status {
+	case "sent", "delivered", "read", "failed":
+	default:
+		return
+	}
+	a.failOpen("status_event", func() error {
+		account, err := a.getWhatsAppAccountCached(phoneNumberID)
+		if err != nil {
+			return fmt.Errorf("account for phone_number_id %s: %w", phoneNumberID, err)
+		}
+		ev := usage.StatusEvent{
+			OrganizationID: account.OrganizationID, WhatsAppAccount: account.Name, Wamid: status.ID,
+			Status: status.Status, EventAt: statusEventTime(status.Timestamp),
+			RecipientCountry: usage.CountryOf(status.RecipientID),
+		}
+		if status.Pricing != nil {
+			ev.Pricing = &usage.Pricing{Billable: status.Pricing.Billable, PricingModel: status.Pricing.PricingModel, Category: status.Pricing.Category}
+		}
+		if status.Conversation != nil {
+			ev.ConversationID, ev.ConversationOrigin = status.Conversation.ID, status.Conversation.Origin.Type
+		}
+		if len(status.Errors) > 0 {
+			ev.ErrorCode, ev.ErrorTitle = status.Errors[0].Code, status.Errors[0].Title
+		}
+		ctx := context.Background()
+		inserted, err := a.Usage.RecordStatusEvent(ctx, ev)
+		if err != nil || !inserted { // a duplicate event changes nothing and is not recomputed
+			return err
+		}
+		return a.Usage.Settle(ctx, ev.OrganizationID, ev.WhatsAppAccount, ev.Wamid)
+	})
+}
+
+// statusEventTime reads the unix-seconds timestamp of a status entry; an
+// unreadable one falls back to now.
+func statusEventTime(ts string) time.Time {
+	if sec, err := strconv.ParseInt(ts, 10, 64); err == nil && sec > 0 {
+		return time.Unix(sec, 0).UTC()
+	}
+	return time.Now().UTC()
 }

@@ -78,7 +78,10 @@ type WebhookStatus struct {
 	Timestamp    string `json:"timestamp"`
 	RecipientID  string `json:"recipient_id"`
 	Conversation *struct {
-		ID string `json:"id"`
+		ID     string `json:"id"`
+		Origin struct {
+			Type string `json:"type"`
+		} `json:"origin"`
 	} `json:"conversation,omitempty"`
 	Pricing *struct {
 		Billable     bool   `json:"billable"`
@@ -377,6 +380,10 @@ func (a *App) processStatusUpdate(phoneNumberID string, status WebhookStatus) {
 	statusValue := status.Status
 
 	a.Log.Info("Processing status update", "message_id", messageID, "status", statusValue, "phone_number_id", phoneNumberID)
+
+	// Record the event in the consumption ledger BEFORE the progression filter below,
+	// so a late `sent` carrying pricing still counts. Fail-open: never affects what follows.
+	a.recordStatusUsage(phoneNumberID, status)
 
 	// Update messages table - this also handles campaign stats via incrementCampaignStat
 	a.updateMessageStatus(messageID, statusValue, status.Errors)
