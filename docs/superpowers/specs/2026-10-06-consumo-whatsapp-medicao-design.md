@@ -1,6 +1,6 @@
 # Consumo do WhatsApp: base de medição por mensagem
 
-Nota de design. Estado: **aprovada em conversa, aguardando revisão do arquivo**; nada implementado (sem plano, código, migration, teste, push ou PR). Base: `development` em `0e86c01`.
+Nota de design. Estado: **aprovada**; nada implementado (sem plano, código, migration, teste, push ou PR). Base: `development` em `0e86c01`.
 
 ## 1. Princípio e objetivo
 
@@ -82,7 +82,7 @@ Colunas: `id`; `organization_id`; `whatsapp_account`; `wamid`; `status`; `event_
 `link_state` (se a mensagem interna foi localizada) é **independente** do estado de cobrança:
 
 - `linked`: `message_id` preenchido.
-- `unlinked`: o registro está **vinculado ao `wamid`**, mas a mensagem interna **ainda não foi localizada**. A liquidação pode associá-lo depois, quando a mensagem ganhar o wamid. **Não é perda**: costuma ser só atraso ou corrida entre o webhook e o envio assíncrono. Só um `unlinked` antigo (mais de 24 h) é sinalizado como atenção.
+- `unlinked`: o registro está **vinculado ao `wamid`**, mas a mensagem interna **ainda não foi localizada**. A liquidação pode associá-lo depois, quando a mensagem ganhar o wamid. **Não é perda**: costuma ser só atraso ou corrida entre o webhook e o envio assíncrono. Só um `unlinked` antigo (mais de `unlinked_attention_hours`, default 24) é sinalizado como atenção.
 
 ### 4.5 `contact_status_events` (só inserção)
 
@@ -109,7 +109,7 @@ Um único `usage.Record(ctx, mensagem, origem)`, com `INSERT … ON CONFLICT DO 
 - **Reenvio:** hoje não há retry automático (o worker devolve "Don't retry"). Reenviar é outra mensagem, com outro wamid e outra linha. Se algum dia houver retry com o mesmo wamid, a unicidade garante uma linha só.
 - **Origem:** `Origin` entra em `OutgoingMessageRequest` e viaja no `context` até os helpers `sendAndSave*` (mudança mecânica nas 29 chamadas).
 - **Unidade:** `unit_id` do agente; senão da equipe da conversa; senão nulo; `unit_source` diz qual.
-- **Job de integridade** (a cada 5 min, janela de 48 h): cria registro para toda mensagem sem `message_usage`, com `origin_inferred=true` (`SentByUserID` → `agent`; `campaign_id` do metadata → `campaign`; resto → `system` + `origin_detail=unclassified`). O total de "não classificadas" aparece no resumo.
+- **Job de integridade** (intervalo e janela configuráveis, ver seção 9): cria registro para toda mensagem sem `message_usage`, com `origin_inferred=true` (`SentByUserID` → `agent`; `campaign_id` do metadata → `campaign`; resto → `system` + `origin_detail=unclassified`). O total de "não classificadas" aparece no resumo.
 
 ## 6. Webhook da Meta
 
@@ -127,8 +127,8 @@ Um único `usage.Record(ctx, mensagem, origem)`, com `INSERT … ON CONFLICT DO 
 | Webhook duplicado | O índice único descarta. Nada é recalculado |
 | Fora de ordem | A liquidação é função do **conjunto** de eventos: o pricing vem do evento mais completo por `event_at`; o estado final é o de maior prioridade (`failed` vence). Nunca regride |
 | Evento antes de existir a linha | Fica em `message_pricing_events`. A liquidação roda de novo quando a linha ganha o wamid (`finalizeMessageSend` e `worker`) |
-| Linha ausente por mais de 15 min | O job cria um `message_usage` com `link_state=unlinked` (ver 4.4). Mantém o custo conhecido pelo wamid; **não é tratado como perda** |
-| Enviada, nunca entregue | Fica `pending`. Passadas 72 h (configurável) sem `delivered`, `read` ou `failed` → `unconfirmed`, custo 0. Se a entrega chegar depois, reliquida |
+| Linha ausente além do prazo de reconciliação (`unlinked_after_minutes`) | O job cria um `message_usage` com `link_state=unlinked` (ver 4.4). Mantém o custo conhecido pelo wamid; **não é tratado como perda** |
+| Enviada, nunca entregue | Fica `pending`. Passado `undelivered_after_hours` sem `delivered`, `read` ou `failed` → `unconfirmed`, custo 0. Se a entrega chegar depois, reliquida |
 | Entregue sem pricing | `awaiting_pricing`, `billable` e `estimated_cost` nulos. O resumo mostra em "sem informação da Meta" e um `provisional_cost` calculado pela categoria declarada, **separado** e nunca gravado |
 | Pricing tardio ou diferente | Aceito a qualquer tempo. Igual ao gravado: não faz nada. Diferente: recalcula, move o anterior para `meta_pricing_history` (máx. 5) e marca `repriced_at` |
 
@@ -162,13 +162,30 @@ Regras adicionais: moedas diferentes **nunca se somam** (totais por moeda). Pre�
 | `GET /api/whatsapp-usage/messages` | Lista paginada de registros (sem conteúdo) | read |
 | `POST /api/whatsapp-usage/reprice` | Reliquida `no_rate`, `awaiting_pricing` e `unconfirmed` | write |
 
-**Filtros** (período no fuso da organização, conta, unidade, agente, categoria, direção). **O resumo traz:** total de mensagens; mensagens cobradas; "sem informação da Meta" (`awaiting_pricing`); `no_rate`; não classificadas; "aguardando vínculo" (`unlinked`, com os de mais de 24 h destacados); `estimated_cost` **por moeda**; `provisional_cost`.
+**Filtros** (período no fuso da organização, conta, unidade, agente, categoria, direção). **O resumo traz:** total de mensagens; mensagens cobradas; "sem informação da Meta" (`awaiting_pricing`); `no_rate`; não classificadas; "aguardando vínculo" (`unlinked`, com os mais antigos que `unlinked_attention_hours` destacados); `estimated_cost` **por moeda**; `provisional_cost`.
 
 **Tela:** Configurações › Canais › **Consumo do WhatsApp**, duas abas: **Consumo** (filtros, totais, tabela agrupável por dia, categoria, unidade, agente ou conta) e **Tabela de preços** (cadastro). Sem gráficos nem dashboard de eficiência. Os filtros de unidade usam `selectableOptions`.
 
 ## 9. Configuração
 
-Seção `[usage]` do `config.toml` (padrões entre parênteses): `record_enabled` (true, chave desligadora), `undelivered_after_hours` (72), `unlinked_after_minutes` (15), `integrity_interval_minutes` (5), `integrity_window_hours` (48). Valor inválido falha o carregamento, como nas demais seções.
+Seção `[usage]` do `config.toml`. Os prazos abaixo são **parâmetros operacionais configuráveis**; os valores são só **defaults**, pontos de partida sem base empírica ainda. A implementação **não espalha esses números pelo código**: eles são lidos de uma única estrutura (`Config.Usage`) e injetados em quem precisa.
+
+| Chave | Default | O que é |
+|---|---|---|
+| `record_enabled` | `true` | Chave desligadora do registro de consumo |
+| `unlinked_after_minutes` | `15` | Quanto esperar por uma mensagem interna antes de criar o registro `unlinked` |
+| `unlinked_attention_hours` | `24` | A partir de quando um `unlinked` é destacado como atenção no resumo (só apresentação) |
+| `integrity_interval_minutes` | `5` | De quanto em quanto tempo o job de integridade roda |
+| `integrity_window_hours` | `48` | Até quanto tempo para trás o job procura mensagens sem registro |
+| `undelivered_after_hours` | `72` | Depois de quanto tempo sem `delivered`, `read` ou `failed` a mensagem passa a `unconfirmed` |
+
+**Natureza dessas decisões: são operacionais, não regras de negócio nem de cobrança.**
+
+- `undelivered_after_hours` **não** conclui nada sobre cobrança nem sobre a mensagem: a ausência de `delivered`, `read` e `failed` leva apenas a uma classificação operacional de **"não confirmado"**. Se a confirmação chegar depois, a liquidação reclassifica normalmente (6.2).
+- `unlinked_after_minutes` é um **mecanismo de reconciliação** entre o webhook e a mensagem interna. Não é regra de cobrança, e `unlinked` não é perda (4.4).
+- `integrity_interval_minutes` e `integrity_window_hours` dimensionam o job de completude; mudá-los não altera nenhum valor já liquidado. `unlinked_attention_hours` só afeta o destaque na tela.
+
+Valor inválido (não numérico, zero ou negativo) **falha o carregamento da configuração**, como nas demais seções. Os testes usam os mesmos parâmetros por injeção, nunca por constante embutida.
 
 ## 10. Testes obrigatórios
 
@@ -188,7 +205,7 @@ Seção `[usage]` do `config.toml` (padrões entre parênteses): `record_enabled
 | Envio sem origem | Job de integridade e contador de "não classificadas" |
 | Estimado ≠ fatura da Meta | Nomes e campos separados; conciliação planejada |
 | Volume (uma linha a mais por mensagem; campanhas grandes) | Insert único e leve, índices mínimos, lote nas campanhas |
-| `unlinked` virar falso alarme | Estado próprio, só destacado após 24 h (4.4) |
+| `unlinked` virar falso alarme | Estado próprio, só destacado quando antigo (`unlinked_attention_hours`, default 24; 4.4) |
 | Meta mudar o payload de pricing | Os campos relevantes ficam em `message_pricing_events`; campo novo não quebra o parser |
 | Gaps de país ou preço | Estado `no_rate` visível e reprecificação |
 | Privacidade | Sem conteúdo; só ids e código do país |
