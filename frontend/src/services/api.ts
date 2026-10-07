@@ -1940,3 +1940,103 @@ export const occurrenceSLAPoliciesService = {
 }
 
 export default api
+
+// ---- WhatsApp consumption (whatsapp_usage:read|write). Amounts are estimates by the internal
+// price table; they come back per currency and are never added across currencies.
+export interface WhatsAppRate {
+  id: string
+  country: string
+  category: string
+  price: number
+  currency: string
+  valid_from: string
+  valid_to?: string | null
+  notes?: string
+  in_use: boolean
+}
+
+export interface WhatsAppRateInput {
+  country: string
+  category: string
+  price: number
+  currency: string
+  valid_from: string
+  valid_to?: string
+  notes?: string
+}
+
+export interface UsageCurrencyAmount { currency: string; estimated_cost: number; messages: number }
+
+export interface WhatsAppUsageCounts {
+  total: number; billed: number; not_billable: number; awaiting_pricing: number; no_rate: number
+  unconfirmed: number; failed: number; send_failed: number; pending: number; unclassified: number
+  unlinked: number; unlinked_attention: number
+}
+
+export interface WhatsAppUsageGroup {
+  key: string
+  label?: string
+  messages: number
+  billed: number
+  costs: UsageCurrencyAmount[]
+}
+
+export interface WhatsAppUsageSummary {
+  period: { from: string; to: string; timezone: string }
+  recording: { enabled: boolean; since: string | null }
+  counts: WhatsAppUsageCounts
+  costs: UsageCurrencyAmount[]
+  provisional_cost: UsageCurrencyAmount[]
+  unlinked_attention_hours: number
+  groups?: WhatsAppUsageGroup[]
+}
+
+export interface WhatsAppUsageRow {
+  id: string
+  whatsapp_account: string
+  direction: 'incoming' | 'outgoing'
+  message_type?: string
+  recipient_country?: string
+  actor_type: string
+  origin_detail?: string
+  origin_inferred: boolean
+  billing_category?: string
+  billable: boolean | null
+  billing_state: string
+  link_state: 'linked' | 'unlinked'
+  estimated_cost: number | null
+  estimated_currency?: string
+  sent_at: string
+  unit_name?: string
+  agent_name?: string
+}
+
+export interface WhatsAppUsageFilters {
+  from?: string
+  to?: string
+  account?: string
+  unit_id?: string
+  agent_id?: string
+  category?: string
+  direction?: string
+  billing_state?: string
+  link_state?: string
+  group_by?: string
+  page?: number
+  limit?: number
+}
+
+export const whatsappUsageService = {
+  summary: (params?: WhatsAppUsageFilters) =>
+    api.get<ApiEnvelope<WhatsAppUsageSummary>>('/whatsapp-usage/summary', { params }),
+  messages: (params?: WhatsAppUsageFilters) =>
+    api.get<ApiEnvelope<{ messages: WhatsAppUsageRow[]; total: number; page: number; limit: number }>>('/whatsapp-usage/messages', { params }),
+  reprice: () => api.post<ApiEnvelope<{ processed: number; changed: number }>>('/whatsapp-usage/reprice', {}),
+}
+
+export const whatsappRatesService = {
+  list: () => api.get<ApiEnvelope<{ rates: WhatsAppRate[] }>>('/whatsapp-rates'),
+  create: (data: WhatsAppRateInput) => api.post<ApiEnvelope<WhatsAppRate>>('/whatsapp-rates', data),
+  update: (id: string, data: WhatsAppRateInput) => api.put<ApiEnvelope<WhatsAppRate>>(`/whatsapp-rates/${id}`, data),
+  delete: (id: string) => api.delete<ApiEnvelope<{ deleted: boolean }>>(`/whatsapp-rates/${id}`),
+}

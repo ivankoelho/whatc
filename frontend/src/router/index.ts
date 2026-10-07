@@ -214,6 +214,12 @@ const router = createRouter({
           meta: { permission: 'accounts' }
         },
         {
+          path: 'settings/whatsapp-usage',
+          name: 'whatsapp-usage',
+          component: () => import('@/views/settings/WhatsAppUsageHubView.vue'),
+          meta: { permission: 'whatsapp_usage' }
+        },
+        {
           path: 'settings/accounts/:id',
           name: 'account-detail',
           component: () => import('@/views/settings/AccountDetailView.vue'),
@@ -447,6 +453,7 @@ const navigationOrder = [
     { path: '/settings', permission: 'settings.general' },
     { path: '/settings/service', permission: 'settings.chatbot' },
     { path: '/settings/accounts', permission: 'accounts' },
+    { path: '/settings/whatsapp-usage', permission: 'whatsapp_usage' },
     { path: '/settings/service', permission: 'canned_responses' },
     { path: '/settings/service', permission: 'contacts' },
     { path: '/settings/service', permission: 'tags' },
