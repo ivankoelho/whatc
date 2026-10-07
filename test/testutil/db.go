@@ -155,6 +155,11 @@ func runMigrations(db *gorm.DB) error {
 		&models.Department{},
 		// Audit
 		&models.AuditLog{},
+		// WhatsApp consumption measurement
+		&models.WhatsAppRate{},
+		&models.MessageUsage{},
+		&models.MessagePricingEvent{},
+		&models.ContactStatusEvent{},
 		// Branding
 		&models.BrandingSettings{},
 		// X2 ERP integration
@@ -198,6 +203,11 @@ func cleanupTables(db *gorm.DB) {
 		"ai_tool_settings",
 		"ai_contexts",
 		"agent_transfers",
+		// WhatsApp consumption measurement
+		"message_usage",
+		"message_pricing_events",
+		"whatsapp_rates",
+		"contact_status_events",
 		// WhatsApp tables
 		"messages",
 		"tags",
@@ -277,6 +287,10 @@ func TruncateTables(db *gorm.DB) {
 		"ai_usage_logs",
 		"ai_contexts",
 		"agent_transfers",
+		"message_usage",
+		"message_pricing_events",
+		"whatsapp_rates",
+		"contact_status_events",
 		"messages",
 		"tags",
 		"contacts",
