@@ -9,17 +9,24 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Switch } from '@/components/ui/switch'
 import { DataTable, ErrorState, type Column } from '@/components/shared'
 import {
   accountsService, unitsService, whatsappUsageService,
   type Unit, type WhatsAppUsageFilters, type WhatsAppUsageGroup, type WhatsAppUsageRow, type WhatsAppUsageSummary,
 } from '@/services/api'
 import { selectableOptions } from '@/lib/placement-options'
+import { useAuthStore } from '@/stores/auth'
 import { getErrorMessage } from '@/lib/api-utils'
 import { ALL, USAGE_GROUPS, activeFilters, formatMoney, lastDays, type UsageGroupBy } from '@/lib/whatsapp-usage'
 import { AlertTriangle, Receipt } from 'lucide-vue-next'
 
 const { t, locale } = useI18n()
+const authStore = useAuthStore()
+
+// The switch only mirrors whatsapp_usage:write; the API is the authority and answers 403 otherwise.
+const canWrite = computed(() => authStore.hasPermission('whatsapp_usage', 'write'))
+const isSwitching = ref(false)
 
 const defaults = lastDays(30)
 const filters = ref({
@@ -97,6 +104,22 @@ onMounted(async () => {
 
 const currencyLocale = computed(() => (locale.value === 'en' ? 'en-US' : 'pt-BR'))
 const money = (amount: number, currency: string) => formatMoney(amount, currency, currencyLocale.value)
+
+const dateOf = (v?: string | null) => (v ? new Date(v).toLocaleString(currencyLocale.value) : '')
+const changedAt = computed(() => dateOf(summary.value?.recording.changed_at))
+
+async function toggleRecording(enabled: boolean) {
+  isSwitching.value = true
+  try {
+    await whatsappUsageService.setRecording(enabled)
+    toast.success(t(enabled ? 'whatsappUsage.recordingTurnedOn' : 'whatsappUsage.recordingTurnedOff'))
+    await load()
+  } catch (e: any) {
+    toast.error(getErrorMessage(e, t('whatsappUsage.recordingSwitchFailed')))
+  } finally {
+    isSwitching.value = false
+  }
+}
 
 const since = computed(() => {
   const s = summary.value?.recording.since
@@ -177,14 +200,37 @@ const when = (v: string) => new Date(v).toLocaleString(currencyLocale.value)
           <Alert v-if="summary && !summary.recording.enabled" variant="destructive" data-testid="usage-recording-off">
             <AlertTriangle class="h-4 w-4" />
             <AlertTitle>{{ $t('whatsappUsage.recordingOff') }}</AlertTitle>
-            <AlertDescription>{{ $t('whatsappUsage.recordingOffHint') }}</AlertDescription>
+            <AlertDescription v-if="!summary.recording.server_enabled" data-testid="usage-recording-off-server">{{ $t('whatsappUsage.recordingOffHint') }}</AlertDescription>
+            <AlertDescription v-else data-testid="usage-recording-off-panel">
+              {{ summary.recording.changed_at ? $t('whatsappUsage.recordingOffPanelSince', { date: changedAt }) : $t('whatsappUsage.recordingOffPanel') }}
+              {{ $t('whatsappUsage.recordingOffPanelHint') }}
+            </AlertDescription>
           </Alert>
           <p v-else-if="summary && !summary.recording.since" class="text-sm text-amber-400 light:text-amber-700" data-testid="usage-recording-none">
             {{ $t('whatsappUsage.recordingNone') }}
           </p>
           <p v-else-if="summary" class="text-xs text-white/50 light:text-gray-500" data-testid="usage-recording-since">
             {{ $t('whatsappUsage.recordingSince', { date: since }) }}
+            <span v-if="summary.recording.changed_at" data-testid="usage-recording-resumed"> {{ $t('whatsappUsage.recordingResumed', { date: changedAt }) }}</span>
           </p>
+
+          <!-- The panel switch: stops (and resumes) the recording for this organization. -->
+          <Card v-if="summary && summary.recording.server_enabled && canWrite" data-testid="usage-recording-card">
+            <CardContent class="flex items-center justify-between gap-4 pt-6">
+              <div class="space-y-1">
+                <Label class="text-sm font-medium">{{ $t('whatsappUsage.recordingSwitchTitle') }}</Label>
+                <p class="text-xs text-muted-foreground">
+                  {{ summary.recording.panel_enabled ? $t('whatsappUsage.recordingSwitchOnHint') : $t('whatsappUsage.recordingSwitchOffHint') }}
+                </p>
+              </div>
+              <Switch
+                :checked="summary.recording.panel_enabled"
+                :disabled="isSwitching"
+                data-testid="usage-recording-switch"
+                @update:checked="toggleRecording"
+              />
+            </CardContent>
+          </Card>
 
           <Card>
             <CardContent class="pt-6">

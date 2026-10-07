@@ -15,7 +15,7 @@ import (
 // inserted is false for a duplicate (same wamid, status and event time), which
 // the caller must not settle again.
 func (r *Recorder) RecordStatusEvent(ctx context.Context, ev StatusEvent) (inserted bool, err error) {
-	if !r.Enabled() {
+	if !r.EnabledFor(ctx, ev.OrganizationID) {
 		return false, nil
 	}
 	row := models.MessagePricingEvent{
@@ -39,7 +39,7 @@ func (r *Recorder) RecordStatusEvent(ctx context.Context, ev StatusEvent) (inser
 // job at the same time: the row is locked while it is recomputed. A wamid with
 // no row yet is a no-op (the events wait; AttachWamid or the job settle later).
 func (r *Recorder) Settle(ctx context.Context, orgID uuid.UUID, account, wamid string) error {
-	if !r.Enabled() || wamid == "" {
+	if wamid == "" || !r.EnabledFor(ctx, orgID) {
 		return nil
 	}
 	return r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

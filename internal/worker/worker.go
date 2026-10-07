@@ -346,7 +346,7 @@ func (w *Worker) recordCampaignUsage(ctx context.Context, msg *models.Message, c
 	var err error
 	switch {
 	case sendErr != nil:
-		err = w.Usage.MarkSendFailed(ctx, nil, msg.ID)
+		err = w.Usage.MarkSendFailed(ctx, nil, msg.OrganizationID, msg.ID)
 	case msg.WhatsAppMessageID != "":
 		err = w.Usage.AttachWamid(ctx, msg.OrganizationID, msg.ID, msg.WhatsAppAccount, msg.WhatsAppMessageID)
 	}

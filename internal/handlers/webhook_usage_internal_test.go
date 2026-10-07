@@ -302,3 +302,15 @@ func TestStatusUsage_UnknownPhoneNumberIDIsIgnored(t *testing.T) {
 	require.NotPanics(t, func() { f.app.processStatusUpdate("phone-does-not-exist", f.status("delivered", 2, utilityPricing())) })
 	assert.Empty(t, f.events(t))
 }
+
+func TestStatusUsage_PanelSwitchOffRecordsNoEventAndTheMessageStillProgresses(t *testing.T) {
+	f := newStatusFixture(t, config.UsageConfig{})
+	_, err := f.app.Usage.SetRecording(context.Background(), f.org.ID, false, time.Now())
+	require.NoError(t, err)
+
+	f.send(f.status("delivered", 2, utilityPricing()))
+
+	assert.Equal(t, models.MessageStatusDelivered, f.messageStatus(t), "the webhook does what it always did")
+	assert.Empty(t, f.events(t), "but no Meta event is kept while the measurement is off")
+	assert.Equal(t, "pending", f.row(t).BillingState, "and the existing row is frozen")
+}

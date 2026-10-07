@@ -1054,6 +1054,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/whatsapp-usage/summary", app.GetWhatsAppUsageSummary)
 	g.GET("/api/whatsapp-usage/messages", app.ListWhatsAppUsageMessages)
 	g.POST("/api/whatsapp-usage/reprice", app.RepriceWhatsAppUsage)
+	g.PUT("/api/whatsapp-usage/recording", app.SetWhatsAppUsageRecording)
 	g.GET("/api/whatsapp-rates", app.ListWhatsAppRates)
 	g.POST("/api/whatsapp-rates", app.CreateWhatsAppRate)
 	g.PUT("/api/whatsapp-rates/{id}", app.UpdateWhatsAppRate)

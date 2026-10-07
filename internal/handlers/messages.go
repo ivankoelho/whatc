@@ -507,7 +507,7 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 			"error_message": errMsg,
 		})
 		a.Log.Error("Failed to send message", "error", err, "message_id", msg.ID, "type", msg.MessageType)
-		a.markUsageSendFailed(context.Background(), msg.ID)
+		a.markUsageSendFailed(context.Background(), msg)
 
 		// Broadcast failure status via WebSocket so frontend updates immediately.
 		// Routed through the authorized-viewers gate (not BroadcastToOrg) since

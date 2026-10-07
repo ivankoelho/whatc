@@ -180,6 +180,13 @@ Seção `[usage]` do `config.toml`. Os prazos abaixo são **parâmetros operacio
 | `integrity_window_hours` | `48` | Até quanto tempo para trás o job procura mensagens sem registro |
 | `undelivered_after_hours` | `72` | Depois de quanto tempo sem `delivered`, `read` ou `failed` a mensagem passa a `unconfirmed` |
 
+**Dois interruptores.** O de **servidor** é `record_enabled` (desligado: nada é registrado e o painel não consegue religar). O de **painel** é por organização, em `organizations.settings` (chave `whatsapp_usage_recording` com `enabled` e `changed_at`), e o administrador o aciona na tela Consumo (`PUT /api/whatsapp-usage/recording`, permissão `whatsapp_usage:write`, auditado). Sem a chave, vale **ligado** (o default aprovado). Só registra quando os dois estão ligados.
+
+- **Desligado no painel:** nada novo é gravado para a organização (linhas, eventos da Meta, histórico de status), as linhas existentes ficam congeladas e o job de integridade a ignora.
+- **Ligar de novo** retoma a partir daquele instante. O que aconteceu enquanto esteve desligado **nunca é reconstruído**: o job só completa mensagens criadas depois da última vez que foi ligado (`changed_at`).
+- A leitura do interruptor é guardada em memória por poucos segundos por instância (a instância que o aciona atualiza o próprio cache na hora). Uma falha ao lê-lo mantém o último valor, ou ligado: ler o interruptor nunca pode quebrar um envio.
+- A tela mostra os dois estados, desde quando e, quando desligado, que o período não entra nos números.
+
 **Natureza dessas decisões: são operacionais, não regras de negócio nem de cobrança.**
 
 - `undelivered_after_hours` **não** conclui nada sobre cobrança nem sobre a mensagem: a ausência de `delivered`, `read` e `failed` leva apenas a uma classificação operacional de **"não confirmado"**. Se a confirmação chegar depois, a liquidação reclassifica normalmente (6.2).

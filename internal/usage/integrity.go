@@ -81,7 +81,10 @@ func (r *Recorder) sweepMissingRows(ctx context.Context, now, base time.Time, re
 		var msgs []models.Message
 		if err := r.DB.WithContext(ctx).
 			Joins("LEFT JOIN message_usage u ON u.message_id = messages.id").
+			Joins("JOIN organizations o ON o.id = messages.organization_id").
 			Where("u.id IS NULL AND messages.created_at <= ?", to).
+			Where(orgOnSQL).
+			Where("messages.created_at >= " + orgFromSQL).
 			Where("(messages.created_at, messages.id) > (?, ?)", curAt, curID).
 			Order("messages.created_at, messages.id").Limit(sweepBatchSize).
 			Find(&msgs).Error; err != nil {
@@ -125,7 +128,7 @@ func (r *Recorder) recordInferred(ctx context.Context, m *models.Message) error 
 	}
 	switch {
 	case m.Direction == models.DirectionOutgoing && m.WhatsAppMessageID == "" && m.Status == models.MessageStatusFailed:
-		return r.MarkSendFailed(ctx, nil, m.ID)
+		return r.MarkSendFailed(ctx, nil, m.OrganizationID, m.ID)
 	case m.WhatsAppMessageID != "":
 		return r.Settle(ctx, m.OrganizationID, m.WhatsAppAccount, m.WhatsAppMessageID)
 	}
@@ -166,14 +169,15 @@ func (r *Recorder) sweepUnlinked(ctx context.Context, now, base time.Time, res *
 			SELECT e.organization_id, e.whatsapp_account, e.wamid,
 			       MIN(e.event_at) AS first_event_at, MAX(e.recipient_country) AS recipient_country
 			FROM message_pricing_events e
-			WHERE e.received_at >= ? AND e.wamid > ?
+			JOIN organizations o ON o.id = e.organization_id
+			WHERE e.received_at >= ? AND e.wamid > ? AND ` + orgOnSQL + `
 			  AND NOT EXISTS (SELECT 1 FROM message_usage u
 			                  WHERE u.organization_id = e.organization_id AND u.whatsapp_account = e.whatsapp_account AND u.wamid = e.wamid)
 			  AND NOT EXISTS (SELECT 1 FROM messages m
-			                  WHERE m.organization_id = e.organization_id AND m.whats_app_message_id = e.wamid AND m.created_at < ?)
+			                  WHERE m.organization_id = e.organization_id AND m.whats_app_message_id = e.wamid AND m.created_at < GREATEST(?::timestamptz, ` + orgFromSQL + `))
 			  AND EXISTS (SELECT 1 FROM message_pricing_events s
 			              WHERE s.organization_id = e.organization_id AND s.whatsapp_account = e.whatsapp_account AND s.wamid = e.wamid
-			                AND s.status = 'sent' AND s.event_at >= ?)
+			                AND s.status = 'sent' AND s.event_at >= GREATEST(?::timestamptz, ` + orgFromSQL + `))
 			GROUP BY e.organization_id, e.whatsapp_account, e.wamid
 			HAVING MIN(e.received_at) <= ?
 			ORDER BY e.wamid LIMIT ?`, from, cursor, base, base, to, sweepBatchSize).Scan(&cands).Error; err != nil {
@@ -219,6 +223,7 @@ func (r *Recorder) sweepPending(ctx context.Context, now, _ time.Time, res *Swee
 		var rows []models.MessageUsage
 		if err := r.DB.WithContext(ctx).
 			Where("billing_state = ? AND wamid <> '' AND id > ?", string(StatePending), cursor).
+			Where("EXISTS (SELECT 1 FROM organizations o WHERE o.id = message_usage.organization_id AND " + orgOnSQL + ")").
 			Where(`sent_at <= ? OR EXISTS (SELECT 1 FROM message_pricing_events e
 			        WHERE e.organization_id = message_usage.organization_id AND e.whatsapp_account = message_usage.whatsapp_account
 			          AND e.wamid = message_usage.wamid AND e.status IN ('delivered','read','failed'))`, deadline).
@@ -292,3 +297,10 @@ func (r *Recorder) baseline(ctx context.Context) (*time.Time, error) {
 	}
 	return first, nil
 }
+
+// SQL fragments over organizations aliased as o: the panel switch (default on) and the
+// instant it was last flipped (the lower bound for what the job may complete).
+var (
+	orgOnSQL   = "COALESCE((o.settings->'" + RecordingSettingsKey + "'->>'enabled')::boolean, true)"
+	orgFromSQL = "COALESCE((o.settings->'" + RecordingSettingsKey + "'->>'changed_at')::timestamptz, '-infinity'::timestamptz)"
+)

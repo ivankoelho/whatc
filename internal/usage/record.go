@@ -3,6 +3,7 @@ package usage
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,6 +19,9 @@ import (
 type Recorder struct {
 	DB  *gorm.DB
 	Cfg config.UsageConfig
+
+	mu    sync.Mutex
+	cache map[uuid.UUID]recordingEntry // panel switch per organization (see recording.go)
 }
 
 // New builds a Recorder.
@@ -41,7 +45,7 @@ func (r *Recorder) conn(ctx context.Context, tx *gorm.DB) *gorm.DB {
 //
 // The caller must log a returned error and carry on: recording never blocks a send.
 func (r *Recorder) Record(ctx context.Context, tx *gorm.DB, msg *models.Message, o Origin) error {
-	if !r.Enabled() || msg == nil {
+	if msg == nil || !r.EnabledFor(ctx, msg.OrganizationID) {
 		return nil
 	}
 	db := r.conn(ctx, tx)
@@ -128,12 +132,12 @@ func (r *Recorder) resolveUnit(db *gorm.DB, o Origin, contactTeam *uuid.UUID) (*
 
 // MarkSendFailed records that the API refused the send before accepting it:
 // no wamid, not billable, cost zero.
-func (r *Recorder) MarkSendFailed(ctx context.Context, tx *gorm.DB, messageID uuid.UUID) error {
-	if !r.Enabled() {
+func (r *Recorder) MarkSendFailed(ctx context.Context, tx *gorm.DB, orgID, messageID uuid.UUID) error {
+	if !r.EnabledFor(ctx, orgID) {
 		return nil
 	}
 	return r.conn(ctx, tx).Model(&models.MessageUsage{}).
-		Where("message_id = ? AND wamid = ''", messageID).
+		Where("message_id = ? AND organization_id = ? AND wamid = ''", messageID, orgID).
 		Updates(map[string]any{
 			"billing_state": string(StateSendFailed), "billable": false, "estimated_cost": 0,
 			"settled_at": time.Now(),
@@ -146,7 +150,7 @@ func (r *Recorder) MarkSendFailed(ctx context.Context, tx *gorm.DB, messageID uu
 // job had already created an `unlinked` row for that wamid, that row is merged
 // (it holds nothing the events cannot rebuild).
 func (r *Recorder) AttachWamid(ctx context.Context, orgID, messageID uuid.UUID, account, wamid string) error {
-	if !r.Enabled() || wamid == "" {
+	if wamid == "" || !r.EnabledFor(ctx, orgID) {
 		return nil
 	}
 	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -180,7 +184,7 @@ func (r *Recorder) AttachWamid(ctx context.Context, orgID, messageID uuid.UUID, 
 // returned but the surrounding transaction stays usable, so a failure of the
 // history never undoes or blocks the status change itself.
 func (r *Recorder) RecordContactStatus(ctx context.Context, db *gorm.DB, e models.ContactStatusEvent) error {
-	if !r.Enabled() {
+	if !r.EnabledFor(ctx, e.OrganizationID) {
 		return nil
 	}
 	if e.OccurredAt.IsZero() {
