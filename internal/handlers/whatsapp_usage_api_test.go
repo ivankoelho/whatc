@@ -366,10 +366,7 @@ func TestWhatsAppUsageAPI_FiltersAndGroups(t *testing.T) {
 	// filters narrow the same figures
 	code, body := f.call(t, f.app.GetWhatsAppUsageSummary, f.reader, nil, map[string]string{"unit_id": unitA.ID.String()}, nil)
 	require.Equal(t, 200, code)
-	var narrowed struct {
-		Counts map[string]int64 `json:"counts"`
-	}
-	narrowed = decodeData[struct {
+	narrowed := decodeData[struct {
 		Counts map[string]int64 `json:"counts"`
 	}](t, body)
 	assert.EqualValues(t, 2, narrowed.Counts["total"])
