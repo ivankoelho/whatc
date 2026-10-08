@@ -172,3 +172,22 @@ write_enabled = false
 # WHATOMATE_KNOWLEDGE__RAG_ENABLED=true) only after validating it. It also needs the
 # per-organization switch (Settings > Chatbot > AI): both must be on.
 rag_enabled = false
+
+# WhatsApp consumption measurement (per-message usage ledger)
+# These are OPERATIONAL parameters, not business or billing rules: changing one
+# never alters a value already settled. Defaults shown. A value that is zero,
+# negative or not a number makes the configuration fail to load.
+[usage]
+# Off switch of the whole recording. When false, nothing is written and the
+# service behaves exactly as before.
+record_enabled = true
+# How long to wait for the internal message before creating an `unlinked` row.
+unlinked_after_minutes = 15
+# Age from which an `unlinked` row is highlighted in the summary (presentation only).
+unlinked_attention_hours = 24
+# How often the integrity job runs.
+integrity_interval_minutes = 5
+# How far back the integrity job looks for messages without a usage row.
+integrity_window_hours = 48
+# Without delivered/read/failed after this long, a message becomes `unconfirmed`.
+undelivered_after_hours = 72

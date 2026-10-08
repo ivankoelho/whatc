@@ -137,7 +137,7 @@ func (a *App) notifyAIToolCustomer(_ context.Context, n aitools.Notification) {
 		text = a.outOfHoursText(account)
 	}
 	if text != "" {
-		_ = a.sendAndSaveTextMessage(account, &contact, text)
+		_ = a.sendAndSaveTextMessage(aiCtx("tool_confirmation"), account, &contact, text)
 	}
 }
 
@@ -180,7 +180,7 @@ func (a *App) handleAIToolConfirmationTap(account *models.WhatsAppAccount, conta
 		text = a.outOfHoursText(account)
 	}
 	if text != "" {
-		if err := a.sendAndSaveTextMessage(account, contact, text); err != nil {
+		if err := a.sendAndSaveTextMessage(aiCtx("tool_confirmation"), account, contact, text); err != nil {
 			a.Log.Error("AI tools: failed to answer a confirmation tap", "error", err, "contact", contact.PhoneNumber)
 		}
 	}

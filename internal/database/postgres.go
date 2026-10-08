@@ -151,6 +151,12 @@ func GetMigrationModels() []MigrationModel {
 
 		{"AuditLog", &models.AuditLog{}},
 
+		// WhatsApp consumption measurement (additive)
+		{"WhatsAppRate", &models.WhatsAppRate{}},
+		{"MessageUsage", &models.MessageUsage{}},
+		{"MessagePricingEvent", &models.MessagePricingEvent{}},
+		{"ContactStatusEvent", &models.ContactStatusEvent{}},
+
 		// Configuração de sistema (não por organização)
 		{"BrandingSettings", &models.BrandingSettings{}},
 	}

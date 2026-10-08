@@ -17,6 +17,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/contactutil"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/templateutil"
+	"github.com/shridarpatil/whatomate/internal/usage"
 	"github.com/shridarpatil/whatomate/internal/utils"
 	"github.com/shridarpatil/whatomate/internal/websocket"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
@@ -78,6 +79,10 @@ type OutgoingMessageRequest struct {
 
 	// Reply context
 	ReplyToMessage *models.Message
+
+	// Origin says who produced the message, for the consumption ledger. Optional:
+	// when empty it is taken from ctx (usage.WithOrigin) or inferred from SentByUserID.
+	Origin usage.Origin
 }
 
 // MessageSendOptions configures optional behaviors for message sending
@@ -187,6 +192,7 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 		a.Log.Error("Failed to create message", "error", err)
 		return nil, fmt.Errorf("failed to create message: %w", err)
 	}
+	a.recordMessageUsage(ctx, msg, outgoingOrigin(ctx, req, opts))
 
 	// Customer-facing agent signature (opt-in): prefix the agent's first name in
 	// bold to outgoing free text and media captions, so the client sees who is
@@ -321,7 +327,8 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 		if _, err := a.transitionContactStatus(req.Contact,
 			models.ContactStatusInProgress,
 			[]models.ContactStatus{models.ContactStatusNew},
-			opts.SentByUserID); err != nil {
+			opts.SentByUserID,
+			statusCause{ActorType: "agent", ActorUserID: opts.SentByUserID, Reason: statusReasonAgentReply}); err != nil {
 			a.Log.Error("Failed to auto-transition contact status", "error", err, "contact_id", req.Contact.ID)
 		}
 	}
@@ -500,6 +507,7 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 			"error_message": errMsg,
 		})
 		a.Log.Error("Failed to send message", "error", err, "message_id", msg.ID, "type", msg.MessageType)
+		a.markUsageSendFailed(context.Background(), msg)
 
 		// Broadcast failure status via WebSocket so frontend updates immediately.
 		// Routed through the authorized-viewers gate (not BroadcastToOrg) since
@@ -523,6 +531,7 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 		"whats_app_message_id": wamid,
 	})
 	a.Log.Info("Message sent", "message_id", msg.ID, "wa_message_id", wamid, "type", msg.MessageType)
+	a.attachUsageWamid(context.Background(), msg, wamid)
 
 	// Dispatch webhook for successful send
 	if opts.DispatchWebhook {
