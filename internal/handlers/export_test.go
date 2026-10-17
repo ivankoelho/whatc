@@ -207,3 +207,10 @@ func SetChatAuditWriterForTest(fn func(db *gorm.DB, orgID, userID uuid.UUID, use
 	chatAuditWriter = fn
 	return func() { chatAuditWriter = prev }
 }
+
+// SetChatUploadsPerMinuteForTest lowers the chat upload rate limit and returns a restore func.
+func SetChatUploadsPerMinuteForTest(n int) func() {
+	old := chatUploadsPerMinute
+	chatUploadsPerMinute = n
+	return func() { chatUploadsPerMinute = old }
+}

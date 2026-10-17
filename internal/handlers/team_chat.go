@@ -71,6 +71,9 @@ type ChatMessageResponse struct {
 	// emojis on it, aggregated, with whether the viewer used each.
 	ReplyTo   *ChatReplyTo          `json:"reply_to,omitempty"`
 	Reactions []ChatReactionSummary `json:"reactions"`
+
+	// Attachments are the files and voice notes of the message.
+	Attachments []ChatAttachmentResponse `json:"attachments"`
 }
 
 type chatChannelRequest struct {
@@ -85,6 +88,8 @@ type chatDMRequest struct {
 type chatMessageRequest struct {
 	Body     string     `json:"body"`
 	ParentID *uuid.UUID `json:"parent_id"` // send only: the message being answered
+	// AttachmentIDs (send only): pending uploads to fix to the new message.
+	AttachmentIDs []uuid.UUID `json:"attachment_ids"`
 }
 
 // validChatBody trims and bounds a message body. Empty or oversized is rejected.
@@ -601,8 +606,12 @@ func (a *App) SendChatMessage(r *fastglue.Request) error {
 	if err := a.decodeRequest(r, &req); err != nil {
 		return nil
 	}
+	if len(req.AttachmentIDs) > chatMaxAttachments {
+		return a.sendChatError(r, errChatTooManyAtt, "send the message")
+	}
 	body, valid := validChatBody(req.Body)
-	if !valid {
+	// With attachments the text is optional (0-4000 characters); without, 1-4000.
+	if !valid && !(len(req.AttachmentIDs) > 0 && strings.TrimSpace(req.Body) == "") {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "body must be 1-4000 characters", nil, "")
 	}
 	// FOR SHARE on the channel row: concurrent sends do not block each other, but an
@@ -631,7 +640,13 @@ func (a *App) SendChatMessage(r *fastglue.Request) error {
 			ChannelID: locked.ID, UserID: userID, Body: body, Kind: models.ChatMessageKindUser,
 			ParentID: req.ParentID,
 		}
-		return tx.Create(&msg).Error
+		if err := tx.Create(&msg).Error; err != nil {
+			return err
+		}
+		if len(req.AttachmentIDs) > 0 {
+			return attachPendingFiles(tx, orgID, userID, locked.ID, msg.ID, req.AttachmentIDs)
+		}
+		return nil
 	})
 	if txErr != nil {
 		return a.sendChatError(r, txErr, "send the message")
@@ -683,7 +698,12 @@ func (a *App) UpdateChatMessage(r *fastglue.Request) error {
 	}
 	body, valid := validChatBody(req.Body)
 	if !valid {
-		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "body must be 1-4000 characters", nil, "")
+		// A message with attachments may end up with no text at all.
+		var withFiles int64
+		a.DB.Model(&models.ChatAttachment{}).Where("message_id = ? AND purged_at IS NULL", msg.ID).Count(&withFiles)
+		if !(withFiles > 0 && strings.TrimSpace(req.Body) == "") {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "body must be 1-4000 characters", nil, "")
+		}
 	}
 	now := time.Now()
 	txErr := a.withLockedChannel(orgID, ch.ID, chatLockShare, func(tx *gorm.DB, locked *models.ChatChannel) error {

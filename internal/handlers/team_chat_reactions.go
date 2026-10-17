@@ -37,6 +37,10 @@ var (
 // author and no text.
 type ChatReplyTo struct {
 	ID       uuid.UUID `json:"id"`
+	// AttachmentKind/Name describe the first file of the original, so a quote of a
+	// message without text can still say what it was ("image", "audio", "file").
+	AttachmentKind string `json:"attachment_kind,omitempty"`
+	AttachmentName string `json:"attachment_name,omitempty"`
 	UserID   uuid.UUID `json:"user_id,omitempty"`
 	UserName string    `json:"user_name"`
 	Snippet  string    `json:"snippet"`
@@ -98,6 +102,10 @@ func (a *App) chatMessageResponses(viewerID uuid.UUID, msgs []models.ChatMessage
 	}
 	names := a.chatUserNames(nameIDs)
 
+	// Files of these messages and of the quoted ones: one query for both.
+	fileOwners := append(append([]uuid.UUID{}, msgIDs...), parentIDs...)
+	files := a.chatAttachmentsFor(fileOwners)
+
 	type agg struct {
 		order []string
 		by    map[string]*ChatReactionSummary
@@ -127,6 +135,10 @@ func (a *App) chatMessageResponses(viewerID uuid.UUID, msgs []models.ChatMessage
 	for i, m := range msgs {
 		out[i] = chatMessageToResponse(m, names)
 		out[i].Reactions = []ChatReactionSummary{}
+		out[i].Attachments = []ChatAttachmentResponse{}
+		for _, f := range files[m.ID] {
+			out[i].Attachments = append(out[i].Attachments, chatAttachmentResponse(f))
+		}
 		if g := perMsg[m.ID]; g != nil {
 			for _, code := range g.order {
 				out[i].Reactions = append(out[i].Reactions, *g.by[code])
@@ -136,6 +148,9 @@ func (a *App) chatMessageResponses(viewerID uuid.UUID, msgs []models.ChatMessage
 			rt := &ChatReplyTo{ID: *m.ParentID, Deleted: true}
 			if p, ok := parents[*m.ParentID]; ok && !p.DeletedAt.Valid && p.ChannelID == m.ChannelID {
 				rt = &ChatReplyTo{ID: p.ID, UserID: p.UserID, UserName: names[p.UserID], Snippet: chatSnippet(p.Body)}
+				if pf := files[p.ID]; len(pf) > 0 {
+					rt.AttachmentKind, rt.AttachmentName = pf[0].Kind, pf[0].Name
+				}
 			}
 			out[i].ReplyTo = rt
 		}
