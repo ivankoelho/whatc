@@ -77,6 +77,13 @@ const usersStore = useUsersStore()
 // Permission-driven (analytics.agents:read), not role-name based — custom
 // roles with the right permission should get the same view.
 const isAdminOrManager = computed(() => authStore.hasPermission('analytics.agents', 'read'))
+// The agent filter lists users (GET /api/users), so it needs users:read.
+const canFilterAgents = computed(() => isAdminOrManager.value && authStore.hasPermission('users', 'read'))
+// A team supervisor without analytics:read gets their own numbers in the cards
+// below; the whole-team view is the live panel above them.
+const isTeamSupervisorOnly = computed(() =>
+  authStore.hasPermission('analytics.agents', 'view_team') && !authStore.hasPermission('analytics', 'read')
+)
 // Live panel: whole organization (analytics:read) or own teams (view_team).
 const canSeeLive = computed(() =>
   authStore.hasPermission('analytics', 'read') || authStore.hasPermission('analytics.agents', 'view_team')
@@ -121,7 +128,7 @@ const formatMinutes = (mins: number): string => {
 }
 
 const fetchAgents = async () => {
-  if (!isAdminOrManager.value) return
+  if (!canFilterAgents.value) return
   try {
     await usersStore.fetchUsers()
     agents.value = usersStore.users
@@ -137,7 +144,7 @@ const fetchAnalytics = async () => {
   try {
     const { from, to } = dateRange.value
     const params: { from: string; to: string; agent_id?: string } = { from, to }
-    if (isAdminOrManager.value && selectedAgentId.value !== 'all') {
+    if (canFilterAgents.value && selectedAgentId.value !== 'all') {
       params.agent_id = selectedAgentId.value
     }
     const response = await agentAnalyticsService.getSummary(params)
@@ -310,13 +317,13 @@ void _displayStats.value // Suppress unused warning
   <div class="flex flex-col h-full">
     <PageHeader
       :title="$t('agentAnalytics.title')"
-      :description="isAdminOrManager ? $t('agentAnalytics.subtitle') : $t('agentAnalytics.myMetrics')"
+      :description="isTeamSupervisorOnly ? $t('agentAnalytics.myMetricsTeamHint') : isAdminOrManager ? $t('agentAnalytics.subtitle') : $t('agentAnalytics.myMetrics')"
       :icon="BarChart3"
       icon-gradient="bg-gradient-to-br from-blue-500 to-indigo-600 shadow-blue-500/20"
     >
       <template #actions>
         <!-- Agent Filter (Admin/Manager only) -->
-        <div v-if="isAdminOrManager" class="flex items-center gap-2 mr-4">
+        <div v-if="canFilterAgents" class="flex items-center gap-2 mr-4">
           <Popover v-model:open="agentComboboxOpen">
             <PopoverTrigger as-child>
               <Button variant="outline" role="combobox" :aria-expanded="agentComboboxOpen" class="w-[200px] justify-between">
