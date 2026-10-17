@@ -365,7 +365,7 @@ async function removeMessage(m: TeamChatMessage) {
                 {{ getInitials(m.user_name || '?') }}
               </AvatarFallback>
             </Avatar>
-            <div class="min-w-0 flex-1">
+            <div :class="['min-w-0', editingId === m.id ? 'flex-1' : '']">
               <div class="flex items-baseline gap-2">
                 <span class="text-sm font-semibold">{{ m.user_name }}</span>
                 <time class="text-[11px] text-muted-foreground" :datetime="m.created_at">{{ formatTime(m.created_at) }}</time>
@@ -418,7 +418,12 @@ async function removeMessage(m: TeamChatMessage) {
               </div>
             </div>
 
-            <div v-if="editingId !== m.id && (canInteract || canEdit(m) || canDelete(m))" class="flex gap-0.5 transition-opacity md:opacity-0 md:focus-within:opacity-100 md:group-hover:opacity-100" :class="pickerFor === m.id ? 'md:opacity-100' : ''">
+            <!-- Right after the message (not at the far edge of the pane), so the actions stay near what they act on -->
+            <div
+              v-if="editingId !== m.id && (canInteract || canEdit(m) || canDelete(m))"
+              class="relative flex shrink-0 gap-0.5 transition-opacity md:opacity-0 md:focus-within:opacity-100 md:group-hover:opacity-100"
+              :class="pickerFor === m.id ? 'md:opacity-100' : ''" :data-testid="`actions-${m.id}`"
+            >
               <button v-if="canInteract" type="button" class="rounded p-2 text-muted-foreground md:p-1 hover:bg-muted hover:text-foreground" :aria-label="t('teamChat.react')" @click="pickerFor = pickerFor === m.id ? null : m.id">
                 <SmilePlus class="h-3.5 w-3.5" />
               </button>
@@ -431,16 +436,16 @@ async function removeMessage(m: TeamChatMessage) {
               <button v-if="canDelete(m)" type="button" class="rounded p-2 text-muted-foreground md:p-1 hover:bg-muted hover:text-destructive" :aria-label="t('teamChat.deleteMessage')" @click="removeMessage(m)">
                 <Trash2 class="h-3.5 w-3.5" />
               </button>
-            </div>
-            <div
-              v-if="pickerFor === m.id" role="menu" :data-testid="`picker-${m.id}`"
-              class="absolute right-2 top-full z-20 -mt-1 grid grid-cols-6 gap-0.5 rounded-md border bg-popover p-1 shadow-md"
-            >
-              <button
-                v-for="r in TEAM_CHAT_REACTIONS" :key="r.code" type="button" role="menuitem"
-                class="h-9 w-9 rounded text-lg hover:bg-muted md:h-8 md:w-8" :aria-label="t(`teamChat.reactions.${r.code}`)"
-                :data-testid="`pick-${m.id}-${r.code}`" @click="toggleReaction(m, r.code)"
-              >{{ r.glyph }}</button>
+              <div
+                v-if="pickerFor === m.id" role="menu" :data-testid="`picker-${m.id}`"
+                class="absolute right-0 top-full z-20 mt-1 grid grid-cols-6 gap-0.5 rounded-md border bg-popover p-1 shadow-md"
+              >
+                <button
+                  v-for="r in TEAM_CHAT_REACTIONS" :key="r.code" type="button" role="menuitem"
+                  class="h-9 w-9 rounded text-lg hover:bg-muted md:h-8 md:w-8" :aria-label="t(`teamChat.reactions.${r.code}`)"
+                  :data-testid="`pick-${m.id}-${r.code}`" @click="toggleReaction(m, r.code)"
+                >{{ r.glyph }}</button>
+              </div>
             </div>
           </article>
           </template>
