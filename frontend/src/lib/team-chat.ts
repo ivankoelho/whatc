@@ -49,6 +49,16 @@ export function pickTypingNames(ids: string[], names: Record<string, string>): s
   return ids.map(id => names[id]).filter((n): n is string => !!n)
 }
 
+/** The reaction palette: stable server codes and the glyph drawn for each. */
+export const TEAM_CHAT_REACTIONS = [
+  { code: 'thumbs_up', glyph: '👍' }, { code: 'heart', glyph: '❤️' }, { code: 'laugh', glyph: '😂' },
+  { code: 'wow', glyph: '😮' }, { code: 'sad', glyph: '😢' }, { code: 'pray', glyph: '🙏' },
+  { code: 'check', glyph: '✅' }, { code: 'eyes', glyph: '👀' }, { code: 'fire', glyph: '🔥' },
+  { code: 'party', glyph: '🎉' }, { code: 'thinking', glyph: '🤔' }, { code: 'clap', glyph: '👏' }
+] as const
+
+export const reactionGlyph = (code: string) => TEAM_CHAT_REACTIONS.find(r => r.code === code)?.glyph ?? '❔'
+
 /** The server's machine-readable reason for a refusal ("last_owner", "archived", ...). */
 export function chatErrorCode(err: unknown): string {
   return (err as { response?: { data?: { error_type?: string } } })?.response?.data?.error_type ?? ''

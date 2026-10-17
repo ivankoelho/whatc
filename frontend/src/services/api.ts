@@ -1140,6 +1140,24 @@ export interface TeamChatMessage {
   // meta holds the event and its parameters for the UI to translate.
   kind?: 'user' | 'system'
   meta?: Record<string, string>
+  // The quote of the message this one answers, and the emojis on it.
+  reply_to?: TeamChatReplyTo
+  reactions?: TeamChatReaction[]
+}
+
+export interface TeamChatReplyTo {
+  id: string
+  user_id?: string
+  user_name: string
+  snippet: string
+  deleted: boolean
+}
+
+export interface TeamChatReaction {
+  code: string
+  count: number
+  mine: boolean
+  names: string[]
 }
 
 export interface TeamChatMember {
@@ -1175,8 +1193,13 @@ export const teamChatService = {
   openDM: (userId: string) => api.post<TeamChatChannel>('/team-chat/dm', { user_id: userId }),
   messages: (channelId: string, params?: { before_id?: string; limit?: number }) =>
     api.get<{ messages: TeamChatMessage[]; has_more: boolean }>(`/team-chat/channels/${channelId}/messages`, { params }),
-  send: (channelId: string, body: string) =>
-    api.post<TeamChatMessage>(`/team-chat/channels/${channelId}/messages`, { body }),
+  send: (channelId: string, body: string, parentId?: string) =>
+    api.post<TeamChatMessage>(`/team-chat/channels/${channelId}/messages`, parentId ? { body, parent_id: parentId } : { body }),
+  message: (messageId: string) => api.get<TeamChatMessage>(`/team-chat/messages/${messageId}`),
+  react: (messageId: string, code: string) =>
+    api.put<{ reactions: TeamChatReaction[] }>(`/team-chat/messages/${messageId}/reactions/${code}`),
+  unreact: (messageId: string, code: string) =>
+    api.delete<{ reactions: TeamChatReaction[] }>(`/team-chat/messages/${messageId}/reactions/${code}`),
   edit: (messageId: string, body: string) =>
     api.put<TeamChatMessage>(`/team-chat/messages/${messageId}`, { body }),
   remove: (messageId: string) => api.delete(`/team-chat/messages/${messageId}`),

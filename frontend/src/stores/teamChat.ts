@@ -6,7 +6,8 @@ import {
   type TeamChatMessage,
   type TeamChatUser,
   type TeamChatMember,
-  type TeamChatAdminChannel
+  type TeamChatAdminChannel,
+  type TeamChatReaction
 } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import {
@@ -14,6 +15,7 @@ import {
   TEAM_CHAT_TYPING_MS,
   TEAM_CHAT_TYPING_THROTTLE_MS,
   appendUnique,
+  chatErrorCode,
   mergeLatest
 } from '@/lib/team-chat'
 
@@ -196,8 +198,24 @@ export const useTeamChatStore = defineStore('teamChat', () => {
     if (panels.value[id]?.error === null) await markRead(id)
   }
 
+  // The message being answered in the composer, per channel (switching channels keeps
+  // each one's own; sending or cancelling clears it).
+  const replyTargets = ref<Record<string, TeamChatMessage | null>>({})
+  const replyTarget = (id: string) => replyTargets.value[id] ?? null
+  function startReply(msg: TeamChatMessage) { replyTargets.value[msg.channel_id] = msg }
+  function cancelReply(id: string) { replyTargets.value[id] = null }
+
   async function send(id: string, body: string) {
-    const msg = unwrap<TeamChatMessage>(await teamChatService.send(id, body))
+    const parent = replyTarget(id)
+    let msg: TeamChatMessage
+    try {
+      msg = unwrap<TeamChatMessage>(parent ? await teamChatService.send(id, body, parent.id) : await teamChatService.send(id, body))
+    } catch (err) {
+      // The original disappeared meanwhile: drop the dead reply, keep the text.
+      if (parent && chatErrorCode(err) === 'reply_target_gone') cancelReply(id)
+      throw err
+    }
+    if (parent) cancelReply(id)
     const p = panel(id)
     p.messages = appendUnique(p.messages, msg)
     const ch = channels.value.find(c => c.id === id)
@@ -209,6 +227,29 @@ export const useTeamChatStore = defineStore('teamChat', () => {
     const updated = unwrap<TeamChatMessage>(await teamChatService.edit(msg.id, body))
     const p = panel(msg.channel_id)
     p.messages = p.messages.map(m => (m.id === updated.id ? updated : m))
+  }
+
+  function replaceMessage(updated: TeamChatMessage) {
+    const p = panels.value[updated.channel_id]
+    if (p) p.messages = p.messages.map(m => (m.id === updated.id ? updated : m))
+  }
+
+  /** Adds or removes the caller's reaction; the server answers with the message's reactions. */
+  async function react(msg: TeamChatMessage, code: string, add: boolean) {
+    const res = unwrap<{ reactions: TeamChatReaction[] }>(
+      add ? await teamChatService.react(msg.id, code) : await teamChatService.unreact(msg.id, code)
+    )
+    const p = panels.value[msg.channel_id]
+    const cur = p?.messages.find(m => m.id === msg.id)
+    if (cur) cur.reactions = res.reactions
+  }
+
+  async function refreshMessage(messageId: string) {
+    try {
+      replaceMessage(unwrap<TeamChatMessage>(await teamChatService.message(messageId)))
+    } catch {
+      /* gone or no longer visible: the next refresh drops it */
+    }
   }
 
   async function remove(msg: TeamChatMessage) {
@@ -391,6 +432,11 @@ export const useTeamChatStore = defineStore('teamChat', () => {
         }
         refreshChannelsSoon()
         break
+      case 'team_chat_message_reactions':
+        if (isActive && payload.message_id && panels.value[id]?.messages.some(m => m.id === payload.message_id)) {
+          void refreshMessage(payload.message_id)
+        } else if (!isActive) delete panels.value[id]
+        break
       case 'team_chat_message_updated':
       case 'team_chat_message_deleted':
         if (isActive) void refreshLatest(id)
@@ -425,7 +471,7 @@ export const useTeamChatStore = defineStore('teamChat', () => {
     archived, showArchived, members, adminChannels, adminLoading, adminError,
     activeChannel, activePanel, totalUnread, userNames, channelById,
     panel, fetchChannels, fetchUsers, selectChannel, loadMessages, loadOlder, refreshLatest,
-    markRead, send, edit, remove, createChannel, openDM, notifyTyping, typingUserIds,
+    markRead, send, edit, remove, replyTarget, startReply, cancelReply, react, createChannel, openDM, notifyTyping, typingUserIds,
     fetchArchived, setShowArchived, fetchMembers, fetchAdminChannels,
     addMember, removeMember, leaveChannel, setRole, renameChannel, archiveChannel, reopenChannel, joinChannel,
     applyPresence, applyEvent, resync

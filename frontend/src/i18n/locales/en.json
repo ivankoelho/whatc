@@ -399,6 +399,25 @@
     "editMessage": "Edit message",
     "editFailed": "Could not edit the message.",
     "deleteMessage": "Delete message",
+    "reply": "Reply",
+    "react": "React",
+    "replyingTo": "Replying to {name}",
+    "cancelReply": "Cancel reply",
+    "removedMessage": "Message removed",
+    "reactions": {
+      "thumbs_up": "Thumbs up",
+      "heart": "Heart",
+      "laugh": "Laughing",
+      "wow": "Surprised",
+      "sad": "Sad",
+      "pray": "Thank you",
+      "check": "Done",
+      "eyes": "Looking",
+      "fire": "Fire",
+      "party": "Celebrate",
+      "thinking": "Thinking",
+      "clap": "Applause"
+    },
     "confirmDelete": "Delete this message?",
     "deleteFailed": "Could not delete the message.",
     "sectionArchived": "Archived",
@@ -443,7 +462,10 @@
       "already_member": "This person is already in the channel.",
       "not_archived": "The channel is not archived.",
       "not_found": "The channel or the person was not found.",
-      "invalid": "Check the data and try again."
+      "invalid": "Check the data and try again.",
+      "reply_target_gone": "The message you are replying to is gone.",
+      "bad_reaction": "That reaction is not available.",
+      "too_many_reactions": "This message has too many different reactions."
     },
     "admin": {
       "title": "Channel administration",

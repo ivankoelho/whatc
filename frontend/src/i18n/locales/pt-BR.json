@@ -399,6 +399,25 @@
     "editMessage": "Editar mensagem",
     "editFailed": "Não foi possível editar a mensagem.",
     "deleteMessage": "Excluir mensagem",
+    "reply": "Responder",
+    "react": "Reagir",
+    "replyingTo": "Respondendo a {name}",
+    "cancelReply": "Cancelar resposta",
+    "removedMessage": "Mensagem removida",
+    "reactions": {
+      "thumbs_up": "Joinha",
+      "heart": "Coração",
+      "laugh": "Risada",
+      "wow": "Surpresa",
+      "sad": "Triste",
+      "pray": "Obrigado",
+      "check": "Feito",
+      "eyes": "Olhando",
+      "fire": "Fogo",
+      "party": "Comemorar",
+      "thinking": "Pensando",
+      "clap": "Palmas"
+    },
     "confirmDelete": "Excluir esta mensagem?",
     "deleteFailed": "Não foi possível excluir a mensagem.",
     "sectionArchived": "Arquivados",
@@ -443,7 +462,10 @@
       "already_member": "Esta pessoa já está no canal.",
       "not_archived": "O canal não está arquivado.",
       "not_found": "O canal ou a pessoa não foi encontrado.",
-      "invalid": "Confira os dados e tente novamente."
+      "invalid": "Confira os dados e tente novamente.",
+      "reply_target_gone": "A mensagem que você está respondendo não existe mais.",
+      "bad_reaction": "Essa reação não está disponível.",
+      "too_many_reactions": "Esta mensagem já tem reações diferentes demais."
     },
     "admin": {
       "title": "Administração de canais",

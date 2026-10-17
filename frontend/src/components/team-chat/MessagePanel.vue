@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowLeft, Check, Hash, Loader2, Lock, MessageSquare, Pencil, Send, Settings2, Trash2, Users, X } from 'lucide-vue-next'
+import { ArrowLeft, Check, CornerUpLeft, Hash, Loader2, Lock, MessageSquare, Pencil, Send, Settings2, SmilePlus, Trash2, Users, X } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
@@ -17,7 +17,7 @@ import { useTeamChatStore } from '@/stores/teamChat'
 import { useAuthStore } from '@/stores/auth'
 import { getAvatarGradient, getInitials } from '@/lib/utils'
 import { getErrorMessage } from '@/lib/api-utils'
-import { TEAM_CHAT_MAX_BODY, isSendableBody, pickTypingNames, systemEventKey } from '@/lib/team-chat'
+import { TEAM_CHAT_MAX_BODY, TEAM_CHAT_REACTIONS, chatErrorCode, isSendableBody, pickTypingNames, reactionGlyph, systemEventKey } from '@/lib/team-chat'
 import type { TeamChatMessage } from '@/services/api'
 
 const props = defineProps<{ channelId: string; showBack?: boolean }>()
@@ -55,6 +55,42 @@ const myId = computed(() => auth.user?.id)
 // Buttons mirror what the server allows; the server still decides.
 const canWrite = computed(() => auth.hasPermission('team_chat', 'write'))
 const canModerate = computed(() => auth.hasPermission('team_chat', 'delete'))
+// Reacting and replying are writes: the same people and the same unarchived channels as sending.
+const canInteract = computed(() => canWrite.value && !isArchived.value)
+
+const replyTo = computed(() => store.replyTarget(props.channelId))
+const pickerFor = ref<string | null>(null)
+const highlightId = ref<string | null>(null)
+
+function startReply(m: TeamChatMessage) {
+  store.startReply(m)
+  pickerFor.value = null
+  void nextTick(() => document.getElementById('team-chat-composer')?.focus())
+}
+
+async function toggleReaction(m: TeamChatMessage, code: string) {
+  pickerFor.value = null
+  const mine = !!m.reactions?.find(r => r.code === code)?.mine
+  try {
+    await store.react(m, code, !mine)
+  } catch (err) {
+    const c = chatErrorCode(err)
+    toast.error(t(['archived', 'forbidden', 'too_many_reactions', 'not_found'].includes(c) ? `teamChat.errors.${c}` : 'teamChat.errors.generic'))
+  }
+}
+
+// Scrolls to the quoted message when it is already loaded; otherwise does nothing
+// (loading history up to it is not worth a request storm).
+function goToMessage(id: string) {
+  const el = document.querySelector(`[data-testid="message-${id}"]`)
+  if (!el) return
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  highlightId.value = id
+  setTimeout(() => { if (highlightId.value === id) highlightId.value = null }, 1500)
+}
+
+const reactionTitle = (r: { names: string[]; count: number }) =>
+  r.names.join(', ') + (r.count > r.names.length ? ` +${r.count - r.names.length}` : '')
 
 const typingNames = computed(() => pickTypingNames(store.typingUserIds(props.channelId), store.userNames))
 const typingText = computed(() => {
@@ -93,6 +129,7 @@ onMounted(arm)
 onBeforeUnmount(() => scroll.cleanup())
 watch(() => props.channelId, () => {
   editingId.value = null
+  pickerFor.value = null
   draft.value = ''
   arm()
 })
@@ -122,7 +159,8 @@ async function submit() {
     scrollToBottom()
   } catch (err) {
     if (!draft.value) draft.value = body
-    toast.error(getErrorMessage(err, t('teamChat.sendFailed')))
+    if (chatErrorCode(err) === 'reply_target_gone') toast.error(t('teamChat.errors.reply_target_gone'))
+    else toast.error(getErrorMessage(err, t('teamChat.sendFailed')))
   } finally {
     inFlight--
     sending.value = inFlight > 0
@@ -130,6 +168,10 @@ async function submit() {
 }
 
 function onComposerKey(e: KeyboardEvent) {
+  if (e.key === 'Escape' && replyTo.value) {
+    store.cancelReply(props.channelId)
+    return
+  }
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
     e.preventDefault()
     void submit()
@@ -233,7 +275,7 @@ async function removeMessage(m: TeamChatMessage) {
           <article
             v-else
             :data-testid="`message-${m.id}`"
-            class="group flex items-start gap-3 rounded-md px-2 py-1.5 hover:bg-muted/50"
+            :class="['group relative flex items-start gap-3 rounded-md px-2 py-1.5 transition-colors hover:bg-muted/50', highlightId === m.id ? 'bg-primary/10' : '']"
           >
             <Avatar class="mt-0.5 h-8 w-8 shrink-0">
               <AvatarFallback :class="'bg-gradient-to-br text-[11px] text-white ' + getAvatarGradient(m.user_name)">
@@ -246,6 +288,15 @@ async function removeMessage(m: TeamChatMessage) {
                 <time class="text-[11px] text-muted-foreground" :datetime="m.created_at">{{ formatTime(m.created_at) }}</time>
                 <span v-if="m.edited_at" class="text-[11px] text-muted-foreground">{{ t('teamChat.edited') }}</span>
               </div>
+
+              <button
+                v-if="m.reply_to" type="button" :data-testid="`quote-${m.id}`"
+                class="mt-0.5 block w-full max-w-full truncate border-l-2 border-primary/50 bg-muted/60 px-2 py-0.5 text-left text-xs text-muted-foreground"
+                @click="goToMessage(m.reply_to.id)"
+              >
+                <template v-if="m.reply_to.deleted"><em>{{ t('teamChat.removedMessage') }}</em></template>
+                <template v-else><strong class="font-medium">{{ m.reply_to.user_name }}</strong> {{ m.reply_to.snippet }}</template>
+              </button>
 
               <div v-if="editingId === m.id" class="mt-1 space-y-2">
                 <Textarea
@@ -266,15 +317,45 @@ async function removeMessage(m: TeamChatMessage) {
               </div>
               <!-- Plain text, escaped by Vue; never v-html -->
               <p v-else class="whitespace-pre-wrap break-words text-sm">{{ m.body }}</p>
+
+              <div v-if="m.reactions?.length" class="mt-1 flex flex-wrap gap-1" :data-testid="`reactions-${m.id}`">
+                <component
+                  :is="canInteract ? 'button' : 'span'"
+                  v-for="r in m.reactions" :key="r.code"
+                  :type="canInteract ? 'button' : undefined"
+                  :data-testid="`reaction-${m.id}-${r.code}`"
+                  :aria-pressed="canInteract ? r.mine : undefined"
+                  :aria-label="t(`teamChat.reactions.${r.code}`) + ' ' + r.count"
+                  :title="reactionTitle(r)"
+                  :class="['inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs', r.mine ? 'border-primary bg-primary/10' : 'bg-background', canInteract ? 'hover:bg-muted' : '']"
+                  @click="canInteract && toggleReaction(m, r.code)"
+                >{{ reactionGlyph(r.code) }} {{ r.count }}</component>
+              </div>
             </div>
 
-            <div v-if="editingId !== m.id && (canEdit(m) || canDelete(m))" class="flex gap-0.5 transition-opacity md:opacity-0 md:focus-within:opacity-100 md:group-hover:opacity-100">
+            <div v-if="editingId !== m.id && (canInteract || canEdit(m) || canDelete(m))" class="flex gap-0.5 transition-opacity md:opacity-0 md:focus-within:opacity-100 md:group-hover:opacity-100" :class="pickerFor === m.id ? 'md:opacity-100' : ''">
+              <button v-if="canInteract" type="button" class="rounded p-2 text-muted-foreground md:p-1 hover:bg-muted hover:text-foreground" :aria-label="t('teamChat.react')" @click="pickerFor = pickerFor === m.id ? null : m.id">
+                <SmilePlus class="h-3.5 w-3.5" />
+              </button>
+              <button v-if="canInteract" type="button" class="rounded p-2 text-muted-foreground md:p-1 hover:bg-muted hover:text-foreground" :aria-label="t('teamChat.reply')" @click="startReply(m)">
+                <CornerUpLeft class="h-3.5 w-3.5" />
+              </button>
               <button v-if="canEdit(m)" type="button" class="rounded p-2 text-muted-foreground md:p-1 hover:bg-muted hover:text-foreground" :aria-label="t('teamChat.editMessage')" @click="startEdit(m)">
                 <Pencil class="h-3.5 w-3.5" />
               </button>
               <button v-if="canDelete(m)" type="button" class="rounded p-2 text-muted-foreground md:p-1 hover:bg-muted hover:text-destructive" :aria-label="t('teamChat.deleteMessage')" @click="removeMessage(m)">
                 <Trash2 class="h-3.5 w-3.5" />
               </button>
+            </div>
+            <div
+              v-if="pickerFor === m.id" role="menu" :data-testid="`picker-${m.id}`"
+              class="absolute right-2 top-full z-20 -mt-1 grid grid-cols-6 gap-0.5 rounded-md border bg-popover p-1 shadow-md"
+            >
+              <button
+                v-for="r in TEAM_CHAT_REACTIONS" :key="r.code" type="button" role="menuitem"
+                class="h-9 w-9 rounded text-lg hover:bg-muted md:h-8 md:w-8" :aria-label="t(`teamChat.reactions.${r.code}`)"
+                :data-testid="`pick-${m.id}-${r.code}`" @click="toggleReaction(m, r.code)"
+              >{{ r.glyph }}</button>
             </div>
           </article>
           </template>
@@ -285,8 +366,16 @@ async function removeMessage(m: TeamChatMessage) {
       <footer class="border-t p-3">
         <p class="h-4 px-1 text-xs text-muted-foreground" aria-live="polite">{{ typingText }}</p>
         <p v-if="isArchived" class="px-1 text-sm text-muted-foreground">{{ t('teamChat.manage.archivedNotice') }}</p>
-        <form v-else-if="canWrite" class="flex items-end gap-2" @submit.prevent="submit">
+        <div v-if="!isArchived && canWrite && replyTo" class="mb-2 flex items-center gap-2 rounded-md border-l-2 border-primary/50 bg-muted/60 px-2 py-1 text-xs" data-testid="reply-bar">
+          <CornerUpLeft class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <span class="min-w-0 flex-1 truncate">{{ t('teamChat.replyingTo', { name: replyTo.user_name }) }}: {{ replyTo.body }}</span>
+          <button type="button" class="rounded p-1.5 text-muted-foreground hover:bg-muted" :aria-label="t('teamChat.cancelReply')" @click="store.cancelReply(channelId)">
+            <X class="h-3.5 w-3.5" />
+          </button>
+        </div>
+        <form v-if="!isArchived && canWrite" class="flex items-end gap-2" @submit.prevent="submit">
           <Textarea
+            id="team-chat-composer"
             v-model="draft"
             class="max-h-40 min-h-[40px] flex-1 resize-none text-sm"
             :rows="1"
@@ -301,7 +390,7 @@ async function removeMessage(m: TeamChatMessage) {
             <Send v-else class="h-4 w-4" />
           </Button>
         </form>
-        <p v-else class="px-1 text-sm text-muted-foreground">{{ t('teamChat.readOnly') }}</p>
+        <p v-else-if="!isArchived" class="px-1 text-sm text-muted-foreground">{{ t('teamChat.readOnly') }}</p>
         <p v-if="overLimit" class="mt-1 px-1 text-xs text-destructive">{{ t('teamChat.tooLong', { max: TEAM_CHAT_MAX_BODY }) }}</p>
       </footer>
     </template>
