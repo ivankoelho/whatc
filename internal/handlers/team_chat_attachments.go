@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/middleware"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -76,13 +77,9 @@ func (a *App) chatUploadAllowed(userID uuid.UUID) bool {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	key := "ratelimit:chat_upload:" + userID.String()
-	n, err := a.Redis.Incr(ctx, key).Result()
+	n, err := middleware.IncrWindow(ctx, a.Redis, "ratelimit:chat_upload:"+userID.String(), time.Minute)
 	if err != nil {
 		return true
-	}
-	if n == 1 {
-		a.Redis.Expire(ctx, key, time.Minute)
 	}
 	return n <= int64(chatUploadsPerMinute)
 }

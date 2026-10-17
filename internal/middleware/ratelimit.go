@@ -14,6 +14,23 @@ import (
 	"github.com/zerodha/logf"
 )
 
+// incrWindowScript counts one hit in a fixed window ATOMICALLY: the increment and the
+// expiry happen in one Redis step, and a counter that somehow has no expiry (a crash
+// between a separate INCR and EXPIRE used to leave it that way) gets one again, so a key
+// can never stay over the limit forever.
+var incrWindowScript = redis.NewScript(`
+local n = redis.call('INCR', KEYS[1])
+if n == 1 or redis.call('PTTL', KEYS[1]) < 0 then
+  redis.call('PEXPIRE', KEYS[1], ARGV[1])
+end
+return n
+`)
+
+// IncrWindow adds one hit to key and returns the count inside the current window.
+func IncrWindow(ctx context.Context, rdb *redis.Client, key string, window time.Duration) (int64, error) {
+	return incrWindowScript.Run(ctx, rdb, []string{key}, window.Milliseconds()).Int64()
+}
+
 // RateLimitOpts configures the rate limit middleware.
 type RateLimitOpts struct {
 	Redis      *redis.Client
@@ -58,18 +75,11 @@ func enforce(opts RateLimitOpts, r *fastglue.Request, key string) *fastglue.Requ
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	count, err := opts.Redis.Incr(ctx, key).Result()
+	count, err := IncrWindow(ctx, opts.Redis, key, opts.Window)
 	if err != nil {
 		// Fail open — log and allow request.
 		opts.Log.Error("Rate limit Redis INCR failed", "error", err, "key", key)
 		return r
-	}
-
-	// Set expiry on first increment (new window).
-	if count == 1 {
-		if err := opts.Redis.Expire(ctx, key, opts.Window).Err(); err != nil {
-			opts.Log.Error("Rate limit Redis EXPIRE failed", "error", err, "key", key)
-		}
 	}
 
 	if count > int64(opts.Max) {
