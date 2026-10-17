@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"errors"
 	"context"
 	"archive/zip"
 	"bytes"
@@ -27,6 +28,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fasthttp"
+	"github.com/zerodha/logf"
 	"github.com/zerodha/fastglue"
 	"gorm.io/gorm"
 )
@@ -1210,4 +1212,107 @@ func TestAttachments_CleanupRunsAtStartup(t *testing.T) {
 	}, 5*time.Second, 50*time.Millisecond, "the first pass runs at once, not an hour later")
 	cancel()
 	<-done
+}
+
+// BLOCKING (review finding 1): the orphan sweep deletes a file when the table has no row for
+// it. If the lookup itself FAILS (database down, timeout), "no row" means nothing, and the
+// pass used to delete every old attachment file. A failed lookup must leave its batch alone.
+func TestAttachments_OrphanSweepNeverDeletesWhenTheLookupFails(t *testing.T) {
+	f := newPhaseA(t)
+	dir := f.withStorage(t)
+	f.app.CleanupChatAttachments(time.Now()) // leftovers of earlier runs, before anything is injected
+
+	live := f.msg(t, f.ch, f.owner, "keeps its files")
+	old := time.Now().Add(-72 * time.Hour)
+	folder := filepath.Join(dir, "team-chat", f.org.ID.String(), f.ch.ID.String())
+	require.NoError(t, os.MkdirAll(folder, 0o755))
+	write := func(name string) string {
+		p := filepath.Join(folder, name)
+		require.NoError(t, os.WriteFile(p, []byte("x"), 0o644))
+		require.NoError(t, os.Chtimes(p, old, old))
+		return p
+	}
+
+	// 1200 legitimate files (three batches of the sweep), every one with a row.
+	const legit = 1200
+	rows := make([]models.ChatAttachment, legit)
+	legitPaths := make([]string, legit)
+	for i := range rows {
+		id := uuid.New()
+		legitPaths[i] = write(id.String() + ".txt")
+		rows[i] = models.ChatAttachment{ID: id, OrganizationID: f.org.ID, ChannelID: f.ch.ID, UploaderID: f.member.ID,
+			MessageID: &live.ID, Kind: "file", Name: "a.txt", Mime: "text/plain", SizeBytes: 1, SHA256: "x",
+			StoragePath: filepath.Join("team-chat", f.org.ID.String(), f.ch.ID.String(), id.String()+".txt")}
+	}
+	require.NoError(t, f.app.DB.CreateInBatches(&rows, 200).Error)
+	// ...plus real orphans (no row) and an interrupted upload's temp file.
+	orphans := []string{write(uuid.New().String() + ".png"), write(uuid.New().String() + ".png"), write(uuid.New().String() + ".png"), write(".upload-leftover")}
+
+	remaining := func(paths []string) int {
+		n := 0
+		for _, p := range paths {
+			if _, err := os.Stat(p); err == nil {
+				n++
+			}
+		}
+		return n
+	}
+
+	// The failure is injected on the lookup only (the query that asks which ids have a row).
+	var failFrom, failTo, lookups int64 // fail lookups numbered failFrom..failTo
+	injected := errors.New("injected: connection reset by peer")
+	const cbName = "inject_orphan_lookup_failure"
+	require.NoError(t, f.app.DB.Callback().Query().After("gorm:query").Register(cbName, func(tx *gorm.DB) {
+		if tx.Statement.Table != "chat_attachments" || !strings.Contains(tx.Statement.SQL.String(), "WHERE id IN") {
+			return
+		}
+		n := atomic.AddInt64(&lookups, 1)
+		if n >= atomic.LoadInt64(&failFrom) && n <= atomic.LoadInt64(&failTo) {
+			tx.AddError(injected)
+		}
+	}))
+	defer f.app.DB.Callback().Query().Remove(cbName)
+
+	var logs bytes.Buffer
+	origLog := f.app.Log
+	f.app.Log = logf.New(logf.Opts{Writer: &logs, Level: logf.ErrorLevel})
+	defer func() { f.app.Log = origLog }()
+
+	t.Run("every lookup fails: not one file is removed, and the error is logged with context", func(t *testing.T) {
+		atomic.StoreInt64(&lookups, 0)
+		atomic.StoreInt64(&failFrom, 1)
+		atomic.StoreInt64(&failTo, 1<<30)
+		res := f.app.CleanupChatAttachments(time.Now())
+		assert.Zero(t, res.Orphans, "the pass reports nothing removed")
+		assert.Equal(t, legit, remaining(legitPaths), "no legitimate file was touched")
+		assert.Equal(t, len(orphans), remaining(orphans), "nothing at all was removed, orphans included: the batch was abandoned")
+		out := logs.String()
+		assert.Contains(t, out, "lookup failed, batch left untouched")
+		assert.Contains(t, out, "injected: connection reset by peer", "the cause is in the log")
+		assert.Contains(t, out, "files_in_batch", "and how big the batch was")
+		assert.Contains(t, out, "first_file", "and where to look")
+		assert.GreaterOrEqual(t, strings.Count(out, "lookup failed"), 3, "one line per abandoned batch (three batches)")
+	})
+
+	t.Run("one batch fails: it is left alone, the others run normally, nothing is wiped", func(t *testing.T) {
+		logs.Reset()
+		atomic.StoreInt64(&lookups, 0)
+		atomic.StoreInt64(&failFrom, 2)
+		atomic.StoreInt64(&failTo, 2)
+		res := f.app.CleanupChatAttachments(time.Now())
+		assert.Equal(t, legit, remaining(legitPaths), "a failure in one batch never turns into a cleanup of everything")
+		assert.LessOrEqual(t, res.Orphans, len(orphans))
+		assert.Equal(t, 1, strings.Count(logs.String(), "lookup failed"), "exactly the one failing batch is reported")
+		assert.Equal(t, len(orphans)-res.Orphans, remaining(orphans), "orphans in the failed batch are still there")
+	})
+
+	t.Run("when the database answers again, the next pass finishes the job and still touches no legitimate file", func(t *testing.T) {
+		logs.Reset()
+		atomic.StoreInt64(&failFrom, 0)
+		atomic.StoreInt64(&failTo, -1)
+		f.app.CleanupChatAttachments(time.Now())
+		assert.Equal(t, legit, remaining(legitPaths))
+		assert.Zero(t, remaining(orphans), "every real orphan and the temp file are gone now")
+		assert.NotContains(t, logs.String(), "lookup failed")
+	})
 }

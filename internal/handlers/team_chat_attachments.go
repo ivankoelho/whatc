@@ -574,7 +574,15 @@ func (a *App) CleanupChatAttachments(now time.Time) ChatCleanupResult {
 		known := map[uuid.UUID]bool{}
 		if len(ids) > 0 {
 			var found []uuid.UUID
-			a.DB.Model(&models.ChatAttachment{}).Where("id IN ?", ids).Pluck("id", &found)
+			// "No row" is only believed when the lookup SUCCEEDED. If it failed (database down, timeout,
+			// pool exhausted) every file would look like an orphan and be deleted, so the whole batch is
+			// left alone, with the context needed to diagnose it, and picked up by the next pass.
+			if err := a.DB.Model(&models.ChatAttachment{}).Where("id IN ?", ids).Pluck("id", &found).Error; err != nil {
+				a.Log.Error("Chat attachment orphan sweep: lookup failed, batch left untouched",
+					"error", err, "files_in_batch", len(pendingFiles), "ids_looked_up", len(ids), "first_file", pendingFiles[0].path)
+				pendingFiles = pendingFiles[:0]
+				return
+			}
 			for _, id := range found {
 				known[id] = true
 			}
