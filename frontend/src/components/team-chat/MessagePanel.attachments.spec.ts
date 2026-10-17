@@ -21,7 +21,7 @@ vi.mock('@/stores/auth', () => ({
 
 import MessagePanel from './MessagePanel.vue'
 import { useTeamChatStore } from '@/stores/teamChat'
-import { checkAttachmentFile, TEAM_CHAT_MAX_FILE_BYTES } from '@/lib/team-chat'
+import { checkAttachmentFile, TEAM_CHAT_ACCEPT, TEAM_CHAT_MAX_FILE_BYTES } from '@/lib/team-chat'
 
 const ScrollArea = { template: '<div><slot /></div>' }
 const ManageStub = { props: ['open', 'channelId'], template: '<div />' }
@@ -190,7 +190,7 @@ describe('the upload queue', () => {
 
   it('a failed send keeps the files and the text for another try', async () => {
     api.uploadAttachment.mockReturnValue(ok(att('a1', 'file', 'a.pdf')))
-    api.send.mockImplementationOnce(() => fail(400, 'attachment_gone')).mockReturnValueOnce(ok(msg('m1', 'me', 'oi')))
+    api.send.mockImplementationOnce(() => fail(503, 'storage_unavailable')).mockReturnValueOnce(ok(msg('m1', 'me', 'oi')))
     const { store, wrapper } = render()
     await store.fetchChannels()
     await flushPromises()
@@ -198,7 +198,7 @@ describe('the upload queue', () => {
     await wrapper.get('textarea').setValue('oi')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
-    expect(toast.error).toHaveBeenCalledWith(en.teamChat.errors.attachment_gone)
+    expect(toast.error).toHaveBeenCalledWith(en.teamChat.errors.storage_unavailable)
     expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('oi')
     expect(wrapper.findAll('[data-testid="attachment-queue"] li')).toHaveLength(1)
   })
@@ -231,7 +231,7 @@ describe('the upload queue', () => {
     await flushPromises()
     const pasted = file('shot.png', 10, 'image/png')
     const ev = new Event('paste', { bubbles: true, cancelable: true }) as Event & { clipboardData: unknown }
-    ev.clipboardData = { files: [pasted] }
+    ev.clipboardData = { files: [pasted], getData: () => '' }
     wrapper.get('textarea').element.dispatchEvent(ev)
     await flushPromises()
     expect(ev.defaultPrevented).toBe(true)
@@ -267,6 +267,173 @@ describe('the upload queue', () => {
     expect(b.wrapper.find('[data-testid="file-input"]').exists()).toBe(false)
     expect(b.wrapper.text()).toContain(en.teamChat.manage.archivedNotice)
     expect(b.wrapper.text()).not.toContain(en.teamChat.readOnly)
+  })
+})
+
+describe('paste', () => {
+  const paste = (w: ReturnType<typeof render>['wrapper'], files: File[], text: string) => {
+    const ev = new Event('paste', { bubbles: true, cancelable: true }) as Event & { clipboardData: unknown }
+    ev.clipboardData = { files, getData: (t: string) => (t === 'text/plain' ? text : '') }
+    w.get('textarea').element.dispatchEvent(ev)
+    return ev
+  }
+
+  it('keeps the text and attaches the picture when the clipboard has both (Excel, Word)', async () => {
+    api.uploadAttachment.mockReturnValue(ok(att('a1', 'image', 'image.png')))
+    const { store, wrapper } = render()
+    await store.fetchChannels()
+    await flushPromises()
+    const ev = paste(wrapper, [file('image.png', 10, 'image/png')], 'a\tb\n1\t2')
+    await flushPromises()
+    expect(ev.defaultPrevented).toBe(false) // the browser still pastes the text
+    expect(api.uploadAttachment).toHaveBeenCalledTimes(1)
+    expect(wrapper.findAll('[data-testid="attachment-queue"] li')).toHaveLength(1)
+  })
+
+  it('takes over only a clipboard that is files and nothing else', async () => {
+    api.uploadAttachment.mockReturnValue(ok(att('a1', 'image', 'shot.png')))
+    const { store, wrapper } = render()
+    await store.fetchChannels()
+    await flushPromises()
+    const ev = paste(wrapper, [file('shot.png', 10, 'image/png')], '')
+    await flushPromises()
+    expect(ev.defaultPrevented).toBe(true)
+    expect(api.uploadAttachment).toHaveBeenCalledTimes(1)
+  })
+
+  it('a text-only paste is left alone', async () => {
+    const { store, wrapper } = render()
+    await store.fetchChannels()
+    await flushPromises()
+    const ev = paste(wrapper, [], 'just text')
+    expect(ev.defaultPrevented).toBe(false)
+    expect(api.uploadAttachment).not.toHaveBeenCalled()
+  })
+})
+
+describe('one format matrix for client and server', () => {
+  it('the paperclip does not offer m4a or webm (the server takes them only from the recorder)', async () => {
+    expect(TEAM_CHAT_ACCEPT.split(',')).not.toContain('.m4a')
+    expect(TEAM_CHAT_ACCEPT.split(',')).not.toContain('.webm')
+    expect(checkAttachmentFile({ name: 'nota.m4a', size: 10 }, 0)).toBe('file_type_not_allowed')
+    expect(checkAttachmentFile({ name: 'clip.webm', size: 10 }, 0)).toBe('file_type_not_allowed')
+    const { store, wrapper } = render()
+    await store.fetchChannels()
+    await flushPromises()
+    await pick(wrapper, [file('nota.m4a', 100)])
+    expect(api.uploadAttachment).not.toHaveBeenCalled() // refused before a byte is sent
+    expect(toast.error).toHaveBeenCalledWith('nota.m4a: ' + en.teamChat.errors.file_type_not_allowed)
+  })
+
+  it('if the server still says 415, the card shows the reason and can be removed', async () => {
+    api.uploadAttachment.mockImplementation(() => fail(415, 'file_type_not_allowed'))
+    const { store, wrapper } = render()
+    await store.fetchChannels()
+    await flushPromises()
+    await pick(wrapper, [file('odd.csv', 100)])
+    expect(wrapper.get('[data-testid="attachment-queue"] li').text()).toContain(en.teamChat.errors.file_type_not_allowed)
+    await wrapper.get('[aria-label="Remove odd.csv"]').trigger('click')
+    expect(wrapper.find('[data-testid="attachment-queue"]').exists()).toBe(false)
+  })
+})
+
+describe('expired attachments', () => {
+  const readyQueue = async (n = 2) => {
+    api.uploadAttachment.mockImplementation((_c: string, f: File) => ok(att('id-' + f.name, 'file', f.name)))
+    const r = render()
+    await r.store.fetchChannels()
+    await flushPromises()
+    await pick(r.wrapper, Array.from({ length: n }, (_, i) => file('f' + i + '.pdf')))
+    return r
+  }
+
+  it('a ready file older than the server grace is dropped before sending, with no request', async () => {
+    const { store, wrapper } = await readyQueue(1)
+    store.uploadsFor('c1')[0].readyAt = Date.now() - 56 * 60 * 1000
+    await wrapper.get('textarea').setValue('oi')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(api.send).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalledWith(en.teamChat.errors.attachment_gone)
+    expect(store.uploadsFor('c1')).toHaveLength(0)
+    expect(wrapper.find('[data-testid="attachment-queue"]').exists()).toBe(false)
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('oi')
+  })
+
+  it('stale files are also dropped when the conversation is opened again', async () => {
+    const { store, wrapper } = await readyQueue(1)
+    store.uploadsFor('c1')[0].readyAt = Date.now() - 2 * 60 * 60 * 1000
+    await wrapper.setProps({ channelId: 'c2' })
+    await wrapper.setProps({ channelId: 'c1' })
+    await flushPromises()
+    expect(store.uploadsFor('c1')).toHaveLength(0)
+    expect(toast.error).toHaveBeenCalledWith(en.teamChat.errors.attachment_gone)
+  })
+
+  it('when the server names the missing ids, only those leave the queue; the others stay ready', async () => {
+    api.send.mockImplementationOnce(() => Promise.reject({
+      response: { status: 400, data: { error_type: 'attachment_gone', data: { attachment_ids: ['id-f0.pdf'] } } }
+    }))
+    const { store, wrapper } = await readyQueue(2)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    const left = store.uploadsFor('c1')
+    expect(left.map(u => u.name)).toEqual(['f1.pdf'])
+    expect(left[0].status).toBe('ready')
+    expect(wrapper.findAll('[data-testid="attachment-queue"] li')).toHaveLength(1)
+    expect(toast.error).toHaveBeenCalledWith(en.teamChat.errors.attachment_gone)
+  })
+
+  it('when the server cannot say which, every ready file is dropped (none is shown as ready)', async () => {
+    api.send.mockImplementationOnce(() => fail(400, 'attachment_gone'))
+    const { store, wrapper } = await readyQueue(2)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(store.uploadsFor('c1')).toHaveLength(0)
+    expect(wrapper.find('[data-testid="attachment-queue"]').exists()).toBe(false)
+  })
+
+  it('a file still uploading is not touched by an expiry', async () => {
+    api.uploadAttachment.mockImplementation(() => new Promise(() => undefined))
+    const { store, wrapper } = render()
+    await store.fetchChannels()
+    await flushPromises()
+    await pick(wrapper, [file('slow.pdf')])
+    expect(store.expireStaleUploads('c1', Date.now() + 10 * 60 * 60 * 1000)).toHaveLength(0)
+    expect(store.uploadsFor('c1')).toHaveLength(1)
+  })
+})
+
+describe('plain HTTP (no crypto.randomUUID)', () => {
+  it.each([
+    ['getRandomValues only', { getRandomValues: (a: Uint8Array) => a.map((_, i) => i * 7) }],
+    ['no crypto at all', undefined]
+  ])('attaches and sends with %s', async (_n, fake) => {
+    vi.stubGlobal('crypto', fake)
+    Object.defineProperty(window, 'isSecureContext', { value: false, configurable: true })
+    api.uploadAttachment.mockReturnValue(ok(att('a1', 'file', 'c.pdf')))
+    api.send.mockReturnValue(ok(msg('m1', 'me', 'oi')))
+    const { store, wrapper } = render()
+    await store.fetchChannels()
+    await flushPromises()
+    await pick(wrapper, [file('c.pdf')])
+    expect(wrapper.get('[data-testid="attachment-queue"] li').attributes('data-status')).toBe('ready')
+    await wrapper.get('textarea').setValue('oi')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(api.send).toHaveBeenCalledWith('c1', 'oi', undefined, ['a1'])
+    Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true })
+  })
+
+  it('two queued files get different keys', async () => {
+    vi.stubGlobal('crypto', undefined)
+    api.uploadAttachment.mockImplementation(() => new Promise(() => undefined))
+    const { store, wrapper } = render()
+    await store.fetchChannels()
+    await flushPromises()
+    await pick(wrapper, [file('a.pdf'), file('b.pdf')])
+    const keys = store.uploadsFor('c1').map(u => u.key)
+    expect(new Set(keys).size).toBe(2)
   })
 })
 
@@ -499,6 +666,62 @@ describe('voice notes', () => {
     await flushPromises()
     expect(trackStop).toHaveBeenCalled()
     expect(toast.info).toHaveBeenCalledWith(en.teamChat.recorder.cancelledOnSwitch)
+  })
+
+  it('a second click while the permission prompt is open does not open a second stream', async () => {
+    let grant!: (s: unknown) => void
+    getUserMedia.mockReturnValue(new Promise(r => { grant = r }))
+    const { store, wrapper } = render()
+    await store.fetchChannels()
+    await flushPromises()
+    await wrapper.get('[data-testid="record-button"]').trigger('click')
+    await wrapper.get('[data-testid="record-button"]').trigger('click')
+    await wrapper.get('[data-testid="record-button"]').trigger('click')
+    expect(getUserMedia).toHaveBeenCalledTimes(1)
+    grant({ getTracks: () => [{ stop: trackStop }] })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="audio-recorder"]').exists()).toBe(true)
+    await wrapper.get('[aria-label="Cancel recording"]').trigger('click')
+    expect(trackStop).toHaveBeenCalledTimes(1)
+  })
+
+  it('unmounting while the prompt is open: the late stream is stopped, nothing records', async () => {
+    let grant!: (s: unknown) => void
+    getUserMedia.mockReturnValue(new Promise(r => { grant = r }))
+    const { store, wrapper } = render()
+    await store.fetchChannels()
+    await flushPromises()
+    await wrapper.get('[data-testid="record-button"]').trigger('click')
+    wrapper.unmount()
+    grant({ getTracks: () => [{ stop: trackStop }] })
+    await flushPromises()
+    expect(trackStop).toHaveBeenCalledTimes(1)
+  })
+
+  it('changing conversation while the prompt is open: the late stream is stopped too', async () => {
+    let grant!: (s: unknown) => void
+    getUserMedia.mockReturnValue(new Promise(r => { grant = r }))
+    const { store, wrapper } = render()
+    await store.fetchChannels()
+    await flushPromises()
+    await wrapper.get('[data-testid="record-button"]').trigger('click')
+    await wrapper.setProps({ channelId: 'c2' })
+    grant({ getTracks: () => [{ stop: trackStop }] })
+    await flushPromises()
+    expect(trackStop).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-testid="audio-recorder"]').exists()).toBe(false)
+    expect(toast.info).not.toHaveBeenCalled() // nothing was recording yet, so nothing to announce
+  })
+
+  it('after a refused prompt the button works again', async () => {
+    const { store, wrapper } = render()
+    await store.fetchChannels()
+    await flushPromises()
+    getUserMedia.mockRejectedValueOnce(Object.assign(new Error('x'), { name: 'NotAllowedError' }))
+    await start(wrapper)
+    await start(wrapper)
+    expect(getUserMedia).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[data-testid="audio-recorder"]').exists()).toBe(true)
   })
 
   it('without MediaRecorder or a secure context there is no microphone button', async () => {

@@ -15,10 +15,12 @@ import {
   TEAM_CHAT_PAGE_SIZE,
   TEAM_CHAT_TYPING_MS,
   TEAM_CHAT_TYPING_THROTTLE_MS,
+  TEAM_CHAT_PENDING_TTL_MS,
   appendUnique,
   checkAttachmentFile,
   chatErrorCode,
-  mergeLatest
+  mergeLatest,
+  newUploadKey
 } from '@/lib/team-chat'
 
 // 'forbidden' covers both "does not exist" and "not yours": the server answers
@@ -31,6 +33,7 @@ export interface UploadItem {
   status: 'queued' | 'uploading' | 'ready' | 'failed'
   progress: number
   attachmentId?: string
+  readyAt?: number
   error?: string
 }
 
@@ -236,7 +239,7 @@ export const useTeamChatStore = defineStore('teamChat', () => {
         refused.push({ name: file.name, code })
         continue
       }
-      const key = crypto.randomUUID()
+      const key = newUploadKey()
       blobs.set(key, { file, audioMs })
       uploads.value[channelId] = [...uploadsFor(channelId), {
         key, name: file.name, size: file.size, status: 'queued', progress: 0,
@@ -265,6 +268,7 @@ export const useTeamChatStore = defineStore('teamChat', () => {
           }))
           item.attachmentId = att.id
           item.progress = 100
+          item.readyAt = Date.now()
           item.status = 'ready'
         } catch (err) {
           // A cancel removed the item already; anything else is a failure the user can retry.
@@ -297,6 +301,23 @@ export const useTeamChatStore = defineStore('teamChat', () => {
     if (item.attachmentId) void teamChatService.discardAttachment(channelId, item.attachmentId).catch(() => undefined)
   }
 
+  /** Drops queue items and frees their files (the server side is already gone or being discarded). */
+  function dropUploads(channelId: string, drop: (u: UploadItem) => boolean): UploadItem[] {
+    const dropped = uploadsFor(channelId).filter(drop)
+    if (dropped.length === 0) return []
+    for (const u of dropped) {
+      blobs.get(u.key)?.abort?.abort()
+      blobs.delete(u.key)
+    }
+    uploads.value[channelId] = uploadsFor(channelId).filter(u => !drop(u))
+    return dropped
+  }
+
+  /** Removes ready files older than the server's grace period, so the UI never offers a dead attachment. */
+  function expireStaleUploads(channelId: string, now = Date.now()): UploadItem[] {
+    return dropUploads(channelId, u => u.status === 'ready' && now - (u.readyAt ?? now) > TEAM_CHAT_PENDING_TTL_MS)
+  }
+
   function clearUploads(channelId: string) {
     for (const u of uploadsFor(channelId)) blobs.delete(u.key)
     uploads.value[channelId] = []
@@ -315,6 +336,10 @@ export const useTeamChatStore = defineStore('teamChat', () => {
 
   async function send(id: string, body: string, attachmentIds?: string[]) {
     const parent = replyTarget(id)
+    if (!attachmentIds && expireStaleUploads(id).length) {
+      // Same error the server would give, raised before a request that is bound to fail.
+      throw { response: { status: 400, data: { error_type: 'attachment_gone' } } }
+    }
     const ids = attachmentIds ?? uploadsFor(id).map(u => u.attachmentId).filter((x): x is string => !!x)
     let msg: TeamChatMessage
     try {
@@ -325,6 +350,12 @@ export const useTeamChatStore = defineStore('teamChat', () => {
     } catch (err) {
       // The original disappeared meanwhile: drop the dead reply, keep the text.
       if (parent && chatErrorCode(err) === 'reply_target_gone') cancelReply(id)
+      // A file is gone on the server: take exactly those out of the queue (all ready ones when
+      // the server could not say which), free them, and let the caller tell the user.
+      if (!attachmentIds && chatErrorCode(err) === 'attachment_gone') {
+        const named = (err as { response?: { data?: { data?: { attachment_ids?: string[] } } } }).response?.data?.data?.attachment_ids
+        dropUploads(id, u => u.status === 'ready' && (!Array.isArray(named) || (!!u.attachmentId && named.includes(u.attachmentId))))
+      }
       throw err
     }
     if (parent) cancelReply(id)
@@ -584,7 +615,7 @@ export const useTeamChatStore = defineStore('teamChat', () => {
     archived, showArchived, members, adminChannels, adminLoading, adminError,
     activeChannel, activePanel, totalUnread, userNames, channelById,
     panel, fetchChannels, fetchUsers, selectChannel, loadMessages, loadOlder, refreshLatest,
-    markRead, send, sendVoice, uploads, uploadsFor, uploadsReady, addFiles, retryUpload, cancelUpload, edit, remove, replyTarget, startReply, cancelReply, react, createChannel, openDM, notifyTyping, typingUserIds,
+    markRead, send, sendVoice, uploads, uploadsFor, uploadsReady, expireStaleUploads, addFiles, retryUpload, cancelUpload, edit, remove, replyTarget, startReply, cancelReply, react, createChannel, openDM, notifyTyping, typingUserIds,
     fetchArchived, setShowArchived, fetchMembers, fetchAdminChannels,
     addMember, removeMember, leaveChannel, setRole, renameChannel, archiveChannel, reopenChannel, joinChannel,
     applyPresence, applyEvent, resync

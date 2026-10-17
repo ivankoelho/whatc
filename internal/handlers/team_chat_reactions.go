@@ -209,6 +209,10 @@ func (a *App) changeChatReaction(r *fastglue.Request, add bool) error {
 			return tx.Where("message_id = ? AND user_id = ? AND code = ?", msg.ID, userID, code).
 				Delete(&models.ChatMessageReaction{}).Error
 		}
+		// Serialize reactors of this message: the 20-kinds cap is check-then-insert.
+		if err := lockChatKey(tx, "chat_react:"+msg.ID.String()); err != nil {
+			return err
+		}
 		var kinds int64
 		tx.Model(&models.ChatMessageReaction{}).Where("message_id = ?", msg.ID).Distinct("code").Count(&kinds)
 		var same int64

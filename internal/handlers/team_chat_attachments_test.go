@@ -607,6 +607,8 @@ func TestAttachments_UploadRateLimit(t *testing.T) {
 func TestAttachments_Cleanup(t *testing.T) {
 	f := newPhaseA(t)
 	dir := f.withStorage(t)
+	// The test database outlives runs: rows left by earlier ones are old enough to be swept.
+	require.NoError(t, f.app.DB.Where("1 = 1").Delete(&models.ChatAttachment{}).Error)
 	now := time.Now()
 	age := func(id uuid.UUID, d time.Duration) {
 		require.NoError(t, f.app.DB.Model(&models.ChatAttachment{}).Where("id = ?", id).Update("created_at", now.Add(-d)).Error)
@@ -898,4 +900,151 @@ func downloadSafe(f *phaseA, u *models.User, id uuid.UUID) int {
 	}
 	_ = ctx.Response.Body()
 	return ctx.Response.StatusCode()
+}
+
+// uploadSafe is upload for goroutines: it never calls t.FailNow and returns the status.
+func (f *phaseA) uploadSafe(u *models.User, ch *models.ChatChannel, name string, data []byte) int {
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	h := make(textproto.MIMEHeader)
+	h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename="%s"`, name))
+	h.Set("Content-Type", "application/octet-stream")
+	part, err := mw.CreatePart(h)
+	if err != nil {
+		return -1
+	}
+	_, _ = part.Write(data)
+	_ = mw.Close()
+	ctx := &fasthttp.RequestCtx{}
+	ctx.Request.Header.SetMethod("POST")
+	ctx.Request.Header.SetContentType(mw.FormDataContentType())
+	ctx.Request.SetBody(buf.Bytes())
+	req := &fastglue.Request{RequestCtx: ctx}
+	testutil.SetAuthContext(req, u.OrganizationID, u.ID)
+	testutil.SetPathParam(req, "id", ch.ID.String())
+	if err := f.app.UploadChatAttachment(req); err != nil {
+		return -1
+	}
+	return ctx.Response.StatusCode()
+}
+
+// The cap of 10 pending uploads is an invariant, not a hint: parallel requests that
+// all read the same count must not get past it.
+func TestAttachments_PendingCapHoldsUnderConcurrency(t *testing.T) {
+	f := newPhaseA(t)
+	f.withStorage(t)
+	defer handlers.SetChatUploadsPerMinuteForTest(1000)()
+	for round := 0; round < 3; round++ {
+		f.app.DB.Where("uploader_id = ? AND message_id IS NULL", f.member.ID).Delete(&models.ChatAttachment{})
+		var accepted, refused, other int64
+		fns := []func(){}
+		for i := 0; i < 30; i++ {
+			fns = append(fns, func() {
+				switch f.uploadSafe(f.member, f.ch, "a.png", pngBytes(2, 2)) {
+				case 200:
+					atomic.AddInt64(&accepted, 1)
+				case 400:
+					atomic.AddInt64(&refused, 1)
+				default:
+					atomic.AddInt64(&other, 1)
+				}
+			})
+		}
+		runTogether(fns...)
+		var pending int64
+		f.app.DB.Model(&models.ChatAttachment{}).Where("uploader_id = ? AND message_id IS NULL", f.member.ID).Count(&pending)
+		assert.EqualValues(t, 10, pending, "round %d: never more than the cap", round)
+		assert.EqualValues(t, 10, accepted, "round %d", round)
+		assert.EqualValues(t, 20, refused, "round %d", round)
+		assert.Zero(t, other, "round %d: no 500 (a deadlock would be one)", round)
+	}
+}
+
+// Same for the 20-different-emojis cap on one message: with 19 kinds in place, twelve
+// people each adding a different emoji at once get exactly one more in.
+func TestReactions_KindCapHoldsUnderConcurrency(t *testing.T) {
+	f := newPhaseA(t)
+	codes := []string{"thumbs_up", "heart", "laugh", "wow", "sad", "pray", "check", "eyes", "fire", "party", "thinking", "clap"}
+	var users []*models.User
+	for range codes {
+		u := chatUser(t, f.app, f.org.ID, teamChatKeysOf("agent"))
+		require.NoError(t, f.app.DB.Create(&models.ChatChannelMember{OrganizationID: f.org.ID, ChannelID: f.ch.ID, UserID: u.ID, Role: "member"}).Error)
+		users = append(users, u)
+	}
+	// The window is narrow, so many rounds, each on a fresh message.
+	for round := 0; round < 25; round++ {
+		m := f.msg(t, f.ch, f.owner, fmt.Sprintf("popular %d", round))
+		rows := make([]models.ChatMessageReaction, 19)
+		for i := range rows {
+			rows[i] = models.ChatMessageReaction{ID: uuid.New(), OrganizationID: f.org.ID, ChannelID: f.ch.ID, MessageID: m.ID,
+				UserID: f.owner.ID, Code: fmt.Sprintf("seed_%02d", i)}
+		}
+		require.NoError(t, f.app.DB.Create(&rows).Error)
+		var ok, full, other int64
+		fns := []func(){}
+		for i, code := range codes {
+			fns = append(fns, func() {
+				switch callSafe(f.app.PutChatReaction, f.org.ID, users[i].ID, nil, map[string]string{"id": m.ID.String(), "code": code}) {
+				case 200:
+					atomic.AddInt64(&ok, 1)
+				case 409:
+					atomic.AddInt64(&full, 1)
+				default:
+					atomic.AddInt64(&other, 1)
+				}
+			})
+		}
+		runTogether(fns...)
+		var kinds int64
+		f.app.DB.Model(&models.ChatMessageReaction{}).Where("message_id = ?", m.ID).Distinct("code").Count(&kinds)
+		require.EqualValues(t, 20, kinds, "round %d: never past the cap", round)
+		require.EqualValues(t, 1, ok, "round %d", round)
+		require.EqualValues(t, 11, full, "round %d", round)
+		require.Zero(t, other, "round %d", round)
+	}
+}
+
+// A voice-memo format (m4a) sent as a plain file is refused: the client must not offer it.
+func TestAttachments_AudioContainersNeedTheRecordingClaim(t *testing.T) {
+	f := newPhaseA(t)
+	f.withStorage(t)
+	for _, c := range []struct {
+		name string
+		data []byte
+	}{{"nota.m4a", m4aAudio()}, {"nota.webm", webmAudio()}} {
+		code, _, body := f.upload(t, f.member, f.ch, c.name, c.data)
+		assert.Equal(t, 415, code, c.name)
+		assert.Contains(t, body, "file_type_not_allowed")
+		code, _, _ = f.upload(t, f.member, f.ch, c.name, c.data, "kind", "audio")
+		assert.Equal(t, 200, code, c.name+" as a recording")
+		f.app.DB.Where("uploader_id = ? AND message_id IS NULL", f.member.ID).Delete(&models.ChatAttachment{})
+	}
+}
+
+// attachment_gone names the attachments that are gone, so the client drops exactly those.
+func TestAttachments_GoneNamesTheMissingIds(t *testing.T) {
+	f := newPhaseA(t)
+	f.withStorage(t)
+	good1 := mustUpload(t, f, f.member, f.ch, "a.png", pngBytes(2, 2)).ID
+	good2 := mustUpload(t, f, f.member, f.ch, "b.png", pngBytes(2, 2)).ID
+	stale := mustUpload(t, f, f.member, f.ch, "c.png", pngBytes(2, 2)).ID
+	foreign := mustUpload(t, f, f.owner, f.ch, "d.png", pngBytes(2, 2)).ID
+	require.NoError(t, f.app.DB.Where("id = ?", stale).Delete(&models.ChatAttachment{}).Error) // as the cleanup does
+
+	code, body := chatDo(t, f.app.SendChatMessage, f.org.ID, f.member.ID,
+		map[string]any{"body": "x", "attachment_ids": []string{good1.String(), stale.String(), good2.String(), foreign.String()}},
+		map[string]string{"id": f.ch.ID.String()}, nil)
+	assert.Equal(t, 400, code)
+	var resp struct {
+		ErrorType string `json:"error_type"`
+		Data      struct {
+			IDs []uuid.UUID `json:"attachment_ids"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(body, &resp))
+	assert.Equal(t, "attachment_gone", resp.ErrorType)
+	assert.ElementsMatch(t, []uuid.UUID{stale, foreign}, resp.Data.IDs, "exactly the unusable ones")
+
+	code2, _, _ := f.sendFiles(t, f.member, f.ch, "ok", good1, good2)
+	assert.Equal(t, 200, code2, "the good ones were not consumed by the failed send")
 }

@@ -87,11 +87,17 @@ function onFiles(list: FileList | File[] | null | undefined) {
   if (fileInput.value) fileInput.value.value = ''
 }
 
+// Copying from Excel/Word puts text AND a rendered picture on the clipboard: keep the text
+// (let the paste happen) and attach the picture. Only a files-only clipboard is taken over.
 function onPaste(e: ClipboardEvent) {
-  if (e.clipboardData?.files.length) {
-    e.preventDefault()
-    onFiles(e.clipboardData.files)
-  }
+  const files = e.clipboardData?.files
+  if (!files?.length) return
+  if (!e.clipboardData?.getData('text/plain')) e.preventDefault()
+  onFiles(files)
+}
+
+function dropStaleUploads() {
+  if (store.expireStaleUploads(props.channelId).length) toast.error(explain('attachment_gone'))
 }
 
 function onDragOver(e: DragEvent) {
@@ -187,15 +193,18 @@ function arm() {
   }, 50))
 }
 
-onMounted(arm)
+onMounted(() => { arm(); dropStaleUploads() })
 onBeforeUnmount(() => scroll.cleanup())
 watch(() => props.channelId, () => {
   editingId.value = null
   pickerFor.value = null
-  if (recorder.value && recorder.value.phase !== 'idle') {
+  if (recorder.value) {
+    // Also while the permission prompt is open (phase still 'idle'): cancel() aborts that start.
+    const wasActive = recorder.value.phase !== 'idle'
     recorder.value.cancel()
-    toast.info(t('teamChat.recorder.cancelledOnSwitch'))
+    if (wasActive) toast.info(t('teamChat.recorder.cancelledOnSwitch'))
   }
+  dropStaleUploads()
   draft.value = ''
   arm()
 })

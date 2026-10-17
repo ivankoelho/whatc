@@ -54,7 +54,22 @@ export const TEAM_CHAT_MAX_FILE_BYTES = 10 * 1024 * 1024
 export const TEAM_CHAT_MAX_ATTACHMENTS = 5
 export const TEAM_CHAT_MAX_AUDIO_MS = 5 * 60 * 1000
 export const TEAM_CHAT_MIN_AUDIO_MS = 1000
-export const TEAM_CHAT_ACCEPT = '.png,.jpg,.jpeg,.jpe,.jfif,.gif,.webp,.pdf,.txt,.csv,.docx,.xlsx,.pptx,.mp3,.wav,.ogg,.oga,.opus,.m4a,.webm'
+// Must be a subset of what the server accepts as a PLAIN file (internal/handlers/team_chat_attachments_validate.go).
+// .m4a and .webm are deliberately absent: those containers may hold video, so the server takes them
+// only from the voice recorder (kind=audio), never from the paperclip.
+export const TEAM_CHAT_ACCEPT = '.png,.jpg,.jpeg,.jpe,.jfif,.gif,.webp,.pdf,.txt,.csv,.docx,.xlsx,.pptx,.mp3,.wav,.ogg,.oga,.opus'
+// The server discards a pending upload after an hour; the queue drops a ready one a little earlier.
+export const TEAM_CHAT_PENDING_TTL_MS = 55 * 60 * 1000
+
+/** A local id for a queued file. crypto.randomUUID only exists in secure contexts (HTTPS/localhost). */
+export function newUploadKey(): string {
+  const c = typeof crypto !== 'undefined' ? crypto : undefined
+  if (c?.randomUUID) return c.randomUUID()
+  const bytes = new Uint8Array(16)
+  if (c?.getRandomValues) c.getRandomValues(bytes)
+  else for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256)
+  return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('')
+}
 const ALLOWED_EXT = new Set(TEAM_CHAT_ACCEPT.split(',').map(e => e.slice(1)))
 const DANGEROUS_EXT = new Set([
   'exe', 'bat', 'cmd', 'com', 'scr', 'pif', 'msi', 'dll', 'js', 'mjs', 'jse', 'vbs', 'vbe', 'wsf', 'ps1', 'sh', 'jar', 'apk',

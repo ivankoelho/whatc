@@ -28,6 +28,9 @@ let chunks: Blob[] = []
 let tick: ReturnType<typeof setInterval> | null = null
 let startedAt = 0
 let cancelled = false
+let starting = false // true while the permission prompt is open
+let startAborted = false // cancel/unmount happened during that prompt
+let disposed = false
 let recorded: { file: File; durationMs: number } | null = null
 
 const supported = computed(() => recordingSupported())
@@ -55,20 +58,33 @@ function resetPreview() {
 }
 
 async function start() {
-  if (phase.value !== 'idle' || props.disabled) return
+  // 'starting' covers the time the permission prompt is open, when phase is still 'idle':
+  // without it a second click opens a second stream and the first is never stopped.
+  if (phase.value !== 'idle' || starting || props.disabled) return
   if (!supported.value) {
     toast.error(t('teamChat.recorder.unsupported'))
     return
   }
+  starting = true
+  startAborted = false
+  let opened: MediaStream
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    opened = await navigator.mediaDevices.getUserMedia({ audio: true })
   } catch (err) {
+    starting = false
     const name = (err as { name?: string })?.name
     toast.error(t(name === 'NotAllowedError' || name === 'SecurityError' ? 'teamChat.recorder.denied'
       : name === 'NotFoundError' || name === 'OverconstrainedError' ? 'teamChat.recorder.noMic'
         : 'teamChat.recorder.failed'))
     return
   }
+  starting = false
+  if (disposed || startAborted) {
+    // Cancelled (channel switch, unmount) while the prompt was open: do not record, do not keep the mic.
+    opened.getTracks().forEach(tr => tr.stop())
+    return
+  }
+  stream = opened
   try {
     const mime = pickMime()
     recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined)
@@ -113,6 +129,7 @@ function finish() {
 
 /** Throws the recording away (also called by the parent when the channel changes). */
 function cancel() {
+  if (starting) startAborted = true
   cancelled = true
   if (recorder && recorder.state !== 'inactive') recorder.stop()
   else releaseMic()
@@ -142,6 +159,7 @@ function onVisibility() {
 document.addEventListener('visibilitychange', onVisibility)
 onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', onVisibility)
+  disposed = true
   cancel()
 })
 

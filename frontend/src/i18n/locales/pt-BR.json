@@ -501,7 +501,7 @@
       "file_type_not_allowed": "Este tipo de arquivo não é permitido.",
       "invalid_file": "O arquivo está vazio, danificado ou não corresponde ao tipo.",
       "too_many_attachments": "No máximo 5 arquivos por mensagem (e 10 aguardando).",
-      "attachment_gone": "Um arquivo não está mais disponível. Remova e anexe de novo.",
+      "attachment_gone": "Um arquivo não está mais disponível e foi tirado da lista. Anexe de novo.",
       "rate_limited": "Envios demais. Espere um minuto e tente de novo.",
       "storage_unavailable": "O armazenamento de arquivos está indisponível. Tente mais tarde."
     },

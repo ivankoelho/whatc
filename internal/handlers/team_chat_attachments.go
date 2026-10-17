@@ -168,6 +168,11 @@ func (a *App) UploadChatAttachment(r *fastglue.Request) error {
 		if locked.ArchivedAt != nil {
 			return errChatArchived
 		}
+		// One upload at a time per person past this point, so the cap below cannot be
+		// beaten by parallel requests that all read the same count.
+		if err := lockChatKey(tx, "chat_pending:"+userID.String()); err != nil {
+			return err
+		}
 		var pending int64
 		tx.Model(&models.ChatAttachment{}).
 			Where("uploader_id = ? AND message_id IS NULL AND purged_at IS NULL", userID).Count(&pending)
@@ -260,6 +265,24 @@ func (a *App) DeleteChatAttachment(r *fastglue.Request) error {
 // the sender's transaction. The number of rows touched must equal the number asked
 // for: anything unknown, foreign, already used or purged aborts the whole send.
 func attachPendingFiles(tx *gorm.DB, orgID, userID, channelID, messageID uuid.UUID, ids []uuid.UUID) error {
+	// Say WHICH ones are gone, so the client drops exactly those and keeps the rest.
+	var usable []uuid.UUID
+	tx.Model(&models.ChatAttachment{}).
+		Where("id IN ? AND organization_id = ? AND channel_id = ? AND uploader_id = ? AND message_id IS NULL AND purged_at IS NULL",
+			ids, orgID, channelID, userID).Pluck("id", &usable)
+	have := make(map[uuid.UUID]bool, len(usable))
+	for _, id := range usable {
+		have[id] = true
+	}
+	var missing []uuid.UUID
+	for _, id := range ids {
+		if !have[id] {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) > 0 {
+		return &chatDataError{errChatAttGone, map[string]any{"attachment_ids": missing}}
+	}
 	res := tx.Model(&models.ChatAttachment{}).
 		Where("id IN ? AND organization_id = ? AND channel_id = ? AND uploader_id = ? AND message_id IS NULL AND purged_at IS NULL",
 			ids, orgID, channelID, userID).

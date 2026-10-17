@@ -501,7 +501,7 @@
       "file_type_not_allowed": "This type of file is not allowed.",
       "invalid_file": "The file is empty, damaged or does not match its type.",
       "too_many_attachments": "At most 5 files per message (and 10 waiting).",
-      "attachment_gone": "A file is no longer available. Remove it and attach it again.",
+      "attachment_gone": "A file is no longer available and was removed from the list. Attach it again.",
       "rate_limited": "Too many uploads. Wait a minute and try again.",
       "storage_unavailable": "File storage is unavailable. Try again later."
     },
