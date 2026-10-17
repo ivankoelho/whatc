@@ -1083,3 +1083,62 @@ func TestAttachments_DuplicateIdIsRefusedWithoutNamingAnyone(t *testing.T) {
 	code, _, _ = f.sendFiles(t, f.member, f.ch, "ok", id)
 	assert.Equal(t, 200, code, "the refused send consumed nothing")
 }
+
+func (f *phaseA) downloadIfNoneMatch(t *testing.T, u *models.User, id uuid.UUID, inm string, rng string) *fastglue.Request {
+	t.Helper()
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, u.OrganizationID, u.ID)
+	testutil.SetPathParam(req, "id", id.String())
+	if inm != "" {
+		testutil.SetHeader(req, "If-None-Match", inm)
+	}
+	if rng != "" {
+		testutil.SetHeader(req, "Range", rng)
+	}
+	require.NoError(t, f.app.DownloadChatAttachment(req))
+	_ = req.RequestCtx.Response.Body()
+	return req
+}
+
+// A browser that already holds the file revalidates with its ETag and gets a 304 with no
+// body, but only after the same access check as any download.
+func TestAttachments_ETagAnd304(t *testing.T) {
+	f := newPhaseA(t)
+	f.withStorage(t)
+	payload := pngBytes(9, 9)
+	a := mustUpload(t, f, f.member, f.ch, "foto.png", payload)
+	_, msg, _ := f.sendFiles(t, f.member, f.ch, "", a.ID)
+
+	first := f.downloadIfNoneMatch(t, f.owner, a.ID, "", "")
+	assert.Equal(t, 200, testutil.GetResponseStatusCode(first))
+	etag := string(first.RequestCtx.Response.Header.Peek("ETag"))
+	var row models.ChatAttachment
+	require.NoError(t, f.app.DB.First(&row, "id = ?", a.ID).Error)
+	assert.Equal(t, `"`+row.SHA256+`"`, etag, "the stored sha256 is the validator")
+	assert.Equal(t, "private, no-cache", string(first.RequestCtx.Response.Header.Peek("Cache-Control")))
+
+	for _, inm := range []string{etag, "W/" + etag, `"nope", ` + etag, "*"} {
+		req := f.downloadIfNoneMatch(t, f.owner, a.ID, inm, "")
+		assert.Equal(t, 304, testutil.GetResponseStatusCode(req), inm)
+		assert.Empty(t, testutil.GetResponseBody(req), "no body on a 304")
+		assert.Equal(t, etag, string(req.RequestCtx.Response.Header.Peek("ETag")))
+		assert.Equal(t, "nosniff", string(req.RequestCtx.Response.Header.Peek("X-Content-Type-Options")))
+	}
+
+	t.Run("a different tag gets the file; a range is still honoured", func(t *testing.T) {
+		req := f.downloadIfNoneMatch(t, f.owner, a.ID, `"other"`, "")
+		assert.Equal(t, 200, testutil.GetResponseStatusCode(req))
+		assert.Equal(t, payload, testutil.GetResponseBody(req))
+		req = f.downloadIfNoneMatch(t, f.owner, a.ID, `"other"`, "bytes=0-3")
+		assert.Equal(t, 206, testutil.GetResponseStatusCode(req))
+		assert.Equal(t, payload[:4], testutil.GetResponseBody(req))
+	})
+
+	t.Run("a matching tag never opens the door: access is checked first", func(t *testing.T) {
+		assert.Equal(t, 404, testutil.GetResponseStatusCode(f.downloadIfNoneMatch(t, f.spare, a.ID, etag, "")), "not in the channel")
+		assert.Equal(t, 404, testutil.GetResponseStatusCode(f.downloadIfNoneMatch(t, f.foreign, a.ID, etag, "")), "another organization")
+		code, _ := chatDo(t, f.app.DeleteChatMessage, f.org.ID, f.member.ID, nil, map[string]string{"id": msg.ID.String()}, nil)
+		require.Equal(t, 200, code)
+		assert.Equal(t, 404, testutil.GetResponseStatusCode(f.downloadIfNoneMatch(t, f.owner, a.ID, etag, "")), "deleted message")
+	})
+}

@@ -341,6 +341,20 @@ func (a *App) DownloadChatAttachment(r *fastglue.Request) error {
 		return notFound()
 	}
 
+	// Attachments never change, and the sha256 is already stored: a validator lets a browser
+	// that already holds the file skip the body. Access was checked above, so a 304 never
+	// reaches someone who may not have the file.
+	etag := `"` + att.SHA256 + `"`
+	hd := &r.RequestCtx.Response.Header
+	hd.Set("ETag", etag)
+	hd.Set("Cache-Control", "private, no-cache")
+	if etagMatches(string(r.RequestCtx.Request.Header.Peek("If-None-Match")), etag) {
+		_ = f.Close()
+		hd.Set("X-Content-Type-Options", "nosniff")
+		r.RequestCtx.SetStatusCode(fasthttp.StatusNotModified)
+		return nil
+	}
+
 	size := st.Size()
 	start, length, status := int64(0), size, fasthttp.StatusOK
 	if h := string(r.RequestCtx.Request.Header.Peek("Range")); h != "" {
@@ -356,17 +370,27 @@ func (a *App) DownloadChatAttachment(r *fastglue.Request) error {
 		}
 	}
 
-	hd := &r.RequestCtx.Response.Header
 	hd.Set("Content-Type", att.Mime)
 	hd.Set("X-Content-Type-Options", "nosniff")
 	hd.Set("Content-Security-Policy", "default-src 'none'; sandbox")
 	hd.Set("Cross-Origin-Resource-Policy", "same-origin")
-	hd.Set("Cache-Control", "private, no-cache")
 	hd.Set("Accept-Ranges", "bytes")
 	hd.Set("Content-Disposition", chatContentDisposition(att))
 	r.RequestCtx.SetStatusCode(status)
 	r.RequestCtx.SetBodyStream(&sectionCloser{io.NewSectionReader(f, start, length), f}, int(length))
 	return nil
+}
+
+// etagMatches implements If-None-Match for a strong validator: "*" or a list of
+// entity tags, weak ones (W/) compared by their value.
+func etagMatches(header, etag string) bool {
+	for _, part := range strings.Split(header, ",") {
+		part = strings.TrimSpace(part)
+		if part == "*" || strings.TrimPrefix(part, "W/") == etag {
+			return true
+		}
+	}
+	return false
 }
 
 type sectionCloser struct {
