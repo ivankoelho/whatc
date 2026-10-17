@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowLeft, Check, CornerUpLeft, Hash, Loader2, Lock, MessageSquare, Pencil, Send, Settings2, SmilePlus, Trash2, Users, X } from 'lucide-vue-next'
+import { ArrowLeft, Check, CornerUpLeft, Hash, Loader2, Lock, MessageSquare, Mic, Paperclip, Pencil, Send, Settings2, SmilePlus, Trash2, Users, X } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
@@ -17,8 +17,14 @@ import { useTeamChatStore } from '@/stores/teamChat'
 import { useAuthStore } from '@/stores/auth'
 import { getAvatarGradient, getInitials } from '@/lib/utils'
 import { getErrorMessage } from '@/lib/api-utils'
-import { TEAM_CHAT_MAX_BODY, TEAM_CHAT_REACTIONS, chatErrorCode, isSendableBody, pickTypingNames, reactionGlyph, systemEventKey } from '@/lib/team-chat'
-import type { TeamChatMessage } from '@/services/api'
+import AttachmentQueue from './AttachmentQueue.vue'
+import AudioRecorder from './AudioRecorder.vue'
+import MessageAttachments from './MessageAttachments.vue'
+import {
+  TEAM_CHAT_ACCEPT, TEAM_CHAT_MAX_BODY, TEAM_CHAT_REACTIONS, TEAM_CHAT_UPLOAD_ERRORS, chatErrorCode, isSendableBody,
+  pickTypingNames, reactionGlyph, recordingSupported, systemEventKey
+} from '@/lib/team-chat'
+import type { TeamChatMessage, TeamChatReplyTo } from '@/services/api'
 
 const props = defineProps<{ channelId: string; showBack?: boolean }>()
 const emit = defineEmits<{ back: [] }>()
@@ -59,6 +65,62 @@ const canModerate = computed(() => auth.hasPermission('team_chat', 'delete'))
 const canInteract = computed(() => canWrite.value && !isArchived.value)
 
 const replyTo = computed(() => store.replyTarget(props.channelId))
+
+// ---- Files and voice notes ----
+const fileInput = ref<HTMLInputElement | null>(null)
+const recorder = ref<InstanceType<typeof AudioRecorder> | null>(null)
+const recActive = ref(false)
+const dragging = ref(false)
+const micAvailable = recordingSupported()
+const queue = computed(() => store.uploadsFor(props.channelId))
+// Text is optional when files go with it; sending waits until every file is ready.
+const canSubmit = computed(() => {
+  if (queue.value.length === 0) return isSendableBody(draft.value)
+  return store.uploadsReady(props.channelId) && (draft.value.trim() === '' || isSendableBody(draft.value))
+})
+
+const explain = (code: string) => t(TEAM_CHAT_UPLOAD_ERRORS.includes(code) ? `teamChat.errors.${code}` : 'teamChat.errors.generic')
+
+function onFiles(list: FileList | File[] | null | undefined) {
+  if (!canInteract.value || !list || list.length === 0) return
+  for (const r of store.addFiles(props.channelId, Array.from(list))) toast.error(`${r.name}: ${explain(r.code)}`)
+  if (fileInput.value) fileInput.value.value = ''
+}
+
+function onPaste(e: ClipboardEvent) {
+  if (e.clipboardData?.files.length) {
+    e.preventDefault()
+    onFiles(e.clipboardData.files)
+  }
+}
+
+function onDragOver(e: DragEvent) {
+  if (canInteract.value && e.dataTransfer?.types.includes('Files')) dragging.value = true
+}
+
+function onDrop(e: DragEvent) {
+  dragging.value = false
+  onFiles(e.dataTransfer?.files)
+}
+
+async function sendVoice(p: { file: File; durationMs: number }) {
+  try {
+    await store.sendVoice(props.channelId, p.file, p.durationMs)
+    recorder.value?.sent(true)
+    scrollToBottom()
+  } catch (err) {
+    recorder.value?.sent(false)
+    toast.error(explain(chatErrorCode(err)))
+  }
+}
+
+const attachmentLabel = (kind?: string, name?: string) =>
+  kind ? t(`teamChat.attachments.quote.${kind}`, { name: name ?? '' }) : ''
+const quoteText = (r: TeamChatReplyTo) => r.snippet || attachmentLabel(r.attachment_kind, r.attachment_name)
+const replyPreview = computed(() => {
+  const m = replyTo.value
+  return m ? m.body || attachmentLabel(m.attachments?.[0]?.kind, m.attachments?.[0]?.name) : ''
+})
 const pickerFor = ref<string | null>(null)
 const highlightId = ref<string | null>(null)
 
@@ -130,6 +192,10 @@ onBeforeUnmount(() => scroll.cleanup())
 watch(() => props.channelId, () => {
   editingId.value = null
   pickerFor.value = null
+  if (recorder.value && recorder.value.phase !== 'idle') {
+    recorder.value.cancel()
+    toast.info(t('teamChat.recorder.cancelledOnSwitch'))
+  }
   draft.value = ''
   arm()
 })
@@ -147,7 +213,7 @@ function formatTime(iso: string) {
 let inFlight = 0
 
 async function submit() {
-  if (!isSendableBody(draft.value)) return
+  if (!canSubmit.value) return
   // Clear the box before the request: whatever is typed while it is in flight is
   // the next message and must survive. A failed send puts the text back.
   const body = draft.value.trim()
@@ -159,7 +225,8 @@ async function submit() {
     scrollToBottom()
   } catch (err) {
     if (!draft.value) draft.value = body
-    if (chatErrorCode(err) === 'reply_target_gone') toast.error(t('teamChat.errors.reply_target_gone'))
+    const code = chatErrorCode(err)
+    if (code === 'reply_target_gone' || TEAM_CHAT_UPLOAD_ERRORS.includes(code)) toast.error(explain(code))
     else toast.error(getErrorMessage(err, t('teamChat.sendFailed')))
   } finally {
     inFlight--
@@ -212,7 +279,14 @@ async function removeMessage(m: TeamChatMessage) {
 </script>
 
 <template>
-  <section class="flex h-full min-w-0 flex-1 flex-col bg-background" :aria-label="channel?.name || t('teamChat.title')">
+  <section
+    class="relative flex h-full min-w-0 flex-1 flex-col bg-background" :aria-label="channel?.name || t('teamChat.title')"
+    @dragenter.prevent="onDragOver" @dragover.prevent="onDragOver"
+  >
+    <div
+      v-if="dragging" class="absolute inset-0 z-30 flex items-center justify-center border-2 border-dashed border-primary bg-background/90 text-sm font-medium"
+      data-testid="drop-overlay" @dragover.prevent @dragleave.prevent="dragging = false" @drop.prevent="onDrop"
+    >{{ t('teamChat.attachments.drop') }}</div>
     <header class="flex items-center gap-2 border-b px-4 py-3">
       <Button v-if="showBack" variant="ghost" size="icon" class="h-10 w-10 md:hidden" :aria-label="t('common.back')" @click="emit('back')">
         <ArrowLeft class="h-4 w-4" />
@@ -295,7 +369,7 @@ async function removeMessage(m: TeamChatMessage) {
                 @click="goToMessage(m.reply_to.id)"
               >
                 <template v-if="m.reply_to.deleted"><em>{{ t('teamChat.removedMessage') }}</em></template>
-                <template v-else><strong class="font-medium">{{ m.reply_to.user_name }}</strong> {{ m.reply_to.snippet }}</template>
+                <template v-else><strong class="font-medium">{{ m.reply_to.user_name }}</strong> {{ quoteText(m.reply_to) }}</template>
               </button>
 
               <div v-if="editingId === m.id" class="mt-1 space-y-2">
@@ -316,7 +390,9 @@ async function removeMessage(m: TeamChatMessage) {
                 </div>
               </div>
               <!-- Plain text, escaped by Vue; never v-html -->
-              <p v-else class="whitespace-pre-wrap break-words text-sm">{{ m.body }}</p>
+              <p v-else-if="m.body" class="whitespace-pre-wrap break-words text-sm">{{ m.body }}</p>
+
+              <MessageAttachments v-if="m.attachments?.length" :attachments="m.attachments" />
 
               <div v-if="m.reactions?.length" class="mt-1 flex flex-wrap gap-1" :data-testid="`reactions-${m.id}`">
                 <component
@@ -368,12 +444,25 @@ async function removeMessage(m: TeamChatMessage) {
         <p v-if="isArchived" class="px-1 text-sm text-muted-foreground">{{ t('teamChat.manage.archivedNotice') }}</p>
         <div v-if="!isArchived && canWrite && replyTo" class="mb-2 flex items-center gap-2 rounded-md border-l-2 border-primary/50 bg-muted/60 px-2 py-1 text-xs" data-testid="reply-bar">
           <CornerUpLeft class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <span class="min-w-0 flex-1 truncate">{{ t('teamChat.replyingTo', { name: replyTo.user_name }) }}: {{ replyTo.body }}</span>
+          <span class="min-w-0 flex-1 truncate">{{ t('teamChat.replyingTo', { name: replyTo.user_name }) }}: {{ replyPreview }}</span>
           <button type="button" class="rounded p-1.5 text-muted-foreground hover:bg-muted" :aria-label="t('teamChat.cancelReply')" @click="store.cancelReply(channelId)">
             <X class="h-3.5 w-3.5" />
           </button>
         </div>
-        <form v-if="!isArchived && canWrite" class="flex items-end gap-2" @submit.prevent="submit">
+        <AttachmentQueue
+          v-if="canInteract && !recActive" :items="queue"
+          @retry="store.retryUpload(channelId, $event)" @cancel="store.cancelUpload(channelId, $event)"
+        />
+        <AudioRecorder v-if="canInteract" ref="recorder" @update:active="recActive = $event" @send="sendVoice" />
+        <form v-if="canInteract && !recActive" class="flex items-end gap-2" @submit.prevent="submit">
+          <input
+            ref="fileInput" type="file" multiple class="hidden" :accept="TEAM_CHAT_ACCEPT"
+            data-testid="file-input" @change="onFiles(($event.target as HTMLInputElement).files)"
+          >
+          <Button
+            type="button" variant="ghost" size="icon" class="h-10 w-10 shrink-0 md:h-9 md:w-9"
+            :aria-label="t('teamChat.attachments.attach')" @click="fileInput?.click()"
+          ><Paperclip class="h-4 w-4" /></Button>
           <Textarea
             id="team-chat-composer"
             v-model="draft"
@@ -384,13 +473,18 @@ async function removeMessage(m: TeamChatMessage) {
             :title="t('teamChat.composerHint')"
             @keydown="onComposerKey"
             @input="onInput"
+            @paste="onPaste"
           />
-          <Button type="submit" size="icon" :disabled="sending || !isSendableBody(draft)" :aria-label="t('teamChat.send')">
+          <Button
+            v-if="micAvailable" type="button" variant="ghost" size="icon" class="h-10 w-10 shrink-0 md:h-9 md:w-9"
+            :aria-label="t('teamChat.recorder.record')" data-testid="record-button" @click="recorder?.start()"
+          ><Mic class="h-4 w-4" /></Button>
+          <Button type="submit" size="icon" class="h-10 w-10 shrink-0 md:h-9 md:w-9" :disabled="sending || !canSubmit" :aria-label="t('teamChat.send')">
             <Loader2 v-if="sending" class="h-4 w-4 animate-spin" />
             <Send v-else class="h-4 w-4" />
           </Button>
         </form>
-        <p v-else-if="!isArchived" class="px-1 text-sm text-muted-foreground">{{ t('teamChat.readOnly') }}</p>
+        <p v-else-if="!isArchived && !canWrite" class="px-1 text-sm text-muted-foreground">{{ t('teamChat.readOnly') }}</p>
         <p v-if="overLimit" class="mt-1 px-1 text-xs text-destructive">{{ t('teamChat.tooLong', { max: TEAM_CHAT_MAX_BODY }) }}</p>
       </footer>
     </template>

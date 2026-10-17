@@ -49,6 +49,58 @@ export function pickTypingNames(ids: string[], names: Record<string, string>): s
   return ids.map(id => names[id]).filter((n): n is string => !!n)
 }
 
+// ---- Attachments (limits mirror the server; the server decides) ----
+export const TEAM_CHAT_MAX_FILE_BYTES = 10 * 1024 * 1024
+export const TEAM_CHAT_MAX_ATTACHMENTS = 5
+export const TEAM_CHAT_MAX_AUDIO_MS = 5 * 60 * 1000
+export const TEAM_CHAT_MIN_AUDIO_MS = 1000
+export const TEAM_CHAT_ACCEPT = '.png,.jpg,.jpeg,.jpe,.jfif,.gif,.webp,.pdf,.txt,.csv,.docx,.xlsx,.pptx,.mp3,.wav,.ogg,.oga,.opus,.m4a,.webm'
+const ALLOWED_EXT = new Set(TEAM_CHAT_ACCEPT.split(',').map(e => e.slice(1)))
+const DANGEROUS_EXT = new Set([
+  'exe', 'bat', 'cmd', 'com', 'scr', 'pif', 'msi', 'dll', 'js', 'mjs', 'jse', 'vbs', 'vbe', 'wsf', 'ps1', 'sh', 'jar', 'apk',
+  'app', 'lnk', 'reg', 'hta', 'cpl', 'html', 'htm', 'xhtml', 'svg', 'svgz', 'xml', 'php', 'asp', 'aspx', 'jsp', 'docm', 'xlsm', 'pptm'
+])
+
+/** An early warning before uploading; returns the error code the server would use, or ''. */
+export function checkAttachmentFile(file: { name: string; size: number }, alreadyQueued: number): string {
+  if (alreadyQueued >= TEAM_CHAT_MAX_ATTACHMENTS) return 'too_many_attachments'
+  if (file.size === 0) return 'invalid_file'
+  if (file.size > TEAM_CHAT_MAX_FILE_BYTES) return 'file_too_large'
+  const parts = file.name.toLowerCase().split('.')
+  const ext = parts.length > 1 ? parts[parts.length - 1] : ''
+  if (parts.slice(1).some(p => DANGEROUS_EXT.has(p)) || !ALLOWED_EXT.has(ext)) return 'file_type_not_allowed'
+  return ''
+}
+
+export function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`
+  return `${(n / 1024 / 1024).toFixed(1)} MB`
+}
+
+export function formatDuration(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000))
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+}
+
+/** Voice notes need MediaRecorder, getUserMedia and a secure context (HTTPS or localhost). */
+export function recordingSupported(): boolean {
+  return typeof window !== 'undefined' && window.isSecureContext !== false &&
+    typeof MediaRecorder !== 'undefined' && !!navigator.mediaDevices?.getUserMedia
+}
+
+/** Same-origin URL of an attachment; the session cookie authorizes it. */
+export function teamChatAttachmentUrl(id: string): string {
+  const base = (((window as unknown as { __BASE_PATH__?: string }).__BASE_PATH__) ?? '').replace(/\/$/, '')
+  return `${base}/api/team-chat/attachments/${id}`
+}
+
+/** The error codes the UI explains (anything else gets the generic text). */
+export const TEAM_CHAT_UPLOAD_ERRORS = [
+  'file_too_large', 'file_type_not_allowed', 'invalid_file', 'too_many_attachments', 'attachment_gone',
+  'rate_limited', 'storage_unavailable', 'archived', 'forbidden', 'not_found', 'reply_target_gone'
+]
+
 /** The reaction palette: stable server codes and the glyph drawn for each. */
 export const TEAM_CHAT_REACTIONS = [
   { code: 'thumbs_up', glyph: '👍' }, { code: 'heart', glyph: '❤️' }, { code: 'laugh', glyph: '😂' },

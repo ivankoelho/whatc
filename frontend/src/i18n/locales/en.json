@@ -404,6 +404,37 @@
     "replyingTo": "Replying to {name}",
     "cancelReply": "Cancel reply",
     "removedMessage": "Message removed",
+    "attachments": {
+      "queue": "Files to send",
+      "attach": "Attach a file",
+      "drop": "Drop files to attach",
+      "uploading": "Uploading {pct}%",
+      "queued": "Waiting…",
+      "retry": "Try again",
+      "remove": "Remove {name}",
+      "openImage": "Open image {name}",
+      "voice": "Voice message",
+      "download": "Download",
+      "quote": {
+        "image": "🖼 {name}",
+        "audio": "🎤 Voice message",
+        "file": "📎 {name}"
+      }
+    },
+    "recorder": {
+      "record": "Record a voice message",
+      "stop": "Stop recording",
+      "cancel": "Cancel recording",
+      "discard": "Discard",
+      "send": "Send voice message",
+      "preview": "Listen before sending",
+      "tooShort": "Recording too short (at least 1 second).",
+      "denied": "Microphone blocked. Allow it in the browser address bar and try again.",
+      "noMic": "No microphone found.",
+      "failed": "Could not start the recording.",
+      "unsupported": "Recording is not available in this browser.",
+      "cancelledOnSwitch": "Recording discarded because you changed conversation."
+    },
     "reactions": {
       "thumbs_up": "Thumbs up",
       "heart": "Heart",
@@ -465,7 +496,14 @@
       "invalid": "Check the data and try again.",
       "reply_target_gone": "The message you are replying to is gone.",
       "bad_reaction": "That reaction is not available.",
-      "too_many_reactions": "This message has too many different reactions."
+      "too_many_reactions": "This message has too many different reactions.",
+      "file_too_large": "The file is too large (limit 10 MB).",
+      "file_type_not_allowed": "This type of file is not allowed.",
+      "invalid_file": "The file is empty, damaged or does not match its type.",
+      "too_many_attachments": "At most 5 files per message (and 10 waiting).",
+      "attachment_gone": "A file is no longer available. Remove it and attach it again.",
+      "rate_limited": "Too many uploads. Wait a minute and try again.",
+      "storage_unavailable": "File storage is unavailable. Try again later."
     },
     "admin": {
       "title": "Channel administration",
