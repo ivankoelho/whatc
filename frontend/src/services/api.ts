@@ -1119,6 +1119,11 @@ export interface TeamChatChannel {
   unread_count: number
   last_message_at?: string
   created_at: string
+  // Free channels only
+  archived_at?: string
+  my_role?: 'owner' | 'member'
+  member_count?: number
+  created_by_name?: string
 }
 
 export interface TeamChatMessage {
@@ -1132,6 +1137,29 @@ export interface TeamChatMessage {
   context_id?: string
   created_at: string
   edited_at?: string
+  // "system" messages are the channel's own record (member added, renamed...): no body,
+  // meta holds the event and its parameters for the UI to translate.
+  kind?: 'user' | 'system'
+  meta?: Record<string, string>
+}
+
+export interface TeamChatMember {
+  user_id: string
+  name: string
+  role: 'owner' | 'member'
+  is_online: boolean
+}
+
+// Composition and state of a free channel; never its messages.
+export interface TeamChatAdminChannel {
+  id: string
+  name: string
+  kind: string
+  created_at: string
+  created_by_name?: string
+  archived_at?: string
+  owners: TeamChatMember[]
+  members: TeamChatMember[]
 }
 
 export interface TeamChatUser {
@@ -1154,7 +1182,26 @@ export const teamChatService = {
     api.put<TeamChatMessage>(`/team-chat/messages/${messageId}`, { body }),
   remove: (messageId: string) => api.delete(`/team-chat/messages/${messageId}`),
   markRead: (channelId: string) => api.post(`/team-chat/channels/${channelId}/read`),
-  typing: (channelId: string) => api.post(`/team-chat/channels/${channelId}/typing`, {})
+  typing: (channelId: string) => api.post(`/team-chat/channels/${channelId}/typing`, {}),
+
+  // Channel management (free channels). The server decides who may do what.
+  archivedChannels: () =>
+    api.get<{ channels: TeamChatChannel[] }>('/team-chat/channels', { params: { archived: 'true' } }),
+  members: (channelId: string) =>
+    api.get<{ members: TeamChatMember[] }>(`/team-chat/channels/${channelId}/members`),
+  addMember: (channelId: string, userId: string) =>
+    api.post(`/team-chat/channels/${channelId}/members`, { user_id: userId }),
+  removeMember: (channelId: string, memberId: string) =>
+    api.delete(`/team-chat/channels/${channelId}/members/${memberId}`),
+  leave: (channelId: string) => api.post(`/team-chat/channels/${channelId}/leave`, {}),
+  setRole: (channelId: string, memberId: string, role: 'owner' | 'member') =>
+    api.put(`/team-chat/channels/${channelId}/members/${memberId}`, { role }),
+  rename: (channelId: string, name: string) => api.put(`/team-chat/channels/${channelId}`, { name }),
+  archive: (channelId: string) => api.post(`/team-chat/channels/${channelId}/archive`, {}),
+  reopen: (channelId: string) => api.post(`/team-chat/channels/${channelId}/reopen`, {}),
+  join: (channelId: string, reason: string) =>
+    api.post(`/team-chat/channels/${channelId}/join`, { reason }),
+  adminChannels: () => api.get<{ channels: TeamChatAdminChannel[] }>('/team-chat/admin/channels')
 }
 
 // Calling - Call Logs & IVR Flows

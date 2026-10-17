@@ -4,7 +4,9 @@ import {
   teamChatService,
   type TeamChatChannel,
   type TeamChatMessage,
-  type TeamChatUser
+  type TeamChatUser,
+  type TeamChatMember,
+  type TeamChatAdminChannel
 } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import {
@@ -57,16 +59,30 @@ export const useTeamChatStore = defineStore('teamChat', () => {
   const panels = ref<Record<string, TeamChatPanel>>({})
   const users = ref<TeamChatUser[]>([])
   const typing = ref<Record<string, Record<string, number>>>({})
+  // Phase A: archived channels (loaded on demand), member lists, administration list.
+  const archived = ref<TeamChatChannel[]>([])
+  const showArchived = ref(false)
+  const members = ref<Record<string, TeamChatMember[]>>({})
+  const adminChannels = ref<TeamChatAdminChannel[]>([])
+  const adminLoading = ref(false)
+  const adminError = ref(false)
 
   let refreshTimer: ReturnType<typeof setTimeout> | null = null
   // Set once the chat screen has been opened: users who never open it (or lack
   // the permission) must not trigger chat requests on every reconnect.
   let started = false
+  let adminStarted = false
   const lastTypingSent: Record<string, number> = {}
 
   const myId = () => useAuthStore().user?.id
 
-  const activeChannel = computed(() => channels.value.find(c => c.id === activeChannelId.value) ?? null)
+  /** A channel the user is in, normal or archived, by id (null when unknown). */
+  function channelById(id: string | null): TeamChatChannel | null {
+    if (!id) return null
+    return channels.value.find(c => c.id === id) ?? archived.value.find(c => c.id === id) ?? null
+  }
+
+  const activeChannel = computed(() => channelById(activeChannelId.value))
   const activePanel = computed(() => (activeChannelId.value ? panels.value[activeChannelId.value] ?? null : null))
   const totalUnread = computed(() => channels.value.reduce((n, c) => n + (c.unread_count || 0), 0))
   const userNames = computed(() => Object.fromEntries(users.value.map(u => [u.id, u.full_name])))
@@ -174,6 +190,8 @@ export const useTeamChatStore = defineStore('teamChat', () => {
   async function selectChannel(id: string | null) {
     activeChannelId.value = id
     if (!id) return
+    // A channel opened by link may be an archived one: resolve its name and state.
+    if (!channelById(id)) await fetchArchived()
     await loadMessages(id)
     if (panels.value[id]?.error === null) await markRead(id)
   }
@@ -209,6 +227,102 @@ export const useTeamChatStore = defineStore('teamChat', () => {
     const ch = unwrap<TeamChatChannel>(await teamChatService.openDM(userId))
     await fetchChannels()
     return ch
+  }
+
+  // ---- Phase A: channel management --------------------------------------------
+  // Every action asks the server and then re-reads what it changed; the server is
+  // the only judge of who may do what, and its refusal reaches the caller as an error
+  // (see chatErrorCode) for the UI to explain.
+
+  async function fetchArchived() {
+    try {
+      archived.value = unwrap<{ channels: TeamChatChannel[] }>(await teamChatService.archivedChannels()).channels || []
+    } catch {
+      archived.value = []
+    }
+  }
+
+  async function setShowArchived(on: boolean) {
+    showArchived.value = on
+    if (on) await fetchArchived()
+  }
+
+  async function fetchMembers(id: string) {
+    try {
+      members.value[id] = unwrap<{ members: TeamChatMember[] }>(await teamChatService.members(id)).members || []
+    } catch (err) {
+      if (httpStatus(err) === 404) delete members.value[id]
+    }
+  }
+
+  async function fetchAdminChannels() {
+    adminStarted = true
+    adminLoading.value = true
+    try {
+      adminChannels.value = unwrap<{ channels: TeamChatAdminChannel[] }>(await teamChatService.adminChannels()).channels || []
+      adminError.value = false
+    } catch {
+      adminError.value = true
+    } finally {
+      adminLoading.value = false
+    }
+  }
+
+  /** After a change: the lists, the open conversation (its new system message) and the members. */
+  async function afterChannelChange(id: string) {
+    await fetchChannels()
+    if (showArchived.value || !channels.value.some(c => c.id === id)) await fetchArchived()
+    if (activeChannelId.value === id) await refreshLatest(id)
+    if (members.value[id]) await fetchMembers(id)
+    if (adminStarted) await fetchAdminChannels()
+  }
+
+  async function addMember(id: string, userId: string) {
+    await teamChatService.addMember(id, userId)
+    await afterChannelChange(id)
+  }
+
+  async function removeMember(id: string, memberId: string) {
+    await teamChatService.removeMember(id, memberId)
+    await afterChannelChange(id)
+  }
+
+  /** The caller leaves: the channel disappears from their lists and its panel is dropped. */
+  async function leaveChannel(id: string) {
+    await teamChatService.leave(id)
+    delete members.value[id]
+    delete panels.value[id]
+    if (activeChannelId.value === id) activeChannelId.value = null
+    await fetchChannels()
+    if (showArchived.value) await fetchArchived()
+    if (adminStarted) await fetchAdminChannels()
+  }
+
+  async function setRole(id: string, memberId: string, role: 'owner' | 'member') {
+    await teamChatService.setRole(id, memberId, role)
+    await afterChannelChange(id)
+  }
+
+  async function renameChannel(id: string, name: string) {
+    await teamChatService.rename(id, name)
+    await afterChannelChange(id)
+  }
+
+  async function archiveChannel(id: string) {
+    await teamChatService.archive(id)
+    await fetchArchived()
+    await afterChannelChange(id)
+  }
+
+  async function reopenChannel(id: string) {
+    await teamChatService.reopen(id)
+    await afterChannelChange(id)
+  }
+
+  /** Administrative entry (team_chat:join_any): needs a reason, which the members will see. */
+  async function joinChannel(id: string, reason: string) {
+    await teamChatService.join(id, reason)
+    await afterChannelChange(id)
   }
 
   /** Tells the channel the user is typing; at most once every few seconds. */
@@ -254,6 +368,17 @@ export const useTeamChatStore = defineStore('teamChat', () => {
       case 'team_chat_channel':
         refreshChannelsSoon()
         break
+      case 'team_chat_channel_updated':
+        // Ids and a change code only. What changed (names, reason) is read by REST;
+        // someone just removed gets a 404 there and lands in the "no access" state.
+        refreshChannelsSoon()
+        if (showArchived.value) void fetchArchived()
+        if (isActive) {
+          void refreshLatest(id)
+          if (members.value[id]) void fetchMembers(id)
+        }
+        if (adminStarted) void fetchAdminChannels()
+        break
       case 'team_chat_message':
         if (isActive) {
           const known = payload.message_id && panels.value[id]?.messages.some(m => m.id === payload.message_id)
@@ -287,14 +412,22 @@ export const useTeamChatStore = defineStore('teamChat', () => {
   async function resync() {
     if (!started) return
     await fetchChannels()
-    if (activeChannelId.value) await refreshLatest(activeChannelId.value)
+    if (showArchived.value) await fetchArchived()
+    if (activeChannelId.value) {
+      await refreshLatest(activeChannelId.value)
+      if (members.value[activeChannelId.value]) await fetchMembers(activeChannelId.value)
+    }
+    if (adminStarted) await fetchAdminChannels()
   }
 
   return {
     channels, channelsLoading, channelsError, activeChannelId, panels, users, typing,
-    activeChannel, activePanel, totalUnread, userNames,
+    archived, showArchived, members, adminChannels, adminLoading, adminError,
+    activeChannel, activePanel, totalUnread, userNames, channelById,
     panel, fetchChannels, fetchUsers, selectChannel, loadMessages, loadOlder, refreshLatest,
     markRead, send, edit, remove, createChannel, openDM, notifyTyping, typingUserIds,
+    fetchArchived, setShowArchived, fetchMembers, fetchAdminChannels,
+    addMember, removeMember, leaveChannel, setRole, renameChannel, archiveChannel, reopenChannel, joinChannel,
     applyPresence, applyEvent, resync
   }
 })

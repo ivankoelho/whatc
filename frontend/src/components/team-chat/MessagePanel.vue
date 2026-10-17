@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowLeft, Check, Hash, Loader2, Lock, MessageSquare, Pencil, Send, Trash2, Users, X } from 'lucide-vue-next'
+import { ArrowLeft, Check, Hash, Loader2, Lock, MessageSquare, Pencil, Send, Settings2, Trash2, Users, X } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
@@ -10,12 +10,14 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { EmptyState } from '@/components/ui/empty-state'
 import { ErrorState } from '@/components/shared'
+import { Badge } from '@/components/ui/badge'
+import ChannelManagePanel from './ChannelManagePanel.vue'
 import { useInfiniteScroll } from '@/composables/useInfiniteScroll'
 import { useTeamChatStore } from '@/stores/teamChat'
 import { useAuthStore } from '@/stores/auth'
 import { getAvatarGradient, getInitials } from '@/lib/utils'
 import { getErrorMessage } from '@/lib/api-utils'
-import { TEAM_CHAT_MAX_BODY, isSendableBody, pickTypingNames } from '@/lib/team-chat'
+import { TEAM_CHAT_MAX_BODY, isSendableBody, pickTypingNames, systemEventKey } from '@/lib/team-chat'
 import type { TeamChatMessage } from '@/services/api'
 
 const props = defineProps<{ channelId: string; showBack?: boolean }>()
@@ -32,7 +34,22 @@ const editingBody = ref('')
 const endRef = ref<HTMLElement | null>(null)
 
 const panel = computed(() => store.panel(props.channelId))
-const channel = computed(() => store.channels.find(c => c.id === props.channelId) ?? null)
+const channel = computed(() => store.channelById(props.channelId))
+const isArchived = computed(() => !!channel.value?.archived_at)
+const manageOpen = ref(false)
+
+// A system message is the channel's own record ("Ana added Bia", "Carlos entered as
+// administrator: <reason>"). It is translated here from its event and parameters and
+// shown as text, never as HTML.
+function systemText(m: TeamChatMessage): string {
+  const key = systemEventKey(m.meta)
+  if (!key) return ''
+  const meta = m.meta ?? {}
+  return t(key, {
+    actor: meta.actor_name ?? '', target: meta.target_name ?? '',
+    old: meta.old_name ?? '', new: meta.new_name ?? '', reason: meta.reason ?? ''
+  })
+}
 const myId = computed(() => auth.user?.id)
 
 // Buttons mirror what the server allows; the server still decides.
@@ -162,6 +179,15 @@ async function removeMessage(m: TeamChatMessage) {
       <Hash v-else-if="channel?.kind === 'channel'" class="h-4 w-4 text-muted-foreground" />
       <Lock v-else class="h-4 w-4 text-muted-foreground" />
       <h2 class="truncate text-sm font-semibold">{{ channel?.name || t('teamChat.unnamed') }}</h2>
+      <Badge v-if="isArchived" variant="secondary">{{ t('teamChat.manage.archivedBadge') }}</Badge>
+      <Button
+        v-if="channel?.kind === 'channel'"
+        variant="ghost" size="icon" class="ml-auto h-9 w-9"
+        :aria-label="t('teamChat.manage.title')" :title="t('teamChat.manage.title')"
+        @click="manageOpen = true"
+      >
+        <Settings2 class="h-4 w-4" />
+      </Button>
     </header>
 
     <!-- No access (or it does not exist: the server answers the same) -->
@@ -200,9 +226,12 @@ async function removeMessage(m: TeamChatMessage) {
             :description="t('teamChat.noMessages')"
           />
 
+          <template v-for="m in panel.messages" :key="m.id">
+          <div v-if="m.kind === 'system'" :data-testid="`system-${m.id}`" class="flex justify-center px-2 py-1">
+            <p class="max-w-[90%] break-words rounded-full bg-muted px-3 py-1 text-center text-xs text-muted-foreground">{{ systemText(m) }}</p>
+          </div>
           <article
-            v-for="m in panel.messages"
-            :key="m.id"
+            v-else
             :data-testid="`message-${m.id}`"
             class="group flex items-start gap-3 rounded-md px-2 py-1.5 hover:bg-muted/50"
           >
@@ -248,13 +277,15 @@ async function removeMessage(m: TeamChatMessage) {
               </button>
             </div>
           </article>
+          </template>
           <div ref="endRef" />
         </div>
       </ScrollArea>
 
       <footer class="border-t p-3">
         <p class="h-4 px-1 text-xs text-muted-foreground" aria-live="polite">{{ typingText }}</p>
-        <form v-if="canWrite" class="flex items-end gap-2" @submit.prevent="submit">
+        <p v-if="isArchived" class="px-1 text-sm text-muted-foreground">{{ t('teamChat.manage.archivedNotice') }}</p>
+        <form v-else-if="canWrite" class="flex items-end gap-2" @submit.prevent="submit">
           <Textarea
             v-model="draft"
             class="max-h-40 min-h-[40px] flex-1 resize-none text-sm"
@@ -274,5 +305,12 @@ async function removeMessage(m: TeamChatMessage) {
         <p v-if="overLimit" class="mt-1 px-1 text-xs text-destructive">{{ t('teamChat.tooLong', { max: TEAM_CHAT_MAX_BODY }) }}</p>
       </footer>
     </template>
+
+    <ChannelManagePanel
+      v-if="channel?.kind === 'channel'"
+      v-model:open="manageOpen"
+      :channel-id="channelId"
+      @left="emit('back')"
+    />
   </section>
 </template>

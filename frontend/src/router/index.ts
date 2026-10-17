@@ -76,6 +76,13 @@ const router = createRouter({
           meta: { permission: 'chat', stableKey: true }
         },
         {
+          // Administration of free channels (composition and state, never messages).
+          path: 'team-chat/admin',
+          name: 'team-chat-admin',
+          component: () => import('@/views/team-chat/TeamChatAdminView.vue'),
+          meta: { permission: 'team_chat', permissionAction: 'manage' }
+        },
+        {
           // Independent of /chat (WhatsApp support): own permission, own screen.
           path: 'team-chat/:channelId?',
           name: 'team-chat',

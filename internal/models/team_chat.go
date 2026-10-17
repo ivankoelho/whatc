@@ -38,6 +38,11 @@ type ChatChannel struct {
 	Name           string          `gorm:"size:100" json:"name"`
 	CreatedByID    *uuid.UUID      `gorm:"type:uuid" json:"created_by_id,omitempty"`
 
+	// ArchivedAt is set while the channel is archived (free channels only): hidden
+	// from the normal list, closed to new messages, edits and members; history stays.
+	ArchivedAt   *time.Time `gorm:"index" json:"archived_at,omitempty"`
+	ArchivedByID *uuid.UUID `gorm:"type:uuid" json:"archived_by_id,omitempty"`
+
 	// Canonical DM pair: low < high (see CanonicalDMPair). Only set for kind=dm.
 	DMUserLowID  *uuid.UUID `gorm:"column:dm_user_low_id;type:uuid" json:"-"`
 	DMUserHighID *uuid.UUID `gorm:"column:dm_user_high_id;type:uuid" json:"-"`
@@ -59,6 +64,26 @@ type ChatChannelMember struct {
 
 func (ChatChannelMember) TableName() string { return "chat_channel_members" }
 
+// ChatMessageKind separates what people write from what the system records about the channel.
+type ChatMessageKind string
+
+const (
+	ChatMessageKindUser   ChatMessageKind = "user"
+	ChatMessageKindSystem ChatMessageKind = "system"
+)
+
+// System message events (ChatMessage.Meta["event"]). The UI translates them.
+const (
+	ChatEventMemberAdded   = "member_added"
+	ChatEventMemberRemoved = "member_removed"
+	ChatEventMemberLeft    = "member_left"
+	ChatEventOwnerChanged  = "owner_changed"
+	ChatEventRenamed       = "renamed"
+	ChatEventArchived      = "archived"
+	ChatEventReopened      = "reopened"
+	ChatEventAdminJoined   = "admin_joined"
+)
+
 // ChatMessage is a message in a channel. ParentID is reserved for threads;
 // ContextType/ContextID only reference a Whatc entity (never copy it).
 type ChatMessage struct {
@@ -71,6 +96,12 @@ type ChatMessage struct {
 	ContextType    string     `gorm:"size:30" json:"context_type,omitempty"`
 	ContextID      *uuid.UUID `gorm:"type:uuid" json:"context_id,omitempty"`
 	EditedAt       *time.Time `json:"edited_at,omitempty"`
+
+	// Kind is "user" (written by a person) or "system" (a record about the channel,
+	// e.g. a member added). A system message's Meta holds the event and its
+	// parameters; it is never editable and never deletable.
+	Kind ChatMessageKind `gorm:"size:10;not null;default:'user'" json:"kind"`
+	Meta JSONB           `gorm:"type:jsonb" json:"meta,omitempty"`
 }
 
 func (ChatMessage) TableName() string { return "chat_messages" }

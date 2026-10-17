@@ -235,6 +235,12 @@ func runServer(args []string) {
 			lo.Fatal("Team chat permissions backfill failed", "error", err)
 		}
 
+		// Same window: team_chat:join_any is a new action of an existing resource, so
+		// it needs its own guard; only the system admin role gets it.
+		if err := database.BackfillTeamChatJoinAnyPermission(db, lo); err != nil {
+			lo.Fatal("Team chat join_any permission backfill failed", "error", err)
+		}
+
 		// Data fix, not a schema migration: AutoMigrate adding occurrences.source
 		// with a DB default backfilled every existing row to 'whatsapp',
 		// including cases opened manually. Runs once, guarded by the column's
@@ -849,6 +855,17 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/team-chat/channels/{id}/messages", app.SendChatMessage)
 	g.POST("/api/team-chat/channels/{id}/read", app.MarkChatChannelRead)
 	g.POST("/api/team-chat/channels/{id}/typing", app.NotifyChatTyping)
+	// Phase A: channel management
+	g.GET("/api/team-chat/channels/{id}/members", app.ListChatChannelMembers)
+	g.POST("/api/team-chat/channels/{id}/members", app.AddChatChannelMember)
+	g.PUT("/api/team-chat/channels/{id}/members/{member_id}", app.SetChatMemberRole)
+	g.DELETE("/api/team-chat/channels/{id}/members/{member_id}", app.RemoveChatChannelMember)
+	g.POST("/api/team-chat/channels/{id}/leave", app.LeaveChatChannel)
+	g.PUT("/api/team-chat/channels/{id}", app.RenameChatChannel)
+	g.POST("/api/team-chat/channels/{id}/archive", app.ArchiveChatChannel)
+	g.POST("/api/team-chat/channels/{id}/reopen", app.ReopenChatChannel)
+	g.POST("/api/team-chat/channels/{id}/join", app.JoinChatChannel)
+	g.GET("/api/team-chat/admin/channels", app.ListChatAdminChannels)
 	g.PUT("/api/team-chat/messages/{id}", app.UpdateChatMessage)
 	g.DELETE("/api/team-chat/messages/{id}", app.DeleteChatMessage)
 

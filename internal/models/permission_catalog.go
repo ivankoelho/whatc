@@ -32,7 +32,7 @@ var permissionGroups = []PermissionGroup{
 // writing, deleting, then the specific ones.
 var permissionActionOrder = []string{
 	ActionRead, ActionWrite, ActionDelete, ActionSync, ActionExecute, ActionImport,
-	ActionExport, ActionPickup, ActionAssign, ActionViewAll, ActionViewTeam, ActionManage,
+	ActionExport, ActionPickup, ActionAssign, ActionViewAll, ActionViewTeam, ActionManage, ActionJoinAny,
 }
 
 // PermissionPresentation returns the functional group, its order and the sort

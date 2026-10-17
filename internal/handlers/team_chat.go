@@ -40,6 +40,13 @@ type ChatChannelResponse struct {
 	UnreadCount   int64                  `json:"unread_count"`
 	LastMessageAt *time.Time             `json:"last_message_at,omitempty"`
 	CreatedAt     time.Time              `json:"created_at"`
+
+	// Free channels only: lets the UI tell same-named channels apart and show the
+	// right actions. MyRole is the caller's role in the channel ("owner"/"member").
+	ArchivedAt    *time.Time `json:"archived_at,omitempty"`
+	MyRole        string     `json:"my_role,omitempty"`
+	MemberCount   int64      `json:"member_count,omitempty"`
+	CreatedByName string     `json:"created_by_name,omitempty"`
 }
 
 // ChatMessageResponse is one message with its author's display name.
@@ -54,6 +61,11 @@ type ChatMessageResponse struct {
 	ContextID   *uuid.UUID `json:"context_id,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
 	EditedAt    *time.Time `json:"edited_at,omitempty"`
+
+	// Kind is "user" or "system". A system message carries no body: Meta holds the
+	// event ("member_added", ...) and its parameters for the UI to translate.
+	Kind models.ChatMessageKind `json:"kind"`
+	Meta models.JSONB           `json:"meta,omitempty"`
 }
 
 type chatChannelRequest struct {
@@ -221,9 +233,11 @@ func (a *App) ListChatChannels(r *fastglue.Request) error {
 	var memberRows []models.ChatChannelMember
 	a.DB.Where("organization_id = ? AND user_id = ?", orgID, userID).Find(&memberRows)
 	joined := make(map[uuid.UUID]time.Time, len(memberRows))
+	roleBy := make(map[uuid.UUID]string, len(memberRows))
 	memberIDs := make([]uuid.UUID, 0, len(memberRows))
 	for _, m := range memberRows {
 		joined[m.ChannelID] = m.JoinedAt
+		roleBy[m.ChannelID] = m.Role
 		memberIDs = append(memberIDs, m.ChannelID)
 	}
 
@@ -243,6 +257,14 @@ func (a *App) ListChatChannels(r *fastglue.Request) error {
 		a.Log.Error("Failed to list chat channels", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list channels", nil, "")
 	}
+	archivedOnly := string(r.RequestCtx.QueryArgs().Peek("archived")) == "true"
+	kept := channels[:0]
+	for _, c := range channels {
+		if (c.ArchivedAt != nil) == archivedOnly {
+			kept = append(kept, c)
+		}
+	}
+	channels = kept
 
 	// Team joined-at (for the unread baseline) and team names.
 	teamJoined := map[uuid.UUID]time.Time{}
@@ -301,6 +323,31 @@ func (a *App) ListChatChannels(r *fastglue.Request) error {
 		}
 	}
 
+	// Free channels: member count and creator, so same-named channels can be told apart.
+	var freeIDs, creatorIDs []uuid.UUID
+	for _, c := range channels {
+		if c.Kind == models.ChatChannelKindChannel {
+			freeIDs = append(freeIDs, c.ID)
+			if c.CreatedByID != nil {
+				creatorIDs = append(creatorIDs, *c.CreatedByID)
+			}
+		}
+	}
+	memberCount := map[uuid.UUID]int64{}
+	if len(freeIDs) > 0 {
+		type countRow struct {
+			ChannelID uuid.UUID
+			N         int64
+		}
+		var rows []countRow
+		a.DB.Model(&models.ChatChannelMember{}).Select("channel_id, COUNT(*) AS n").
+			Where("channel_id IN ?", freeIDs).Group("channel_id").Scan(&rows)
+		for _, rw := range rows {
+			memberCount[rw.ChannelID] = rw.N
+		}
+	}
+	creatorNames := a.chatUserNames(creatorIDs)
+
 	out := make([]ChatChannelResponse, 0, len(channels))
 	for _, c := range channels {
 		resp := ChatChannelResponse{
@@ -317,6 +364,14 @@ func (a *App) ListChatChannels(r *fastglue.Request) error {
 				o := other
 				resp.DMUserID = &o
 				resp.Name = names[other]
+			}
+		}
+		if c.Kind == models.ChatChannelKindChannel {
+			resp.ArchivedAt = c.ArchivedAt
+			resp.MyRole = roleBy[c.ID]
+			resp.MemberCount = memberCount[c.ID]
+			if c.CreatedByID != nil {
+				resp.CreatedByName = creatorNames[*c.CreatedByID]
 			}
 		}
 		if t, ok := last[c.ID]; ok {
@@ -466,8 +521,15 @@ func chatMessageToResponse(m models.ChatMessage, names map[uuid.UUID]string) Cha
 	return ChatMessageResponse{
 		ID: m.ID, ChannelID: m.ChannelID, UserID: m.UserID, UserName: names[m.UserID],
 		Body: m.Body, ParentID: m.ParentID, ContextType: m.ContextType, ContextID: m.ContextID,
-		CreatedAt: m.CreatedAt, EditedAt: m.EditedAt,
+		CreatedAt: m.CreatedAt, EditedAt: m.EditedAt, Kind: kindOrUser(m.Kind), Meta: m.Meta,
 	}
+}
+
+func kindOrUser(k models.ChatMessageKind) models.ChatMessageKind {
+	if k == "" {
+		return models.ChatMessageKindUser
+	}
+	return k
 }
 
 // ListChatMessages pages a channel's history backwards with a (created_at, id)
@@ -546,13 +608,26 @@ func (a *App) SendChatMessage(r *fastglue.Request) error {
 	if !valid {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "body must be 1-4000 characters", nil, "")
 	}
-	msg := models.ChatMessage{
-		BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: orgID,
-		ChannelID: ch.ID, UserID: userID, Body: body,
-	}
-	if err := a.DB.Create(&msg).Error; err != nil {
-		a.Log.Error("Failed to create chat message", "error", err)
-		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to send message", nil, "")
+	// FOR SHARE on the channel row: concurrent sends do not block each other, but an
+	// archive or a removal (FOR UPDATE) waits for them and the other way round, so a
+	// message either lands before the archive or is refused, never after it. Access is
+	// re-checked inside the lock: someone removed a moment ago cannot slip one in.
+	var msg models.ChatMessage
+	txErr := a.withLockedChannel(orgID, ch.ID, chatLockShare, func(tx *gorm.DB, locked *models.ChatChannel) error {
+		if !a.canAccessChatChannelDB(tx, userID, orgID, locked) {
+			return errChatNotFound
+		}
+		if locked.ArchivedAt != nil {
+			return errChatArchived
+		}
+		msg = models.ChatMessage{
+			BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: orgID,
+			ChannelID: locked.ID, UserID: userID, Body: body, Kind: models.ChatMessageKindUser,
+		}
+		return tx.Create(&msg).Error
+	})
+	if txErr != nil {
+		return a.sendChatError(r, txErr, "send the message")
 	}
 	a.notifyChat(orgID, ch, websocket.TypeTeamChatMessage, userID, &msg.ID, uuid.Nil)
 	return r.SendEnvelope(chatMessageToResponse(msg, a.chatUserNames([]uuid.UUID{userID})))
@@ -589,6 +664,9 @@ func (a *App) UpdateChatMessage(r *fastglue.Request) error {
 	if !ok {
 		return nil
 	}
+	if msg.Kind == models.ChatMessageKindSystem {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "System messages cannot be edited", nil, fastglue.ErrorType("system_message"))
+	}
 	if msg.UserID != userID {
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You can only edit your own messages", nil, "")
 	}
@@ -601,9 +679,17 @@ func (a *App) UpdateChatMessage(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "body must be 1-4000 characters", nil, "")
 	}
 	now := time.Now()
-	if err := a.DB.Model(msg).Updates(map[string]any{"body": body, "edited_at": now}).Error; err != nil {
-		a.Log.Error("Failed to edit chat message", "error", err)
-		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to edit message", nil, "")
+	txErr := a.withLockedChannel(orgID, ch.ID, chatLockShare, func(tx *gorm.DB, locked *models.ChatChannel) error {
+		if !a.canAccessChatChannelDB(tx, userID, orgID, locked) {
+			return errChatNotFound
+		}
+		if locked.ArchivedAt != nil {
+			return errChatArchived
+		}
+		return tx.Model(msg).Updates(map[string]any{"body": body, "edited_at": now}).Error
+	})
+	if txErr != nil {
+		return a.sendChatError(r, txErr, "edit the message")
 	}
 	msg.Body, msg.EditedAt = body, &now
 	a.notifyChat(orgID, ch, websocket.TypeTeamChatMessageUpdated, userID, &msg.ID, uuid.Nil)

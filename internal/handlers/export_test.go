@@ -199,3 +199,11 @@ func (a *App) CanDeleteChatMessageForTest(userID, orgID uuid.UUID, msg *models.C
 func (a *App) ReassignAwayTransferForTest(t *models.AgentTransfer, awayAgent uuid.UUID, event string) bool {
 	return a.reassignAwayTransfer(t, awayAgent, event)
 }
+
+// SetChatAuditWriterForTest swaps the function that writes the audit entry of a chat
+// change (to inject a failure) and returns the function that restores it.
+func SetChatAuditWriterForTest(fn func(db *gorm.DB, orgID, userID uuid.UUID, userName, resourceType string, resourceID uuid.UUID, action models.AuditAction, changes ...map[string]any) error) func() {
+	prev := chatAuditWriter
+	chatAuditWriter = fn
+	return func() { chatAuditWriter = prev }
+}

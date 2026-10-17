@@ -104,7 +104,8 @@ const TEAM_CHAT_EVENT_TYPES = new Set([
   'team_chat_message_deleted',
   'team_chat_read',
   'team_chat_typing',
-  'team_chat_channel'
+  'team_chat_channel',
+  'team_chat_channel_updated'
 ])
 
 // Occurrence types
@@ -357,6 +358,7 @@ class WebSocketService {
         case 'team_chat_read':
         case 'team_chat_typing':
         case 'team_chat_channel':
+        case 'team_chat_channel_updated':
           if (TEAM_CHAT_EVENT_TYPES.has(message.type)) useTeamChatStore().applyEvent(message.type, message.payload)
           break
         case WS_TYPE_OCCURRENCE_CHANGED:

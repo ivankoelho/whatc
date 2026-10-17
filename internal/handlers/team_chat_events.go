@@ -98,6 +98,9 @@ func (a *App) NotifyChatTyping(r *fastglue.Request) error {
 	if !ok {
 		return nil
 	}
+	if ch.ArchivedAt != nil {
+		return a.sendChatError(r, errChatArchived, "send typing")
+	}
 	a.notifyChat(orgID, ch, websocket.TypeTeamChatTyping, userID, nil, userID)
 	r.RequestCtx.SetStatusCode(fasthttp.StatusNoContent)
 	return nil

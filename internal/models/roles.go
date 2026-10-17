@@ -117,6 +117,9 @@ const (
 	ActionViewAll  = "view_all"
 	ActionViewTeam = "view_team"
 	ActionManage   = "manage"
+	// ActionJoinAny lets the holder enter a private chat channel without being a
+	// member (audited, with a reason). Only the system admin role gets it.
+	ActionJoinAny = "join_any"
 )
 
 // DefaultPermissions returns the list of all available permissions to seed
@@ -192,6 +195,7 @@ func DefaultPermissions() []Permission {
 		{Resource: ResourceTeamChat, Action: ActionWrite, Description: "Send internal chat messages and start direct messages"},
 		{Resource: ResourceTeamChat, Action: ActionManage, Description: "Create and manage internal chat channels"},
 		{Resource: ResourceTeamChat, Action: ActionDelete, Description: "Delete other users' internal chat messages"},
+		{Resource: ResourceTeamChat, Action: ActionJoinAny, Description: "Enter a private internal chat channel without being a member (audited, with a reason)"},
 
 		// Conversations
 		{Resource: ResourceConversations, Action: ActionViewAll, Description: "View and act on all conversations, including those assigned to other agents"},

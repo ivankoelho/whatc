@@ -48,3 +48,19 @@ export function isSendableBody(raw: string): boolean {
 export function pickTypingNames(ids: string[], names: Record<string, string>): string[] {
   return ids.map(id => names[id]).filter((n): n is string => !!n)
 }
+
+/** The server's machine-readable reason for a refusal ("last_owner", "archived", ...). */
+export function chatErrorCode(err: unknown): string {
+  return (err as { response?: { data?: { error_type?: string } } })?.response?.data?.error_type ?? ''
+}
+
+/** i18n key of a system message's event, or '' for a user message / unknown event. */
+export const TEAM_CHAT_SYSTEM_EVENTS = [
+  'member_added', 'member_removed', 'member_left', 'owner_changed',
+  'renamed', 'archived', 'reopened', 'admin_joined'
+] as const
+
+export function systemEventKey(meta?: Record<string, string>): string {
+  const ev = meta?.event
+  return ev && (TEAM_CHAT_SYSTEM_EVENTS as readonly string[]).includes(ev) ? `teamChat.system.${ev}` : ''
+}

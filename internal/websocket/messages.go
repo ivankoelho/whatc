@@ -64,6 +64,10 @@ const (
 	TypeTeamChatRead           = "team_chat_read"
 	TypeTeamChatTyping         = "team_chat_typing"
 	TypeTeamChatChannel        = "team_chat_channel"
+	// TypeTeamChatChannelUpdated: composition or state of a channel changed (member
+	// added/removed/left, owner changed, renamed, archived, reopened, admin joined).
+	// Ids and a change code only: never a reason, name or text.
+	TypeTeamChatChannelUpdated = "team_chat_channel_updated"
 
 	// Call types
 	TypeCallIncoming = "call_incoming"
@@ -162,4 +166,7 @@ type TeamChatEventPayload struct {
 	MessageID *uuid.UUID `json:"message_id,omitempty"`
 	UserID    uuid.UUID  `json:"user_id"` // who did it (author, reader, typist, creator)
 	At        time.Time  `json:"at"`
+	// Change is a code (e.g. "member_added") on team_chat_channel_updated; it never
+	// carries names, reasons or text.
+	Change string `json:"change,omitempty"`
 }

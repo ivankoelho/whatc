@@ -400,7 +400,75 @@
     "editFailed": "Não foi possível editar a mensagem.",
     "deleteMessage": "Excluir mensagem",
     "confirmDelete": "Excluir esta mensagem?",
-    "deleteFailed": "Não foi possível excluir a mensagem."
+    "deleteFailed": "Não foi possível excluir a mensagem.",
+    "sectionArchived": "Arquivados",
+    "showArchived": "Mostrar canais arquivados",
+    "hideArchived": "Ocultar canais arquivados",
+    "sameName": "de {name} · {n} pessoas",
+    "manage": {
+      "title": "Membros do canal",
+      "desc": "Quem está neste canal e o que você pode fazer a respeito.",
+      "name": "Nome",
+      "archivedBadge": "Arquivado",
+      "rename": "Renomear canal",
+      "members": "Membros ({n})",
+      "noMembers": "Ninguém está neste canal.",
+      "you": "você",
+      "owner": "Dono",
+      "add": "Adicionar membro",
+      "remove": "Remover {name}",
+      "promote": "Tornar {name} dono(a)",
+      "demote": "Tornar {name} membro comum",
+      "leave": "Sair do canal",
+      "archive": "Arquivar canal",
+      "reopen": "Reabrir canal",
+      "pickDesc": "Escolha alguém da sua organização. A pessoa verá todo o histórico do canal.",
+      "confirmRemove": "Remover {name} deste canal? A pessoa perde o acesso a ele, inclusive ao que escreveu.",
+      "confirmLeave": "Sair deste canal? Você perderá o acesso a ele.",
+      "confirmArchive": "Arquivar este canal? Ele sai da lista e deixa de aceitar mensagens; o histórico é mantido.",
+      "added": "Membro adicionado.",
+      "removed": "Membro removido.",
+      "left": "Você saiu do canal.",
+      "renamed": "Canal renomeado.",
+      "archivedOk": "Canal arquivado.",
+      "reopenedOk": "Canal reaberto.",
+      "archivedNotice": "Este canal está arquivado: você pode lê-lo, mas não escrever nele."
+    },
+    "errors": {
+      "generic": "Não foi possível fazer isso. Tente novamente.",
+      "last_owner": "O último dono não pode sair nem deixar de ser dono: torne outra pessoa dona ou arquive o canal antes.",
+      "archived": "O canal está arquivado.",
+      "forbidden": "Você não tem permissão para fazer isso neste canal.",
+      "self_add": "Ninguém se adiciona por aqui. Use a entrada administrativa, que pede um motivo.",
+      "already_member": "Esta pessoa já está no canal.",
+      "not_archived": "O canal não está arquivado.",
+      "not_found": "O canal ou a pessoa não foi encontrado.",
+      "invalid": "Confira os dados e tente novamente."
+    },
+    "admin": {
+      "title": "Administração de canais",
+      "subtitle": "Quem está em cada canal e o estado dele. As mensagens nunca aparecem aqui.",
+      "emptyTitle": "Nenhum canal ainda",
+      "empty": "Os canais privados criados na sua organização aparecerão aqui.",
+      "createdBy": "Criado por {name}",
+      "youAreIn": "Você é membro",
+      "joinTitle": "Entrar em \"{name}\"",
+      "joinDesc": "Você não é membro deste canal privado. Entrar permite ler todo o histórico dele. Todos os membros verão que você entrou e por quê, e isso fica registrado na auditoria.",
+      "reason": "Motivo",
+      "reasonHint": "De {min} a {max} caracteres ({n} até agora). É exibido aos membros do canal.",
+      "joinAction": "Entrar como administrador",
+      "joined": "Você entrou no canal."
+    },
+    "system": {
+      "member_added": "{actor} adicionou {target}.",
+      "member_removed": "{actor} removeu {target}.",
+      "member_left": "{actor} saiu do canal.",
+      "owner_changed": "{actor} alterou o papel de {target}.",
+      "renamed": "{actor} renomeou o canal de \"{old}\" para \"{new}\".",
+      "archived": "{actor} arquivou o canal.",
+      "reopened": "{actor} reabriu o canal.",
+      "admin_joined": "{actor} entrou como administrador. Motivo: {reason}"
+    }
   },
   "chat": {
     "marketingOptOut": "Recusa de marketing",
@@ -4419,6 +4487,10 @@
       "team_chat_delete": {
         "label": "Excluir mensagens de outros",
         "description": "Remover mensagens internas escritas por outras pessoas."
+      },
+      "team_chat_join_any": {
+        "label": "Entrar em canais privados",
+        "description": "Entrar em um canal interno privado sem ser membro. Exige um motivo e fica registrado para os membros e na auditoria."
       },
       "conversations_view_all": {
         "label": "Ver todas as conversas",

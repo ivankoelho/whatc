@@ -151,6 +151,34 @@ func LogAudit(
 	}()
 }
 
+// LogAuditTx writes an audit entry synchronously through db and returns the error.
+// Pass a transaction: the entry then commits or rolls back together with the change
+// it records, so a failed audit write undoes the change instead of being swallowed
+// (LogAudit above is fire-and-forget and cannot give that guarantee).
+func LogAuditTx(
+	db *gorm.DB,
+	orgID, userID uuid.UUID,
+	userName string,
+	resourceType string,
+	resourceID uuid.UUID,
+	action models.AuditAction,
+	changes ...map[string]any,
+) error {
+	changesArr := make(models.JSONBArray, len(changes))
+	for i, c := range changes {
+		changesArr[i] = c
+	}
+	return db.Create(&models.AuditLog{
+		OrganizationID: orgID,
+		ResourceType:   resourceType,
+		ResourceID:     resourceID,
+		UserID:         userID,
+		UserName:       userName,
+		Action:         action,
+		Changes:        changesArr,
+	}).Error
+}
+
 func extractSubField(val any, key string) any {
 	if m, ok := val.(map[string]any); ok {
 		return m[key]

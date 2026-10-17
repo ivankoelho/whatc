@@ -54,6 +54,7 @@ const showPanel = computed(() => !isMobile.value || !!activeId.value)
       @select="open"
       @new-channel="openDialog('channel')"
       @new-dm="openDialog('dm')"
+      @admin="router.push({ name: 'team-chat-admin' })"
     />
 
     <template v-if="showPanel">

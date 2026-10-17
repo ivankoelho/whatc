@@ -928,3 +928,58 @@ func BackfillTeamChatPermissions(db *gorm.DB, lo logf.Logger) error {
 	lo.Info("team_chat permissions backfill complete", "links_granted", res.RowsAffected)
 	return nil
 }
+
+// BackfillTeamChatJoinAnyPermission grants team_chat:join_any (enter a private chat
+// channel without being a member, audited, with a reason) to the system "admin"
+// role ONLY. FixSystemRolePermissions skips roles that already have permissions,
+// so existing organizations would never receive it otherwise. Idempotent per
+// organization: one where any live role already holds team_chat:join_any is
+// skipped. LIMITATION (shared with the other single-permission backfills): the
+// guard remembers "already migrated" only while some role still holds the
+// permission, so if the admin role is its ONLY holder and an admin removes it,
+// the next boot grants it to the admin role again. Purely additive; manager,
+// agent and custom roles are never touched.
+func BackfillTeamChatJoinAnyPermission(db *gorm.DB, lo logf.Logger) error {
+	var seeded int64
+	if err := db.Model(&models.Permission{}).
+		Where("resource = ? AND action = ?", models.ResourceTeamChat, models.ActionJoinAny).
+		Count(&seeded).Error; err != nil {
+		return fmt.Errorf("failed to count the team_chat:join_any permission: %w", err)
+	}
+	if seeded == 0 {
+		lo.Warn("team_chat:join_any permission not seeded yet, did nothing")
+		return nil
+	}
+
+	res := db.Exec(`
+		INSERT INTO role_permissions (custom_role_id, permission_id)
+		SELECT r.id, target.id
+		FROM custom_roles r
+		CROSS JOIN permissions target
+		WHERE r.deleted_at IS NULL
+		  AND r.is_system = true
+		  AND r.name = 'admin'
+		  AND target.resource = ? AND target.action = ?
+		  AND NOT EXISTS (
+		    SELECT 1
+		    FROM custom_roles r2
+		    JOIN role_permissions rp2 ON rp2.custom_role_id = r2.id
+		    JOIN permissions p2 ON p2.id = rp2.permission_id
+		    WHERE r2.organization_id = r.organization_id
+		      AND r2.deleted_at IS NULL
+		      AND p2.resource = ? AND p2.action = ?
+		  )
+		ON CONFLICT DO NOTHING`,
+		models.ResourceTeamChat, models.ActionJoinAny,
+		models.ResourceTeamChat, models.ActionJoinAny,
+	)
+	if res.Error != nil {
+		return fmt.Errorf("failed to grant the team_chat:join_any permission: %w", res.Error)
+	}
+	if res.RowsAffected == 0 {
+		lo.Info("team_chat:join_any backfill: nothing pending")
+		return nil
+	}
+	lo.Info("team_chat:join_any backfill complete", "links_granted", res.RowsAffected)
+	return nil
+}

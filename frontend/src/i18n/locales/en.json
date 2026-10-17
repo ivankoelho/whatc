@@ -400,7 +400,75 @@
     "editFailed": "Could not edit the message.",
     "deleteMessage": "Delete message",
     "confirmDelete": "Delete this message?",
-    "deleteFailed": "Could not delete the message."
+    "deleteFailed": "Could not delete the message.",
+    "sectionArchived": "Archived",
+    "showArchived": "Show archived channels",
+    "hideArchived": "Hide archived channels",
+    "sameName": "by {name} · {n} people",
+    "manage": {
+      "title": "Channel members",
+      "desc": "Who is in this channel and what you can do about it.",
+      "name": "Name",
+      "archivedBadge": "Archived",
+      "rename": "Rename channel",
+      "members": "Members ({n})",
+      "noMembers": "Nobody is in this channel.",
+      "you": "you",
+      "owner": "Owner",
+      "add": "Add a member",
+      "remove": "Remove {name}",
+      "promote": "Make {name} an owner",
+      "demote": "Make {name} a regular member",
+      "leave": "Leave channel",
+      "archive": "Archive channel",
+      "reopen": "Reopen channel",
+      "pickDesc": "Choose someone from your organization. They will see the whole history of the channel.",
+      "confirmRemove": "Remove {name} from this channel? They lose access to it, including what they wrote.",
+      "confirmLeave": "Leave this channel? You will lose access to it.",
+      "confirmArchive": "Archive this channel? It leaves the list and stops accepting messages; the history is kept.",
+      "added": "Member added.",
+      "removed": "Member removed.",
+      "left": "You left the channel.",
+      "renamed": "Channel renamed.",
+      "archivedOk": "Channel archived.",
+      "reopenedOk": "Channel reopened.",
+      "archivedNotice": "This channel is archived: you can read it but not write in it."
+    },
+    "errors": {
+      "generic": "Could not do that. Try again.",
+      "last_owner": "The last owner cannot leave or step down: make someone else an owner or archive the channel first.",
+      "archived": "The channel is archived.",
+      "forbidden": "You are not allowed to do that in this channel.",
+      "self_add": "Nobody adds themselves here. Use the administrative entry, which asks for a reason.",
+      "already_member": "This person is already in the channel.",
+      "not_archived": "The channel is not archived.",
+      "not_found": "The channel or the person was not found.",
+      "invalid": "Check the data and try again."
+    },
+    "admin": {
+      "title": "Channel administration",
+      "subtitle": "Who is in each channel and its state. Messages are never shown here.",
+      "emptyTitle": "No channels yet",
+      "empty": "Private channels created in your organization will appear here.",
+      "createdBy": "Created by {name}",
+      "youAreIn": "You are a member",
+      "joinTitle": "Enter \"{name}\"",
+      "joinDesc": "You are not a member of this private channel. Entering lets you read its whole history. Everyone in the channel will see that you entered and why, and it is recorded in the audit log.",
+      "reason": "Reason",
+      "reasonHint": "{min} to {max} characters ({n} so far). It is shown to the members of the channel.",
+      "joinAction": "Enter as administrator",
+      "joined": "You entered the channel."
+    },
+    "system": {
+      "member_added": "{actor} added {target}.",
+      "member_removed": "{actor} removed {target}.",
+      "member_left": "{actor} left the channel.",
+      "owner_changed": "{actor} changed the role of {target}.",
+      "renamed": "{actor} renamed the channel from \"{old}\" to \"{new}\".",
+      "archived": "{actor} archived the channel.",
+      "reopened": "{actor} reopened the channel.",
+      "admin_joined": "{actor} entered as administrator. Reason: {reason}"
+    }
   },
   "chat": {
     "marketingOptOut": "Marketing Opt-out",
@@ -4430,6 +4498,10 @@
       "team_chat_delete": {
         "label": "Delete others' internal messages",
         "description": "Remove internal messages written by other people."
+      },
+      "team_chat_join_any": {
+        "label": "Enter private channels",
+        "description": "Join a private internal channel without being a member. Requires a reason and is recorded for the members and the audit log."
       },
       "conversations_view_all": {
         "label": "View all conversations",

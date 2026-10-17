@@ -81,3 +81,24 @@ describe('pickTypingNames', () => {
     expect(pickTypingNames(['1', '2', '3'], { '1': 'Ana', '3': 'Caio' })).toEqual(['Ana', 'Caio'])
   })
 })
+
+describe('chatErrorCode', () => {
+  it('reads the server reason, and is empty for anything else', async () => {
+    const { chatErrorCode } = await import('./team-chat')
+    expect(chatErrorCode({ response: { data: { error_type: 'last_owner' } } })).toBe('last_owner')
+    expect(chatErrorCode({ response: { data: {} } })).toBe('')
+    expect(chatErrorCode(new Error('offline'))).toBe('')
+    expect(chatErrorCode(null)).toBe('')
+  })
+})
+
+describe('systemEventKey', () => {
+  it('maps the eight known events to their text, and nothing else', async () => {
+    const { systemEventKey, TEAM_CHAT_SYSTEM_EVENTS } = await import('./team-chat')
+    for (const ev of TEAM_CHAT_SYSTEM_EVENTS) expect(systemEventKey({ event: ev })).toBe(`teamChat.system.${ev}`)
+    expect(TEAM_CHAT_SYSTEM_EVENTS).toHaveLength(8)
+    expect(systemEventKey({ event: 'drop_table' })).toBe('')
+    expect(systemEventKey({})).toBe('')
+    expect(systemEventKey(undefined)).toBe('')
+  })
+})
