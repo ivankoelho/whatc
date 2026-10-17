@@ -404,6 +404,16 @@
     "replyingTo": "Respondendo a {name}",
     "cancelReply": "Cancelar resposta",
     "removedMessage": "Mensagem removida",
+    "emoji": {
+      "title": "Emojis",
+      "open": "Adicionar emoji",
+      "categories": {
+        "smileys": "Rostos",
+        "people": "Pessoas",
+        "symbols": "Símbolos",
+        "things": "Objetos"
+      }
+    },
     "attachments": {
       "queue": "Arquivos para enviar",
       "attach": "Anexar arquivo",

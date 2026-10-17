@@ -404,6 +404,16 @@
     "replyingTo": "Replying to {name}",
     "cancelReply": "Cancel reply",
     "removedMessage": "Message removed",
+    "emoji": {
+      "title": "Emoji",
+      "open": "Add an emoji",
+      "categories": {
+        "smileys": "Faces",
+        "people": "People",
+        "symbols": "Symbols",
+        "things": "Things"
+      }
+    },
     "attachments": {
       "queue": "Files to send",
       "attach": "Attach a file",

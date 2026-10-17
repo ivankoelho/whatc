@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowLeft, Check, CornerUpLeft, Hash, Loader2, Lock, MessageSquare, Mic, Paperclip, Pencil, Send, Settings2, SmilePlus, Trash2, Users, X } from 'lucide-vue-next'
+import { ArrowLeft, Check, CornerUpLeft, Hash, Loader2, Lock, MessageSquare, Mic, Paperclip, Pencil, Send, Settings2, Smile, SmilePlus, Trash2, Users, X } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
@@ -19,6 +19,7 @@ import { getAvatarGradient, getInitials } from '@/lib/utils'
 import { getErrorMessage } from '@/lib/api-utils'
 import AttachmentQueue from './AttachmentQueue.vue'
 import AudioRecorder from './AudioRecorder.vue'
+import EmojiPicker from './EmojiPicker.vue'
 import MessageAttachments from './MessageAttachments.vue'
 import {
   TEAM_CHAT_ACCEPT, TEAM_CHAT_MAX_BODY, TEAM_CHAT_REACTIONS, TEAM_CHAT_UPLOAD_ERRORS, chatErrorCode, isOnlyFileNames, isSendableBody,
@@ -72,6 +73,41 @@ const recorder = ref<InstanceType<typeof AudioRecorder> | null>(null)
 const recActive = ref(false)
 const dragging = ref(false)
 const micAvailable = recordingSupported()
+
+// ---- Emoji while writing ----
+const emojiOpen = ref(false)
+const emojiWrap = ref<HTMLElement | null>(null)
+
+function insertEmoji(glyph: string) {
+  const el = document.getElementById('team-chat-composer') as HTMLTextAreaElement | null
+  const start = el?.selectionStart ?? draft.value.length
+  const end = el?.selectionEnd ?? start
+  draft.value = draft.value.slice(0, start) + glyph + draft.value.slice(end)
+  void nextTick(() => {
+    el?.focus()
+    el?.setSelectionRange(start + glyph.length, start + glyph.length)
+  })
+}
+
+// Both emoji panels (composer and reactions) close on a click anywhere else, or Escape, like any popover.
+function onDocPointerDown(e: PointerEvent) {
+  const target = e.target as Element | null
+  if (emojiOpen.value && !emojiWrap.value?.contains(target as Node)) emojiOpen.value = false
+  if (pickerFor.value && !target?.closest?.('[data-testid^="actions-"]')) pickerFor.value = null
+}
+function onDocKeyDown(e: KeyboardEvent) {
+  if (e.key !== 'Escape') return
+  emojiOpen.value = false
+  pickerFor.value = null
+}
+onMounted(() => {
+  document.addEventListener('pointerdown', onDocPointerDown)
+  document.addEventListener('keydown', onDocKeyDown)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', onDocPointerDown)
+  document.removeEventListener('keydown', onDocKeyDown)
+})
 const queue = computed(() => store.uploadsFor(props.channelId))
 // Text is optional when files go with it; sending waits until every file is ready.
 const canSubmit = computed(() => {
@@ -200,6 +236,7 @@ onBeforeUnmount(() => scroll.cleanup())
 watch(() => props.channelId, () => {
   editingId.value = null
   pickerFor.value = null
+  emojiOpen.value = false
   if (recorder.value) {
     // Also while the permission prompt is open (phase still 'idle'): cancel() aborts that start.
     const wasActive = recorder.value.phase !== 'idle'
@@ -246,6 +283,10 @@ async function submit() {
 }
 
 function onComposerKey(e: KeyboardEvent) {
+  if (e.key === 'Escape' && emojiOpen.value) {
+    emojiOpen.value = false
+    return
+  }
   if (e.key === 'Escape' && replyTo.value) {
     store.cancelReply(props.channelId)
     return
@@ -336,7 +377,8 @@ async function removeMessage(m: TeamChatMessage) {
     />
 
     <template v-else>
-      <ScrollArea :ref="(el: any) => scroll.scrollAreaRef.value = el" class="flex-1">
+      <!-- the viewport wrapper is min-width: fit-content, which lets a long line stretch the whole list past the pane: undo that so text wraps -->
+      <ScrollArea :ref="(el: any) => scroll.scrollAreaRef.value = el" class="flex-1 [&_[data-reka-scroll-area-viewport]>div]:!min-w-0">
         <div class="space-y-1 p-4" aria-live="polite">
           <div v-if="panel.loadingOlder" class="flex justify-center py-2">
             <Loader2 class="h-4 w-4 animate-spin text-muted-foreground" />
@@ -367,7 +409,7 @@ async function removeMessage(m: TeamChatMessage) {
                 {{ getInitials(m.user_name || '?') }}
               </AvatarFallback>
             </Avatar>
-            <div :class="['min-w-0', editingId === m.id ? 'flex-1' : '']">
+            <div :class="['min-w-0 max-w-3xl', editingId === m.id ? 'flex-1' : '']">
               <div class="flex items-baseline gap-2">
                 <span class="text-sm font-semibold">{{ m.user_name }}</span>
                 <time class="text-[11px] text-muted-foreground" :datetime="m.created_at">{{ formatTime(m.created_at) }}</time>
@@ -401,7 +443,7 @@ async function removeMessage(m: TeamChatMessage) {
                 </div>
               </div>
               <!-- Plain text, escaped by Vue; never v-html -->
-              <p v-else-if="m.body" class="whitespace-pre-wrap break-words text-sm">{{ m.body }}</p>
+              <p v-else-if="m.body" class="whitespace-pre-wrap text-sm [overflow-wrap:anywhere]">{{ m.body }}</p>
 
               <MessageAttachments v-if="m.attachments?.length" :attachments="m.attachments" />
 
@@ -440,7 +482,7 @@ async function removeMessage(m: TeamChatMessage) {
               </button>
               <div
                 v-if="pickerFor === m.id" role="menu" :data-testid="`picker-${m.id}`"
-                class="absolute right-0 top-full z-20 mt-1 grid grid-cols-6 gap-0.5 rounded-md border bg-popover p-1 shadow-md"
+                class="absolute right-0 top-full z-20 mt-1 grid w-max max-w-[calc(100vw-1rem)] grid-cols-6 gap-0.5 rounded-md border bg-popover p-1 shadow-md"
               >
                 <button
                   v-for="r in TEAM_CHAT_REACTIONS" :key="r.code" type="button" role="menuitem"
@@ -491,6 +533,14 @@ async function removeMessage(m: TeamChatMessage) {
             @input="onInput"
             @paste="onPaste"
           />
+          <div ref="emojiWrap" class="relative shrink-0" @keydown.esc="emojiOpen = false">
+            <Button
+              type="button" variant="ghost" size="icon" class="h-10 w-10 md:h-9 md:w-9"
+              :aria-label="t('teamChat.emoji.open')" :aria-expanded="emojiOpen" data-testid="emoji-button"
+              @click="emojiOpen = !emojiOpen"
+            ><Smile class="h-4 w-4" /></Button>
+            <EmojiPicker v-if="emojiOpen" class="absolute bottom-full right-0 z-30 mb-2" @pick="insertEmoji" />
+          </div>
           <Button
             v-if="micAvailable" type="button" variant="ghost" size="icon" class="h-10 w-10 shrink-0 md:h-9 md:w-9"
             :aria-label="t('teamChat.recorder.record')" data-testid="record-button" @click="recorder?.start()"
