@@ -16,7 +16,7 @@ function onPlay(e: Event) {
 </script>
 
 <template>
-  <div class="mt-1 flex flex-col gap-1.5" data-testid="message-attachments">
+  <div class="mt-1 flex flex-col gap-1.5" data-testid="attachments-list">
     <template v-for="a in attachments" :key="a.id">
       <a
         v-if="a.kind === 'image'" :href="teamChatAttachmentUrl(a.id)" target="_blank" rel="noopener noreferrer"
