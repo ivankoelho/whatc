@@ -61,6 +61,9 @@ const (
 	TypeTeamChatMessage        = "team_chat_message"
 	TypeTeamChatMessageUpdated = "team_chat_message_updated"
 	TypeTeamChatMessageDeleted = "team_chat_message_deleted"
+	// TypeTeamChatMessageReactions: the reactions of one message changed (ids only;
+	// clients refetch the message).
+	TypeTeamChatMessageReactions = "team_chat_message_reactions"
 	TypeTeamChatRead           = "team_chat_read"
 	TypeTeamChatTyping         = "team_chat_typing"
 	TypeTeamChatChannel        = "team_chat_channel"

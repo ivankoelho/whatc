@@ -866,6 +866,9 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/team-chat/channels/{id}/reopen", app.ReopenChatChannel)
 	g.POST("/api/team-chat/channels/{id}/join", app.JoinChatChannel)
 	g.GET("/api/team-chat/admin/channels", app.ListChatAdminChannels)
+	g.GET("/api/team-chat/messages/{id}", app.GetChatMessage)
+	g.PUT("/api/team-chat/messages/{id}/reactions/{code}", app.PutChatReaction)
+	g.DELETE("/api/team-chat/messages/{id}/reactions/{code}", app.DeleteChatReaction)
 	g.PUT("/api/team-chat/messages/{id}", app.UpdateChatMessage)
 	g.DELETE("/api/team-chat/messages/{id}", app.DeleteChatMessage)
 
