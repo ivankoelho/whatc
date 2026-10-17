@@ -3300,6 +3300,28 @@
     }
   },
   "agentAnalytics": {
+    "live": {
+      "title": "Ao vivo",
+      "scopeAll": "Toda a organização",
+      "scopeTeam": "Suas equipes",
+      "loadFailed": "Não foi possível atualizar",
+      "online": "Online",
+      "away": "Ausentes",
+      "offline": "Offline",
+      "queue": "Na fila",
+      "empty": "Nenhum atendente para mostrar.",
+      "agent": "Atendente",
+      "state": "Status",
+      "active": "Abertas",
+      "awaitingAgent": "Cliente aguardando",
+      "awaitingCustomer": "Aguardando cliente",
+      "slaAtRisk": "SLA em risco",
+      "states": {
+        "online": "Online",
+        "away": "Ausente",
+        "offline": "Offline"
+      }
+    },
     "title": "Análises de agentes",
     "subtitle": "Métricas de desempenho de todos os agentes",
     "myMetrics": "Suas métricas de desempenho",
@@ -4682,6 +4704,10 @@
         "label": "Visualizar desempenho dos atendentes",
         "description": "Consultar indicadores de produtividade dos atendentes."
       },
+        "analytics_agents_view_team": {
+          "label": "Supervisionar agentes da equipe",
+          "description": "Ver o painel ao vivo dos atendentes das equipes das quais a pessoa faz parte."
+        },
       "call_logs_read": {
         "label": "Visualizar histórico de chamadas",
         "description": "Consultar as chamadas registradas."

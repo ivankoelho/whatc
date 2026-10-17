@@ -517,7 +517,8 @@ export const cannedResponsesService = {
 
 export const agentAnalyticsService = {
   getSummary: (params?: { from?: string; to?: string; agent_id?: string }) =>
-    api.get('/analytics/agents', { params })
+    api.get('/analytics/agents', { params }),
+  getLive: () => api.get('/analytics/agents/live')
 }
 
 // Meta WhatsApp Analytics Types

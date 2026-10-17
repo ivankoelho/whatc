@@ -3311,6 +3311,28 @@
     }
   },
   "agentAnalytics": {
+    "live": {
+      "title": "Live",
+      "scopeAll": "Whole organization",
+      "scopeTeam": "Your teams",
+      "loadFailed": "Could not refresh",
+      "online": "Online",
+      "away": "Away",
+      "offline": "Offline",
+      "queue": "In queue",
+      "empty": "No agents to show.",
+      "agent": "Agent",
+      "state": "Status",
+      "active": "Open",
+      "awaitingAgent": "Customer waiting",
+      "awaitingCustomer": "Awaiting customer",
+      "slaAtRisk": "SLA at risk",
+      "states": {
+        "online": "Online",
+        "away": "Away",
+        "offline": "Offline"
+      }
+    },
     "title": "Agent Analytics",
     "subtitle": "Performance metrics for all agents",
     "myMetrics": "Your performance metrics",
@@ -4693,6 +4715,10 @@
         "label": "View agent performance",
         "description": "Look up agent productivity indicators."
       },
+        "analytics_agents_view_team": {
+          "label": "Supervise team agents",
+          "description": "See the live panel of the agents in the teams the user belongs to."
+        },
       "call_logs_read": {
         "label": "View call history",
         "description": "Look up the recorded calls."

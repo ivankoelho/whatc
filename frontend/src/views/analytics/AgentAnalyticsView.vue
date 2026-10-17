@@ -10,6 +10,7 @@ import { agentAnalyticsService } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import { useUsersStore } from '@/stores/users'
 import { PageHeader, ErrorState, DateRangePicker } from '@/components/shared'
+import AgentsLivePanel from '@/components/analytics/AgentsLivePanel.vue'
 import {
   Command,
   CommandEmpty,
@@ -76,6 +77,10 @@ const usersStore = useUsersStore()
 // Permission-driven (analytics.agents:read), not role-name based — custom
 // roles with the right permission should get the same view.
 const isAdminOrManager = computed(() => authStore.hasPermission('analytics.agents', 'read'))
+// Live panel: whole organization (analytics:read) or own teams (view_team).
+const canSeeLive = computed(() =>
+  authStore.hasPermission('analytics', 'read') || authStore.hasPermission('analytics.agents', 'view_team')
+)
 
 const analytics = ref<AgentAnalyticsResponse | null>(null)
 const isLoading = ref(true)
@@ -372,6 +377,8 @@ void _displayStats.value // Suppress unused warning
           :retry-label="$t('common.retry')"
           @retry="fetchAnalytics"
         />
+
+        <AgentsLivePanel v-if="canSeeLive && !error" />
 
         <!-- Stats Cards -->
         <div v-if="!error" class="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
