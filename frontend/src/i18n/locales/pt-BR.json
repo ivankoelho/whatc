@@ -3393,6 +3393,7 @@
     "title": "Análises de agentes",
     "subtitle": "Métricas de desempenho de todos os agentes",
     "myMetrics": "Suas métricas de desempenho",
+    "myMetricsTeamHint": "Os cartões abaixo são as suas métricas; o painel Ao vivo mostra as suas equipes",
     "allAgents": "Todos os agentes",
     "selectAgent": "Selecionar agente",
     "searchAgent": "Buscar agente...",
