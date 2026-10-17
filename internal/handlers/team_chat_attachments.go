@@ -486,70 +486,144 @@ func (a *App) chatAttachmentsFor(messageIDs []uuid.UUID) map[uuid.UUID][]models.
 // ChatCleanupResult counts what one cleanup pass did (used by tests and logs).
 type ChatCleanupResult struct{ Pending, Deleted, Orphans int }
 
-// CleanupChatAttachments is the hourly housekeeping pass:
-//  1. pending attachments older than an hour are discarded (row first, atomically
-//     against a send that attaches them at the same moment, then the file);
+// chatCleanupBatch bounds each query of the pass: memory stays flat however much has piled up,
+// and the number of queries grows with batches, not with files.
+const chatCleanupBatch = 500
+
+// CleanupChatAttachments is the housekeeping pass:
+//  1. pending attachments older than an hour are discarded: ONE statement per batch deletes the
+//     rows that are still pending and returns their paths (atomic against a send that attaches
+//     one at the same moment: that row is no longer pending, so it is simply not deleted), then
+//     the files go;
 //  2. files of messages deleted more than 7 days ago are removed and marked purged;
-//  3. files with no row, older than a day (a crash between writing the file and the
-//     row), are removed.
+//  3. files with no row, older than a day (a crash between writing the file and the row), are
+//     removed; their ids are checked against the table in batches, not one query per file.
 //
 // A file that cannot be removed is kept and retried on the next pass.
 func (a *App) CleanupChatAttachments(now time.Time) ChatCleanupResult {
 	var res ChatCleanupResult
 
-	var pending []models.ChatAttachment
-	a.DB.Where("message_id IS NULL AND purged_at IS NULL AND created_at < ?", now.Add(-chatPendingGrace)).Find(&pending)
-	for _, p := range pending {
-		del := a.DB.Where("id = ? AND message_id IS NULL", p.ID).Delete(&models.ChatAttachment{})
-		if del.Error == nil && del.RowsAffected == 1 {
-			if err := a.removeChatFile(p.StoragePath); err != nil {
-				a.Log.Error("Failed to remove pending chat file", "error", err)
-			}
-			res.Pending++
+	// 1. Abandoned uploads. Keyset pages by id so a row that cannot be processed never loops.
+	pendingCutoff := now.Add(-chatPendingGrace)
+	last := uuid.Nil
+	for {
+		var ids []uuid.UUID
+		a.DB.Model(&models.ChatAttachment{}).
+			Where("message_id IS NULL AND purged_at IS NULL AND created_at < ? AND id > ?", pendingCutoff, last).
+			Order("id ASC").Limit(chatCleanupBatch).Pluck("id", &ids)
+		if len(ids) == 0 {
+			break
 		}
-	}
-
-	var gone []models.ChatAttachment
-	a.DB.Raw(`SELECT a.* FROM chat_attachments a JOIN chat_messages m ON m.id = a.message_id
-		WHERE a.purged_at IS NULL AND m.deleted_at IS NOT NULL AND m.deleted_at < ?`, now.Add(-chatDeletedGrace)).Scan(&gone)
-	for _, g := range gone {
-		if err := a.removeChatFile(g.StoragePath); err != nil {
-			a.Log.Error("Failed to remove chat file of a deleted message", "error", err)
+		last = ids[len(ids)-1]
+		var gone []string
+		if err := a.DB.Raw(`DELETE FROM chat_attachments WHERE id IN ? AND message_id IS NULL RETURNING storage_path`, ids).
+			Scan(&gone).Error; err != nil {
+			a.Log.Error("Failed to discard pending chat attachments", "error", err)
 			continue
 		}
-		a.DB.Model(&models.ChatAttachment{}).Where("id = ?", g.ID).Update("purged_at", now)
-		res.Deleted++
+		for _, p := range gone {
+			if err := a.removeChatFile(p); err != nil {
+				a.Log.Error("Failed to remove pending chat file", "error", err)
+			}
+		}
+		res.Pending += len(gone)
 	}
 
+	// 2. Files of messages deleted a while ago.
+	deletedCutoff := now.Add(-chatDeletedGrace)
+	last = uuid.Nil
+	for {
+		var batch []models.ChatAttachment
+		a.DB.Raw(`SELECT a.* FROM chat_attachments a JOIN chat_messages m ON m.id = a.message_id
+			WHERE a.purged_at IS NULL AND m.deleted_at IS NOT NULL AND m.deleted_at < ? AND a.id > ?
+			ORDER BY a.id LIMIT ?`, deletedCutoff, last, chatCleanupBatch).Scan(&batch)
+		if len(batch) == 0 {
+			break
+		}
+		last = batch[len(batch)-1].ID
+		removed := make([]uuid.UUID, 0, len(batch))
+		for _, g := range batch {
+			if err := a.removeChatFile(g.StoragePath); err != nil {
+				a.Log.Error("Failed to remove chat file of a deleted message", "error", err)
+				continue
+			}
+			removed = append(removed, g.ID)
+		}
+		if len(removed) > 0 {
+			a.DB.Model(&models.ChatAttachment{}).Where("id IN ?", removed).Update("purged_at", now)
+			res.Deleted += len(removed)
+		}
+	}
+
+	// 3. Files without a row.
+	type candidate struct {
+		path string
+		id   uuid.UUID // Nil: not named like an attachment (an interrupted upload's temp file)
+	}
+	var pendingFiles []candidate
+	flush := func() {
+		if len(pendingFiles) == 0 {
+			return
+		}
+		var ids []uuid.UUID
+		for _, c := range pendingFiles {
+			if c.id != uuid.Nil {
+				ids = append(ids, c.id)
+			}
+		}
+		known := map[uuid.UUID]bool{}
+		if len(ids) > 0 {
+			var found []uuid.UUID
+			a.DB.Model(&models.ChatAttachment{}).Where("id IN ?", ids).Pluck("id", &found)
+			for _, id := range found {
+				known[id] = true
+			}
+		}
+		for _, c := range pendingFiles {
+			if known[c.id] {
+				continue
+			}
+			if os.Remove(c.path) == nil {
+				res.Orphans++
+			}
+		}
+		pendingFiles = pendingFiles[:0]
+	}
 	root := filepath.Join(a.getMediaStoragePath(), chatAttachmentsRoot)
-	cutoff := now.Add(-chatOrphanGrace)
+	orphanCutoff := now.Add(-chatOrphanGrace)
 	_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || d.Type()&os.ModeSymlink != 0 {
 			return nil
 		}
 		info, ierr := d.Info()
-		if ierr != nil || !info.ModTime().Before(cutoff) {
+		if ierr != nil || !info.ModTime().Before(orphanCutoff) {
 			return nil
 		}
 		base := d.Name()
 		id, perr := uuid.Parse(strings.TrimSuffix(base, filepath.Ext(base)))
-		if perr == nil {
-			var n int64
-			a.DB.Model(&models.ChatAttachment{}).Where("id = ?", id).Count(&n)
-			if n > 0 {
-				return nil
-			}
+		if perr != nil {
+			id = uuid.Nil
 		}
-		if os.Remove(p) == nil {
-			res.Orphans++
+		pendingFiles = append(pendingFiles, candidate{p, id})
+		if len(pendingFiles) >= chatCleanupBatch {
+			flush()
 		}
 		return nil
 	})
+	flush()
 	return res
 }
 
-// RunChatAttachmentCleanup runs the housekeeping pass on an interval until ctx ends.
+// RunChatAttachmentCleanup runs the housekeeping pass once right away (a server that is
+// restarted more often than the interval would otherwise never run it) and then on every
+// tick, until ctx ends.
 func (a *App) RunChatAttachmentCleanup(ctx context.Context, every time.Duration) {
+	pass := func() {
+		if r := a.CleanupChatAttachments(time.Now()); r != (ChatCleanupResult{}) {
+			a.Log.Info("Chat attachment cleanup", "pending", r.Pending, "deleted", r.Deleted, "orphans", r.Orphans)
+		}
+	}
+	pass()
 	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
@@ -557,9 +631,7 @@ func (a *App) RunChatAttachmentCleanup(ctx context.Context, every time.Duration)
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if r := a.CleanupChatAttachments(time.Now()); r != (ChatCleanupResult{}) {
-				a.Log.Info("Chat attachment cleanup", "pending", r.Pending, "deleted", r.Deleted, "orphans", r.Orphans)
-			}
+			pass()
 		}
 	}
 }

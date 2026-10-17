@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"context"
 	"archive/zip"
 	"bytes"
 	"encoding/json"
@@ -1141,4 +1142,72 @@ func TestAttachments_ETagAnd304(t *testing.T) {
 		require.Equal(t, 200, code)
 		assert.Equal(t, 404, testutil.GetResponseStatusCode(f.downloadIfNoneMatch(t, f.owner, a.ID, etag, "")), "deleted message")
 	})
+}
+
+// The pass costs queries per BATCH, not per file: a long history must not turn the hourly
+// housekeeping into thousands of single-row statements.
+func TestAttachments_CleanupCostsBatchesNotFiles(t *testing.T) {
+	f := newPhaseA(t)
+	dir := f.withStorage(t)
+	f.app.CleanupChatAttachments(time.Now()) // leftovers of earlier runs, so the numbers are this test's own
+	live := f.msg(t, f.ch, f.owner, "keeps the files")
+	old := time.Now().Add(-72 * time.Hour)
+	folder := filepath.Join(dir, "team-chat", f.org.ID.String(), f.ch.ID.String())
+	require.NoError(t, os.MkdirAll(folder, 0o755))
+
+	const kept, stale = 1200, 1100
+	keptRows := make([]models.ChatAttachment, kept)
+	for i := range keptRows {
+		id := uuid.New()
+		rel := filepath.Join("team-chat", f.org.ID.String(), f.ch.ID.String(), id.String()+".txt")
+		keptRows[i] = models.ChatAttachment{ID: id, OrganizationID: f.org.ID, ChannelID: f.ch.ID, UploaderID: f.member.ID,
+			MessageID: &live.ID, Kind: "file", Name: "a.txt", Mime: "text/plain", SizeBytes: 1, SHA256: "x", StoragePath: rel}
+		p := filepath.Join(dir, rel)
+		require.NoError(t, os.WriteFile(p, []byte("x"), 0o644))
+		require.NoError(t, os.Chtimes(p, old, old))
+	}
+	require.NoError(t, f.app.DB.CreateInBatches(&keptRows, 200).Error)
+	staleRows := make([]models.ChatAttachment, stale)
+	for i := range staleRows {
+		staleRows[i] = models.ChatAttachment{ID: uuid.New(), OrganizationID: f.org.ID, ChannelID: f.ch.ID, UploaderID: f.owner.ID,
+			Kind: "file", Name: "p.txt", Mime: "text/plain", SizeBytes: 1, SHA256: "x",
+			StoragePath: filepath.Join("team-chat", "nowhere", uuid.New().String()+".txt"), CreatedAt: old}
+	}
+	require.NoError(t, f.app.DB.CreateInBatches(&staleRows, 200).Error)
+
+	var queries int64
+	count := func(*gorm.DB) { atomic.AddInt64(&queries, 1) }
+	require.NoError(t, f.app.DB.Callback().Query().After("gorm:query").Register("count_cleanup_q", count))
+	require.NoError(t, f.app.DB.Callback().Row().After("gorm:row").Register("count_cleanup_r", count))
+	require.NoError(t, f.app.DB.Callback().Raw().After("gorm:raw").Register("count_cleanup_w", count))
+
+	res := f.app.CleanupChatAttachments(time.Now())
+	assert.Equal(t, stale, res.Pending, "every stale pending row, across several batches")
+	assert.Zero(t, res.Orphans, "files that have a row are not orphans")
+	assert.Zero(t, res.Deleted)
+	assert.Less(t, atomic.LoadInt64(&queries), int64(60), "queries grow with batches (a few dozen), not with the %d files", kept+stale)
+	assert.Equal(t, kept, countFiles(t, dir), "no attached file was touched")
+	var left int64
+	f.app.DB.Model(&models.ChatAttachment{}).Where("organization_id = ?", f.org.ID).Count(&left)
+	assert.EqualValues(t, kept, left)
+}
+
+// A server that restarts more often than the interval must still get its housekeeping.
+func TestAttachments_CleanupRunsAtStartup(t *testing.T) {
+	f := newPhaseA(t)
+	f.withStorage(t)
+	a := mustUpload(t, f, f.member, f.ch, "a.png", pngBytes(2, 2))
+	require.NoError(t, f.app.DB.Model(&models.ChatAttachment{}).Where("id = ?", a.ID).
+		Update("created_at", time.Now().Add(-3*time.Hour)).Error)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { f.app.RunChatAttachmentCleanup(ctx, time.Hour); close(done) }()
+	require.Eventually(t, func() bool {
+		var n int64
+		f.app.DB.Model(&models.ChatAttachment{}).Where("id = ?", a.ID).Count(&n)
+		return n == 0
+	}, 5*time.Second, 50*time.Millisecond, "the first pass runs at once, not an hour later")
+	cancel()
+	<-done
 }
