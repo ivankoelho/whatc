@@ -217,6 +217,7 @@ func DefaultPermissions() []Permission {
 		{Resource: ResourceAnalytics, Action: ActionWrite, Description: "Create and edit dashboard widgets"},
 		{Resource: ResourceAnalytics, Action: ActionDelete, Description: "Delete dashboard widgets"},
 		{Resource: ResourceAnalyticsAgents, Action: ActionRead, Description: "View agent analytics"},
+		{Resource: ResourceAnalyticsAgents, Action: ActionViewTeam, Description: "Supervise in the live panel the agents of the teams the user belongs to (analytics.agents:read is still needed to open the screen)"},
 		{Resource: ResourceWhatsAppUsage, Action: ActionRead, Description: "View WhatsApp consumption and the price table"},
 		{Resource: ResourceWhatsAppUsage, Action: ActionWrite, Description: "Edit the WhatsApp price table and reprice"},
 
