@@ -1225,6 +1225,8 @@ export const teamChatService = {
       form.append('duration_ms', String(Math.round(opts.audioMs)))
     }
     return api.post<TeamChatAttachment>(`/team-chat/channels/${channelId}/attachments`, form, {
+      // The instance defaults to JSON; a multipart body needs its own type (with boundary).
+      headers: { 'Content-Type': 'multipart/form-data' },
       signal: opts.signal,
       onUploadProgress: e => { if (e.total) opts.onProgress?.(Math.round((e.loaded / e.total) * 100)) }
     })
