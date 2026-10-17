@@ -12,7 +12,7 @@ const active = ref(EMOJI_CATEGORIES[0].id)
 
 <template>
   <div
-    class="w-[min(19rem,calc(100vw-2rem))] rounded-md border bg-popover p-2 shadow-md"
+    class="w-[min(24rem,calc(100vw-1rem))] rounded-md border bg-popover p-2 shadow-md"
     role="dialog" :aria-label="t('teamChat.emoji.title')" data-testid="emoji-picker"
   >
     <div class="mb-2 flex gap-1 border-b pb-1" role="tablist">

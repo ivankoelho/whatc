@@ -402,14 +402,14 @@ async function removeMessage(m: TeamChatMessage) {
           <article
             v-else
             :data-testid="`message-${m.id}`"
-            :class="['group relative flex items-start gap-3 rounded-md px-2 py-1.5 transition-colors hover:bg-muted/50', highlightId === m.id ? 'bg-primary/10' : '']"
+            :class="['group relative flex flex-wrap items-start gap-x-3 rounded-md px-2 py-1.5 transition-colors hover:bg-muted/50 md:flex-nowrap', highlightId === m.id ? 'bg-primary/10' : '']"
           >
             <Avatar class="mt-0.5 h-8 w-8 shrink-0">
               <AvatarFallback :class="'bg-gradient-to-br text-[11px] text-white ' + getAvatarGradient(m.user_name)">
                 {{ getInitials(m.user_name || '?') }}
               </AvatarFallback>
             </Avatar>
-            <div :class="['min-w-0 max-w-3xl', editingId === m.id ? 'flex-1' : '']">
+            <div :class="['min-w-0 max-w-3xl max-md:flex-1 max-md:basis-[calc(100%-46px)]', editingId === m.id ? 'flex-1' : '']">
               <div class="flex items-baseline gap-2">
                 <span class="text-sm font-semibold">{{ m.user_name }}</span>
                 <time class="text-[11px] text-muted-foreground" :datetime="m.created_at">{{ formatTime(m.created_at) }}</time>
@@ -465,24 +465,24 @@ async function removeMessage(m: TeamChatMessage) {
             <!-- Right after the message (not at the far edge of the pane), so the actions stay near what they act on -->
             <div
               v-if="editingId !== m.id && (canInteract || canEdit(m) || canDelete(m))"
-              class="relative flex shrink-0 gap-0.5 transition-opacity md:opacity-0 md:focus-within:opacity-100 md:group-hover:opacity-100"
+              class="relative flex shrink-0 gap-0.5 transition-opacity max-md:ml-[44px] md:opacity-0 md:focus-within:opacity-100 md:group-hover:opacity-100"
               :class="pickerFor === m.id ? 'md:opacity-100' : ''" :data-testid="`actions-${m.id}`"
             >
-              <button v-if="canInteract" type="button" class="rounded p-2 text-muted-foreground md:p-1 hover:bg-muted hover:text-foreground" :aria-label="t('teamChat.react')" @click="pickerFor = pickerFor === m.id ? null : m.id">
+              <button v-if="canInteract" type="button" class="flex h-9 w-9 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground md:h-7 md:w-7" :aria-label="t('teamChat.react')" @click="pickerFor = pickerFor === m.id ? null : m.id">
                 <SmilePlus class="h-3.5 w-3.5" />
               </button>
-              <button v-if="canInteract" type="button" class="rounded p-2 text-muted-foreground md:p-1 hover:bg-muted hover:text-foreground" :aria-label="t('teamChat.reply')" @click="startReply(m)">
+              <button v-if="canInteract" type="button" class="flex h-9 w-9 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground md:h-7 md:w-7" :aria-label="t('teamChat.reply')" @click="startReply(m)">
                 <CornerUpLeft class="h-3.5 w-3.5" />
               </button>
-              <button v-if="canEdit(m)" type="button" class="rounded p-2 text-muted-foreground md:p-1 hover:bg-muted hover:text-foreground" :aria-label="t('teamChat.editMessage')" @click="startEdit(m)">
+              <button v-if="canEdit(m)" type="button" class="flex h-9 w-9 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground md:h-7 md:w-7" :aria-label="t('teamChat.editMessage')" @click="startEdit(m)">
                 <Pencil class="h-3.5 w-3.5" />
               </button>
-              <button v-if="canDelete(m)" type="button" class="rounded p-2 text-muted-foreground md:p-1 hover:bg-muted hover:text-destructive" :aria-label="t('teamChat.deleteMessage')" @click="removeMessage(m)">
+              <button v-if="canDelete(m)" type="button" class="flex h-9 w-9 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-destructive md:h-7 md:w-7" :aria-label="t('teamChat.deleteMessage')" @click="removeMessage(m)">
                 <Trash2 class="h-3.5 w-3.5" />
               </button>
               <div
                 v-if="pickerFor === m.id" role="menu" :data-testid="`picker-${m.id}`"
-                class="absolute right-0 top-full z-20 mt-1 grid w-max max-w-[calc(100vw-1rem)] grid-cols-6 gap-0.5 rounded-md border bg-popover p-1 shadow-md"
+                class="absolute left-0 top-full z-20 mt-1 grid w-max md:left-auto md:right-0 max-w-[calc(100vw-1rem)] grid-cols-6 gap-0.5 rounded-md border bg-popover p-1 shadow-md"
               >
                 <button
                   v-for="r in TEAM_CHAT_REACTIONS" :key="r.code" type="button" role="menuitem"
@@ -539,7 +539,8 @@ async function removeMessage(m: TeamChatMessage) {
               :aria-label="t('teamChat.emoji.open')" :aria-expanded="emojiOpen" data-testid="emoji-button"
               @click="emojiOpen = !emojiOpen"
             ><Smile class="h-4 w-4" /></Button>
-            <EmojiPicker v-if="emojiOpen" class="absolute bottom-full right-0 z-30 mb-2" @pick="insertEmoji" />
+            <!-- on a phone it is a centered panel above the composer (anchored to the button it would run off the screen) -->
+            <EmojiPicker v-if="emojiOpen" class="absolute bottom-full right-0 z-30 mb-2 max-md:fixed max-md:bottom-20 max-md:left-1/2 max-md:right-auto max-md:mb-0 max-md:-translate-x-1/2" @pick="insertEmoji" />
           </div>
           <Button
             v-if="micAvailable" type="button" variant="ghost" size="icon" class="h-10 w-10 shrink-0 md:h-9 md:w-9"
