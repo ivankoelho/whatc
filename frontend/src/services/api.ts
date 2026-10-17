@@ -1155,6 +1155,8 @@ export interface TeamChatAttachment {
   width?: number
   height?: number
   duration_ms?: number
+  /** Only on the upload answer: how long the pending file is guaranteed to live. */
+  pending_ttl_ms?: number
 }
 
 export interface TeamChatReplyTo {

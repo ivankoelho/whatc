@@ -21,7 +21,7 @@ vi.mock('@/stores/auth', () => ({
 
 import MessagePanel from './MessagePanel.vue'
 import { useTeamChatStore } from '@/stores/teamChat'
-import { checkAttachmentFile, TEAM_CHAT_ACCEPT, TEAM_CHAT_MAX_FILE_BYTES } from '@/lib/team-chat'
+import { ChatApiError, checkAttachmentFile, isOnlyFileNames, TEAM_CHAT_ACCEPT, TEAM_CHAT_MAX_FILE_BYTES } from '@/lib/team-chat'
 
 const ScrollArea = { template: '<div><slot /></div>' }
 const ManageStub = { props: ['open', 'channelId'], template: '<div />' }
@@ -301,6 +301,31 @@ describe('paste', () => {
     expect(api.uploadAttachment).toHaveBeenCalledTimes(1)
   })
 
+  it('a copied file whose name comes as text does not paste that name', async () => {
+    api.uploadAttachment.mockReturnValue(ok(att('a1', 'file', 'contrato.pdf')))
+    const { store, wrapper } = render()
+    await store.fetchChannels()
+    await flushPromises()
+    const ev = paste(wrapper, [file('contrato.pdf')], 'contrato.pdf')
+    await flushPromises()
+    expect(ev.defaultPrevented).toBe(true)
+    expect(api.uploadAttachment).toHaveBeenCalledTimes(1)
+    // ...while real text that merely mentions a name still pastes
+    const ev2 = paste(wrapper, [file('contrato.pdf')], 'segue o contrato.pdf')
+    expect(ev2.defaultPrevented).toBe(false)
+  })
+
+  it('isOnlyFileNames: names and file:// paths only', () => {
+    const files = [{ name: 'a.pdf' }, { name: 'b b.png' }]
+    expect(isOnlyFileNames('a.pdf', files)).toBe(true)
+    expect(isOnlyFileNames('a.pdf\nb b.png', files)).toBe(true)
+    expect(isOnlyFileNames('a.pdf\r\nb b.png\r\n', files)).toBe(true)
+    expect(isOnlyFileNames('file:///home/me/a.pdf', files)).toBe(true)
+    expect(isOnlyFileNames('a.pdf and more', files)).toBe(false)
+    expect(isOnlyFileNames('', files)).toBe(false)
+    expect(isOnlyFileNames('other.pdf', files)).toBe(false)
+  })
+
   it('a text-only paste is left alone', async () => {
     const { store, wrapper } = render()
     await store.fetchChannels()
@@ -349,7 +374,7 @@ describe('expired attachments', () => {
 
   it('a ready file older than the server grace is dropped before sending, with no request', async () => {
     const { store, wrapper } = await readyQueue(1)
-    store.uploadsFor('c1')[0].readyAt = Date.now() - 56 * 60 * 1000
+    store.uploadsFor('c1')[0].expiresAt = Date.now() - 1000
     await wrapper.get('textarea').setValue('oi')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
@@ -362,7 +387,7 @@ describe('expired attachments', () => {
 
   it('stale files are also dropped when the conversation is opened again', async () => {
     const { store, wrapper } = await readyQueue(1)
-    store.uploadsFor('c1')[0].readyAt = Date.now() - 2 * 60 * 60 * 1000
+    store.uploadsFor('c1')[0].expiresAt = Date.now() - 60 * 60 * 1000
     await wrapper.setProps({ channelId: 'c2' })
     await wrapper.setProps({ channelId: 'c1' })
     await flushPromises()
@@ -391,6 +416,38 @@ describe('expired attachments', () => {
     await flushPromises()
     expect(store.uploadsFor('c1')).toHaveLength(0)
     expect(wrapper.find('[data-testid="attachment-queue"]').exists()).toBe(false)
+  })
+
+  it('the expiry comes from the server answer (pending_ttl_ms), minus a safety margin', async () => {
+    api.uploadAttachment.mockReturnValue(ok({ ...att('a1', 'file', 'x.pdf'), pending_ttl_ms: 10 * 60 * 1000 }))
+    const { store, wrapper } = render()
+    await store.fetchChannels()
+    await flushPromises()
+    await pick(wrapper, [file('x.pdf')])
+    const item = store.uploadsFor('c1')[0]
+    const ttl = (item.expiresAt as number) - Date.now()
+    expect(ttl).toBeGreaterThan(7.5 * 60 * 1000) // 10 min minus the 2 min margin
+    expect(ttl).toBeLessThanOrEqual(8 * 60 * 1000)
+    expect(store.expireStaleUploads('c1', Date.now() + 7 * 60 * 1000)).toHaveLength(0)
+    expect(store.expireStaleUploads('c1', Date.now() + 9 * 60 * 1000)).toHaveLength(1)
+  })
+
+  it('without the field the one-hour fallback applies', async () => {
+    api.uploadAttachment.mockReturnValue(ok(att('a1', 'file', 'x.pdf')))
+    const { store, wrapper } = render()
+    await store.fetchChannels()
+    await flushPromises()
+    await pick(wrapper, [file('x.pdf')])
+    const ttl = (store.uploadsFor('c1')[0].expiresAt as number) - Date.now()
+    expect(ttl).toBeGreaterThan(57 * 60 * 1000)
+    expect(ttl).toBeLessThanOrEqual(58 * 60 * 1000)
+  })
+
+  it('the synthetic error is a real Error that the error-code path understands', () => {
+    const e = new ChatApiError('attachment_gone')
+    expect(e).toBeInstanceOf(Error)
+    expect(e.stack).toBeTruthy()
+    expect(e.response.data.error_type).toBe('attachment_gone')
   })
 
   it('a file still uploading is not touched by an expiry', async () => {
@@ -711,6 +768,19 @@ describe('voice notes', () => {
     expect(trackStop).toHaveBeenCalledTimes(1)
     expect(wrapper.find('[data-testid="audio-recorder"]').exists()).toBe(false)
     expect(toast.info).not.toHaveBeenCalled() // nothing was recording yet, so nothing to announce
+  })
+
+  it('a permission error that arrives after the user left shows nothing', async () => {
+    let refuse!: (e: unknown) => void
+    getUserMedia.mockReturnValue(new Promise((_r, rej) => { refuse = rej }))
+    const { store, wrapper } = render()
+    await store.fetchChannels()
+    await flushPromises()
+    await wrapper.get('[data-testid="record-button"]').trigger('click')
+    await wrapper.setProps({ channelId: 'c2' })
+    refuse(Object.assign(new Error('x'), { name: 'NotAllowedError' }))
+    await flushPromises()
+    expect(toast.error).not.toHaveBeenCalled()
   })
 
   it('after a refused prompt the button works again', async () => {

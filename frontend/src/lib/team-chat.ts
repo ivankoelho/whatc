@@ -58,8 +58,32 @@ export const TEAM_CHAT_MIN_AUDIO_MS = 1000
 // .m4a and .webm are deliberately absent: those containers may hold video, so the server takes them
 // only from the voice recorder (kind=audio), never from the paperclip.
 export const TEAM_CHAT_ACCEPT = '.png,.jpg,.jpeg,.jpe,.jfif,.gif,.webp,.pdf,.txt,.csv,.docx,.xlsx,.pptx,.mp3,.wav,.ogg,.oga,.opus'
-// The server discards a pending upload after an hour; the queue drops a ready one a little earlier.
-export const TEAM_CHAT_PENDING_TTL_MS = 55 * 60 * 1000
+// Fallback only: the upload answer carries the server's own guarantee (pending_ttl_ms), which is the
+// source of truth. A ready file is guaranteed until then; afterwards it may or may not still exist, and
+// attachment_gone (which names the missing ids) settles it exactly.
+export const TEAM_CHAT_PENDING_TTL_MS = 60 * 60 * 1000
+/** Safety margin for the time between the server creating the file and the client learning of it. */
+export const TEAM_CHAT_PENDING_MARGIN_MS = 2 * 60 * 1000
+
+/** An error raised by the client that looks like the server's for a given code (so one path handles both). */
+export class ChatApiError extends Error {
+  response: { status: number; data: { error_type: string } }
+  constructor(code: string, status = 400) {
+    super(code)
+    this.name = 'ChatApiError'
+    this.response = { status, data: { error_type: code } }
+  }
+}
+
+/**
+ * True when pasted text is only the names (or file:// paths) of the pasted files. Some file managers put
+ * the name of a copied file on the clipboard as text; that is not text the user meant to paste.
+ */
+export function isOnlyFileNames(text: string, files: ArrayLike<{ name: string }>): boolean {
+  const names = new Set(Array.from(files, f => f.name))
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean)
+  return lines.length > 0 && lines.every(l => names.has(l) || /^file:\/\//i.test(l))
+}
 
 /** A local id for a queued file. crypto.randomUUID only exists in secure contexts (HTTPS/localhost). */
 export function newUploadKey(): string {

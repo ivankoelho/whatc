@@ -57,6 +57,8 @@ type ChatAttachmentResponse struct {
 	Width      *int      `json:"width,omitempty"`
 	Height     *int      `json:"height,omitempty"`
 	DurationMs *int      `json:"duration_ms,omitempty"`
+	// PendingTTLMs is only on the upload response: the pending file is guaranteed for this long.
+	PendingTTLMs int64 `json:"pending_ttl_ms,omitempty"`
 }
 
 func chatAttachmentResponse(a models.ChatAttachment) ChatAttachmentResponse {
@@ -185,7 +187,9 @@ func (a *App) UploadChatAttachment(r *fastglue.Request) error {
 		_ = a.removeChatFile(att.StoragePath)
 		return a.sendChatError(r, txErr, "upload the file")
 	}
-	return r.SendEnvelope(chatAttachmentResponse(att))
+	resp := chatAttachmentResponse(att)
+	resp.PendingTTLMs = chatPendingGrace.Milliseconds()
+	return r.SendEnvelope(resp)
 }
 
 func (a *App) writeChatFile(rel string, data []byte) error {
@@ -265,33 +269,29 @@ func (a *App) DeleteChatAttachment(r *fastglue.Request) error {
 // the sender's transaction. The number of rows touched must equal the number asked
 // for: anything unknown, foreign, already used or purged aborts the whole send.
 func attachPendingFiles(tx *gorm.DB, orgID, userID, channelID, messageID uuid.UUID, ids []uuid.UUID) error {
-	// Say WHICH ones are gone, so the client drops exactly those and keeps the rest.
-	var usable []uuid.UUID
-	tx.Model(&models.ChatAttachment{}).
-		Where("id IN ? AND organization_id = ? AND channel_id = ? AND uploader_id = ? AND message_id IS NULL AND purged_at IS NULL",
-			ids, orgID, channelID, userID).Pluck("id", &usable)
-	have := make(map[uuid.UUID]bool, len(usable))
-	for _, id := range usable {
+	// One statement does the check and the change: the ids it returns are exactly the ones
+	// that were pending, theirs and here; every other id is reported as gone, so the client
+	// drops exactly those. Anything missing aborts (and rolls back) the whole send.
+	var attached []uuid.UUID
+	if err := tx.Raw(`UPDATE chat_attachments SET message_id = ?
+		WHERE id IN ? AND organization_id = ? AND channel_id = ? AND uploader_id = ?
+		  AND message_id IS NULL AND purged_at IS NULL
+		RETURNING id`, messageID, ids, orgID, channelID, userID).Scan(&attached).Error; err != nil {
+		return err
+	}
+	have := make(map[uuid.UUID]bool, len(attached))
+	for _, id := range attached {
 		have[id] = true
 	}
-	var missing []uuid.UUID
+	missing := []uuid.UUID{}
 	for _, id := range ids {
 		if !have[id] {
 			missing = append(missing, id)
 		}
 	}
-	if len(missing) > 0 {
+	// A duplicated id updates once, so the counts differ with nothing "missing": still a refusal.
+	if len(missing) > 0 || len(attached) != len(ids) {
 		return &chatDataError{errChatAttGone, map[string]any{"attachment_ids": missing}}
-	}
-	res := tx.Model(&models.ChatAttachment{}).
-		Where("id IN ? AND organization_id = ? AND channel_id = ? AND uploader_id = ? AND message_id IS NULL AND purged_at IS NULL",
-			ids, orgID, channelID, userID).
-		Update("message_id", messageID)
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected != int64(len(ids)) {
-		return errChatAttGone
 	}
 	return nil
 }

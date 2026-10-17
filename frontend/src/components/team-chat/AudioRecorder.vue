@@ -72,6 +72,8 @@ async function start() {
     opened = await navigator.mediaDevices.getUserMedia({ audio: true })
   } catch (err) {
     starting = false
+    // The user already left (channel switch, unmount): an error about that start would be noise.
+    if (startAborted || disposed) return
     const name = (err as { name?: string })?.name
     toast.error(t(name === 'NotAllowedError' || name === 'SecurityError' ? 'teamChat.recorder.denied'
       : name === 'NotFoundError' || name === 'OverconstrainedError' ? 'teamChat.recorder.noMic'

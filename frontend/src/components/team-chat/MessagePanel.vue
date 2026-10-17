@@ -21,7 +21,7 @@ import AttachmentQueue from './AttachmentQueue.vue'
 import AudioRecorder from './AudioRecorder.vue'
 import MessageAttachments from './MessageAttachments.vue'
 import {
-  TEAM_CHAT_ACCEPT, TEAM_CHAT_MAX_BODY, TEAM_CHAT_REACTIONS, TEAM_CHAT_UPLOAD_ERRORS, chatErrorCode, isSendableBody,
+  TEAM_CHAT_ACCEPT, TEAM_CHAT_MAX_BODY, TEAM_CHAT_REACTIONS, TEAM_CHAT_UPLOAD_ERRORS, chatErrorCode, isOnlyFileNames, isSendableBody,
   pickTypingNames, reactionGlyph, recordingSupported, systemEventKey
 } from '@/lib/team-chat'
 import type { TeamChatMessage, TeamChatReplyTo } from '@/services/api'
@@ -92,7 +92,9 @@ function onFiles(list: FileList | File[] | null | undefined) {
 function onPaste(e: ClipboardEvent) {
   const files = e.clipboardData?.files
   if (!files?.length) return
-  if (!e.clipboardData?.getData('text/plain')) e.preventDefault()
+  // Text that is only the copied files' names (Finder, some Linux managers) is not text to paste.
+  const text = e.clipboardData?.getData('text/plain') ?? ''
+  if (!text || isOnlyFileNames(text, files)) e.preventDefault()
   onFiles(files)
 }
 

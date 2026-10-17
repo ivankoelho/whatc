@@ -608,7 +608,8 @@ func TestAttachments_Cleanup(t *testing.T) {
 	f := newPhaseA(t)
 	dir := f.withStorage(t)
 	// The test database outlives runs: rows left by earlier ones are old enough to be swept.
-	require.NoError(t, f.app.DB.Where("1 = 1").Delete(&models.ChatAttachment{}).Error)
+	// Run the job once first, so the counts below are only about this test.
+	f.app.CleanupChatAttachments(time.Now())
 	now := time.Now()
 	age := func(id uuid.UUID, d time.Duration) {
 		require.NoError(t, f.app.DB.Model(&models.ChatAttachment{}).Where("id = ?", id).Update("created_at", now.Add(-d)).Error)
@@ -1047,4 +1048,38 @@ func TestAttachments_GoneNamesTheMissingIds(t *testing.T) {
 
 	code2, _, _ := f.sendFiles(t, f.member, f.ch, "ok", good1, good2)
 	assert.Equal(t, 200, code2, "the good ones were not consumed by the failed send")
+}
+
+// The upload answer says how long the pending file is guaranteed to live, so the
+// client does not keep its own copy of the server's grace period.
+func TestAttachments_UploadReportsPendingTTL(t *testing.T) {
+	f := newPhaseA(t)
+	f.withStorage(t)
+	a := mustUpload(t, f, f.member, f.ch, "a.png", pngBytes(2, 2))
+	assert.EqualValues(t, time.Hour.Milliseconds(), a.PendingTTLMs)
+	_, msg, _ := f.sendFiles(t, f.member, f.ch, "", a.ID)
+	require.Len(t, msg.Attachments, 1)
+	assert.Zero(t, msg.Attachments[0].PendingTTLMs, "only the upload answer carries it")
+}
+
+// A duplicated id is refused, and nothing is claimed as missing (the client then drops none).
+func TestAttachments_DuplicateIdIsRefusedWithoutNamingAnyone(t *testing.T) {
+	f := newPhaseA(t)
+	f.withStorage(t)
+	id := mustUpload(t, f, f.member, f.ch, "a.png", pngBytes(2, 2)).ID
+	code, body := chatDo(t, f.app.SendChatMessage, f.org.ID, f.member.ID,
+		map[string]any{"body": "x", "attachment_ids": []string{id.String(), id.String()}},
+		map[string]string{"id": f.ch.ID.String()}, nil)
+	assert.Equal(t, 400, code)
+	var resp struct {
+		ErrorType string `json:"error_type"`
+		Data      struct {
+			IDs []uuid.UUID `json:"attachment_ids"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(body, &resp))
+	assert.Equal(t, "attachment_gone", resp.ErrorType)
+	assert.Empty(t, resp.Data.IDs)
+	code, _, _ = f.sendFiles(t, f.member, f.ch, "ok", id)
+	assert.Equal(t, 200, code, "the refused send consumed nothing")
 }

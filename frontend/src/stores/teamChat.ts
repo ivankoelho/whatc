@@ -15,6 +15,8 @@ import {
   TEAM_CHAT_PAGE_SIZE,
   TEAM_CHAT_TYPING_MS,
   TEAM_CHAT_TYPING_THROTTLE_MS,
+  ChatApiError,
+  TEAM_CHAT_PENDING_MARGIN_MS,
   TEAM_CHAT_PENDING_TTL_MS,
   appendUnique,
   checkAttachmentFile,
@@ -33,7 +35,7 @@ export interface UploadItem {
   status: 'queued' | 'uploading' | 'ready' | 'failed'
   progress: number
   attachmentId?: string
-  readyAt?: number
+  expiresAt?: number // when the server stops guaranteeing the pending file
   error?: string
 }
 
@@ -268,7 +270,7 @@ export const useTeamChatStore = defineStore('teamChat', () => {
           }))
           item.attachmentId = att.id
           item.progress = 100
-          item.readyAt = Date.now()
+          item.expiresAt = Date.now() + (att.pending_ttl_ms ?? TEAM_CHAT_PENDING_TTL_MS) - TEAM_CHAT_PENDING_MARGIN_MS
           item.status = 'ready'
         } catch (err) {
           // A cancel removed the item already; anything else is a failure the user can retry.
@@ -315,7 +317,7 @@ export const useTeamChatStore = defineStore('teamChat', () => {
 
   /** Removes ready files older than the server's grace period, so the UI never offers a dead attachment. */
   function expireStaleUploads(channelId: string, now = Date.now()): UploadItem[] {
-    return dropUploads(channelId, u => u.status === 'ready' && now - (u.readyAt ?? now) > TEAM_CHAT_PENDING_TTL_MS)
+    return dropUploads(channelId, u => u.status === 'ready' && u.expiresAt !== undefined && now >= u.expiresAt)
   }
 
   function clearUploads(channelId: string) {
@@ -338,7 +340,7 @@ export const useTeamChatStore = defineStore('teamChat', () => {
     const parent = replyTarget(id)
     if (!attachmentIds && expireStaleUploads(id).length) {
       // Same error the server would give, raised before a request that is bound to fail.
-      throw { response: { status: 400, data: { error_type: 'attachment_gone' } } }
+      throw new ChatApiError('attachment_gone')
     }
     const ids = attachmentIds ?? uploadsFor(id).map(u => u.attachmentId).filter((x): x is string => !!x)
     let msg: TeamChatMessage
