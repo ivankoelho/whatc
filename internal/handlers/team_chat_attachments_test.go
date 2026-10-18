@@ -22,7 +22,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"github.com/shridarpatil/whatomate/internal/handlers"
+	"github.com/shridarpatil/whatomate/internal/middleware"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/test/testutil"
 	"github.com/stretchr/testify/assert"
@@ -1315,4 +1317,46 @@ func TestAttachments_OrphanSweepNeverDeletesWhenTheLookupFails(t *testing.T) {
 		assert.Zero(t, remaining(orphans), "every real orphan and the temp file are gone now")
 		assert.NotContains(t, logs.String(), "lookup failed")
 	})
+}
+
+// The upload limiter fails open when Redis is down (as it always did), but it is no longer
+// silent: one throttled line for a persistent failure, naming the component, with no user id.
+func TestAttachments_UploadRateLimit_RedisDownFailsOpenAndIsLoggedOnce(t *testing.T) {
+	f := newPhaseA(t)
+	f.withStorage(t)
+
+	f.app.Redis = redis.NewClient(&redis.Options{Addr: "127.0.0.1:1", DialTimeout: 20 * time.Millisecond, MaxRetries: -1})
+	defer f.app.Redis.Close()
+
+	clock := time.Unix(1_700_000_000, 0)
+	origFailures := middleware.Failures
+	middleware.Failures = middleware.NewFailureLog(time.Minute, func() time.Time { return clock })
+	defer func() { middleware.Failures = origFailures }()
+
+	var logs bytes.Buffer
+	origLog := f.app.Log
+	f.app.Log = logf.New(logf.Opts{Writer: &logs, Level: logf.ErrorLevel})
+	defer func() { f.app.Log = origLog }()
+	defer handlers.SetChatUploadsPerMinuteForTest(1)() // would refuse the second upload if the limiter were working
+
+	for i := 0; i < 4; i++ {
+		a := mustUpload(t, f, f.member, f.ch, "a.png", pngBytes(2, 2)) // all four are accepted: fail open
+		f.sendFiles(t, f.member, f.ch, "", a.ID)
+	}
+
+	out := strings.TrimSpace(logs.String())
+	require.NotEmpty(t, out, "a failing limiter is no longer silent")
+	assert.Len(t, strings.Split(out, "\n"), 1, "four failing uploads, one log line")
+	assert.Contains(t, out, "component=chat.upload")
+	assert.Contains(t, out, "operation=upload_rate_limit")
+	assert.Contains(t, out, "failing open")
+	assert.NotContains(t, out, f.member.ID.String(), "the user id is not logged")
+	assert.NotContains(t, out, "ratelimit:chat_upload", "nor the rate limit key")
+
+	clock = clock.Add(2 * time.Minute) // a persistent failure is reported again later
+	a := mustUpload(t, f, f.member, f.ch, "b.png", pngBytes(2, 2))
+	f.sendFiles(t, f.member, f.ch, "", a.ID)
+	lines := strings.Split(strings.TrimSpace(logs.String()), "\n")
+	require.Len(t, lines, 2)
+	assert.Contains(t, lines[1], "suppressed_since_last_log=3")
 }

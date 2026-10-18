@@ -79,6 +79,8 @@ func (a *App) chatUploadAllowed(userID uuid.UUID) bool {
 	defer cancel()
 	n, err := middleware.IncrWindow(ctx, a.Redis, "ratelimit:chat_upload:"+userID.String(), time.Minute)
 	if err != nil {
+		// Fails open, as it always did, but no longer silently (throttled; the user id is not logged).
+		middleware.Failures.Report(a.Log, "chat.upload", "upload_rate_limit", err)
 		return true
 	}
 	return n <= int64(chatUploadsPerMinute)

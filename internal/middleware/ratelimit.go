@@ -77,8 +77,8 @@ func enforce(opts RateLimitOpts, r *fastglue.Request, key string) *fastglue.Requ
 
 	count, err := IncrWindow(ctx, opts.Redis, key, opts.Window)
 	if err != nil {
-		// Fail open — log and allow request.
-		opts.Log.Error("Rate limit Redis INCR failed", "error", err, "key", key)
+		// Fail open: allow the request, and say so (throttled; the key holds an IP or user id, so it is not logged).
+		Failures.Report(opts.Log, "ratelimit.middleware", opts.KeyPrefix, err)
 		return r
 	}
 
