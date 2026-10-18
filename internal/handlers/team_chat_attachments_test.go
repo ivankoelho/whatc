@@ -237,6 +237,11 @@ func TestAttachments_AcceptedTypes(t *testing.T) {
 	a := mustUpload(t, f, f.member, f.ch, "a.webm", webmAudio(), "kind", "audio", "duration_ms", "999999999")
 	require.NotNil(t, a.DurationMs)
 	assert.Equal(t, 300000, *a.DurationMs)
+	// There is no minimum on the server: the recorder's one-second floor is the client's alone.
+	f.app.DB.Where("uploader_id = ?", f.member.ID).Delete(&models.ChatAttachment{})
+	a = mustUpload(t, f, f.member, f.ch, "short.webm", webmAudio(), "kind", "audio", "duration_ms", "1")
+	require.NotNil(t, a.DurationMs)
+	assert.Equal(t, 1, *a.DurationMs)
 }
 
 func TestAttachments_RefusedTypes(t *testing.T) {
