@@ -106,6 +106,21 @@ type ChatMessage struct {
 
 func (ChatMessage) TableName() string { return "chat_messages" }
 
+// ChatMessageReaction is one person's emoji on one message. Code is a key of the
+// fixed palette (thumbs_up, heart, ...), never free text. Removing a reaction
+// deletes the row; a deleted message just stops being read with its reactions.
+type ChatMessageReaction struct {
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
+	OrganizationID uuid.UUID `gorm:"type:uuid;index;not null" json:"organization_id"`
+	ChannelID      uuid.UUID `gorm:"type:uuid;not null" json:"channel_id"`
+	MessageID      uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_chat_reaction_unique,priority:1" json:"message_id"`
+	UserID         uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_chat_reaction_unique,priority:2" json:"user_id"`
+	Code           string    `gorm:"size:20;not null;uniqueIndex:idx_chat_reaction_unique,priority:3" json:"code"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+func (ChatMessageReaction) TableName() string { return "chat_message_reactions" }
+
 // ChatRead is one user's read marker in one channel. It is separate from
 // membership because team-channel members have no membership row. The marker is
 // the (created_at, id) of the last read message, the same cursor shape the
@@ -130,3 +145,28 @@ func CanonicalDMPair(a, b uuid.UUID) (low, high uuid.UUID) {
 	}
 	return b, a
 }
+
+// ChatAttachment is a file (or voice recording) sent in a chat. It is uploaded
+// first, pending (MessageID nil, visible only to the uploader), and fixed to a
+// message in the same transaction that creates the message. StoragePath is
+// server-generated and never leaves the server; Name is only a display label.
+type ChatAttachment struct {
+	ID             uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
+	OrganizationID uuid.UUID  `gorm:"type:uuid;index;not null" json:"organization_id"`
+	ChannelID      uuid.UUID  `gorm:"type:uuid;index;not null" json:"channel_id"`
+	UploaderID     uuid.UUID  `gorm:"type:uuid;index;not null" json:"uploader_id"`
+	MessageID      *uuid.UUID `gorm:"type:uuid;index" json:"message_id,omitempty"`
+	Kind           string     `gorm:"size:10;not null" json:"kind"` // image | audio | file
+	Name           string     `gorm:"size:255;not null" json:"name"`
+	Mime           string     `gorm:"size:100;not null" json:"mime"`
+	SizeBytes      int64      `gorm:"not null" json:"size"`
+	SHA256         string     `gorm:"size:64;not null" json:"-"`
+	StoragePath    string     `gorm:"size:500;not null" json:"-"`
+	Width          *int       `json:"width,omitempty"`
+	Height         *int       `json:"height,omitempty"`
+	DurationMs     *int       `json:"duration_ms,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	PurgedAt       *time.Time `json:"-"`
+}
+
+func (ChatAttachment) TableName() string { return "chat_attachments" }

@@ -152,6 +152,8 @@ func GetMigrationModels() []MigrationModel {
 		{"ChatChannelMember", &models.ChatChannelMember{}},
 		{"ChatMessage", &models.ChatMessage{}},
 		{"ChatRead", &models.ChatRead{}},
+		{"ChatMessageReaction", &models.ChatMessageReaction{}},
+		{"ChatAttachment", &models.ChatAttachment{}},
 
 		// Help Desk — unidade e departamento
 		{"Unit", &models.Unit{}},

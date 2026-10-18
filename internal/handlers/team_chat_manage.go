@@ -58,6 +58,22 @@ type chatHTTPError struct {
 
 func (e *chatHTTPError) Error() string { return e.msg }
 
+// chatDataError is a chatHTTPError that also carries a payload for the client
+// (the ids of the attachments that are no longer available, for example).
+type chatDataError struct {
+	*chatHTTPError
+	data any
+}
+
+func (e *chatDataError) Unwrap() error { return e.chatHTTPError }
+
+// lockChatKey serializes check-then-insert limits that a FOR SHARE channel lock does
+// not (it lets many writers in): a transaction-scoped advisory lock on a named key.
+// Taken AFTER the channel row, always, so the lock order is the same everywhere.
+func lockChatKey(tx *gorm.DB, key string) error {
+	return tx.Exec("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))", key).Error
+}
+
 var (
 	errChatNotFound  = &chatHTTPError{http.StatusNotFound, "Channel not found", "not_found"}
 	errChatForbidden = &chatHTTPError{http.StatusForbidden, "You cannot do this in this channel", "forbidden"}
@@ -72,6 +88,10 @@ func chatBadRequest(msg string) error { return &chatHTTPError{http.StatusBadRequ
 // sendChatError answers the request for err; an unexpected error is logged and
 // becomes a generic 500.
 func (a *App) sendChatError(r *fastglue.Request, err error, what string) error {
+	var de *chatDataError
+	if errors.As(err, &de) {
+		return r.SendErrorEnvelope(de.status, de.msg, de.data, fastglue.ErrorType(de.code))
+	}
 	var he *chatHTTPError
 	if errors.As(err, &he) {
 		return r.SendErrorEnvelope(he.status, he.msg, nil, fastglue.ErrorType(he.code))

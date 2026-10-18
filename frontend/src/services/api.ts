@@ -1141,6 +1141,41 @@ export interface TeamChatMessage {
   // meta holds the event and its parameters for the UI to translate.
   kind?: 'user' | 'system'
   meta?: Record<string, string>
+  // The quote of the message this one answers, and the emojis on it.
+  reply_to?: TeamChatReplyTo
+  reactions?: TeamChatReaction[]
+  attachments?: TeamChatAttachment[]
+}
+
+export interface TeamChatAttachment {
+  id: string
+  kind: 'image' | 'audio' | 'file'
+  name: string
+  mime: string
+  size: number
+  width?: number
+  height?: number
+  duration_ms?: number
+  /** Only on the upload answer: how long the pending file is guaranteed to live. */
+  pending_ttl_ms?: number
+}
+
+export interface TeamChatReplyTo {
+  id: string
+  user_id?: string
+  user_name: string
+  snippet: string
+  deleted: boolean
+  // First file of the original, for quoting a message that has no text.
+  attachment_kind?: 'image' | 'audio' | 'file'
+  attachment_name?: string
+}
+
+export interface TeamChatReaction {
+  code: string
+  count: number
+  mine: boolean
+  names: string[]
 }
 
 export interface TeamChatMember {
@@ -1176,8 +1211,36 @@ export const teamChatService = {
   openDM: (userId: string) => api.post<TeamChatChannel>('/team-chat/dm', { user_id: userId }),
   messages: (channelId: string, params?: { before_id?: string; limit?: number }) =>
     api.get<{ messages: TeamChatMessage[]; has_more: boolean }>(`/team-chat/channels/${channelId}/messages`, { params }),
-  send: (channelId: string, body: string) =>
-    api.post<TeamChatMessage>(`/team-chat/channels/${channelId}/messages`, { body }),
+  send: (channelId: string, body: string, parentId?: string, attachmentIds?: string[]) =>
+    api.post<TeamChatMessage>(`/team-chat/channels/${channelId}/messages`, {
+      body,
+      ...(parentId ? { parent_id: parentId } : {}),
+      ...(attachmentIds?.length ? { attachment_ids: attachmentIds } : {})
+    }),
+  uploadAttachment: (
+    channelId: string, file: File,
+    opts: { audioMs?: number; onProgress?: (pct: number) => void; signal?: AbortSignal } = {}
+  ) => {
+    const form = new FormData()
+    form.append('file', file)
+    if (opts.audioMs !== undefined) {
+      form.append('kind', 'audio')
+      form.append('duration_ms', String(Math.round(opts.audioMs)))
+    }
+    return api.post<TeamChatAttachment>(`/team-chat/channels/${channelId}/attachments`, form, {
+      // The instance defaults to JSON; a multipart body needs its own type (with boundary).
+      headers: { 'Content-Type': 'multipart/form-data' },
+      signal: opts.signal,
+      onUploadProgress: e => { if (e.total) opts.onProgress?.(Math.round((e.loaded / e.total) * 100)) }
+    })
+  },
+  discardAttachment: (channelId: string, attachmentId: string) =>
+    api.delete(`/team-chat/channels/${channelId}/attachments/${attachmentId}`),
+  message: (messageId: string) => api.get<TeamChatMessage>(`/team-chat/messages/${messageId}`),
+  react: (messageId: string, code: string) =>
+    api.put<{ reactions: TeamChatReaction[] }>(`/team-chat/messages/${messageId}/reactions/${code}`),
+  unreact: (messageId: string, code: string) =>
+    api.delete<{ reactions: TeamChatReaction[] }>(`/team-chat/messages/${messageId}/reactions/${code}`),
   edit: (messageId: string, body: string) =>
     api.put<TeamChatMessage>(`/team-chat/messages/${messageId}`, { body }),
   remove: (messageId: string) => api.delete(`/team-chat/messages/${messageId}`),

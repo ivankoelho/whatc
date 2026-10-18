@@ -102,6 +102,7 @@ const TEAM_CHAT_EVENT_TYPES = new Set([
   'team_chat_message',
   'team_chat_message_updated',
   'team_chat_message_deleted',
+  'team_chat_message_reactions',
   'team_chat_read',
   'team_chat_typing',
   'team_chat_channel',
@@ -355,6 +356,7 @@ class WebSocketService {
         case 'team_chat_message':
         case 'team_chat_message_updated':
         case 'team_chat_message_deleted':
+        case 'team_chat_message_reactions':
         case 'team_chat_read':
         case 'team_chat_typing':
         case 'team_chat_channel':

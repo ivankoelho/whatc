@@ -6,19 +6,39 @@ import {
   type TeamChatMessage,
   type TeamChatUser,
   type TeamChatMember,
-  type TeamChatAdminChannel
+  type TeamChatAdminChannel,
+  type TeamChatReaction,
+  type TeamChatAttachment
 } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import {
   TEAM_CHAT_PAGE_SIZE,
   TEAM_CHAT_TYPING_MS,
   TEAM_CHAT_TYPING_THROTTLE_MS,
+  ChatApiError,
+  TEAM_CHAT_PENDING_MARGIN_MS,
+  TEAM_CHAT_PENDING_TTL_MS,
   appendUnique,
-  mergeLatest
+  checkAttachmentFile,
+  chatErrorCode,
+  mergeLatest,
+  newUploadKey
 } from '@/lib/team-chat'
 
 // 'forbidden' covers both "does not exist" and "not yours": the server answers
 // 404 for both on purpose, so the UI never learns which.
+export interface UploadItem {
+  key: string
+  name: string
+  size: number
+  kind: 'image' | 'audio' | 'file'
+  status: 'queued' | 'uploading' | 'ready' | 'failed'
+  progress: number
+  attachmentId?: string
+  expiresAt?: number // when the server stops guaranteeing the pending file
+  error?: string
+}
+
 export type TeamChatPanelError = null | 'forbidden' | 'failed'
 
 export interface TeamChatPanel {
@@ -196,8 +216,152 @@ export const useTeamChatStore = defineStore('teamChat', () => {
     if (panels.value[id]?.error === null) await markRead(id)
   }
 
-  async function send(id: string, body: string) {
-    const msg = unwrap<TeamChatMessage>(await teamChatService.send(id, body))
+  // The message being answered in the composer, per channel (switching channels keeps
+  // each one's own; sending or cancelling clears it).
+  const replyTargets = ref<Record<string, TeamChatMessage | null>>({})
+  const replyTarget = (id: string) => replyTargets.value[id] ?? null
+  function startReply(msg: TeamChatMessage) { replyTargets.value[msg.channel_id] = msg }
+  function cancelReply(id: string) { replyTargets.value[id] = null }
+
+  // ---- Files waiting to be sent, per channel ----
+  // Each file is uploaded on its own (progress, retry, cancel) and becomes a pending
+  // attachment on the server; sending the message fixes the ready ones to it.
+  const uploads = ref<Record<string, UploadItem[]>>({})
+  const blobs = new Map<string, { file: File; audioMs?: number; abort?: AbortController }>() // not reactive
+  const pumping = new Set<string>()
+  const uploadsFor = (id: string): UploadItem[] => uploads.value[id] ?? []
+  const uploadsReady = (id: string) => uploadsFor(id).every(u => u.status === 'ready')
+
+  /** Queues files; returns the refusals (file name + error code) found before uploading. */
+  function addFiles(channelId: string, files: File[], audioMs?: number): Array<{ name: string; code: string }> {
+    const refused: Array<{ name: string; code: string }> = []
+    for (const file of files) {
+      const code = audioMs !== undefined ? '' : checkAttachmentFile(file, uploadsFor(channelId).length)
+      if (code) {
+        refused.push({ name: file.name, code })
+        continue
+      }
+      const key = newUploadKey()
+      blobs.set(key, { file, audioMs })
+      uploads.value[channelId] = [...uploadsFor(channelId), {
+        key, name: file.name, size: file.size, status: 'queued', progress: 0,
+        kind: audioMs !== undefined ? 'audio' : file.type.startsWith('image/') ? 'image' : 'file'
+      }]
+    }
+    void pumpUploads(channelId)
+    return refused
+  }
+
+  async function pumpUploads(channelId: string) {
+    if (pumping.has(channelId)) return
+    pumping.add(channelId)
+    try {
+      for (;;) {
+        const item = uploadsFor(channelId).find(u => u.status === 'queued')
+        const entry = item && blobs.get(item.key)
+        if (!item || !entry) break
+        item.status = 'uploading'
+        item.progress = 0
+        item.error = undefined
+        entry.abort = new AbortController()
+        try {
+          const att = unwrap<TeamChatAttachment>(await teamChatService.uploadAttachment(channelId, entry.file, {
+            audioMs: entry.audioMs, signal: entry.abort.signal, onProgress: pct => { item.progress = pct }
+          }))
+          item.attachmentId = att.id
+          item.progress = 100
+          item.expiresAt = Date.now() + (att.pending_ttl_ms ?? TEAM_CHAT_PENDING_TTL_MS) - TEAM_CHAT_PENDING_MARGIN_MS
+          item.status = 'ready'
+        } catch (err) {
+          // A cancel removed the item already; anything else is a failure the user can retry.
+          if (uploadsFor(channelId).includes(item)) {
+            item.status = 'failed'
+            item.error = chatErrorCode(err) || 'generic'
+          }
+        }
+      }
+    } finally {
+      pumping.delete(channelId)
+    }
+  }
+
+  function retryUpload(channelId: string, key: string) {
+    const item = uploadsFor(channelId).find(u => u.key === key)
+    if (item?.status === 'failed') {
+      item.status = 'queued'
+      void pumpUploads(channelId)
+    }
+  }
+
+  /** Removes a file from the queue: aborts it if uploading, discards it on the server if ready. */
+  function cancelUpload(channelId: string, key: string) {
+    const item = uploadsFor(channelId).find(u => u.key === key)
+    if (!item) return
+    uploads.value[channelId] = uploadsFor(channelId).filter(u => u !== item)
+    blobs.get(key)?.abort?.abort()
+    blobs.delete(key)
+    if (item.attachmentId) void teamChatService.discardAttachment(channelId, item.attachmentId).catch(() => undefined)
+  }
+
+  /** Drops queue items and frees their files (the server side is already gone or being discarded). */
+  function dropUploads(channelId: string, drop: (u: UploadItem) => boolean): UploadItem[] {
+    const dropped = uploadsFor(channelId).filter(drop)
+    if (dropped.length === 0) return []
+    for (const u of dropped) {
+      blobs.get(u.key)?.abort?.abort()
+      blobs.delete(u.key)
+    }
+    uploads.value[channelId] = uploadsFor(channelId).filter(u => !drop(u))
+    return dropped
+  }
+
+  /** Removes ready files older than the server's grace period, so the UI never offers a dead attachment. */
+  function expireStaleUploads(channelId: string, now = Date.now()): UploadItem[] {
+    return dropUploads(channelId, u => u.status === 'ready' && u.expiresAt !== undefined && now >= u.expiresAt)
+  }
+
+  function clearUploads(channelId: string) {
+    for (const u of uploadsFor(channelId)) blobs.delete(u.key)
+    uploads.value[channelId] = []
+  }
+
+  /** A recording: uploaded and sent at once as its own message (replying if a reply is pending). */
+  async function sendVoice(id: string, file: File, audioMs: number) {
+    const att = unwrap<TeamChatAttachment>(await teamChatService.uploadAttachment(id, file, { audioMs }))
+    try {
+      return await send(id, '', [att.id])
+    } catch (err) {
+      void teamChatService.discardAttachment(id, att.id).catch(() => undefined)
+      throw err
+    }
+  }
+
+  async function send(id: string, body: string, attachmentIds?: string[]) {
+    const parent = replyTarget(id)
+    if (!attachmentIds && expireStaleUploads(id).length) {
+      // Same error the server would give, raised before a request that is bound to fail.
+      throw new ChatApiError('attachment_gone')
+    }
+    const ids = attachmentIds ?? uploadsFor(id).map(u => u.attachmentId).filter((x): x is string => !!x)
+    let msg: TeamChatMessage
+    try {
+      const call = ids.length
+        ? teamChatService.send(id, body, parent?.id, ids)
+        : parent ? teamChatService.send(id, body, parent.id) : teamChatService.send(id, body)
+      msg = unwrap<TeamChatMessage>(await call)
+    } catch (err) {
+      // The original disappeared meanwhile: drop the dead reply, keep the text.
+      if (parent && chatErrorCode(err) === 'reply_target_gone') cancelReply(id)
+      // A file is gone on the server: take exactly those out of the queue (all ready ones when
+      // the server could not say which), free them, and let the caller tell the user.
+      if (!attachmentIds && chatErrorCode(err) === 'attachment_gone') {
+        const named = (err as { response?: { data?: { data?: { attachment_ids?: string[] } } } }).response?.data?.data?.attachment_ids
+        dropUploads(id, u => u.status === 'ready' && (!Array.isArray(named) || (!!u.attachmentId && named.includes(u.attachmentId))))
+      }
+      throw err
+    }
+    if (parent) cancelReply(id)
+    if (!attachmentIds) clearUploads(id)
     const p = panel(id)
     p.messages = appendUnique(p.messages, msg)
     const ch = channels.value.find(c => c.id === id)
@@ -209,6 +373,29 @@ export const useTeamChatStore = defineStore('teamChat', () => {
     const updated = unwrap<TeamChatMessage>(await teamChatService.edit(msg.id, body))
     const p = panel(msg.channel_id)
     p.messages = p.messages.map(m => (m.id === updated.id ? updated : m))
+  }
+
+  function replaceMessage(updated: TeamChatMessage) {
+    const p = panels.value[updated.channel_id]
+    if (p) p.messages = p.messages.map(m => (m.id === updated.id ? updated : m))
+  }
+
+  /** Adds or removes the caller's reaction; the server answers with the message's reactions. */
+  async function react(msg: TeamChatMessage, code: string, add: boolean) {
+    const res = unwrap<{ reactions: TeamChatReaction[] }>(
+      add ? await teamChatService.react(msg.id, code) : await teamChatService.unreact(msg.id, code)
+    )
+    const p = panels.value[msg.channel_id]
+    const cur = p?.messages.find(m => m.id === msg.id)
+    if (cur) cur.reactions = res.reactions
+  }
+
+  async function refreshMessage(messageId: string) {
+    try {
+      replaceMessage(unwrap<TeamChatMessage>(await teamChatService.message(messageId)))
+    } catch {
+      /* gone or no longer visible: the next refresh drops it */
+    }
   }
 
   async function remove(msg: TeamChatMessage) {
@@ -391,6 +578,11 @@ export const useTeamChatStore = defineStore('teamChat', () => {
         }
         refreshChannelsSoon()
         break
+      case 'team_chat_message_reactions':
+        if (isActive && payload.message_id && panels.value[id]?.messages.some(m => m.id === payload.message_id)) {
+          void refreshMessage(payload.message_id)
+        } else if (!isActive) delete panels.value[id]
+        break
       case 'team_chat_message_updated':
       case 'team_chat_message_deleted':
         if (isActive) void refreshLatest(id)
@@ -425,7 +617,7 @@ export const useTeamChatStore = defineStore('teamChat', () => {
     archived, showArchived, members, adminChannels, adminLoading, adminError,
     activeChannel, activePanel, totalUnread, userNames, channelById,
     panel, fetchChannels, fetchUsers, selectChannel, loadMessages, loadOlder, refreshLatest,
-    markRead, send, edit, remove, createChannel, openDM, notifyTyping, typingUserIds,
+    markRead, send, sendVoice, uploads, uploadsFor, uploadsReady, expireStaleUploads, addFiles, retryUpload, cancelUpload, edit, remove, replyTarget, startReply, cancelReply, react, createChannel, openDM, notifyTyping, typingUserIds,
     fetchArchived, setShowArchived, fetchMembers, fetchAdminChannels,
     addMember, removeMember, leaveChannel, setRole, renameChannel, archiveChannel, reopenChannel, joinChannel,
     applyPresence, applyEvent, resync
