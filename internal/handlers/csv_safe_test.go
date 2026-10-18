@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"mime/multipart"
 	"testing"
+	"unicode"
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/handlers"
@@ -52,6 +53,66 @@ func TestCSVSafeCell_LeavesLegitimateValuesAlone(t *testing.T) {
 	}
 }
 
+// Format characters (Unicode category Cf) render as nothing and may be skipped by a spreadsheet before it
+// decides what a cell is: they must not hide a trigger. The six found in review, each in front of every
+// kind of trigger, alone, repeated, and mixed with spaces and tabs.
+func TestCSVSafeCell_FormatCharactersDoNotHideATrigger(t *testing.T) {
+	hidden := map[string]rune{
+		"LRM (U+200E)": 0x200e, "RLM (U+200F)": 0x200f, "soft hyphen (U+00AD)": 0x00ad,
+		"Arabic letter mark (U+061C)": 0x061c, "Mongolian vowel separator (U+180E)": 0x180e,
+		"invisible function application (U+2061)": 0x2061,
+	}
+	triggers := []string{"=1+1", "+cmd|' /C calc'!A0", "-2+3+cmd|' /C calc'!A0", "@SUM(A1:A2)", "=", "@", "-", "+"}
+	for name, r := range hidden {
+		ch := string(r)
+		for _, trig := range triggers {
+			for _, v := range []string{
+				ch + trig, ch + ch + trig, ch + ch + ch + trig, // alone and repeated
+				" " + ch + trig, ch + " " + trig, "\t" + ch + trig, ch + "\t" + trig, // mixed with spaces and tabs
+				ch + string(rune(0x200b)) + trig, string(rune(0xfeff)) + ch + trig, // mixed with other format characters
+			} {
+				got := handlers.CSVSafeCellForTest(v)
+				assert.Equal(t, "'"+v, got, "%s in front of %q must be guarded", name, trig)
+				assert.False(t, handlers.CSVLooksLikeFormulaForTest(got))
+				assert.Equal(t, v, handlers.CSVUnsafeCellForTest(got), "and import gives it back")
+			}
+		}
+	}
+
+	t.Run("ordinary text that merely contains such a character is left alone", func(t *testing.T) {
+		for name, r := range hidden {
+			ch := string(r)
+			for _, v := range []string{ch + "Maria", "Maria" + ch, "Ma" + ch + "ria", ch + "5511999998888", "a" + ch + "=1", "1" + ch + "-2"} {
+				assert.Equal(t, v, handlers.CSVSafeCellForTest(v), "%s inside ordinary text: %q", name, v)
+			}
+		}
+	})
+
+	t.Run("plain numbers keep their representation; hidden characters before one are not a plain number", func(t *testing.T) {
+		for _, v := range []string{"+5511999998888", "-5", "-1,5", "+1"} {
+			assert.Equal(t, v, handlers.CSVSafeCellForTest(v), v)
+		}
+		assert.Equal(t, "'"+string(rune(0x200e))+"-5", handlers.CSVSafeCellForTest(string(rune(0x200e))+"-5"))
+	})
+}
+
+// Not a hand-picked list: every character of the Unicode format category (Cf), in front of a trigger.
+func TestCSVSafeCell_EveryFormatCharacterIsLookedThrough(t *testing.T) {
+	count := 0
+	for r := rune(0); r <= unicode.MaxRune; r++ {
+		if !unicode.Is(unicode.Cf, r) {
+			continue
+		}
+		count++
+		for _, trig := range []string{"=1+1", "+cmd|x", "-2+3", "@SUM(1)"} {
+			v := string(r) + trig
+			assert.Equal(t, "'"+v, handlers.CSVSafeCellForTest(v), "U+%04X in front of %q", r, trig)
+			assert.Equal(t, v, handlers.CSVUnsafeCellForTest(handlers.CSVSafeCellForTest(v)), "U+%04X round trip", r)
+		}
+	}
+	assert.Greater(t, count, 100, "the category really was enumerated")
+}
+
 func TestCSVCell_RoundTripIsExact(t *testing.T) {
 	all := append(append([]string{}, csvFormulaVectors...), csvLegitValues...)
 	for _, v := range all {
@@ -69,7 +130,7 @@ func TestCSVCell_RoundTripIsExact(t *testing.T) {
 // Every string up to four characters over an alphabet of triggers, spaces, apostrophes and
 // plain characters: nothing the export writes is ever a formula, and import always undoes it.
 func TestCSVCell_ExhaustiveSmallStrings(t *testing.T) {
-	alphabet := []string{"=", "+", "-", "@", "\t", "\r", " ", "'", "a", "1", "\u200b", "\x01"}
+	alphabet := []string{"=", "+", "-", "@", "\t", "\r", " ", "'", "a", "1", "\u200b", "\x01", string(rune(0x200e)), string(rune(0x00ad))}
 	var gen func(prefix string, n int)
 	count := 0
 	gen = func(prefix string, n int) {

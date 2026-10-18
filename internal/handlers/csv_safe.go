@@ -21,12 +21,12 @@ import (
 // whitespace is not plain.
 var numericCell = regexp.MustCompile(`^[+-]?[0-9]+([.,][0-9]+)?$`)
 
-// isInvisibleRune: characters that render as nothing (or reorder text) and that a spreadsheet may
-// skip before deciding what a cell is, so they cannot be allowed to hide a trigger.
-func isInvisibleRune(r rune) bool {
-	return r == 0x200b || r == 0x200c || r == 0x200d || r == 0x2060 || r == 0xfeff ||
-		(r >= 0x202a && r <= 0x202e) || (r >= 0x2066 && r <= 0x2069)
-}
+// isInvisibleRune: format characters (Unicode category Cf: zero-width and joiner characters, the BOM,
+// left/right marks, bidi controls, the soft hyphen, the Arabic letter mark, the invisible function
+// application and so on). They render as nothing or only reorder text, and a spreadsheet may skip them
+// before deciding what a cell is, so none of them can be allowed to hide a trigger. The whole category is
+// covered, not a hand-picked list, so a character nobody thought of is covered too.
+func isInvisibleRune(r rune) bool { return unicode.Is(unicode.Cf, r) }
 
 // startsWithFormulaTrigger reports whether the first meaningful character is a trigger. TAB and CR are
 // triggers by themselves; other spaces, control and invisible characters in front are looked through.
