@@ -247,7 +247,8 @@ export class OccurrencesPage extends BasePage {
   }
 
   async expectToast(text: string | RegExp) {
-    const toast = this.page.locator('[data-sonner-toast]').filter({ hasText: text })
+    // The newest one: an earlier toast with the same text can still be on screen.
+    const toast = this.page.locator('[data-sonner-toast]').filter({ hasText: text }).first()
     await expect(toast).toBeVisible({ timeout: 5000 })
     return toast
   }

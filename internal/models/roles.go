@@ -70,6 +70,7 @@ const (
 	ResourceChatbotAI               = "chatbot.ai"
 	ResourceChat                    = "chat"
 	ResourceChatAssign              = "chat.assign"
+	ResourceTeamChat                = "team_chat"
 	ResourceContacts                = "contacts"
 	ResourceContactName             = "contacts.name"
 	ResourceTags                    = "tags"
@@ -115,6 +116,10 @@ const (
 	ActionAssign   = "assign"
 	ActionViewAll  = "view_all"
 	ActionViewTeam = "view_team"
+	ActionManage   = "manage"
+	// ActionJoinAny lets the holder enter a private chat channel without being a
+	// member (audited, with a reason). Only the system admin role gets it.
+	ActionJoinAny = "join_any"
 )
 
 // DefaultPermissions returns the list of all available permissions to seed
@@ -185,6 +190,13 @@ func DefaultPermissions() []Permission {
 		{Resource: ResourceChat, Action: ActionWrite, Description: "Send messages"},
 		{Resource: ResourceChatAssign, Action: ActionWrite, Description: "Assign conversations to agents"},
 
+		// Chat interno entre usuários (separado do atendimento WhatsApp, "chat")
+		{Resource: ResourceTeamChat, Action: ActionRead, Description: "View internal chat channels and messages"},
+		{Resource: ResourceTeamChat, Action: ActionWrite, Description: "Send internal chat messages and start direct messages"},
+		{Resource: ResourceTeamChat, Action: ActionManage, Description: "Create and manage internal chat channels"},
+		{Resource: ResourceTeamChat, Action: ActionDelete, Description: "Delete other users' internal chat messages"},
+		{Resource: ResourceTeamChat, Action: ActionJoinAny, Description: "Enter a private internal chat channel without being a member (audited, with a reason)"},
+
 		// Conversations
 		{Resource: ResourceConversations, Action: ActionViewAll, Description: "View and act on all conversations, including those assigned to other agents"},
 		{Resource: ResourceConversations, Action: ActionViewTeam, Description: "View and act on all conversations of the teams the user belongs to"},
@@ -209,6 +221,7 @@ func DefaultPermissions() []Permission {
 		{Resource: ResourceAnalytics, Action: ActionWrite, Description: "Create and edit dashboard widgets"},
 		{Resource: ResourceAnalytics, Action: ActionDelete, Description: "Delete dashboard widgets"},
 		{Resource: ResourceAnalyticsAgents, Action: ActionRead, Description: "View agent analytics"},
+		{Resource: ResourceAnalyticsAgents, Action: ActionViewTeam, Description: "Supervise in the live panel the agents of the teams the user belongs to (analytics.agents:read is still needed to open the screen)"},
 		{Resource: ResourceWhatsAppUsage, Action: ActionRead, Description: "View WhatsApp consumption and the price table"},
 		{Resource: ResourceWhatsAppUsage, Action: ActionWrite, Description: "Edit the WhatsApp price table and reprice"},
 
@@ -366,6 +379,8 @@ func SystemRolePermissions() map[string][]string {
 		"chatbot.ai:read", "chatbot.ai:write", "chatbot.ai:delete",
 		// Chat
 		"chat:read", "chat:write", "chat.assign:write",
+		// Chat interno
+		"team_chat:read", "team_chat:write", "team_chat:manage", "team_chat:delete",
 		// CRM: o gestor usa e administra o funil, coerente com ter settings.general:write
 		"occurrences:read", "occurrences:write",
 		"occurrences.stages:read", "occurrences.stages:write", "occurrences.stages:delete",
@@ -408,6 +423,8 @@ func SystemRolePermissions() map[string][]string {
 		"accounts:read",
 		// Chat
 		"chat:read", "chat:write",
+		// Chat interno: usa, não administra
+		"team_chat:read", "team_chat:write",
 		// CRM: o atendente usa; administrar o funil não é papel dele
 		"occurrences:read", "occurrences:write",
 		// Contacts (read only)

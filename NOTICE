@@ -1,0 +1,38 @@
+Whatc
+=====
+
+Whatc is a modified version of Whatomate, an open-source WhatsApp Business
+Platform, originally written by Shridhar Patil and contributors:
+
+    https://github.com/shridarpatil/whatomate
+
+The original work, and this derivative work as a whole, are licensed under the
+GNU Affero General Public License, version 3 (AGPL-3.0). The full text is in the
+LICENSE file. This notice does not replace or modify that license.
+
+Modifications
+-------------
+
+Whatc was forked from Whatomate (tag v1.0.0-fork-base, 2026-07-19) and has been
+modified since then by Ivan Coelho and contributors: among other changes, the
+CRM (occurrences, sales opportunities, kanban), help desk, distribution and
+presence rules, supervision analytics, UI shell, and operational tooling.
+The complete record of who changed what, and when, is the Git history of this
+repository, which preserves the original authors' commits.
+
+Source code
+-----------
+
+Under section 13 of the AGPL-3.0, users who interact with Whatc over a network
+are entitled to the Corresponding Source of the version they use. It is
+available in this repository:
+
+    https://github.com/ivankoelho/whatc
+
+Trademarks
+----------
+
+The names "Whatomate" and "Zerodha" and any related logos belong to their
+respective owners. The AGPL-3.0 grants no right to use them. References to them
+in this repository identify the origin of the code; they do not imply
+endorsement.

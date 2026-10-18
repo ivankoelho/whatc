@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/assignment"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -51,7 +52,12 @@ type UserResponse struct {
 	IsAvailable bool       `json:"is_available"`
 	// IsOnline is the live-connection state (presence), reported by the user
 	// list only; nil elsewhere means "not reported", not "offline".
-	IsOnline       *bool        `json:"is_online,omitempty"`
+	IsOnline *bool `json:"is_online,omitempty"`
+	// PresenceState (online | away | offline) and StatusSince are reported by the
+	// user list only. StatusSince is when the state really began, and is absent
+	// when the presence log cannot say so honestly.
+	PresenceState  *string      `json:"presence_state,omitempty"`
+	StatusSince    *time.Time   `json:"status_since,omitempty"`
 	IsSuperAdmin   bool         `json:"is_super_admin"`
 	IsMember       bool         `json:"is_member"`
 	UnitID         *uuid.UUID   `json:"unit_id,omitempty"`
@@ -179,6 +185,14 @@ func (a *App) ListUsers(r *fastglue.Request) error {
 		onlineSet[id] = struct{}{}
 	}
 
+	// Presence state for the whole page: one grouped lookup, not one per user.
+	states := make(map[uuid.UUID]models.AgentState, len(users))
+	for _, user := range users {
+		_, online := onlineSet[user.ID]
+		states[user.ID] = assignment.AgentStateOf(online, user.IsAvailable)
+	}
+	since := a.presenceSince(orgID, states)
+
 	// Convert to response format, using org-specific role
 	response := make([]UserResponse, len(users))
 	for i, user := range users {
@@ -191,6 +205,9 @@ func (a *App) ListUsers(r *fastglue.Request) error {
 		resp.IsMember = homeOrgMap[user.ID] != orgID
 		_, online := onlineSet[user.ID]
 		resp.IsOnline = &online
+		state := string(states[user.ID])
+		resp.PresenceState = &state
+		resp.StatusSince = since[user.ID]
 		response[i] = resp
 	}
 
@@ -1014,6 +1031,7 @@ func (a *App) UpdateAvailability(r *fastglue.Request) error {
 	if wasAvailable != req.IsAvailable {
 		a.logAudit(orgID, userID, models.ResourceUsers, userID, models.AuditActionUpdated, nil, nil,
 			map[string]any{"field": "is_available", "old_value": wasAvailable, "new_value": req.IsAvailable})
+		a.RecordPresence(orgID, userID)
 		a.broadcastAgentAvailability(orgID, userID, req.IsAvailable)
 	}
 
@@ -1021,8 +1039,12 @@ func (a *App) UpdateAvailability(r *fastglue.Request) error {
 	transfersReturned := 0
 	if !req.IsAvailable {
 		status = "away"
-		// Return agent's active transfers to queue when going away
-		transfersReturned = a.ReturnAgentTransfersToQueue(userID, orgID)
+		// Original behaviour: going away returns the agent's attendances to the queue
+		// at once. An organization that turned the away tolerance on keeps them with
+		// the agent; the sweep releases them only after the tolerance (SweepAway).
+		if tolerant, _ := a.awayTolerance(orgID); !tolerant {
+			transfersReturned = a.ReturnAgentTransfersToQueue(userID, orgID)
+		}
 	}
 
 	// Get the current break start time if away

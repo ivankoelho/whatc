@@ -59,3 +59,21 @@ func (a *Assigner) FilterEligible(orgID uuid.UUID, userIDs []uuid.UUID) []uuid.U
 	}
 	return connected
 }
+
+// AgentStateOf is the single definition of an agent's state: offline when there
+// is no live connection (whatever the toggle says), away when connected but
+// marked away, online otherwise. Presence (connected) and availability (the
+// toggle) are different facts; only their combination answers "may this agent
+// receive a new attendance". An active agent is eligible exactly when the state
+// is online, which is what IsAgentEligible and FilterEligible compute, and the
+// test that compares the two keeps them from drifting.
+func AgentStateOf(connected, available bool) models.AgentState {
+	switch {
+	case !connected:
+		return models.AgentStateOffline
+	case !available:
+		return models.AgentStateAway
+	default:
+		return models.AgentStateOnline
+	}
+}

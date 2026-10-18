@@ -20,6 +20,11 @@ export interface User {
   // whether the user has a live connection. Only the user list reports presence.
   is_available?: boolean
   is_online?: boolean
+  // The backend's combined answer (offline wins over away) and the instant it
+  // began (ISO, absent when the presence log cannot say). Show "away for X" from
+  // status_since; never time it on the client.
+  presence_state?: 'online' | 'away' | 'offline'
+  status_since?: string | null
   is_super_admin?: boolean
   is_member?: boolean
   organization_id: string
@@ -93,14 +98,25 @@ export const useUsersStore = defineStore('users', () => {
 
   // Realtime: agent_presence / agent_availability events. The backend is the
   // source of truth; these only keep an already-loaded list in sync.
-  function applyPresence(userId: string, online: boolean) {
-    const user = users.value.find(u => u.id === userId)
-    if (user) user.is_online = online
+  function applyState(user: User, state?: string, since?: string | null) {
+    if (state === 'online' || state === 'away' || state === 'offline') {
+      user.presence_state = state
+      user.status_since = since ?? null
+    }
   }
 
-  function applyAvailability(userId: string, available: boolean) {
+  function applyPresence(userId: string, online: boolean, state?: string, since?: string | null) {
     const user = users.value.find(u => u.id === userId)
-    if (user) user.is_available = available
+    if (!user) return
+    user.is_online = online
+    applyState(user, state, since)
+  }
+
+  function applyAvailability(userId: string, available: boolean, state?: string, since?: string | null) {
+    const user = users.value.find(u => u.id === userId)
+    if (!user) return
+    user.is_available = available
+    applyState(user, state, since)
   }
 
   async function fetchUser(id: string): Promise<User> {

@@ -30,7 +30,8 @@ func (a *App) authorizeConversation(userID, orgID uuid.UUID, contact *models.Con
 		if a.HasPermission(userID, models.ResourceContacts, models.ActionRead, orgID) {
 			return conversationAccess{canView: true, canInteract: true}
 		}
-		ok := a.userOwnsContact(userID, orgID, contact)
+		ownerWins := settings != nil && settings.AgentAssignment.AwayReassignEnabled
+		ok := a.userOwnsContact(userID, orgID, contact, ownerWins)
 		return conversationAccess{canView: ok, canInteract: ok}
 	}
 
@@ -161,12 +162,18 @@ func (a *App) scopeVisibleConversations(query *gorm.DB, userID, orgID uuid.UUID)
 		if a.HasPermission(userID, models.ResourceContacts, models.ActionRead, orgID) {
 			return query
 		}
-		return query.Where("assigned_user_id = ? OR id IN (?)",
-			userID,
-			a.DB.Model(&models.AgentTransfer{}).Select("contact_id").
-				Where("agent_id = ? AND organization_id = ? AND status = ?",
-					userID, orgID, models.TransferStatusActive),
-		)
+		mine := a.DB.Model(&models.AgentTransfer{}).Select("contact_id").
+			Where("agent_id = ? AND organization_id = ? AND status = ?",
+				userID, orgID, models.TransferStatusActive)
+		if settings != nil && settings.AgentAssignment.AwayReassignEnabled {
+			// The SQL twin of userOwnsContact(ownerWins): the carteira does not open a
+			// conversation that an active attendance gave to another agent.
+			ownedByOther := a.DB.Model(&models.AgentTransfer{}).Select("contact_id").
+				Where("agent_id IS NOT NULL AND agent_id <> ? AND organization_id = ? AND status = ?",
+					userID, orgID, models.TransferStatusActive)
+			return query.Where("(assigned_user_id = ? AND id NOT IN (?)) OR id IN (?)", userID, ownedByOther, mine)
+		}
+		return query.Where("assigned_user_id = ? OR id IN (?)", userID, mine)
 	}
 
 	// Strict: view_all sees everything.
@@ -223,9 +230,24 @@ func (a *App) scopeVisibleConversations(query *gorm.DB, userID, orgID uuid.UUID)
 // userOwnsContact mirrors the old assigned-contact "mine" condition, for
 // the flag-off path: the contact is assigned to the user, or an active transfer
 // is assigned to them.
-func (a *App) userOwnsContact(userID, orgID uuid.UUID, contact *models.Contact) bool {
+//
+// With ownerWins (the organization turned the away tolerance on) the carteira alone
+// is not enough when an active attendance belongs to ANOTHER agent: after a
+// reassignment the former agent keeps the relationship, not access to a
+// conversation someone else now owns. Without it the original rule stands.
+func (a *App) userOwnsContact(userID, orgID uuid.UUID, contact *models.Contact, ownerWins bool) bool {
 	if contact.AssignedUserID != nil && *contact.AssignedUserID == userID {
-		return true
+		if !ownerWins {
+			return true
+		}
+		var other int64
+		a.DB.Model(&models.AgentTransfer{}).
+			Where("organization_id = ? AND contact_id = ? AND status = ? AND agent_id IS NOT NULL AND agent_id <> ?",
+				orgID, contact.ID, models.TransferStatusActive, userID).
+			Count(&other)
+		if other == 0 {
+			return true
+		}
 	}
 	var count int64
 	a.DB.Model(&models.AgentTransfer{}).

@@ -267,6 +267,7 @@
   "nav": {
     "dashboard": "Dashboard",
     "chat": "Chat",
+    "teamChat": "Team chat",
     "crm": "Protocols",
     "salesOperation": "CRM",
     "salesDashboard": "Sales Dashboard",
@@ -354,6 +355,190 @@
     "goAway": "Go Away",
     "ariaUserMenu": "User menu",
     "ariaToggleAvailability": "Toggle availability status"
+  },
+  "teamChat": {
+    "title": "Team chat",
+    "sectionTeams": "Teams",
+    "sectionChannels": "Channels",
+    "sectionDirect": "Direct messages",
+    "newChannel": "New channel",
+    "newChannelDesc": "A private channel: only the people you add can read it.",
+    "newDm": "New direct message",
+    "newDmDesc": "Start a private conversation with a colleague.",
+    "channelName": "Channel name",
+    "pickPerson": "Who do you want to talk to?",
+    "pickMembers": "Members",
+    "searchPeople": "Search people",
+    "noPeople": "No people found.",
+    "startDm": "Start conversation",
+    "createFailed": "Could not create it. Try again.",
+    "unnamed": "Untitled",
+    "online": "Online",
+    "offline": "Offline",
+    "unreadCount": "{n} unread messages",
+    "noChannels": "You are not in any channel yet. Join a team or start a direct message.",
+    "loadFailedTitle": "Could not load your channels",
+    "loadFailed": "Check your connection and try again.",
+    "pickTitle": "Pick a conversation",
+    "pickDescription": "Choose a channel or a direct message on the left.",
+    "noAccessTitle": "No access to this conversation",
+    "noAccess": "It does not exist, or you are not a member of it.",
+    "messagesFailedTitle": "Could not load the messages",
+    "messagesFailed": "Check your connection and try again.",
+    "noMessagesTitle": "No messages yet",
+    "noMessages": "Be the first to write here.",
+    "composerPlaceholder": "Write a message",
+    "composerHint": "Enter sends, Shift+Enter adds a line.",
+    "send": "Send",
+    "sendFailed": "Could not send the message.",
+    "readOnly": "You can read this chat but not write in it.",
+    "tooLong": "Messages are limited to {max} characters.",
+    "typingOne": "{name} is typing…",
+    "typingMany": "Several people are typing…",
+    "edited": "(edited)",
+    "editMessage": "Edit message",
+    "editFailed": "Could not edit the message.",
+    "deleteMessage": "Delete message",
+    "reply": "Reply",
+    "react": "React",
+    "replyingTo": "Replying to {name}",
+    "cancelReply": "Cancel reply",
+    "removedMessage": "Message removed",
+    "emoji": {
+      "title": "Emoji",
+      "open": "Add an emoji",
+      "categories": {
+        "smileys": "Faces",
+        "people": "People",
+        "symbols": "Symbols",
+        "things": "Things"
+      }
+    },
+    "attachments": {
+      "queue": "Files to send",
+      "attach": "Attach a file",
+      "drop": "Drop files to attach",
+      "uploading": "Uploading {pct}%",
+      "queued": "Waiting…",
+      "retry": "Try again",
+      "remove": "Remove {name}",
+      "openImage": "Open image {name}",
+      "voice": "Voice message",
+      "download": "Download",
+      "quote": {
+        "image": "🖼 {name}",
+        "audio": "🎤 Voice message",
+        "file": "📎 {name}"
+      }
+    },
+    "recorder": {
+      "record": "Record a voice message",
+      "stop": "Stop recording",
+      "cancel": "Cancel recording",
+      "discard": "Discard",
+      "send": "Send voice message",
+      "preview": "Listen before sending",
+      "tooShort": "Recording too short (at least 1 second).",
+      "denied": "Microphone blocked. Allow it in the browser address bar and try again.",
+      "noMic": "No microphone found.",
+      "failed": "Could not start the recording.",
+      "unsupported": "Recording is not available in this browser.",
+      "cancelledOnSwitch": "Recording discarded because you changed conversation."
+    },
+    "reactions": {
+      "thumbs_up": "Thumbs up",
+      "heart": "Heart",
+      "laugh": "Laughing",
+      "wow": "Surprised",
+      "sad": "Sad",
+      "pray": "Thank you",
+      "check": "Done",
+      "eyes": "Looking",
+      "fire": "Fire",
+      "party": "Celebrate",
+      "thinking": "Thinking",
+      "clap": "Applause"
+    },
+    "confirmDelete": "Delete this message?",
+    "deleteFailed": "Could not delete the message.",
+    "sectionArchived": "Archived",
+    "showArchived": "Show archived channels",
+    "hideArchived": "Hide archived channels",
+    "sameName": "by {name} · {n} people",
+    "manage": {
+      "title": "Channel members",
+      "desc": "Who is in this channel and what you can do about it.",
+      "name": "Name",
+      "archivedBadge": "Archived",
+      "rename": "Rename channel",
+      "members": "Members ({n})",
+      "noMembers": "Nobody is in this channel.",
+      "you": "you",
+      "owner": "Owner",
+      "add": "Add a member",
+      "remove": "Remove {name}",
+      "promote": "Make {name} an owner",
+      "demote": "Make {name} a regular member",
+      "leave": "Leave channel",
+      "archive": "Archive channel",
+      "reopen": "Reopen channel",
+      "pickDesc": "Choose someone from your organization. They will see the whole history of the channel.",
+      "confirmRemove": "Remove {name} from this channel? They lose access to it, including what they wrote.",
+      "confirmLeave": "Leave this channel? You will lose access to it.",
+      "confirmArchive": "Archive this channel? It leaves the list and stops accepting messages; the history is kept.",
+      "added": "Member added.",
+      "removed": "Member removed.",
+      "left": "You left the channel.",
+      "renamed": "Channel renamed.",
+      "archivedOk": "Channel archived.",
+      "reopenedOk": "Channel reopened.",
+      "archivedNotice": "This channel is archived: you can read it but not write in it."
+    },
+    "errors": {
+      "generic": "Could not do that. Try again.",
+      "last_owner": "The last owner cannot leave or step down: make someone else an owner or archive the channel first.",
+      "archived": "The channel is archived.",
+      "forbidden": "You are not allowed to do that in this channel.",
+      "self_add": "Nobody adds themselves here. Use the administrative entry, which asks for a reason.",
+      "already_member": "This person is already in the channel.",
+      "not_archived": "The channel is not archived.",
+      "not_found": "The channel or the person was not found.",
+      "invalid": "Check the data and try again.",
+      "reply_target_gone": "The message you are replying to is gone.",
+      "bad_reaction": "That reaction is not available.",
+      "too_many_reactions": "This message has too many different reactions.",
+      "file_too_large": "The file is too large (limit 10 MB).",
+      "file_type_not_allowed": "This type of file is not allowed.",
+      "invalid_file": "The file is empty, damaged or does not match its type.",
+      "too_many_attachments": "At most 5 files per message (and 10 waiting).",
+      "attachment_gone": "A file is no longer available and was removed from the list. Attach it again.",
+      "rate_limited": "Too many uploads. Wait a minute and try again.",
+      "storage_unavailable": "File storage is unavailable. Try again later."
+    },
+    "admin": {
+      "title": "Channel administration",
+      "subtitle": "Who is in each channel and its state. Messages are never shown here.",
+      "emptyTitle": "No channels yet",
+      "empty": "Private channels created in your organization will appear here.",
+      "createdBy": "Created by {name}",
+      "youAreIn": "You are a member",
+      "joinTitle": "Enter \"{name}\"",
+      "joinDesc": "You are not a member of this private channel. Entering lets you read its whole history. Everyone in the channel will see that you entered and why, and it is recorded in the audit log.",
+      "reason": "Reason",
+      "reasonHint": "{min} to {max} characters ({n} so far). It is shown to the members of the channel.",
+      "joinAction": "Enter as administrator",
+      "joined": "You entered the channel."
+    },
+    "system": {
+      "member_added": "{actor} added {target}.",
+      "member_removed": "{actor} removed {target}.",
+      "member_left": "{actor} left the channel.",
+      "owner_changed": "{actor} changed the role of {target}.",
+      "renamed": "{actor} renamed the channel from \"{old}\" to \"{new}\".",
+      "archived": "{actor} archived the channel.",
+      "reopened": "{actor} reopened the channel.",
+      "admin_joined": "{actor} entered as administrator. Reason: {reason}"
+    }
   },
   "chat": {
     "marketingOptOut": "Marketing Opt-out",
@@ -1812,6 +1997,11 @@
     "chartLine": "Line",
     "chartBar": "Bar",
     "chartPie": "Pie",
+    "chartMap": "Map (Brazil)",
+    "mapAria": "Contacts by state",
+    "mapTotal": "{count} contacts",
+    "mapOther": "Other",
+    "mapOtherHint": "Numbers from other countries or without a recognizable area code",
     "groupBy": "Group By",
     "selectGroupBy": "Select field to group by",
     "noneTimeSeries": "None (time series)",
@@ -2215,6 +2405,10 @@
     "strictConversationVisibilityDesc": "When on, an assigned conversation is visible and answerable only by the responsible agent. Supervisors and managers keep access via permissions.",
     "signWithAgentName": "Sign messages with the agent's name",
     "signWithAgentNameDesc": "When on, outgoing free-text and media captions are prefixed with the agent's first name (in bold), so the customer sees who is replying. Does not affect templates or the internal label.",
+    "awayReassign": "Keep conversations while an agent is away",
+    "awayReassignDesc": "Off: marking away returns the agent's conversations to the queue at once. On: they stay with the agent and are returned to the queue only after the time below.",
+    "awayReassignAfter": "Return to the queue after (minutes)",
+    "awayReassignAfterDesc": "Counted from the moment the agent marked away. Between 1 and 1440.",
     "businessHours": "Business Hours",
     "businessHoursDesc": "Set when the chatbot is active and configure out-of-hours behavior",
     "enableBusinessHours": "Enable Business Hours",
@@ -3255,9 +3449,32 @@
     }
   },
   "agentAnalytics": {
+    "live": {
+      "title": "Live",
+      "scopeAll": "Whole organization",
+      "scopeTeam": "Your teams",
+      "loadFailed": "Could not refresh",
+      "online": "Online",
+      "away": "Away",
+      "offline": "Offline",
+      "queue": "In queue",
+      "empty": "No agents to show.",
+      "agent": "Agent",
+      "state": "Status",
+      "active": "Open",
+      "awaitingAgent": "Customer waiting",
+      "awaitingCustomer": "Awaiting customer",
+      "slaAtRisk": "SLA at risk",
+      "states": {
+        "online": "Online",
+        "away": "Away",
+        "offline": "Offline"
+      }
+    },
     "title": "Agent Analytics",
     "subtitle": "Performance metrics for all agents",
     "myMetrics": "Your performance metrics",
+    "myMetricsTeamHint": "The cards below are your own metrics; the Live panel shows your teams",
     "allAgents": "All Agents",
     "selectAgent": "Select agent",
     "searchAgent": "Search agent...",
@@ -4019,6 +4236,10 @@
         "label": "Chat",
         "description": "Follow and answer customer conversations."
       },
+      "team_chat": {
+        "label": "Internal chat",
+        "description": "Talk with teammates in channels and direct messages."
+      },
       "chat_assign": {
         "label": "Conversation assignment",
         "description": "Choose which agent handles each conversation."
@@ -4333,6 +4554,26 @@
         "label": "Assign conversations",
         "description": "Choose which agent handles each conversation."
       },
+      "team_chat_read": {
+        "label": "View internal chat",
+        "description": "Open channels and messages you belong to."
+      },
+      "team_chat_write": {
+        "label": "Send internal messages",
+        "description": "Write in channels and start direct messages."
+      },
+      "team_chat_manage": {
+        "label": "Manage internal channels",
+        "description": "Create and manage internal chat channels."
+      },
+      "team_chat_delete": {
+        "label": "Delete others' internal messages",
+        "description": "Remove internal messages written by other people."
+      },
+      "team_chat_join_any": {
+        "label": "Enter private channels",
+        "description": "Join a private internal channel without being a member. Requires a reason and is recorded for the members and the audit log."
+      },
       "conversations_view_all": {
         "label": "View all conversations",
         "description": "See and act on conversations of any agent."
@@ -4617,6 +4858,10 @@
         "label": "View agent performance",
         "description": "Look up agent productivity indicators."
       },
+        "analytics_agents_view_team": {
+          "label": "Supervise team agents",
+          "description": "See the live panel of the agents in the teams the user belongs to."
+        },
       "call_logs_read": {
         "label": "View call history",
         "description": "Look up the recorded calls."

@@ -76,6 +76,21 @@ const router = createRouter({
           meta: { permission: 'chat', stableKey: true }
         },
         {
+          // Administration of free channels (composition and state, never messages).
+          path: 'team-chat/admin',
+          name: 'team-chat-admin',
+          component: () => import('@/views/team-chat/TeamChatAdminView.vue'),
+          meta: { permission: 'team_chat', permissionAction: 'manage' }
+        },
+        {
+          // Independent of /chat (WhatsApp support): own permission, own screen.
+          path: 'team-chat/:channelId?',
+          name: 'team-chat',
+          component: () => import('@/views/team-chat/TeamChatView.vue'),
+          props: true,
+          meta: { permission: 'team_chat', stableKey: true }
+        },
+        {
           path: 'profile',
           name: 'profile',
           component: () => import('@/views/profile/ProfileView.vue')
@@ -468,6 +483,7 @@ const router = createRouter({
 const navigationOrder = [
   { path: '/', permission: 'analytics' },
   { path: '/chat', permission: 'chat' },
+  { path: '/team-chat', permission: 'team_chat' },
   { path: '/crm/occurrences', permission: 'occurrences' },
   { path: '/sales/operation', permission: 'sales_opportunities' },
   { path: '/knowledge', permission: 'knowledge' },

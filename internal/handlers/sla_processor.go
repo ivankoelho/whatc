@@ -489,8 +489,17 @@ func (a *App) SetSLADeadlines(transfer *models.AgentTransfer, settings *models.C
 	)
 }
 
-// UpdateSLAOnPickup updates SLA tracking when a transfer is picked up
+// UpdateSLAOnPickup updates SLA tracking when a transfer is picked up.
+//
+// picked_up_at is the FIRST pickup from the queue and is never rewritten: a
+// transfer returned to the queue (agent away, released) and picked again keeps
+// the original instant, and a breach already recorded is not re-evaluated. The
+// wait of each later ownership belongs to the ownership history, not to this
+// field. Callers may call it unconditionally.
 func (a *App) UpdateSLAOnPickup(transfer *models.AgentTransfer) {
+	if transfer.SLA.PickedUpAt != nil {
+		return
+	}
 	now := time.Now()
 	transfer.SLA.PickedUpAt = &now
 

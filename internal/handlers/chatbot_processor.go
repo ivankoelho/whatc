@@ -228,6 +228,9 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 
 	// Check for active agent transfer - skip chatbot processing if transferred
 	if a.hasActiveAgentTransfer(account.OrganizationID, contact.ID) {
+		// The message is saved: if the agent is away past the organization's tolerance
+		// the customer is now waiting on someone who cannot answer, so hand it over now.
+		a.ReevaluateOnCustomerReply(account.OrganizationID, contact.ID)
 		a.Log.Info("Contact has active agent transfer, skipping chatbot processing",
 			"contact_id", contact.ID,
 			"phone_number", contact.PhoneNumber)

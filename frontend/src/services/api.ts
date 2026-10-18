@@ -517,7 +517,8 @@ export const cannedResponsesService = {
 
 export const agentAnalyticsService = {
   getSummary: (params?: { from?: string; to?: string; agent_id?: string }) =>
-    api.get('/analytics/agents', { params })
+    api.get('/analytics/agents', { params }),
+  getLive: () => api.get('/analytics/agents/live')
 }
 
 // Meta WhatsApp Analytics Types
@@ -1103,6 +1104,167 @@ export const notesService = {
     api.put<ConversationNote>(`/contacts/${contactId}/notes/${noteId}`, data),
   delete: (contactId: string, noteId: string) =>
     api.delete(`/contacts/${contactId}/notes/${noteId}`)
+}
+
+// Internal chat (team_chat). The server decides who can see what: every id sent
+// here is checked again there, and an inaccessible channel answers 404.
+export type TeamChatChannelKind = 'team' | 'channel' | 'dm'
+
+export interface TeamChatChannel {
+  id: string
+  kind: TeamChatChannelKind
+  name: string
+  team_id?: string
+  dm_user_id?: string
+  unread_count: number
+  last_message_at?: string
+  created_at: string
+  // Free channels only
+  archived_at?: string
+  my_role?: 'owner' | 'member'
+  member_count?: number
+  created_by_name?: string
+}
+
+export interface TeamChatMessage {
+  id: string
+  channel_id: string
+  user_id: string
+  user_name: string
+  body: string
+  parent_id?: string
+  context_type?: string
+  context_id?: string
+  created_at: string
+  edited_at?: string
+  // "system" messages are the channel's own record (member added, renamed...): no body,
+  // meta holds the event and its parameters for the UI to translate.
+  kind?: 'user' | 'system'
+  meta?: Record<string, string>
+  // The quote of the message this one answers, and the emojis on it.
+  reply_to?: TeamChatReplyTo
+  reactions?: TeamChatReaction[]
+  attachments?: TeamChatAttachment[]
+}
+
+export interface TeamChatAttachment {
+  id: string
+  kind: 'image' | 'audio' | 'file'
+  name: string
+  mime: string
+  size: number
+  width?: number
+  height?: number
+  duration_ms?: number
+  /** Only on the upload answer: how long the pending file is guaranteed to live. */
+  pending_ttl_ms?: number
+}
+
+export interface TeamChatReplyTo {
+  id: string
+  user_id?: string
+  user_name: string
+  snippet: string
+  deleted: boolean
+  // First file of the original, for quoting a message that has no text.
+  attachment_kind?: 'image' | 'audio' | 'file'
+  attachment_name?: string
+}
+
+export interface TeamChatReaction {
+  code: string
+  count: number
+  mine: boolean
+  names: string[]
+}
+
+export interface TeamChatMember {
+  user_id: string
+  name: string
+  role: 'owner' | 'member'
+  is_online: boolean
+}
+
+// Composition and state of a free channel; never its messages.
+export interface TeamChatAdminChannel {
+  id: string
+  name: string
+  kind: string
+  created_at: string
+  created_by_name?: string
+  archived_at?: string
+  owners: TeamChatMember[]
+  members: TeamChatMember[]
+}
+
+export interface TeamChatUser {
+  id: string
+  full_name: string
+  is_online: boolean
+}
+
+export const teamChatService = {
+  channels: () => api.get<{ channels: TeamChatChannel[] }>('/team-chat/channels'),
+  users: (q?: string) => api.get<{ users: TeamChatUser[] }>('/team-chat/users', { params: q ? { q } : undefined }),
+  createChannel: (data: { name: string; member_ids?: string[] }) =>
+    api.post<TeamChatChannel>('/team-chat/channels', data),
+  openDM: (userId: string) => api.post<TeamChatChannel>('/team-chat/dm', { user_id: userId }),
+  messages: (channelId: string, params?: { before_id?: string; limit?: number }) =>
+    api.get<{ messages: TeamChatMessage[]; has_more: boolean }>(`/team-chat/channels/${channelId}/messages`, { params }),
+  send: (channelId: string, body: string, parentId?: string, attachmentIds?: string[]) =>
+    api.post<TeamChatMessage>(`/team-chat/channels/${channelId}/messages`, {
+      body,
+      ...(parentId ? { parent_id: parentId } : {}),
+      ...(attachmentIds?.length ? { attachment_ids: attachmentIds } : {})
+    }),
+  uploadAttachment: (
+    channelId: string, file: File,
+    opts: { audioMs?: number; onProgress?: (pct: number) => void; signal?: AbortSignal } = {}
+  ) => {
+    const form = new FormData()
+    form.append('file', file)
+    if (opts.audioMs !== undefined) {
+      form.append('kind', 'audio')
+      form.append('duration_ms', String(Math.round(opts.audioMs)))
+    }
+    return api.post<TeamChatAttachment>(`/team-chat/channels/${channelId}/attachments`, form, {
+      // The instance defaults to JSON; a multipart body needs its own type (with boundary).
+      headers: { 'Content-Type': 'multipart/form-data' },
+      signal: opts.signal,
+      onUploadProgress: e => { if (e.total) opts.onProgress?.(Math.round((e.loaded / e.total) * 100)) }
+    })
+  },
+  discardAttachment: (channelId: string, attachmentId: string) =>
+    api.delete(`/team-chat/channels/${channelId}/attachments/${attachmentId}`),
+  message: (messageId: string) => api.get<TeamChatMessage>(`/team-chat/messages/${messageId}`),
+  react: (messageId: string, code: string) =>
+    api.put<{ reactions: TeamChatReaction[] }>(`/team-chat/messages/${messageId}/reactions/${code}`),
+  unreact: (messageId: string, code: string) =>
+    api.delete<{ reactions: TeamChatReaction[] }>(`/team-chat/messages/${messageId}/reactions/${code}`),
+  edit: (messageId: string, body: string) =>
+    api.put<TeamChatMessage>(`/team-chat/messages/${messageId}`, { body }),
+  remove: (messageId: string) => api.delete(`/team-chat/messages/${messageId}`),
+  markRead: (channelId: string) => api.post(`/team-chat/channels/${channelId}/read`),
+  typing: (channelId: string) => api.post(`/team-chat/channels/${channelId}/typing`, {}),
+
+  // Channel management (free channels). The server decides who may do what.
+  archivedChannels: () =>
+    api.get<{ channels: TeamChatChannel[] }>('/team-chat/channels', { params: { archived: 'true' } }),
+  members: (channelId: string) =>
+    api.get<{ members: TeamChatMember[] }>(`/team-chat/channels/${channelId}/members`),
+  addMember: (channelId: string, userId: string) =>
+    api.post(`/team-chat/channels/${channelId}/members`, { user_id: userId }),
+  removeMember: (channelId: string, memberId: string) =>
+    api.delete(`/team-chat/channels/${channelId}/members/${memberId}`),
+  leave: (channelId: string) => api.post(`/team-chat/channels/${channelId}/leave`, {}),
+  setRole: (channelId: string, memberId: string, role: 'owner' | 'member') =>
+    api.put(`/team-chat/channels/${channelId}/members/${memberId}`, { role }),
+  rename: (channelId: string, name: string) => api.put(`/team-chat/channels/${channelId}`, { name }),
+  archive: (channelId: string) => api.post(`/team-chat/channels/${channelId}/archive`, {}),
+  reopen: (channelId: string) => api.post(`/team-chat/channels/${channelId}/reopen`, {}),
+  join: (channelId: string, reason: string) =>
+    api.post(`/team-chat/channels/${channelId}/join`, { reason }),
+  adminChannels: () => api.get<{ channels: TeamChatAdminChannel[] }>('/team-chat/admin/channels')
 }
 
 // Calling - Call Logs & IVR Flows

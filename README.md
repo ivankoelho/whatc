@@ -131,3 +131,10 @@ cd frontend && npm run dev   # Frontend (port 3000)
 ## License
 
 See [LICENSE](LICENSE) for details.
+
+## Origin and license
+
+Whatc is a modified version of [Whatomate](https://github.com/shridarpatil/whatomate)
+by Shridhar Patil and contributors, and is distributed under the
+[GNU AGPL-3.0](LICENSE). See [NOTICE](NOTICE) for the origin, the modifications
+and the source-code offer.

@@ -288,14 +288,14 @@ test.describe('SLA Indicators', () => {
   test('should show SLA column in queue', async ({ page }) => {
     const tableRows = await page.locator('tbody tr').count()
     if (tableRows > 0) {
-      await expect(page.getByText('SLA')).toBeVisible()
+      await expect(page.getByRole('columnheader', { name: 'SLA', exact: true }).first()).toBeVisible()
     }
   })
 
   test('should show waiting time column', async ({ page }) => {
     const tableRows = await page.locator('tbody tr').count()
     if (tableRows > 0) {
-      await expect(page.getByText('Waiting')).toBeVisible()
+      await expect(page.getByRole('columnheader', { name: 'Waiting', exact: true }).first()).toBeVisible()
     }
   })
 })

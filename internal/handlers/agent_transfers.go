@@ -692,6 +692,8 @@ func (a *App) closeAttendance(
 	if opts.webhookEvent != "" {
 		a.dispatchTransferLifecycleWebhook(transfer, contact, opts.webhookEvent)
 	}
+	// The attendance ends here: close the last ownership interval.
+	a.recordOwnership(transfer.OrganizationID, actorID, transfer.ID, ownershipReasonClosed, transfer.AgentID, nil)
 	return nil
 }
 
@@ -1787,8 +1789,10 @@ func (a *App) returnAgentTransfers(userID, orgID uuid.UUID, reason string) int {
 
 		// Clear the contact's relationship-manager pointer only if it was
 		// pointing at the agent we just removed. Don't blow away a manually
-		// set manager assigned via /api/contacts/<id>/assign.
-		if transfer.ContactID != uuid.Nil && previousAgentID != nil && transfer.Contact != nil &&
+		// set manager assigned via /api/contacts/<id>/assign. An away timeout keeps
+		// it: the conversation is being redistributed, the relationship stays.
+		if reason != distEventReturnedAwayTimeout &&
+			transfer.ContactID != uuid.Nil && previousAgentID != nil && transfer.Contact != nil &&
 			transfer.Contact.AssignedUserID != nil && *transfer.Contact.AssignedUserID == *previousAgentID {
 			a.DB.Model(&models.Contact{}).Where("id = ?", transfer.ContactID).Update("assigned_user_id", nil)
 		}

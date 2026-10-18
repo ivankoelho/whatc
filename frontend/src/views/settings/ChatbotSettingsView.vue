@@ -91,7 +91,9 @@ const chatbotSettings = ref({
   assign_to_same_agent: true,
   agent_current_conversation_only: false,
   strict_conversation_visibility: false,
-  sign_with_agent_name: false
+  sign_with_agent_name: false,
+  away_reassign_enabled: false,
+  away_reassign_after_mins: 10
 })
 
 // SLA Settings
@@ -186,7 +188,9 @@ onMounted(async () => {
         assign_to_same_agent: chatbotData.settings.assign_to_same_agent !== false,
         agent_current_conversation_only: chatbotData.settings.agent_current_conversation_only === true,
         strict_conversation_visibility: chatbotData.settings.strict_conversation_visibility === true,
-        sign_with_agent_name: chatbotData.settings.sign_with_agent_name === true
+        sign_with_agent_name: chatbotData.settings.sign_with_agent_name === true,
+        away_reassign_enabled: chatbotData.settings.away_reassign_enabled === true,
+        away_reassign_after_mins: chatbotData.settings.away_reassign_after_mins || 10
       }
 
       const slaEnabledValue = chatbotData.settings.sla_enabled === true
@@ -257,7 +261,10 @@ async function saveAgentSettings() {
       assign_to_same_agent: chatbotSettings.value.assign_to_same_agent,
       agent_current_conversation_only: chatbotSettings.value.agent_current_conversation_only,
       strict_conversation_visibility: chatbotSettings.value.strict_conversation_visibility,
-      sign_with_agent_name: chatbotSettings.value.sign_with_agent_name
+      sign_with_agent_name: chatbotSettings.value.sign_with_agent_name,
+      away_reassign_enabled: chatbotSettings.value.away_reassign_enabled,
+      // An empty or out-of-range field would be rejected by the server: keep it in 1..1440.
+      away_reassign_after_mins: Math.min(1440, Math.max(1, Math.round(Number(chatbotSettings.value.away_reassign_after_mins)) || 10))
     })
     toast.success(t('chatbotSettings.agentSettingsSaved'))
     refreshActivityLog(agentsLogKey)
@@ -501,6 +508,27 @@ function removeEscalationUser(userId: string) {
                     :checked="chatbotSettings.sign_with_agent_name"
                     @update:checked="chatbotSettings.sign_with_agent_name = $event"
                   />
+                </div>
+
+                <Separator />
+
+                <div class="flex items-center justify-between py-2">
+                  <div>
+                    <p class="font-medium">{{ $t('chatbotSettings.awayReassign') }}</p>
+                    <p class="text-sm text-muted-foreground">{{ $t('chatbotSettings.awayReassignDesc') }}</p>
+                  </div>
+                  <Switch
+                    :checked="chatbotSettings.away_reassign_enabled"
+                    @update:checked="chatbotSettings.away_reassign_enabled = $event"
+                  />
+                </div>
+
+                <div v-if="chatbotSettings.away_reassign_enabled" class="flex items-center justify-between gap-4 py-2 pl-4">
+                  <div>
+                    <p class="font-medium">{{ $t('chatbotSettings.awayReassignAfter') }}</p>
+                    <p class="text-sm text-muted-foreground">{{ $t('chatbotSettings.awayReassignAfterDesc') }}</p>
+                  </div>
+                  <Input v-model.number="chatbotSettings.away_reassign_after_mins" type="number" min="1" max="1440" class="w-24" />
                 </div>
 
                 <div class="flex justify-end pt-4">

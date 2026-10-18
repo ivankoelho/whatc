@@ -18,7 +18,7 @@ const PermissionGroupOther = "other"
 
 var permissionGroups = []PermissionGroup{
 	{"admin", 10, []string{ResourceUsers, ResourceTeams, ResourceRoles, ResourceOrganizations, ResourceAuditLogs, ResourceSettingsGeneral, ResourceSettingsSSO}},
-	{"service", 20, []string{ResourceChat, ResourceChatAssign, ResourceConversations, ResourceContacts, ResourceContactName, ResourceTags, ResourceTransfers, ResourceCannedResponses}},
+	{"service", 20, []string{ResourceChat, ResourceChatAssign, ResourceTeamChat, ResourceConversations, ResourceContacts, ResourceContactName, ResourceTags, ResourceTransfers, ResourceCannedResponses}},
 	{"crm", 30, []string{ResourceOccurrences, ResourceOccurrenceStages, ResourceOccurrenceCategories, ResourceOccurrenceWhatHappened, ResourceOccurrenceSLAPolicies, ResourceOccurrenceProcesses, ResourceUnits, ResourceDepartments}},
 	{"sales", 40, []string{ResourceSalesOpportunities}},
 	{"whatsapp", 50, []string{ResourceAccounts, ResourceTemplates, ResourceCampaigns, ResourceFlowsWhatsApp, ResourceFlowsChatbot, ResourceChatbotKeywords, ResourceSettingsChatbot}},
@@ -32,7 +32,7 @@ var permissionGroups = []PermissionGroup{
 // writing, deleting, then the specific ones.
 var permissionActionOrder = []string{
 	ActionRead, ActionWrite, ActionDelete, ActionSync, ActionExecute, ActionImport,
-	ActionExport, ActionPickup, ActionAssign, ActionViewAll, ActionViewTeam,
+	ActionExport, ActionPickup, ActionAssign, ActionViewAll, ActionViewTeam, ActionManage, ActionJoinAny,
 }
 
 // PermissionPresentation returns the functional group, its order and the sort

@@ -15,6 +15,22 @@ import (
 // laptop does not hold customers hostage.
 const DefaultPresenceGrace = 60 * time.Second
 
+// OfflineReleasePolicy decides when an agent who stays disconnected loses the
+// attendances assigned to them. It is deliberately separate from how away is
+// handled (the manual toggle, with its own tolerance): the 60 s grace here is the
+// technical window that survives a page refresh or a network blip, not a business
+// rule about abandoned conversations. Today it is fixed at DefaultPresenceGrace;
+// keeping it a value of its own is what lets it become configurable later.
+type OfflineReleasePolicy struct {
+	Grace time.Duration
+}
+
+// ShouldRelease reports whether an agent disconnected for this long loses their
+// attendances.
+func (p OfflineReleasePolicy) ShouldRelease(disconnectedFor time.Duration) bool {
+	return disconnectedFor >= p.Grace
+}
+
 type agentKey struct{ org, user uuid.UUID }
 
 // PresenceReaper returns an agent's attendances to the queue once they have
@@ -28,9 +44,9 @@ type agentKey struct{ org, user uuid.UUID }
 // the first sweep starts the clock for every assigned agent and anyone who
 // reconnects within the grace keeps their attendances.
 type PresenceReaper struct {
-	app   *App
-	grace time.Duration
-	every time.Duration
+	app    *App
+	policy OfflineReleasePolicy
+	every  time.Duration
 
 	// isConnected is injectable for tests; defaults to the Assigner rule.
 	isConnected func(orgID, userID uuid.UUID) bool
@@ -43,7 +59,7 @@ type PresenceReaper struct {
 func NewPresenceReaper(app *App, grace, every time.Duration) *PresenceReaper {
 	r := &PresenceReaper{
 		app:          app,
-		grace:        grace,
+		policy:       OfflineReleasePolicy{Grace: grace},
 		every:        every,
 		disconnected: make(map[agentKey]time.Time),
 		stopCh:       make(chan struct{}),
@@ -76,7 +92,7 @@ func (r *PresenceReaper) OnPresenceChange(orgID, userID uuid.UUID, online bool) 
 }
 
 func (r *PresenceReaper) Start(ctx context.Context) {
-	r.app.Log.Info("Presence reaper started", "grace", r.grace, "interval", r.every)
+	r.app.Log.Info("Presence reaper started", "grace", r.policy.Grace, "interval", r.every)
 	t := time.NewTicker(r.every)
 	defer t.Stop()
 	for {
@@ -87,6 +103,7 @@ func (r *PresenceReaper) Start(ctx context.Context) {
 			return
 		case now := <-t.C:
 			r.Sweep(now)
+			r.SweepAway(now)
 		}
 	}
 }
@@ -136,7 +153,7 @@ func (r *PresenceReaper) Sweep(now time.Time) int {
 		}
 		r.mu.Unlock()
 
-		if now.Sub(since) < r.grace {
+		if !r.policy.ShouldRelease(now.Sub(since)) {
 			continue
 		}
 		// Re-check right before acting: the agent may have just reconnected.

@@ -21,7 +21,8 @@ import {
   Receipt,
   BookOpen,
   StickyNote,
-  Phone
+  Phone,
+  MessagesSquare
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
@@ -76,6 +77,13 @@ export const navigationSections: NavSection[] = [
           { name: 'nav.phone', path: '/chat/phone', icon: Phone, permission: 'chat' },
           { name: 'nav.whatsappUsage', path: '/chat/usage', icon: Receipt, permission: 'whatsapp_usage' }
         ]
+      },
+      {
+        name: 'nav.teamChat',
+        path: '/team-chat',
+        icon: MessagesSquare,
+        color: 'text-lime-400 light:text-lime-600',
+        permission: 'team_chat'
       },
       {
         name: 'nav.crm',

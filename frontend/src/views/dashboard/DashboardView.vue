@@ -70,6 +70,7 @@ import {
 // Centralized Chart.js setup (registered once)
 import { Line, Bar, Pie } from '@/lib/charts'
 import { DateRangePicker } from '@/components/shared'
+import BrazilTileMap from '@/components/dashboard/BrazilTileMap.vue'
 import { useDateRange } from '@/composables/useDateRange'
 import { useAppToast } from '@/composables/useAppToast'
 
@@ -162,7 +163,8 @@ const colorOptions = computed(() => [
 const chartTypeOptions = computed(() => [
   { value: 'line', label: t('dashboard.chartLine') },
   { value: 'bar', label: t('dashboard.chartBar') },
-  { value: 'pie', label: t('dashboard.chartPie') }
+  { value: 'pie', label: t('dashboard.chartPie') },
+  { value: 'map', label: t('dashboard.chartMap') }
 ])
 
 // Chart color palette for pie charts
@@ -679,6 +681,14 @@ watch(selectedRange, (newValue) => {
   }
 })
 
+// The map draws contacts per state: it needs that source and grouping.
+watch(() => widgetForm.value.chart_type, (newVal) => {
+  if (newVal === 'map') {
+    widgetForm.value.data_source = 'contacts'
+    widgetForm.value.group_by_field = 'region'
+  }
+})
+
 // Set default chart_type when display_type changes to chart
 watch(() => widgetForm.value.display_type, (newVal) => {
   if (newVal === 'chart' && !widgetForm.value.chart_type) {
@@ -917,6 +927,7 @@ onMounted(() => {
                   <Line v-if="getWidgetById(item.i)!.chart_type === 'line'" :data="getChartComponentData(getWidgetById(item.i)!)" :options="lineBarChartOptions" />
                   <Bar v-else-if="getWidgetById(item.i)!.chart_type === 'bar'" :data="getChartComponentData(getWidgetById(item.i)!)" :options="lineBarChartOptions" />
                   <Pie v-else-if="getWidgetById(item.i)!.chart_type === 'pie'" :data="getChartComponentData(getWidgetById(item.i)!)" :options="pieChartOptions" />
+                  <BrazilTileMap v-else-if="getWidgetById(item.i)!.chart_type === 'map'" :data-points="widgetData[item.i]?.data_points || []" />
                 </template>
                 <template v-else>
                   <div class="h-full flex items-center justify-center text-white/40 light:text-gray-400">

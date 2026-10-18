@@ -398,9 +398,17 @@ func TestWhatsAppUsageAPI_FiltersAndGroups(t *testing.T) {
 		assert.Equal(t, want, got.Counts["total"], q)
 	}
 
-	// a period filter excludes the older row
-	day := time.Now().Format("2006-01-02")
-	_, b := f.call(t, f.app.GetWhatsAppUsageSummary, f.reader, nil, map[string]string{"from": day, "to": day}, nil)
+	// a period filter excludes the older row. "Today" must be the
+	// organization's today (the default period ends on it), not the test
+	// machine's: CI runs in UTC and fails between 21h and midnight in BRT.
+	_, b := f.call(t, f.app.GetWhatsAppUsageSummary, f.reader, nil, nil, nil)
+	day := decodeData[struct {
+		Period struct {
+			To string `json:"to"`
+		} `json:"period"`
+	}](t, b).Period.To
+	require.NotEmpty(t, day)
+	_, b = f.call(t, f.app.GetWhatsAppUsageSummary, f.reader, nil, map[string]string{"from": day, "to": day}, nil)
 	assert.EqualValues(t, 3, decodeData[struct {
 		Counts map[string]int64 `json:"counts"`
 	}](t, b).Counts["total"])
