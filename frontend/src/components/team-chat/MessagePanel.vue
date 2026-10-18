@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowLeft, Check, CornerUpLeft, Hash, Loader2, Lock, MessageSquare, Mic, Paperclip, Pencil, Send, Settings2, Smile, SmilePlus, Trash2, Users, X } from 'lucide-vue-next'
+import { ArrowLeft, Check, CornerUpLeft, Hash, Loader2, Lock, MessageSquare, Pencil, Settings2, SmilePlus, Trash2, Users, X } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
@@ -17,16 +17,14 @@ import { useTeamChatStore } from '@/stores/teamChat'
 import { useAuthStore } from '@/stores/auth'
 import { getAvatarGradient, getInitials } from '@/lib/utils'
 import { getErrorMessage } from '@/lib/api-utils'
-import AttachmentQueue from './AttachmentQueue.vue'
-import AudioRecorder from './AudioRecorder.vue'
-import EmojiPicker from './EmojiPicker.vue'
 import MessageAttachments from './MessageAttachments.vue'
-import {
-  TEAM_CHAT_ACCEPT, TEAM_CHAT_MAX_BODY, TEAM_CHAT_REACTIONS, TEAM_CHAT_UPLOAD_ERRORS, chatErrorCode, isOnlyFileNames, isSendableBody,
-  pickTypingNames, reactionGlyph, recordingSupported, systemEventKey
-} from '@/lib/team-chat'
+import MessageComposer from './MessageComposer.vue'
+import { TEAM_CHAT_REACTIONS, chatErrorCode, isSendableBody, reactionGlyph, systemEventKey } from '@/lib/team-chat'
 import type { TeamChatMessage, TeamChatReplyTo } from '@/services/api'
 
+// The conversation: header, the list of messages (reactions, quotes, actions, edit and delete) and
+// scrolling. Writing is MessageComposer's job; this panel only follows what was sent, hands it files
+// dropped anywhere on the conversation, and focuses it when a reply starts.
 const props = defineProps<{ channelId: string; showBack?: boolean }>()
 const emit = defineEmits<{ back: [] }>()
 
@@ -34,8 +32,6 @@ const { t, locale } = useI18n()
 const store = useTeamChatStore()
 const auth = useAuthStore()
 
-const draft = ref('')
-const sending = ref(false)
 const editingId = ref<string | null>(null)
 const editingBody = ref('')
 const endRef = ref<HTMLElement | null>(null)
@@ -65,78 +61,10 @@ const canModerate = computed(() => auth.hasPermission('team_chat', 'delete'))
 // Reacting and replying are writes: the same people and the same unarchived channels as sending.
 const canInteract = computed(() => canWrite.value && !isArchived.value)
 
-const replyTo = computed(() => store.replyTarget(props.channelId))
+const composer = ref<InstanceType<typeof MessageComposer> | null>(null)
 
-// ---- Files and voice notes ----
-const fileInput = ref<HTMLInputElement | null>(null)
-const recorder = ref<InstanceType<typeof AudioRecorder> | null>(null)
-const recActive = ref(false)
+// ---- Drop files anywhere on the conversation: the composer decides what to do with them ----
 const dragging = ref(false)
-const micAvailable = recordingSupported()
-
-// ---- Emoji while writing ----
-const emojiOpen = ref(false)
-const emojiWrap = ref<HTMLElement | null>(null)
-
-function insertEmoji(glyph: string) {
-  const el = document.getElementById('team-chat-composer') as HTMLTextAreaElement | null
-  const start = el?.selectionStart ?? draft.value.length
-  const end = el?.selectionEnd ?? start
-  draft.value = draft.value.slice(0, start) + glyph + draft.value.slice(end)
-  void nextTick(() => {
-    el?.focus()
-    el?.setSelectionRange(start + glyph.length, start + glyph.length)
-  })
-}
-
-// Both emoji panels (composer and reactions) close on a click anywhere else, or Escape, like any popover.
-function onDocPointerDown(e: PointerEvent) {
-  const target = e.target as Element | null
-  if (emojiOpen.value && !emojiWrap.value?.contains(target as Node)) emojiOpen.value = false
-  if (pickerFor.value && !target?.closest?.('[data-testid^="actions-"]')) pickerFor.value = null
-}
-function onDocKeyDown(e: KeyboardEvent) {
-  if (e.key !== 'Escape') return
-  emojiOpen.value = false
-  pickerFor.value = null
-}
-onMounted(() => {
-  document.addEventListener('pointerdown', onDocPointerDown)
-  document.addEventListener('keydown', onDocKeyDown)
-})
-onBeforeUnmount(() => {
-  document.removeEventListener('pointerdown', onDocPointerDown)
-  document.removeEventListener('keydown', onDocKeyDown)
-})
-const queue = computed(() => store.uploadsFor(props.channelId))
-// Text is optional when files go with it; sending waits until every file is ready.
-const canSubmit = computed(() => {
-  if (queue.value.length === 0) return isSendableBody(draft.value)
-  return store.uploadsReady(props.channelId) && (draft.value.trim() === '' || isSendableBody(draft.value))
-})
-
-const explain = (code: string) => t(TEAM_CHAT_UPLOAD_ERRORS.includes(code) ? `teamChat.errors.${code}` : 'teamChat.errors.generic')
-
-function onFiles(list: FileList | File[] | null | undefined) {
-  if (!canInteract.value || !list || list.length === 0) return
-  for (const r of store.addFiles(props.channelId, Array.from(list))) toast.error(`${r.name}: ${explain(r.code)}`)
-  if (fileInput.value) fileInput.value.value = ''
-}
-
-// Copying from Excel/Word puts text AND a rendered picture on the clipboard: keep the text
-// (let the paste happen) and attach the picture. Only a files-only clipboard is taken over.
-function onPaste(e: ClipboardEvent) {
-  const files = e.clipboardData?.files
-  if (!files?.length) return
-  // Text that is only the copied files' names (Finder, some Linux managers) is not text to paste.
-  const text = e.clipboardData?.getData('text/plain') ?? ''
-  if (!text || isOnlyFileNames(text, files)) e.preventDefault()
-  onFiles(files)
-}
-
-function dropStaleUploads() {
-  if (store.expireStaleUploads(props.channelId).length) toast.error(explain('attachment_gone'))
-}
 
 function onDragOver(e: DragEvent) {
   if (canInteract.value && e.dataTransfer?.types.includes('Files')) dragging.value = true
@@ -144,34 +72,19 @@ function onDragOver(e: DragEvent) {
 
 function onDrop(e: DragEvent) {
   dragging.value = false
-  onFiles(e.dataTransfer?.files)
-}
-
-async function sendVoice(p: { file: File; durationMs: number }) {
-  try {
-    await store.sendVoice(props.channelId, p.file, p.durationMs)
-    recorder.value?.sent(true)
-    scrollToBottom()
-  } catch (err) {
-    recorder.value?.sent(false)
-    toast.error(explain(chatErrorCode(err)))
-  }
+  composer.value?.attach(e.dataTransfer?.files)
 }
 
 const attachmentLabel = (kind?: string, name?: string) =>
   kind ? t(`teamChat.attachments.quote.${kind}`, { name: name ?? '' }) : ''
 const quoteText = (r: TeamChatReplyTo) => r.snippet || attachmentLabel(r.attachment_kind, r.attachment_name)
-const replyPreview = computed(() => {
-  const m = replyTo.value
-  return m ? m.body || attachmentLabel(m.attachments?.[0]?.kind, m.attachments?.[0]?.name) : ''
-})
 const pickerFor = ref<string | null>(null)
 const highlightId = ref<string | null>(null)
 
 function startReply(m: TeamChatMessage) {
   store.startReply(m)
   pickerFor.value = null
-  void nextTick(() => document.getElementById('team-chat-composer')?.focus())
+  void nextTick(() => composer.value?.focus())
 }
 
 async function toggleReaction(m: TeamChatMessage, code: string) {
@@ -198,15 +111,6 @@ function goToMessage(id: string) {
 const reactionTitle = (r: { names: string[]; count: number }) =>
   r.names.join(', ') + (r.count > r.names.length ? ` +${r.count - r.names.length}` : '')
 
-const typingNames = computed(() => pickTypingNames(store.typingUserIds(props.channelId), store.userNames))
-const typingText = computed(() => {
-  const names = typingNames.value
-  if (names.length === 0) return ''
-  if (names.length === 1) return t('teamChat.typingOne', { name: names[0] })
-  return t('teamChat.typingMany')
-})
-const overLimit = computed(() => Array.from(draft.value.trim()).length > TEAM_CHAT_MAX_BODY)
-
 const scroll = useInfiniteScroll({
   direction: 'top',
   onLoadMore: async () => {
@@ -231,20 +135,28 @@ function arm() {
   }, 50))
 }
 
-onMounted(() => { arm(); dropStaleUploads() })
-onBeforeUnmount(() => scroll.cleanup())
+// The reaction picker closes on a click anywhere else, or Escape, like any popover
+// (the composer's emoji panel does the same for itself).
+function onDocPointerDown(e: PointerEvent) {
+  const target = e.target as Element | null
+  if (pickerFor.value && !target?.closest?.('[data-testid^="actions-"]')) pickerFor.value = null
+}
+function onDocKeyDown(e: KeyboardEvent) {
+  if (e.key === 'Escape') pickerFor.value = null
+}
+onMounted(() => {
+  arm()
+  document.addEventListener('pointerdown', onDocPointerDown)
+  document.addEventListener('keydown', onDocKeyDown)
+})
+onBeforeUnmount(() => {
+  scroll.cleanup()
+  document.removeEventListener('pointerdown', onDocPointerDown)
+  document.removeEventListener('keydown', onDocKeyDown)
+})
 watch(() => props.channelId, () => {
   editingId.value = null
   pickerFor.value = null
-  emojiOpen.value = false
-  if (recorder.value) {
-    // Also while the permission prompt is open (phase still 'idle'): cancel() aborts that start.
-    const wasActive = recorder.value.phase !== 'idle'
-    recorder.value.cancel()
-    if (wasActive) toast.info(t('teamChat.recorder.cancelledOnSwitch'))
-  }
-  dropStaleUploads()
-  draft.value = ''
   arm()
 })
 // Re-arm once the first page arrives (the list was empty while loading).
@@ -256,49 +168,6 @@ watch(() => panel.value.messages[panel.value.messages.length - 1]?.id, (now, was
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
-}
-
-let inFlight = 0
-
-async function submit() {
-  if (!canSubmit.value) return
-  // Clear the box before the request: whatever is typed while it is in flight is
-  // the next message and must survive. A failed send puts the text back.
-  const body = draft.value.trim()
-  draft.value = ''
-  inFlight++
-  sending.value = true
-  try {
-    await store.send(props.channelId, body)
-    scrollToBottom()
-  } catch (err) {
-    if (!draft.value) draft.value = body
-    const code = chatErrorCode(err)
-    if (code === 'reply_target_gone' || TEAM_CHAT_UPLOAD_ERRORS.includes(code)) toast.error(explain(code))
-    else toast.error(getErrorMessage(err, t('teamChat.sendFailed')))
-  } finally {
-    inFlight--
-    sending.value = inFlight > 0
-  }
-}
-
-function onComposerKey(e: KeyboardEvent) {
-  if (e.key === 'Escape' && emojiOpen.value) {
-    emojiOpen.value = false
-    return
-  }
-  if (e.key === 'Escape' && replyTo.value) {
-    store.cancelReply(props.channelId)
-    return
-  }
-  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-    e.preventDefault()
-    void submit()
-  }
-}
-
-function onInput() {
-  if (draft.value.trim()) store.notifyTyping(props.channelId)
 }
 
 const isOwn = (m: TeamChatMessage) => m.user_id === myId.value
@@ -497,63 +366,10 @@ async function removeMessage(m: TeamChatMessage) {
         </div>
       </ScrollArea>
 
-      <footer class="border-t p-3">
-        <p class="h-4 px-1 text-xs text-muted-foreground" aria-live="polite">{{ typingText }}</p>
-        <p v-if="isArchived" class="px-1 text-sm text-muted-foreground">{{ t('teamChat.manage.archivedNotice') }}</p>
-        <div v-if="!isArchived && canWrite && replyTo" class="mb-2 flex items-center gap-2 rounded-md border-l-2 border-primary/50 bg-muted/60 px-2 py-1 text-xs" data-testid="reply-bar">
-          <CornerUpLeft class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <span class="min-w-0 flex-1 truncate">{{ t('teamChat.replyingTo', { name: replyTo.user_name }) }}: {{ replyPreview }}</span>
-          <button type="button" class="rounded p-1.5 text-muted-foreground hover:bg-muted" :aria-label="t('teamChat.cancelReply')" @click="store.cancelReply(channelId)">
-            <X class="h-3.5 w-3.5" />
-          </button>
-        </div>
-        <AttachmentQueue
-          v-if="canInteract && !recActive" :items="queue"
-          @retry="store.retryUpload(channelId, $event)" @cancel="store.cancelUpload(channelId, $event)"
-        />
-        <AudioRecorder v-if="canInteract" ref="recorder" @update:active="recActive = $event" @send="sendVoice" />
-        <form v-if="canInteract && !recActive" class="flex items-end gap-2" @submit.prevent="submit">
-          <input
-            ref="fileInput" type="file" multiple class="hidden" :accept="TEAM_CHAT_ACCEPT"
-            data-testid="file-input" @change="onFiles(($event.target as HTMLInputElement).files)"
-          >
-          <Button
-            type="button" variant="ghost" size="icon" class="h-10 w-10 shrink-0 md:h-9 md:w-9"
-            :aria-label="t('teamChat.attachments.attach')" @click="fileInput?.click()"
-          ><Paperclip class="h-4 w-4" /></Button>
-          <Textarea
-            id="team-chat-composer"
-            v-model="draft"
-            class="max-h-40 min-h-[40px] flex-1 resize-none text-sm"
-            :rows="1"
-            :placeholder="t('teamChat.composerPlaceholder')"
-            :aria-label="t('teamChat.composerPlaceholder')"
-            :title="t('teamChat.composerHint')"
-            @keydown="onComposerKey"
-            @input="onInput"
-            @paste="onPaste"
-          />
-          <div ref="emojiWrap" class="relative shrink-0" @keydown.esc="emojiOpen = false">
-            <Button
-              type="button" variant="ghost" size="icon" class="h-10 w-10 md:h-9 md:w-9"
-              :aria-label="t('teamChat.emoji.open')" :aria-expanded="emojiOpen" data-testid="emoji-button"
-              @click="emojiOpen = !emojiOpen"
-            ><Smile class="h-4 w-4" /></Button>
-            <!-- on a phone it is a centered panel above the composer (anchored to the button it would run off the screen) -->
-            <EmojiPicker v-if="emojiOpen" class="absolute bottom-full right-0 z-30 mb-2 max-md:fixed max-md:bottom-20 max-md:left-1/2 max-md:right-auto max-md:mb-0 max-md:-translate-x-1/2" @pick="insertEmoji" />
-          </div>
-          <Button
-            v-if="micAvailable" type="button" variant="ghost" size="icon" class="h-10 w-10 shrink-0 md:h-9 md:w-9"
-            :aria-label="t('teamChat.recorder.record')" data-testid="record-button" @click="recorder?.start()"
-          ><Mic class="h-4 w-4" /></Button>
-          <Button type="submit" size="icon" class="h-10 w-10 shrink-0 md:h-9 md:w-9" :disabled="sending || !canSubmit" :aria-label="t('teamChat.send')">
-            <Loader2 v-if="sending" class="h-4 w-4 animate-spin" />
-            <Send v-else class="h-4 w-4" />
-          </Button>
-        </form>
-        <p v-else-if="!isArchived && !canWrite" class="px-1 text-sm text-muted-foreground">{{ t('teamChat.readOnly') }}</p>
-        <p v-if="overLimit" class="mt-1 px-1 text-xs text-destructive">{{ t('teamChat.tooLong', { max: TEAM_CHAT_MAX_BODY }) }}</p>
-      </footer>
+      <MessageComposer
+        ref="composer" :channel-id="channelId" :can-write="canWrite" :archived="isArchived"
+        @sent="scrollToBottom()"
+      />
     </template>
 
     <ChannelManagePanel
