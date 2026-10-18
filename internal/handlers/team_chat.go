@@ -66,6 +66,14 @@ type ChatMessageResponse struct {
 	// event ("member_added", ...) and its parameters for the UI to translate.
 	Kind models.ChatMessageKind `json:"kind"`
 	Meta models.JSONB           `json:"meta,omitempty"`
+
+	// ReplyTo quotes the message this one answers (ParentID); Reactions are the
+	// emojis on it, aggregated, with whether the viewer used each.
+	ReplyTo   *ChatReplyTo          `json:"reply_to,omitempty"`
+	Reactions []ChatReactionSummary `json:"reactions"`
+
+	// Attachments are the files and voice notes of the message.
+	Attachments []ChatAttachmentResponse `json:"attachments"`
 }
 
 type chatChannelRequest struct {
@@ -78,7 +86,10 @@ type chatDMRequest struct {
 }
 
 type chatMessageRequest struct {
-	Body string `json:"body"`
+	Body     string     `json:"body"`
+	ParentID *uuid.UUID `json:"parent_id"` // send only: the message being answered
+	// AttachmentIDs (send only): pending uploads to fix to the new message.
+	AttachmentIDs []uuid.UUID `json:"attachment_ids"`
 }
 
 // validChatBody trims and bounds a message body. Empty or oversized is rejected.
@@ -578,16 +589,7 @@ func (a *App) ListChatMessages(r *fastglue.Request) error {
 		msgs[i], msgs[j] = msgs[j], msgs[i]
 	}
 
-	ids := make([]uuid.UUID, 0, len(msgs))
-	for _, m := range msgs {
-		ids = append(ids, m.UserID)
-	}
-	names := a.chatUserNames(ids)
-	out := make([]ChatMessageResponse, len(msgs))
-	for i, m := range msgs {
-		out[i] = chatMessageToResponse(m, names)
-	}
-	return r.SendEnvelope(map[string]any{"messages": out, "has_more": hasMore})
+	return r.SendEnvelope(map[string]any{"messages": a.chatMessageResponses(userID, msgs), "has_more": hasMore})
 }
 
 // SendChatMessage posts a message to a channel the caller can access.
@@ -604,8 +606,12 @@ func (a *App) SendChatMessage(r *fastglue.Request) error {
 	if err := a.decodeRequest(r, &req); err != nil {
 		return nil
 	}
+	if len(req.AttachmentIDs) > chatMaxAttachments {
+		return a.sendChatError(r, errChatTooManyAtt, "send the message")
+	}
 	body, valid := validChatBody(req.Body)
-	if !valid {
+	// With attachments the text is optional (0-4000 characters); without, 1-4000.
+	if !valid && !(len(req.AttachmentIDs) > 0 && strings.TrimSpace(req.Body) == "") {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "body must be 1-4000 characters", nil, "")
 	}
 	// FOR SHARE on the channel row: concurrent sends do not block each other, but an
@@ -620,17 +626,33 @@ func (a *App) SendChatMessage(r *fastglue.Request) error {
 		if locked.ArchivedAt != nil {
 			return errChatArchived
 		}
+		if req.ParentID != nil {
+			// The original must still exist, be a person's message, and be in this channel.
+			var n int64
+			tx.Model(&models.ChatMessage{}).Where("id = ? AND channel_id = ? AND organization_id = ? AND kind = ?",
+				*req.ParentID, locked.ID, orgID, models.ChatMessageKindUser).Count(&n)
+			if n == 0 {
+				return errChatReplyGone
+			}
+		}
 		msg = models.ChatMessage{
 			BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: orgID,
 			ChannelID: locked.ID, UserID: userID, Body: body, Kind: models.ChatMessageKindUser,
+			ParentID: req.ParentID,
 		}
-		return tx.Create(&msg).Error
+		if err := tx.Create(&msg).Error; err != nil {
+			return err
+		}
+		if len(req.AttachmentIDs) > 0 {
+			return attachPendingFiles(tx, orgID, userID, locked.ID, msg.ID, req.AttachmentIDs)
+		}
+		return nil
 	})
 	if txErr != nil {
 		return a.sendChatError(r, txErr, "send the message")
 	}
 	a.notifyChat(orgID, ch, websocket.TypeTeamChatMessage, userID, &msg.ID, uuid.Nil)
-	return r.SendEnvelope(chatMessageToResponse(msg, a.chatUserNames([]uuid.UUID{userID})))
+	return r.SendEnvelope(a.chatMessageResponses(userID, []models.ChatMessage{msg})[0])
 }
 
 // chatMessageFor loads the message from the :id path parameter within the
@@ -676,7 +698,12 @@ func (a *App) UpdateChatMessage(r *fastglue.Request) error {
 	}
 	body, valid := validChatBody(req.Body)
 	if !valid {
-		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "body must be 1-4000 characters", nil, "")
+		// A message with attachments may end up with no text at all.
+		var withFiles int64
+		a.DB.Model(&models.ChatAttachment{}).Where("message_id = ? AND purged_at IS NULL", msg.ID).Count(&withFiles)
+		if !(withFiles > 0 && strings.TrimSpace(req.Body) == "") {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "body must be 1-4000 characters", nil, "")
+		}
 	}
 	now := time.Now()
 	txErr := a.withLockedChannel(orgID, ch.ID, chatLockShare, func(tx *gorm.DB, locked *models.ChatChannel) error {
@@ -693,7 +720,7 @@ func (a *App) UpdateChatMessage(r *fastglue.Request) error {
 	}
 	msg.Body, msg.EditedAt = body, &now
 	a.notifyChat(orgID, ch, websocket.TypeTeamChatMessageUpdated, userID, &msg.ID, uuid.Nil)
-	return r.SendEnvelope(chatMessageToResponse(*msg, a.chatUserNames([]uuid.UUID{msg.UserID})))
+	return r.SendEnvelope(a.chatMessageResponses(userID, []models.ChatMessage{*msg})[0])
 }
 
 // DeleteChatMessage soft-deletes a message: the author may delete their own,

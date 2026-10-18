@@ -157,6 +157,8 @@ func runMigrations(db *gorm.DB) error {
 		&models.ChatChannelMember{},
 		&models.ChatMessage{},
 		&models.ChatRead{},
+		&models.ChatMessageReaction{},
+		&models.ChatAttachment{},
 		// Help Desk — unidade e departamento
 		&models.Unit{},
 		&models.Department{},

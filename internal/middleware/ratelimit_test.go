@@ -180,3 +180,82 @@ func init() {
 		return &fastglue.Request{RequestCtx: ctx}
 	}
 }
+
+func TestIncrWindow_CountsAndSetsExpiry(t *testing.T) {
+	rdb := testutil.SetupTestRedis(t)
+	if rdb == nil {
+		t.Skip("TEST_REDIS_URL not set")
+	}
+	ctx := t.Context()
+	key := "test_incr_" + uuid.New().String()
+	defer rdb.Del(ctx, key)
+
+	for want := int64(1); want <= 3; want++ {
+		n, err := middleware.IncrWindow(ctx, rdb, key, 5*time.Second)
+		require.NoError(t, err)
+		assert.Equal(t, want, n)
+	}
+	ttl, err := rdb.PTTL(ctx, key).Result()
+	require.NoError(t, err)
+	assert.Greater(t, ttl, time.Duration(0))
+	assert.LessOrEqual(t, ttl, 5*time.Second)
+
+	// Later hits do not push the window out: it is fixed, not sliding.
+	time.Sleep(300 * time.Millisecond)
+	_, _ = middleware.IncrWindow(ctx, rdb, key, 5*time.Second)
+	ttl2, _ := rdb.PTTL(ctx, key).Result()
+	assert.Less(t, ttl2, ttl, "the expiry keeps counting down")
+}
+
+// A counter left without an expiry (the old INCR-then-EXPIRE pair could be cut in two)
+// must not stay over the limit forever: the next hit gives it one.
+func TestIncrWindow_HealsAKeyThatHasNoExpiry(t *testing.T) {
+	rdb := testutil.SetupTestRedis(t)
+	if rdb == nil {
+		t.Skip("TEST_REDIS_URL not set")
+	}
+	ctx := t.Context()
+	key := "test_heal_" + uuid.New().String()
+	defer rdb.Del(ctx, key)
+	require.NoError(t, rdb.Set(ctx, key, 99, 0).Err()) // no TTL: the stuck state
+	ttl, _ := rdb.PTTL(ctx, key).Result()
+	require.Equal(t, time.Duration(-1), ttl)
+
+	n, err := middleware.IncrWindow(ctx, rdb, key, time.Second)
+	require.NoError(t, err)
+	assert.EqualValues(t, 100, n)
+	ttl, _ = rdb.PTTL(ctx, key).Result()
+	assert.Greater(t, ttl, time.Duration(0), "it now expires")
+	time.Sleep(1200 * time.Millisecond)
+	n, _ = middleware.IncrWindow(ctx, rdb, key, time.Second)
+	assert.EqualValues(t, 1, n, "and the window really resets")
+}
+
+func TestIncrWindow_ParallelHitsAreAllCountedWithOneExpiry(t *testing.T) {
+	rdb := testutil.SetupTestRedis(t)
+	if rdb == nil {
+		t.Skip("TEST_REDIS_URL not set")
+	}
+	ctx := t.Context()
+	key := "test_parallel_" + uuid.New().String()
+	defer rdb.Del(ctx, key)
+	const hits = 60
+	seen := make(chan int64, hits)
+	for i := 0; i < hits; i++ {
+		go func() {
+			n, err := middleware.IncrWindow(ctx, rdb, key, 5*time.Second)
+			if err != nil {
+				n = -1
+			}
+			seen <- n
+		}()
+	}
+	got := map[int64]bool{}
+	for i := 0; i < hits; i++ {
+		got[<-seen] = true
+	}
+	assert.Len(t, got, hits, "every hit saw its own count: no duplicates, no errors")
+	assert.True(t, got[1] && got[hits])
+	ttl, _ := rdb.PTTL(ctx, key).Result()
+	assert.Greater(t, ttl, time.Duration(0))
+}

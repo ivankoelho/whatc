@@ -303,7 +303,7 @@ func (a *App) ExportData(r *fastglue.Request) error {
 			header[i] = col
 		}
 	}
-	_ = writer.Write(header)
+	_ = writeSafeCSVRow(writer, header)
 
 	// Write rows
 	for rows.Next() {
@@ -342,15 +342,8 @@ func (a *App) ExportData(r *fastglue.Request) error {
 			}
 		}
 
-		// Escape CSV injection: prefix dangerous first chars with a single quote
-		// Only escape '=' and '@' which trigger formulas. '+' and '-' are skipped
-		// because they appear in legitimate data (phone numbers, negative values).
-		for j, cell := range csvRow {
-			if len(cell) > 0 && (cell[0] == '=' || cell[0] == '@') {
-				csvRow[j] = "'" + cell
-			}
-		}
-		_ = writer.Write(csvRow)
+		// Every cell is neutralized against spreadsheet formulas at this one point (see csv_safe.go).
+		_ = writeSafeCSVRow(writer, csvRow)
 	}
 
 	writer.Flush()
@@ -512,7 +505,9 @@ func (a *App) ImportData(r *fastglue.Request) error {
 			if idx >= len(record) {
 				continue
 			}
-			val := strings.TrimSpace(record[idx])
+			// Undo the export-time guard (an apostrophe in front of a formula-looking value) before anything else, so
+			// a round trip gives back the original data. Only an apostrophe the export could have added is removed.
+			val := strings.TrimSpace(csvUnsafeCell(record[idx]))
 
 			// Validate field length
 			if len(val) > 10000 {

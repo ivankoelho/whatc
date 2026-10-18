@@ -399,6 +399,66 @@
     "editMessage": "Editar mensagem",
     "editFailed": "Não foi possível editar a mensagem.",
     "deleteMessage": "Excluir mensagem",
+    "reply": "Responder",
+    "react": "Reagir",
+    "replyingTo": "Respondendo a {name}",
+    "cancelReply": "Cancelar resposta",
+    "removedMessage": "Mensagem removida",
+    "emoji": {
+      "title": "Emojis",
+      "open": "Adicionar emoji",
+      "categories": {
+        "smileys": "Rostos",
+        "people": "Pessoas",
+        "symbols": "Símbolos",
+        "things": "Objetos"
+      }
+    },
+    "attachments": {
+      "queue": "Arquivos para enviar",
+      "attach": "Anexar arquivo",
+      "drop": "Solte os arquivos para anexar",
+      "uploading": "Enviando {pct}%",
+      "queued": "Aguardando…",
+      "retry": "Tentar de novo",
+      "remove": "Remover {name}",
+      "openImage": "Abrir imagem {name}",
+      "voice": "Mensagem de voz",
+      "download": "Baixar",
+      "quote": {
+        "image": "🖼 {name}",
+        "audio": "🎤 Mensagem de voz",
+        "file": "📎 {name}"
+      }
+    },
+    "recorder": {
+      "record": "Gravar mensagem de voz",
+      "stop": "Parar gravação",
+      "cancel": "Cancelar gravação",
+      "discard": "Descartar",
+      "send": "Enviar mensagem de voz",
+      "preview": "Ouvir antes de enviar",
+      "tooShort": "Gravação curta demais (mínimo 1 segundo).",
+      "denied": "Microfone bloqueado. Libere na barra de endereço do navegador e tente de novo.",
+      "noMic": "Nenhum microfone encontrado.",
+      "failed": "Não foi possível iniciar a gravação.",
+      "unsupported": "A gravação não está disponível neste navegador.",
+      "cancelledOnSwitch": "Gravação descartada porque você mudou de conversa."
+    },
+    "reactions": {
+      "thumbs_up": "Joinha",
+      "heart": "Coração",
+      "laugh": "Risada",
+      "wow": "Surpresa",
+      "sad": "Triste",
+      "pray": "Obrigado",
+      "check": "Feito",
+      "eyes": "Olhando",
+      "fire": "Fogo",
+      "party": "Comemorar",
+      "thinking": "Pensando",
+      "clap": "Palmas"
+    },
     "confirmDelete": "Excluir esta mensagem?",
     "deleteFailed": "Não foi possível excluir a mensagem.",
     "sectionArchived": "Arquivados",
@@ -443,7 +503,17 @@
       "already_member": "Esta pessoa já está no canal.",
       "not_archived": "O canal não está arquivado.",
       "not_found": "O canal ou a pessoa não foi encontrado.",
-      "invalid": "Confira os dados e tente novamente."
+      "invalid": "Confira os dados e tente novamente.",
+      "reply_target_gone": "A mensagem que você está respondendo não existe mais.",
+      "bad_reaction": "Essa reação não está disponível.",
+      "too_many_reactions": "Esta mensagem já tem reações diferentes demais.",
+      "file_too_large": "O arquivo é grande demais (limite de 10 MB).",
+      "file_type_not_allowed": "Este tipo de arquivo não é permitido.",
+      "invalid_file": "O arquivo está vazio, danificado ou não corresponde ao tipo.",
+      "too_many_attachments": "No máximo 5 arquivos por mensagem (e 10 aguardando).",
+      "attachment_gone": "Um arquivo não está mais disponível e foi tirado da lista. Anexe de novo.",
+      "rate_limited": "Envios demais. Espere um minuto e tente de novo.",
+      "storage_unavailable": "O armazenamento de arquivos está indisponível. Tente mais tarde."
     },
     "admin": {
       "title": "Administração de canais",
