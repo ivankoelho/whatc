@@ -611,7 +611,7 @@ func (a *App) SendChatMessage(r *fastglue.Request) error {
 	}
 	body, valid := validChatBody(req.Body)
 	// With attachments the text is optional (0-4000 characters); without, 1-4000.
-	if !valid && !(len(req.AttachmentIDs) > 0 && strings.TrimSpace(req.Body) == "") {
+	if !valid && (len(req.AttachmentIDs) == 0 || strings.TrimSpace(req.Body) != "") {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "body must be 1-4000 characters", nil, "")
 	}
 	// FOR SHARE on the channel row: concurrent sends do not block each other, but an
@@ -701,7 +701,7 @@ func (a *App) UpdateChatMessage(r *fastglue.Request) error {
 		// A message with attachments may end up with no text at all.
 		var withFiles int64
 		a.DB.Model(&models.ChatAttachment{}).Where("message_id = ? AND purged_at IS NULL", msg.ID).Count(&withFiles)
-		if !(withFiles > 0 && strings.TrimSpace(req.Body) == "") {
+		if withFiles == 0 || strings.TrimSpace(req.Body) != "" {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "body must be 1-4000 characters", nil, "")
 		}
 	}
