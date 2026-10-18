@@ -276,6 +276,10 @@ func runServer(args []string) {
 	}
 	lo.Info("Connected to Redis")
 
+	// The limiters (auth, global API, chat uploads) share this client. PING above does not prove they can
+	// run their Lua script, so check that too; a failure is only reported (limiters fail open as before).
+	middleware.ProbeRateLimiter(context.Background(), rdb, lo)
+
 	// Drop cached chatbot settings once per start: entries written by an older
 	// version held the AI API key in plaintext, and must not outlive the upgrade.
 	if n, err := handlers.FlushChatbotSettingsCache(context.Background(), rdb); err != nil {
