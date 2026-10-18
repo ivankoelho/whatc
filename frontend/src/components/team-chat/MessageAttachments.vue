@@ -31,7 +31,7 @@ function onPlay(e: Event) {
 
       <div v-else-if="a.kind === 'audio'" :data-testid="`attachment-${a.id}`" class="flex flex-col gap-0.5">
         <audio
-          controls preload="none" :src="teamChatAttachmentUrl(a.id)" class="h-10 w-full max-w-xs"
+          controls preload="none" :src="teamChatAttachmentUrl(a.id)" class="h-10 w-72 max-w-full"
           :aria-label="t('teamChat.attachments.voice')" @play="onPlay"
         />
         <span v-if="a.duration_ms" class="text-[11px] text-muted-foreground">{{ formatDuration(a.duration_ms) }}</span>
