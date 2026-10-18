@@ -3404,6 +3404,7 @@
     "title": "Agent Analytics",
     "subtitle": "Performance metrics for all agents",
     "myMetrics": "Your performance metrics",
+    "myMetricsTeamHint": "The cards below are your own metrics; the Live panel shows your teams",
     "allAgents": "All Agents",
     "selectAgent": "Select agent",
     "searchAgent": "Search agent...",
