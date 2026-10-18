@@ -214,3 +214,12 @@ func SetChatUploadsPerMinuteForTest(n int) func() {
 	chatUploadsPerMinute = n
 	return func() { chatUploadsPerMinute = old }
 }
+
+// CSV formula neutralization (csv_safe.go), exposed for the external test package.
+func CSVSafeCellForTest(s string) string   { return csvSafeCell(s) }
+func CSVUnsafeCellForTest(s string) string { return csvUnsafeCell(s) }
+
+// CSVLooksLikeFormulaForTest: what a spreadsheet would evaluate (a trigger first, and not a plain number).
+func CSVLooksLikeFormulaForTest(s string) bool {
+	return startsWithFormulaTrigger(s) && !numericCell.MatchString(s)
+}
