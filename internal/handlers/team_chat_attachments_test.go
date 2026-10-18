@@ -1,6 +1,8 @@
 package handlers_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"context"
 	"archive/zip"
@@ -1359,4 +1361,123 @@ func TestAttachments_UploadRateLimit_RedisDownFailsOpenAndIsLoggedOnce(t *testin
 	lines := strings.Split(strings.TrimSpace(logs.String()), "\n")
 	require.Len(t, lines, 2)
 	assert.Contains(t, lines[1], "suppressed_since_last_log=3")
+}
+
+// CSV attachments are delivered as text (text/plain, a .txt added to the download name) so a
+// double click does not open them in a spreadsheet that evaluates formulas. Nothing else about the
+// file changes: bytes, hash, ETag, Range, stored name and MIME, and every other type.
+func TestAttachments_CSVIsDeliveredAsText(t *testing.T) {
+	f := newPhaseA(t)
+	f.withStorage(t)
+	payload := []byte("name,link\nMaria,=HYPERLINK(\"http://evil\",\"x\")\n+cmd|' /C calc'!A0,-2+3\n")
+	a := mustUpload(t, f, f.member, f.ch, "dados.csv", payload)
+	_, msg, _ := f.sendFiles(t, f.member, f.ch, "", a.ID)
+
+	t.Run("what the API and the database say is untouched", func(t *testing.T) {
+		require.Len(t, msg.Attachments, 1)
+		assert.Equal(t, "dados.csv", msg.Attachments[0].Name, "the name people see is the original")
+		assert.Equal(t, "text/csv", msg.Attachments[0].Mime)
+		var row models.ChatAttachment
+		require.NoError(t, f.app.DB.First(&row, "id = ?", a.ID).Error)
+		assert.Equal(t, "text/csv", row.Mime)
+		assert.Equal(t, ".csv", filepath.Ext(row.StoragePath), "the stored file keeps its name too")
+		sum := sha256.Sum256(payload)
+		assert.Equal(t, hex.EncodeToString(sum[:]), row.SHA256)
+	})
+
+	t.Run("headers: text/plain, a .txt in the download name, still a download", func(t *testing.T) {
+		req := f.download(t, f.owner, a.ID, "")
+		h := &req.RequestCtx.Response.Header
+		assert.Equal(t, 200, testutil.GetResponseStatusCode(req))
+		assert.Equal(t, "text/plain; charset=utf-8", string(h.Peek("Content-Type")))
+		assert.Equal(t, `attachment; filename="dados.csv.txt"; filename*=UTF-8''dados.csv.txt`, string(h.Peek("Content-Disposition")))
+		assert.Equal(t, "nosniff", string(h.Peek("X-Content-Type-Options")))
+		assert.Equal(t, "default-src 'none'; sandbox", string(h.Peek("Content-Security-Policy")))
+	})
+
+	t.Run("the bytes arrive exactly as sent", func(t *testing.T) {
+		req := f.download(t, f.owner, a.ID, "")
+		body := testutil.GetResponseBody(req)
+		assert.Equal(t, payload, body, "formula-looking content is not rewritten, escaped or dropped")
+		sum := sha256.Sum256(body)
+		var row models.ChatAttachment
+		require.NoError(t, f.app.DB.First(&row, "id = ?", a.ID).Error)
+		assert.Equal(t, row.SHA256, hex.EncodeToString(sum[:]))
+	})
+
+	t.Run("ETag, 304 and Range behave as for any file", func(t *testing.T) {
+		first := f.downloadIfNoneMatch(t, f.owner, a.ID, "", "")
+		etag := string(first.RequestCtx.Response.Header.Peek("ETag"))
+		var row models.ChatAttachment
+		require.NoError(t, f.app.DB.First(&row, "id = ?", a.ID).Error)
+		assert.Equal(t, `"`+row.SHA256+`"`, etag)
+
+		nm := f.downloadIfNoneMatch(t, f.owner, a.ID, etag, "")
+		assert.Equal(t, 304, testutil.GetResponseStatusCode(nm))
+		assert.Empty(t, testutil.GetResponseBody(nm))
+
+		part := f.downloadIfNoneMatch(t, f.owner, a.ID, "", "bytes=5-14")
+		assert.Equal(t, 206, testutil.GetResponseStatusCode(part))
+		assert.Equal(t, payload[5:15], testutil.GetResponseBody(part))
+		assert.Equal(t, fmt.Sprintf("bytes 5-14/%d", len(payload)), string(part.RequestCtx.Response.Header.Peek("Content-Range")))
+		assert.Equal(t, "text/plain; charset=utf-8", string(part.RequestCtx.Response.Header.Peek("Content-Type")))
+	})
+
+	t.Run("access rules are the same", func(t *testing.T) {
+		assert.Equal(t, 404, testutil.GetResponseStatusCode(f.download(t, f.spare, a.ID, "")))
+		assert.Equal(t, 404, testutil.GetResponseStatusCode(f.download(t, f.foreign, a.ID, "")))
+	})
+}
+
+func TestAttachments_CSVDownloadNameIsSafeAndKeepsTheOriginal(t *testing.T) {
+	f := newPhaseA(t)
+	f.withStorage(t)
+	for _, c := range []struct{ upload, filenameStar string }{
+		{"relatório.CSV", "relat%C3%B3rio.CSV.txt"},
+		{"lista de clientes.csv", "lista%20de%20clientes.csv.txt"},
+	} {
+		a := mustUpload(t, f, f.member, f.ch, c.upload, []byte("a,b\n1,2\n"))
+		f.sendFiles(t, f.member, f.ch, "", a.ID)
+		disp := string(f.download(t, f.owner, a.ID, "").RequestCtx.Response.Header.Peek("Content-Disposition"))
+		assert.True(t, strings.HasPrefix(disp, "attachment; "), disp)
+		assert.True(t, strings.HasSuffix(disp, "filename*=UTF-8''"+c.filenameStar), disp)
+		f.app.DB.Where("uploader_id = ? AND message_id IS NULL", f.member.ID).Delete(&models.ChatAttachment{})
+	}
+
+	t.Run("a name with CR/LF cannot split the header", func(t *testing.T) {
+		a := mustUpload(t, f, f.member, f.ch, "ok.csv", []byte("a,b\n"))
+		require.NoError(t, f.app.DB.Model(&models.ChatAttachment{}).Where("id = ?", a.ID).Update("name", "a\r\nSet-Cookie: x=1.csv").Error)
+		f.sendFiles(t, f.member, f.ch, "", a.ID)
+		disp := string(f.download(t, f.owner, a.ID, "").RequestCtx.Response.Header.Peek("Content-Disposition"))
+		assert.NotContains(t, disp, "\r")
+		assert.NotContains(t, disp, "\n")
+		assert.Contains(t, disp, "%0D%0A")
+		assert.True(t, strings.HasSuffix(disp, ".csv.txt"), disp)
+	})
+}
+
+// Only CSV changes. Every other type is served exactly as before: its own type, its own name.
+func TestAttachments_OtherTypesAreServedUnchanged(t *testing.T) {
+	f := newPhaseA(t)
+	f.withStorage(t)
+	docx := ooxml(t, "word", nil)
+	cases := []struct {
+		name, mime, disposition string
+		data                    []byte
+	}{
+		{"notas.txt", "text/plain", "attachment", []byte("hello")},
+		{"contrato.pdf", "application/pdf", "attachment", pdfBytes()},
+		{"doc.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "attachment", docx},
+		{"foto.png", "image/png", "inline", pngBytes(3, 3)},
+	}
+	for _, c := range cases {
+		a := mustUpload(t, f, f.member, f.ch, c.name, c.data)
+		f.sendFiles(t, f.member, f.ch, "", a.ID)
+		req := f.download(t, f.owner, a.ID, "")
+		h := &req.RequestCtx.Response.Header
+		assert.Equal(t, c.mime, string(h.Peek("Content-Type")), c.name)
+		assert.Equal(t, fmt.Sprintf(`%s; filename="%s"; filename*=UTF-8''%s`, c.disposition, c.name, c.name), string(h.Peek("Content-Disposition")), c.name)
+		assert.Equal(t, c.data, testutil.GetResponseBody(req), c.name)
+		f.app.DB.Where("uploader_id = ? AND message_id IS NULL", f.member.ID).Delete(&models.ChatAttachment{})
+	}
 }

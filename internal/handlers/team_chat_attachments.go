@@ -372,7 +372,7 @@ func (a *App) DownloadChatAttachment(r *fastglue.Request) error {
 		}
 	}
 
-	hd.Set("Content-Type", att.Mime)
+	hd.Set("Content-Type", chatDeliveryType(att))
 	hd.Set("X-Content-Type-Options", "nosniff")
 	hd.Set("Content-Security-Policy", "default-src 'none'; sandbox")
 	hd.Set("Cross-Origin-Resource-Policy", "same-origin")
@@ -445,6 +445,25 @@ func parseByteRange(h string, size int64) (start, end int64, valid, partial bool
 	return 0, 0, false, false
 }
 
+// chatDeliveryType / chatDeliveryName: how an attachment is SERVED, which is not always how it is stored.
+// A CSV is delivered as plain text with a .txt file name added ("dados.csv" -> "dados.csv.txt"):
+// Excel and LibreOffice decide what to do with a file by its extension, not by the MIME type, and a .csv
+// opened by double click evaluates formulas (=, +, -, @). The bytes, the hash, the ETag, Range, the stored
+// name/MIME and what the API reports are untouched; only these two headers change, and only for CSV.
+func chatDeliveryType(att models.ChatAttachment) string {
+	if att.Mime == "text/csv" {
+		return "text/plain; charset=utf-8"
+	}
+	return att.Mime
+}
+
+func chatDeliveryName(att models.ChatAttachment) string {
+	if att.Mime == "text/csv" {
+		return att.Name + ".txt"
+	}
+	return att.Name
+}
+
 // chatContentDisposition: inline only for images and audio, download for the rest.
 // The name is the sanitized label, as an ASCII fallback plus RFC 5987 filename*,
 // so nothing the sender typed can break out of the header.
@@ -454,7 +473,7 @@ func chatContentDisposition(att models.ChatAttachment) string {
 		mode = "inline"
 	}
 	var ascii, enc strings.Builder
-	for _, b := range []byte(att.Name) {
+	for _, b := range []byte(chatDeliveryName(att)) {
 		switch {
 		case b >= 'a' && b <= 'z', b >= 'A' && b <= 'Z', b >= '0' && b <= '9', b == '.', b == '-', b == '_':
 			ascii.WriteByte(b)
