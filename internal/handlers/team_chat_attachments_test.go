@@ -1277,10 +1277,10 @@ func TestAttachments_OrphanSweepNeverDeletesWhenTheLookupFails(t *testing.T) {
 		}
 		n := atomic.AddInt64(&lookups, 1)
 		if n >= atomic.LoadInt64(&failFrom) && n <= atomic.LoadInt64(&failTo) {
-			tx.AddError(injected)
+			_ = tx.AddError(injected)
 		}
 	}))
-	defer f.app.DB.Callback().Query().Remove(cbName)
+	defer func() { _ = f.app.DB.Callback().Query().Remove(cbName) }()
 
 	var logs bytes.Buffer
 	origLog := f.app.Log
@@ -1333,7 +1333,7 @@ func TestAttachments_UploadRateLimit_RedisDownFailsOpenAndIsLoggedOnce(t *testin
 	f.withStorage(t)
 
 	f.app.Redis = redis.NewClient(&redis.Options{Addr: "127.0.0.1:1", DialTimeout: 20 * time.Millisecond, MaxRetries: -1})
-	defer f.app.Redis.Close()
+	defer func() { _ = f.app.Redis.Close() }()
 
 	clock := time.Unix(1_700_000_000, 0)
 	origFailures := middleware.Failures

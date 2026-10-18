@@ -76,7 +76,7 @@ func TestFailureLog_EachComponentAndOperationHasItsOwnFirstLine(t *testing.T) {
 // A Redis that is down while the limiter keeps serving: requests still pass, and the log is one line, not one per request.
 func TestEnforce_RedisDown_FailsOpenAndLogsOnceWithoutIdentifiers(t *testing.T) {
 	broken := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1", DialTimeout: 20 * time.Millisecond, MaxRetries: -1})
-	defer broken.Close()
+	defer func() { _ = broken.Close() }()
 
 	clock := &fakeClock{t: time.Unix(1_700_000_000, 0)}
 	orig := middleware.Failures

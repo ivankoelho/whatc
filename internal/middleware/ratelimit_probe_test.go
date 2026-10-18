@@ -39,7 +39,7 @@ func TestProbeRateLimiter_AvailableRedis(t *testing.T) {
 func TestProbeRateLimiter_UnreachableRedisIsReportedNotFatal(t *testing.T) {
 	// Nothing listens on port 1: a connection error.
 	rdb := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1", DialTimeout: 300 * time.Millisecond, MaxRetries: -1})
-	defer rdb.Close()
+	defer func() { _ = rdb.Close() }()
 
 	var logs bytes.Buffer
 	start := time.Now()
@@ -67,7 +67,7 @@ func TestProbeRateLimiter_ScriptingForbiddenByACL(t *testing.T) {
 
 	opts := admin.Options()
 	restricted := redis.NewClient(&redis.Options{Addr: opts.Addr, DB: opts.DB, Username: user, Password: "probe-test-pw", MaxRetries: -1})
-	defer restricted.Close()
+	defer func() { _ = restricted.Close() }()
 	require.NoError(t, restricted.Ping(ctx).Err(), "this identity connects fine")
 	who, err := restricted.Do(ctx, "ACL", "WHOAMI").Text()
 	require.NoError(t, err)
