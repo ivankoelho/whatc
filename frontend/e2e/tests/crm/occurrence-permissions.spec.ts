@@ -91,7 +91,7 @@ test.describe('CRM permissions', () => {
 
     await page.goto('/crm/occurrences')
     await page.waitForLoadState('networkidle')
-    await expect(page.locator('#occurrences-list')).toBeVisible()
+    await expect(page.locator('#occurrences-board')).toBeVisible()
 
     // Este usuário não tem nenhuma das permissões que controlam a
     // visibilidade de "Settings" (settings.general + as de cada hub:
@@ -151,15 +151,16 @@ test.describe('CRM permissions', () => {
     // (AppLayout.vue calcula esse effectivePath a partir do primeiro
     // grupo/item acessível).
     //
-    // A barra nasce recolhida por padrao agora, e os itens de submenu so
-    // renderizam com `item.active && !isCollapsed` — expande primeiro, senao
-    // "Occurrences" nunca chega a montar.
+    // As subpáginas de Settings vivem só nas abas da barra superior (nav com
+    // aria-label do módulo ativo), não mais no menu lateral.
     await page.getByRole('button', { name: /expand sidebar|expandir/i }).click()
 
     const settingsLink = page.getByRole('menuitem', { name: 'Settings', exact: true })
     await expect(settingsLink).toBeVisible()
     await expect(settingsLink).toHaveAttribute('href', '/settings/occurrences')
-    await expect(page.getByRole('menuitem', { name: 'Occurrences' })).toBeVisible()
+    const settingsTabs = page.getByRole('navigation', { name: 'Settings', exact: true })
+    await expect(settingsTabs.getByRole('link', { name: 'Protocols' })).toBeVisible()
+    await expect(settingsTabs.getByRole('link')).toHaveCount(1)
   })
 
   // navigationOrder (router/index.ts) nao tinha entrada para /crm/occurrences:
@@ -182,6 +183,6 @@ test.describe('CRM permissions', () => {
     await page.waitForLoadState('networkidle')
 
     expect(page.url()).toContain('/crm/occurrences')
-    await expect(page.locator('#occurrences-list')).toBeVisible()
+    await expect(page.locator('#occurrences-board')).toBeVisible()
   })
 })

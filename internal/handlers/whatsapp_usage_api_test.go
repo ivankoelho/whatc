@@ -23,7 +23,7 @@ type apiFixture struct {
 	app    *handlers.App
 	org    *models.Organization
 	reader *models.User // whatsapp_usage:read
-	writer *models.User // read + write
+	writer *models.User // read + write, super admin (the price table is super-admin only)
 	nobody *models.User // no permission
 }
 
@@ -39,7 +39,10 @@ func newAPIFixture(t *testing.T) *apiFixture {
 	}
 	return &apiFixture{app: app, org: org,
 		reader: mk("usage-reader", []string{"whatsapp_usage:read"}),
-		writer: mk("usage-writer", []string{"whatsapp_usage:read", "whatsapp_usage:write"}),
+		writer: func() *models.User {
+			role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "usage-writer-"+uuid.NewString()[:6], []string{"whatsapp_usage:read", "whatsapp_usage:write"})
+			return testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID), testutil.WithSuperAdmin())
+		}(),
 		nobody: mk("usage-nobody", []string{"chat:read"})}
 }
 
@@ -83,7 +86,7 @@ func TestWhatsAppUsageAPI_Permissions(t *testing.T) {
 	f := newAPIFixture(t)
 	id := uuid.NewString()
 	reads := map[string]func(*fastglue.Request) error{
-		"summary": f.app.GetWhatsAppUsageSummary, "messages": f.app.ListWhatsAppUsageMessages, "rates": f.app.ListWhatsAppRates}
+		"summary": f.app.GetWhatsAppUsageSummary, "messages": f.app.ListWhatsAppUsageMessages}
 	writes := map[string]func(*fastglue.Request) error{
 		"create": f.app.CreateWhatsAppRate, "update": f.app.UpdateWhatsAppRate, "delete": f.app.DeleteWhatsAppRate, "reprice": f.app.RepriceWhatsAppUsage}
 
@@ -99,6 +102,21 @@ func TestWhatsAppUsageAPI_Permissions(t *testing.T) {
 		code, _ = f.call(t, h, f.nobody, rateBody("55", "utility", 1, "2026-01-01", ""), nil, map[string]string{"id": id})
 		assert.Equal(t, fasthttp.StatusForbidden, code, "nobody can %s", name)
 	}
+}
+
+// The price table is visible and editable only by a super admin, whatever
+// whatsapp_usage permissions the role carries.
+func TestWhatsAppRatesAPI_SuperAdminOnly(t *testing.T) {
+	f := newAPIFixture(t)
+	code, _ := f.call(t, f.app.ListWhatsAppRates, f.reader, nil, nil, nil)
+	assert.Equal(t, fasthttp.StatusForbidden, code, "a reader cannot see the price table")
+	code, _ = f.call(t, f.app.ListWhatsAppRates, f.writer, nil, nil, nil)
+	assert.Equal(t, fasthttp.StatusOK, code, "a super admin can")
+
+	writerRole := testutil.CreateTestRoleWithKeys(t, f.app.DB, f.org.ID, "usage-plain-writer-"+uuid.NewString()[:6], []string{"whatsapp_usage:read", "whatsapp_usage:write"})
+	plain := testutil.CreateTestUser(t, f.app.DB, f.org.ID, testutil.WithRoleID(&writerRole.ID))
+	code, _ = f.call(t, f.app.CreateWhatsAppRate, plain, rateBody("55", "utility", 1, "2026-01-01", ""), nil, nil)
+	assert.Equal(t, fasthttp.StatusForbidden, code, "whatsapp_usage:write alone cannot edit prices")
 }
 
 func TestWhatsAppRatesAPI_CreateValidation(t *testing.T) {
@@ -171,7 +189,7 @@ func TestWhatsAppRatesAPI_UsedRatesAreImmutableExceptClosingThePeriod(t *testing
 	code, _ = f.call(t, f.app.CreateWhatsAppRate, f.writer, rateBody("55", "utility", 0.25, "2026-03-01", ""), nil, nil)
 	assert.Equal(t, 200, code)
 
-	_, lb := f.call(t, f.app.ListWhatsAppRates, f.reader, nil, nil, nil)
+	_, lb := f.call(t, f.app.ListWhatsAppRates, f.writer, nil, nil, nil)
 	list := decodeData[struct {
 		Rates []struct {
 			ID    uuid.UUID `json:"id"`
@@ -380,9 +398,17 @@ func TestWhatsAppUsageAPI_FiltersAndGroups(t *testing.T) {
 		assert.Equal(t, want, got.Counts["total"], q)
 	}
 
-	// a period filter excludes the older row
-	day := time.Now().Format("2006-01-02")
-	_, b := f.call(t, f.app.GetWhatsAppUsageSummary, f.reader, nil, map[string]string{"from": day, "to": day}, nil)
+	// a period filter excludes the older row. "Today" must be the
+	// organization's today (the default period ends on it), not the test
+	// machine's: CI runs in UTC and fails between 21h and midnight in BRT.
+	_, b := f.call(t, f.app.GetWhatsAppUsageSummary, f.reader, nil, nil, nil)
+	day := decodeData[struct {
+		Period struct {
+			To string `json:"to"`
+		} `json:"period"`
+	}](t, b).Period.To
+	require.NotEmpty(t, day)
+	_, b = f.call(t, f.app.GetWhatsAppUsageSummary, f.reader, nil, map[string]string{"from": day, "to": day}, nil)
 	assert.EqualValues(t, 3, decodeData[struct {
 		Counts map[string]int64 `json:"counts"`
 	}](t, b).Counts["total"])
@@ -504,7 +530,7 @@ func TestWhatsAppUsageAPI_SummaryReportsTheActivationState(t *testing.T) {
 // An empty list must be [] in the JSON, never null: the screens iterate over it.
 func TestWhatsAppUsageAPI_EmptyListsAreArraysNotNull(t *testing.T) {
 	f := newAPIFixture(t)
-	_, rates := f.call(t, f.app.ListWhatsAppRates, f.reader, nil, nil, nil)
+	_, rates := f.call(t, f.app.ListWhatsAppRates, f.writer, nil, nil, nil)
 	assert.Contains(t, string(rates), `"rates":[]`)
 	_, msgs := f.call(t, f.app.ListWhatsAppUsageMessages, f.reader, nil, nil, nil)
 	assert.Contains(t, string(msgs), `"messages":[]`)

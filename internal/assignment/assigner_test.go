@@ -637,3 +637,32 @@ func TestAssignToTeam_CallRotation_UsesSamePresenceRuleAsChat(t *testing.T) {
 	// The broadcast fallback uses the same rule.
 	assert.ElementsMatch(t, []uuid.UUID{agents[2].ID}, a.GetAvailableAgents(team.ID, org.ID, []uuid.UUID{agents[1].ID}))
 }
+
+// An active agent is eligible exactly when their state is online: the one
+// definition of state (AgentStateOf) and the eligibility rule cannot drift.
+func TestAgentStateOf_MatchesEligibility(t *testing.T) {
+	assert.Equal(t, models.AgentStateOffline, assignment.AgentStateOf(false, true))
+	assert.Equal(t, models.AgentStateOffline, assignment.AgentStateOf(false, false), "offline wins over away")
+	assert.Equal(t, models.AgentStateAway, assignment.AgentStateOf(true, false))
+	assert.Equal(t, models.AgentStateOnline, assignment.AgentStateOf(true, true))
+
+	a, db := newAssigner(t)
+	org := testutil.CreateTestOrganization(t, db)
+	connected := map[uuid.UUID]bool{}
+	a.SetPresence(func(_, id uuid.UUID) bool { return connected[id] })
+
+	for _, isConnected := range []bool{true, false} {
+		for _, isAvailable := range []bool{true, false} {
+			for _, isActive := range []bool{true, false} {
+				u := testutil.CreateTestUser(t, db, org.ID)
+				require.NoError(t, db.Model(&models.User{}).Where("id = ?", u.ID).
+					Updates(map[string]any{"is_available": isAvailable, "is_active": isActive}).Error)
+				connected[u.ID] = isConnected
+
+				want := isActive && assignment.AgentStateOf(isConnected, isAvailable) == models.AgentStateOnline
+				assert.Equal(t, want, a.IsAgentEligible(org.ID, u.ID),
+					"connected=%v available=%v active=%v", isConnected, isAvailable, isActive)
+			}
+		}
+	}
+}

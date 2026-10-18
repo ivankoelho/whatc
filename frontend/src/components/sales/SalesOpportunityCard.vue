@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import { Badge } from '@/components/ui/badge'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { salesOpportunitiesService } from '@/services/api'
@@ -13,7 +13,8 @@ import MoneyInput from '@/components/sales/MoneyInput.vue'
 import XProcessLinkForm from '@/components/sales/XProcessLinkForm.vue'
 import SalesOpportunityDetailsDialog from '@/components/sales/SalesOpportunityDetailsDialog.vue'
 import { formatQuantity, parseDecimalInput } from '@/lib/salesUnits'
-import { Pencil } from 'lucide-vue-next'
+import { getInitials, getAvatarGradient } from '@/lib/utils'
+import { Pencil, MessageCircle, AlertTriangle } from 'lucide-vue-next'
 
 const props = defineProps<{ opportunity: SalesOpportunity; disabled?: boolean }>()
 
@@ -24,7 +25,15 @@ const emit = defineEmits<{
   'details-change': [opportunity: SalesOpportunity]
 }>()
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
+
+const contactName = computed(() =>
+  props.opportunity.contact?.profile_name || props.opportunity.contact?.phone_number || props.opportunity.contact_id)
+const sellerName = computed(() => props.opportunity.assigned_user?.full_name || '')
+const openedAt = computed(() => {
+  const d = new Date(props.opportunity.opened_at)
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString(locale.value, { day: '2-digit', month: 'short' })
+})
 
 // As 2 chaves fechadas de SalesDirecionamento (services/api.ts).
 const DIRECIONAMENTO_OPTIONS: SalesDirecionamento[] = ['visita', 'whatsapp']
@@ -94,59 +103,80 @@ async function saveValue() {
 <template>
   <div
     data-board-card
-    class="rounded-md border border-white/[0.08] light:border-gray-200 bg-white/[0.02] light:bg-white p-3"
-    :class="disabled ? 'opacity-50 cursor-wait' : 'cursor-grab'"
+    class="rounded-xl bg-card p-3 shadow-sm ring-1 ring-black/[0.05] transition-shadow hover:shadow-md dark:ring-white/[0.07]"
+    :class="disabled ? 'opacity-50 cursor-wait' : 'cursor-grab active:cursor-grabbing'"
   >
-    <div class="flex items-center justify-between gap-2">
-      <span class="font-mono text-xs text-white/50 light:text-muted-foreground">
-        {{ opportunity.opportunity_number }}
-      </span>
-      <Badge v-if="opportunity.sla_breached" variant="destructive" class="shrink-0 text-xs">
-        {{ $t('sales.slaBreached') }}
-      </Badge>
+    <!-- Contact-first card, same layout as the CRM board's OccurrenceCard: who
+         on top, the deal and its actions in the middle, seller + date below. -->
+    <!-- Single root element on purpose: vuedraggable maps each item through
+         the component's root node, so nothing (not even a comment) may sit
+         beside it, or dragging breaks. -->
+    <div class="flex items-start gap-2.5">
+      <Avatar class="h-9 w-9 shrink-0">
+        <AvatarFallback :class="'bg-gradient-to-br text-xs font-semibold text-white ' + getAvatarGradient(contactName)">
+          {{ getInitials(contactName) }}
+        </AvatarFallback>
+      </Avatar>
+      <div class="min-w-0 flex-1">
+        <p class="truncate text-sm font-semibold text-foreground">{{ contactName }}</p>
+        <!-- WhatsApp line opens the contact's conversation -->
+        <RouterLink
+          :to="`/chat/${opportunity.contact_id}`"
+          :title="$t('chat.openConversation')"
+          :aria-label="`${$t('chat.openConversation')}: ${contactName}`"
+          class="mt-0.5 inline-flex max-w-full items-center gap-1 rounded-md text-xs text-muted-foreground transition-colors hover:text-emerald-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:hover:text-emerald-400"
+          @click.stop
+          @mousedown.stop
+        >
+          <MessageCircle class="h-3 w-3 shrink-0 text-emerald-500" aria-hidden="true" />
+          <span class="truncate">{{ opportunity.contact?.phone_number || $t('chat.openConversation') }}</span>
+        </RouterLink>
+      </div>
       <Button
         v-if="opportunity.status === 'aberta'"
         data-testid="sales-opportunity-edit-details"
         variant="ghost"
         size="icon"
-        class="h-6 w-6 shrink-0"
+        class="-mr-1 -mt-1 h-7 w-7 shrink-0 text-muted-foreground"
         :title="$t('sales.editDetails')"
+        :aria-label="$t('sales.editDetails')"
         @click.stop="detailsOpen = true"
         @mousedown.stop
       >
-        <Pencil class="h-3 w-3" />
+        <Pencil class="h-3.5 w-3.5" />
       </Button>
     </div>
-    <p class="text-xs mt-1 truncate text-white/50 light:text-muted-foreground">
-      <span class="text-white/30 light:text-gray-400">{{ $t('sales.contactLabel') }}:</span>
-      {{ opportunity.contact?.profile_name || opportunity.contact_id }}
-    </p>
-    <div v-if="editingValue" class="mt-1" @click.stop @mousedown.stop>
-      <MoneyInput
-        v-model="valueDraft"
-        data-testid="sales-opportunity-value-input"
-        class="h-7 text-xs"
-        autofocus
-        @keyup.enter="saveValue"
-        @keyup.escape="editingValue = false"
-        @blur="saveValue"
-      />
+
+    <div class="mt-2.5 flex items-baseline justify-between gap-2">
+      <div v-if="editingValue" class="flex-1" @click.stop @mousedown.stop>
+        <MoneyInput
+          v-model="valueDraft"
+          data-testid="sales-opportunity-value-input"
+          class="h-7 text-xs"
+          autofocus
+          @keyup.enter="saveValue"
+          @keyup.escape="editingValue = false"
+          @blur="saveValue"
+        />
+      </div>
+      <p
+        v-else
+        data-testid="sales-opportunity-value"
+        class="truncate text-[15px] font-semibold text-foreground"
+        :class="{ 'cursor-text hover:underline': opportunity.status === 'aberta', 'opacity-50': savingValue }"
+        @click.stop="startEditValue"
+      >
+        {{ formatCurrency(opportunity.estimated_value) }}
+      </p>
+      <span class="shrink-0 font-mono text-[11px] text-muted-foreground">{{ opportunity.opportunity_number }}</span>
     </div>
-    <p
-      v-else
-      data-testid="sales-opportunity-value"
-      class="text-sm mt-1 truncate text-white light:text-gray-900"
-      :class="{ 'cursor-text hover:underline': opportunity.status === 'aberta', 'opacity-50': savingValue }"
-      @click.stop="startEditValue"
-    >
-      {{ formatCurrency(opportunity.estimated_value) }}
-    </p>
-    <p v-if="opportunity.estimated_quantity != null" data-testid="sales-opportunity-quantity" class="text-xs mt-0.5 text-white/60 light:text-muted-foreground">
+    <p v-if="opportunity.estimated_quantity != null" data-testid="sales-opportunity-quantity" class="mt-0.5 text-xs text-muted-foreground">
       {{ formatQuantity(opportunity.estimated_quantity, opportunity.unit_of_measure) }}
     </p>
-    <p v-if="opportunity.status === 'convertida' && opportunity.conversion_source" class="text-xs mt-0.5 text-white/40 light:text-muted-foreground">
+    <p v-if="opportunity.status === 'convertida' && opportunity.conversion_source" class="mt-0.5 text-xs text-muted-foreground">
       {{ opportunity.conversion_source === 'xprocess' ? $t('sales.conversionSourceXProcess') : $t('sales.conversionSourceManual') }}
     </p>
+
     <div class="mt-2" @click.stop @mousedown.stop>
       <XProcessLinkForm :opportunity-id="opportunity.id" :editable="opportunity.status === 'aberta'" />
     </div>
@@ -174,6 +204,26 @@ async function saveValue() {
       <Button data-testid="sales-opportunity-lose-button" size="sm" variant="outline" class="flex-1 text-xs px-1" @click.stop="$emit('lose', opportunity)">
         {{ $t('sales.markLostShort') }}
       </Button>
+    </div>
+
+    <div class="mt-3 flex items-center justify-between gap-2 border-t pt-2.5">
+      <div class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+        <Avatar class="h-5 w-5 shrink-0">
+          <AvatarFallback :class="sellerName ? 'bg-gradient-to-br text-[9px] text-white ' + getAvatarGradient(sellerName) : 'bg-muted text-[9px]'">
+            {{ sellerName ? getInitials(sellerName) : '?' }}
+          </AvatarFallback>
+        </Avatar>
+        <span class="truncate" :class="!sellerName && 'italic'">{{ sellerName || $t('sales.noSeller') }}</span>
+      </div>
+      <div class="flex shrink-0 items-center gap-1.5 text-[11px]">
+        <span
+          v-if="opportunity.sla_breached"
+          class="inline-flex items-center gap-0.5 rounded-full bg-red-500/15 px-1.5 py-0.5 font-medium text-red-700 dark:text-red-300"
+        >
+          <AlertTriangle class="h-3 w-3" aria-hidden="true" />{{ $t('sales.slaBreached') }}
+        </span>
+        <span v-if="openedAt" class="text-muted-foreground">{{ openedAt }}</span>
+      </div>
     </div>
     <SalesOpportunityDetailsDialog v-model:open="detailsOpen" :opportunity="opportunity" @saved="$emit('details-change', $event)" />
   </div>

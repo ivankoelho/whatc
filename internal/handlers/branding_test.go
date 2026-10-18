@@ -713,3 +713,38 @@ func TestUpdateBrandingFooter_SystemNameOnlyLeavesFooterFieldsUntouched(t *testi
 	assert.Equal(t, "New Name", row.SystemName)
 	assert.Equal(t, "Original", row.FooterText, "omitted field must be untouched")
 }
+
+// The system theme (app shell layout) is a system-wide branding setting: the
+// public endpoint always reports one (default "bitrix"), only a super admin
+// changes it, and only to a known theme.
+func TestBrandingUITheme_DefaultSetAndValidated(t *testing.T) {
+	app := newTestApp(t)
+	require.NoError(t, database.EnsureBrandingSettingsRow(app.DB))
+	require.NoError(t, app.DB.Model(&models.BrandingSettings{}).
+		Where("id = ?", models.BrandingSettingsSingletonID).Update("ui_theme", "").Error)
+
+	publicBody := func() string {
+		req := testutil.NewGETRequest(t)
+		require.NoError(t, app.GetPublicBranding(req))
+		return string(testutil.GetResponseBody(req))
+	}
+	assert.Contains(t, publicBody(), `"ui_theme":"bitrix"`, "an unset theme reads as the default")
+
+	org := testutil.CreateTestOrganization(t, app.DB)
+	admin := testutil.CreateAdminRole(t, app.DB, org.ID)
+	superAdmin := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&admin.ID), testutil.WithSuperAdmin())
+	orgAdmin := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&admin.ID))
+
+	put := func(user *models.User, value string) int {
+		req := testutil.NewJSONRequest(t, map[string]any{"ui_theme": value})
+		req.RequestCtx.Request.Header.SetMethod("PUT")
+		testutil.SetAuthContext(req, org.ID, user.ID)
+		require.NoError(t, app.UpdateBrandingFooter(req))
+		return testutil.GetResponseStatusCode(req)
+	}
+
+	assert.Equal(t, fasthttp.StatusForbidden, put(orgAdmin, "classic"), "an org admin cannot change the system theme")
+	assert.Equal(t, fasthttp.StatusBadRequest, put(superAdmin, "neon"), "unknown themes are refused")
+	assert.Equal(t, fasthttp.StatusOK, put(superAdmin, "classic"))
+	assert.Contains(t, publicBody(), `"ui_theme":"classic"`)
+}

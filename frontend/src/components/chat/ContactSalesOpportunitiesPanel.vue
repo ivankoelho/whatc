@@ -143,7 +143,7 @@ defineExpose({ refresh: load })
 <template>
   <!-- Section inside ContactInfoPanel's own scrollable column (spec item 4)
        — same semantic tokens as its other sections, no own width/scroll. -->
-  <div id="sales-opportunities-panel" class="border-t pt-4">
+  <div id="sales-opportunities-panel" class="rounded-xl bg-card px-4 pb-4 pt-2 shadow-sm">
     <div class="flex items-center justify-between py-2">
       <h5 class="text-sm font-medium">{{ t('chat.salesOpportunities') }}</h5>
       <Button v-if="canCreate" variant="ghost" size="sm" class="h-7 px-2" @click="createDialogOpen = true">

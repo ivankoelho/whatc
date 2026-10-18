@@ -20,9 +20,9 @@ import (
 	"github.com/shridarpatil/whatomate/internal/handlers"
 	"github.com/shridarpatil/whatomate/internal/middleware"
 	"github.com/shridarpatil/whatomate/internal/queue"
-	"github.com/shridarpatil/whatomate/internal/usage"
 	"github.com/shridarpatil/whatomate/internal/storage"
 	"github.com/shridarpatil/whatomate/internal/tts"
+	"github.com/shridarpatil/whatomate/internal/usage"
 	"github.com/shridarpatil/whatomate/internal/websocket"
 	"github.com/shridarpatil/whatomate/internal/worker"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
@@ -229,6 +229,18 @@ func runServer(args []string) {
 			lo.Fatal("Occurrence processes permission backfill failed", "error", err)
 		}
 
+		// Same window: team_chat is a new resource; system admin, manager and
+		// agent roles get it, custom roles never do (see teamChatGrants).
+		if err := database.BackfillTeamChatPermissions(db, lo); err != nil {
+			lo.Fatal("Team chat permissions backfill failed", "error", err)
+		}
+
+		// Same window: team_chat:join_any is a new action of an existing resource, so
+		// it needs its own guard; only the system admin role gets it.
+		if err := database.BackfillTeamChatJoinAnyPermission(db, lo); err != nil {
+			lo.Fatal("Team chat join_any permission backfill failed", "error", err)
+		}
+
 		// Data fix, not a schema migration: AutoMigrate adding occurrences.source
 		// with a DB default backfilled every existing row to 'whatsapp',
 		// including cases opened manually. Runs once, guarded by the column's
@@ -263,6 +275,10 @@ func runServer(args []string) {
 		lo.Fatal("Failed to connect to Redis", "error", err)
 	}
 	lo.Info("Connected to Redis")
+
+	// The limiters (auth, global API, chat uploads) share this client. PING above does not prove they can
+	// run their Lua script, so check that too; a failure is only reported (limiters fail open as before).
+	middleware.ProbeRateLimiter(context.Background(), rdb, lo)
 
 	// Drop cached chatbot settings once per start: entries written by an older
 	// version held the AI API key in plaintext, and must not outlive the upgrade.
@@ -319,8 +335,12 @@ func runServer(args []string) {
 	// Presence reaper: releases an agent's attendances only after they stay
 	// disconnected past the grace period (reconnects within it change nothing).
 	presenceReaper := handlers.NewPresenceReaper(app, handlers.DefaultPresenceGrace, 10*time.Second)
+	// A restart drops every connection at once: close the open presence intervals
+	// before the hub accepts connections instead of recording a mass "offline".
+	app.ResetPresenceLogOnBoot()
 	wsHub.SetPresenceListener(func(orgID, userID uuid.UUID, online bool) {
 		presenceReaper.OnPresenceChange(orgID, userID, online)
+		app.RecordPresence(orgID, userID)
 		app.BroadcastAgentPresence(orgID, userID, online)
 	})
 
@@ -400,6 +420,10 @@ func runServer(args []string) {
 	go slaProcessor.Start(slaCtx)
 	lo.Info("SLA processor started")
 
+	// Chat attachment housekeeping (abandoned uploads, files of deleted messages)
+	chatFilesCtx, chatFilesCancel := context.WithCancel(context.Background())
+	go app.RunChatAttachmentCleanup(chatFilesCtx, time.Hour)
+
 	// Start presence reaper (sweeps every 10s; grace is 60s)
 	presenceCtx, presenceCancel := context.WithCancel(context.Background())
 	go presenceReaper.Start(presenceCtx)
@@ -462,6 +486,7 @@ func runServer(args []string) {
 	// Stop SLA processor
 	lo.Info("Stopping SLA processor...")
 	slaCancel()
+	chatFilesCancel()
 	slaProcessor.Stop()
 	presenceCancel()
 	presenceReaper.Stop()
@@ -830,6 +855,35 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.PUT("/api/contacts/{id}/notes/{note_id}", app.UpdateConversationNote)
 	g.DELETE("/api/contacts/{id}/notes/{note_id}", app.DeleteConversationNote)
 
+	// Chat interno (team_chat)
+	g.GET("/api/team-chat/channels", app.ListChatChannels)
+	g.POST("/api/team-chat/channels", app.CreateChatChannel)
+	g.POST("/api/team-chat/dm", app.CreateChatDM)
+	g.GET("/api/team-chat/users", app.ListChatUsers)
+	g.GET("/api/team-chat/channels/{id}/messages", app.ListChatMessages)
+	g.POST("/api/team-chat/channels/{id}/messages", app.SendChatMessage)
+	g.POST("/api/team-chat/channels/{id}/read", app.MarkChatChannelRead)
+	g.POST("/api/team-chat/channels/{id}/typing", app.NotifyChatTyping)
+	// Phase A: channel management
+	g.GET("/api/team-chat/channels/{id}/members", app.ListChatChannelMembers)
+	g.POST("/api/team-chat/channels/{id}/members", app.AddChatChannelMember)
+	g.PUT("/api/team-chat/channels/{id}/members/{member_id}", app.SetChatMemberRole)
+	g.DELETE("/api/team-chat/channels/{id}/members/{member_id}", app.RemoveChatChannelMember)
+	g.POST("/api/team-chat/channels/{id}/leave", app.LeaveChatChannel)
+	g.PUT("/api/team-chat/channels/{id}", app.RenameChatChannel)
+	g.POST("/api/team-chat/channels/{id}/archive", app.ArchiveChatChannel)
+	g.POST("/api/team-chat/channels/{id}/reopen", app.ReopenChatChannel)
+	g.POST("/api/team-chat/channels/{id}/join", app.JoinChatChannel)
+	g.GET("/api/team-chat/admin/channels", app.ListChatAdminChannels)
+	g.POST("/api/team-chat/channels/{id}/attachments", app.UploadChatAttachment)
+	g.DELETE("/api/team-chat/channels/{id}/attachments/{aid}", app.DeleteChatAttachment)
+	g.GET("/api/team-chat/attachments/{id}", app.DownloadChatAttachment)
+	g.GET("/api/team-chat/messages/{id}", app.GetChatMessage)
+	g.PUT("/api/team-chat/messages/{id}/reactions/{code}", app.PutChatReaction)
+	g.DELETE("/api/team-chat/messages/{id}/reactions/{code}", app.DeleteChatReaction)
+	g.PUT("/api/team-chat/messages/{id}", app.UpdateChatMessage)
+	g.DELETE("/api/team-chat/messages/{id}", app.DeleteChatMessage)
+
 	// CRM — etapas de ocorrência
 	g.GET("/api/occurrence-stages", app.ListOccurrenceStages)
 	g.POST("/api/occurrence-stages", app.CreateOccurrenceStage)
@@ -857,6 +911,8 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	// CRM — central de vendas
 	g.POST("/api/sales-opportunities", app.CreateSalesOpportunity)
 	g.GET("/api/sales-opportunities", app.ListSalesOpportunities)
+	g.GET("/api/sales-opportunities/summary", app.GetSalesOpportunitiesSummary)
+	g.GET("/api/sales-opportunities/scope", app.GetSalesOpportunitiesScope)
 	g.GET("/api/sales-opportunities/{id}", app.GetSalesOpportunity)
 	g.GET("/api/sales-opportunities/{id}/events", app.ListSalesOpportunityEvents)
 	g.PUT("/api/sales-opportunities/{id}/stage", app.ChangeSalesOpportunityStage)
@@ -1048,6 +1104,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/analytics/agents", app.GetAgentAnalytics)
 	g.GET("/api/analytics/agents/{id}", app.GetAgentDetails)
 	g.GET("/api/analytics/agents/comparison", app.GetAgentComparison)
+	g.GET("/api/analytics/agents/live", app.GetLiveAgents)
 
 	// Meta WhatsApp Analytics
 	// WhatsApp consumption (whatsapp_usage:read|write)

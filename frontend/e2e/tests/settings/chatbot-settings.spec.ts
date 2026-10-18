@@ -31,8 +31,12 @@ test.describe('Chatbot Settings Page', () => {
     await expect(chatbotSettingsPage.slaTab).toBeVisible()
   })
 
-  test('should have AI tab', async () => {
-    await expect(chatbotSettingsPage.aiTab).toBeVisible()
+  // AI settings moved to Settings → Integrations (its first tab).
+  test('AI settings live in Integrations, not here', async ({ page }) => {
+    await expect(page.getByRole('tab', { name: /^AI$/ })).toHaveCount(0)
+    await chatbotSettingsPage.switchToAITab()
+    await expect(page.getByRole('tab', { name: /^AI$/ })).toHaveAttribute('data-state', 'active')
+    await chatbotSettingsPage.expectAITabVisible()
   })
 })
 
@@ -329,6 +333,7 @@ test.describe('Tab Navigation', () => {
 
   test('should switch back to Messages tab', async () => {
     await chatbotSettingsPage.switchToAITab()
+    await chatbotSettingsPage.goto() // AI now lives in Integrations, a separate page
     await chatbotSettingsPage.switchToMessagesTab()
     await chatbotSettingsPage.expectMessagesTabVisible()
   })

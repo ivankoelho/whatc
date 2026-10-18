@@ -29,6 +29,8 @@ type ChatbotSettingsResponse struct {
 	AgentCurrentConversationOnly bool              `json:"agent_current_conversation_only"`
 	StrictConversationVisibility bool              `json:"strict_conversation_visibility"`
 	SignWithAgentName            bool              `json:"sign_with_agent_name"`
+	AwayReassignEnabled          bool              `json:"away_reassign_enabled"`
+	AwayReassignAfterMins        int               `json:"away_reassign_after_mins"`
 	AIEnabled                    bool              `json:"ai_enabled"`
 	AIProvider                   models.AIProvider `json:"ai_provider"`
 	AIModel                      string            `json:"ai_model"`
@@ -139,6 +141,7 @@ func (a *App) GetChatbotSettings(r *fastglue.Request) error {
 			DefaultResponse:    "Hello! How can I help you today?",
 			SessionTimeoutMins: 30,
 			AI:                 models.AIConfig{Enabled: false},
+			AgentAssignment:    models.AgentAssignmentConfig{AwayReassignAfterMins: defaultAwayReassignMins},
 		}
 	}
 
@@ -192,6 +195,8 @@ func (a *App) GetChatbotSettings(r *fastglue.Request) error {
 		AgentCurrentConversationOnly: settings.AgentAssignment.CurrentConversationOnly,
 		StrictConversationVisibility: settings.AgentAssignment.StrictConversationVisibility,
 		SignWithAgentName:            settings.AgentAssignment.SignWithAgentName,
+		AwayReassignEnabled:          settings.AgentAssignment.AwayReassignEnabled,
+		AwayReassignAfterMins:        settings.AgentAssignment.AwayReassignAfterMins,
 		// AI
 		AIEnabled:          settings.AI.Enabled,
 		AIProvider:         settings.AI.Provider,
@@ -249,6 +254,8 @@ func chatbotAgentsSnapshot(s *models.ChatbotSettings) map[string]any {
 		"agent_current_conversation_only": s.AgentAssignment.CurrentConversationOnly,
 		"strict_conversation_visibility":  s.AgentAssignment.StrictConversationVisibility,
 		"sign_with_agent_name":            s.AgentAssignment.SignWithAgentName,
+		"away_reassign_enabled":           s.AgentAssignment.AwayReassignEnabled,
+		"away_reassign_after_mins":        s.AgentAssignment.AwayReassignAfterMins,
 	}
 }
 
@@ -320,6 +327,8 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		AgentCurrentConversationOnly *bool              `json:"agent_current_conversation_only"`
 		StrictConversationVisibility *bool              `json:"strict_conversation_visibility"`
 		SignWithAgentName            *bool              `json:"sign_with_agent_name"`
+		AwayReassignEnabled          *bool              `json:"away_reassign_enabled"`
+		AwayReassignAfterMins        *int               `json:"away_reassign_after_mins"`
 		AIEnabled                    *bool              `json:"ai_enabled"`
 		AIProvider                   *models.AIProvider `json:"ai_provider"`
 		AIAPIKey                     *string            `json:"ai_api_key"`
@@ -390,8 +399,9 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		// Create new settings
 		isNew = true
 		settings = models.ChatbotSettings{
-			BaseModel:      models.BaseModel{ID: uuid.New()},
-			OrganizationID: orgID,
+			BaseModel:       models.BaseModel{ID: uuid.New()},
+			OrganizationID:  orgID,
+			AgentAssignment: models.AgentAssignmentConfig{AwayReassignAfterMins: defaultAwayReassignMins},
 		}
 	}
 
@@ -410,7 +420,7 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		req.FallbackButtons != nil || req.SessionTimeoutMinutes != nil
 	agentsTouched := req.AllowAgentQueuePickup != nil || req.AssignToSameAgent != nil ||
 		req.AgentCurrentConversationOnly != nil || req.StrictConversationVisibility != nil ||
-		req.SignWithAgentName != nil
+		req.SignWithAgentName != nil || req.AwayReassignEnabled != nil || req.AwayReassignAfterMins != nil
 	hoursTouched := req.BusinessHoursEnabled != nil || req.BusinessHours != nil ||
 		req.OutOfHoursMessage != nil || req.AllowAutomatedOutsideHours != nil
 	slaTouched := req.SLAEnabled != nil || req.SLAResponseMinutes != nil ||
@@ -501,6 +511,15 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 	}
 	if req.SignWithAgentName != nil {
 		settings.AgentAssignment.SignWithAgentName = *req.SignWithAgentName
+	}
+	if req.AwayReassignEnabled != nil {
+		settings.AgentAssignment.AwayReassignEnabled = *req.AwayReassignEnabled
+	}
+	if req.AwayReassignAfterMins != nil {
+		if *req.AwayReassignAfterMins < minAwayReassignMins || *req.AwayReassignAfterMins > maxAwayReassignMins {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "away_reassign_after_mins must be between 1 and 1440", nil, "")
+		}
+		settings.AgentAssignment.AwayReassignAfterMins = *req.AwayReassignAfterMins
 	}
 
 	// AI Settings

@@ -223,14 +223,62 @@ func isUniqueViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
-// visibleSalesOpportunities scopes a query to what userID may see: everything
-// with view_all, otherwise only opportunities assigned to them (spec §7).
-// Task 7/8 reuse this for the board and export endpoints.
-func (a *App) visibleSalesOpportunities(query *gorm.DB, userID, orgID uuid.UUID) *gorm.DB {
-	if a.HasPermission(userID, models.ResourceSalesOpportunities, models.ActionViewAll, orgID) {
-		return query
+// Sales visibility levels for the unified sales screen.
+const (
+	salesScopeAll  = "all"  // view_all: admin, SAC supervisor
+	salesScopeTeam = "team" // view_team: store supervisor
+	salesScopeOwn  = "own"  // seller
+)
+
+func (a *App) salesScope(userID, orgID uuid.UUID) string {
+	switch {
+	case a.HasPermission(userID, models.ResourceSalesOpportunities, models.ActionViewAll, orgID):
+		return salesScopeAll
+	case a.HasPermission(userID, models.ResourceSalesOpportunities, models.ActionViewTeam, orgID):
+		return salesScopeTeam
+	default:
+		return salesScopeOwn
 	}
-	return query.Where("sales_opportunities.assigned_user_id = ?", userID)
+}
+
+// salesTeamMates is the users sharing a team with userID (themselves
+// included) — the SQL twin of canViewTeamMember, same as conversations'
+// viewTeamScope.
+func (a *App) salesTeamMates(userID uuid.UUID) *gorm.DB {
+	return a.DB.Model(&models.TeamMember{}).Select("user_id").
+		Where("team_id IN (?)", a.DB.Model(&models.TeamMember{}).Select("team_id").Where("user_id = ?", userID))
+}
+
+// visibleSalesOpportunities scopes a query to what userID may see: everything
+// with view_all, the sellers of their teams with view_team, otherwise only
+// opportunities assigned to them (spec §7).
+func (a *App) visibleSalesOpportunities(query *gorm.DB, userID, orgID uuid.UUID) *gorm.DB {
+	switch a.salesScope(userID, orgID) {
+	case salesScopeAll:
+		return query
+	case salesScopeTeam:
+		return query.Where("sales_opportunities.assigned_user_id = ? OR sales_opportunities.assigned_user_id IN (?)",
+			userID, a.salesTeamMates(userID))
+	default:
+		return query.Where("sales_opportunities.assigned_user_id = ?", userID)
+	}
+}
+
+// filterSalesOpportunities applies the manual filters shared by the list and
+// the summary: a seller and/or a store. The store is the unit of the seller's
+// team (opportunities carry no unit of their own).
+func filterSalesOpportunities(query *gorm.DB, db *gorm.DB, r *fastglue.Request) *gorm.DB {
+	args := r.RequestCtx.QueryArgs()
+	if assignedUserID := string(args.Peek("assigned_user_id")); assignedUserID != "" {
+		query = query.Where("sales_opportunities.assigned_user_id = ?", assignedUserID)
+	}
+	if unitID := string(args.Peek("unit_id")); unitID != "" {
+		storeSellers := db.Model(&models.TeamMember{}).Select("team_members.user_id").
+			Joins("JOIN teams ON teams.id = team_members.team_id").
+			Where("teams.unit_id = ?", unitID)
+		query = query.Where("sales_opportunities.assigned_user_id IN (?)", storeSellers)
+	}
+	return query
 }
 
 // loadAuthorizedSalesOpportunity resolves {id} from the route and applies the
@@ -247,16 +295,27 @@ func (a *App) loadAuthorizedSalesOpportunity(r *fastglue.Request, orgID, userID 
 	if err != nil {
 		return nil, errEnvelopeSent
 	}
-	if !a.HasPermission(userID, models.ResourceSalesOpportunities, models.ActionViewAll, orgID) &&
-		(opp.AssignedUserID == nil || *opp.AssignedUserID != userID) {
+	if !a.canSeeSalesOpportunity(opp, userID, orgID) {
 		_ = r.SendErrorEnvelope(fasthttp.StatusForbidden, "Insufficient permissions", nil, "")
 		return nil, errEnvelopeSent
 	}
 	return opp, nil
 }
 
+// canSeeSalesOpportunity is the single-record form of visibleSalesOpportunities.
+func (a *App) canSeeSalesOpportunity(opp *models.SalesOpportunity, userID, orgID uuid.UUID) bool {
+	switch a.salesScope(userID, orgID) {
+	case salesScopeAll:
+		return true
+	case salesScopeTeam:
+		return opp.AssignedUserID != nil && (*opp.AssignedUserID == userID || a.canViewTeamMember(userID, *opp.AssignedUserID))
+	default:
+		return opp.AssignedUserID != nil && *opp.AssignedUserID == userID
+	}
+}
+
 // ListSalesOpportunities lists opportunities visible to the caller, optionally
-// filtered by stage, status or assignee.
+// filtered by stage, status, contact, seller or store.
 func (a *App) ListSalesOpportunities(r *fastglue.Request) error {
 	orgID, userID, err := a.requireAuth(r, models.ResourceSalesOpportunities, models.ActionRead)
 	if err != nil {
@@ -264,17 +323,19 @@ func (a *App) ListSalesOpportunities(r *fastglue.Request) error {
 	}
 
 	pg := parsePaginationWithDefaults(r, 30, 100)
-	query := a.DB.Model(&models.SalesOpportunity{}).Preload("Contact").Where("sales_opportunities.organization_id = ?", orgID)
+	// AssignedUser trimmed to what the card shows (the seller's name), so the
+	// list never ships a user row's other fields.
+	query := a.DB.Model(&models.SalesOpportunity{}).Preload("Contact").
+		Preload("AssignedUser", func(db *gorm.DB) *gorm.DB { return db.Select("id", "full_name") }).
+		Where("sales_opportunities.organization_id = ?", orgID)
 	query = a.visibleSalesOpportunities(query, userID, orgID)
+	query = filterSalesOpportunities(query, a.DB, r)
 
 	if stage := string(r.RequestCtx.QueryArgs().Peek("stage")); stage != "" {
 		query = query.Where("sales_opportunities.stage = ?", stage)
 	}
 	if status := string(r.RequestCtx.QueryArgs().Peek("status")); status != "" {
 		query = query.Where("sales_opportunities.status = ?", status)
-	}
-	if assignedUserID := string(r.RequestCtx.QueryArgs().Peek("assigned_user_id")); assignedUserID != "" {
-		query = query.Where("sales_opportunities.assigned_user_id = ?", assignedUserID)
 	}
 	if contactID := string(r.RequestCtx.QueryArgs().Peek("contact_id")); contactID != "" {
 		query = query.Where("sales_opportunities.contact_id = ?", contactID)

@@ -264,15 +264,10 @@ test.describe('Roles Management', () => {
     await page.goto('/settings')
     await page.waitForLoadState('networkidle')
 
-    // The sidebar starts collapsed (AppLayout.vue's isCollapsed defaults to
-    // true) -- submenu links like Access aren't in the DOM at all until it's
-    // expanded, regardless of which section is active.
-    await page.locator('[data-testid="sidebar-toggle"]').click()
-
-    // Click the sidebar's Access nav item (Roles/Teams/Users are tabs inside
-    // this hub, not their own sidebar links, since the settings tab-hubs
-    // work). href-based, not text-based -- the app runs e2e in English, but
-    // href is still the more robust locator against label changes.
+    // Click the top bar's Access tab (Settings sub-pages live in the header
+    // tabs, not the sidebar; Roles/Teams/Users are tabs inside this hub).
+    // href-based, not text-based -- the app runs e2e in English, but href is
+    // still the more robust locator against label changes.
     await page.locator('a[href="/settings/access"]').first().click()
     await expect(page).toHaveURL(/\/settings\/access/)
 

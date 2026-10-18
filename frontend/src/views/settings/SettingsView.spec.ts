@@ -61,55 +61,17 @@ beforeEach(() => {
 })
 
 describe('SettingsView tabs', () => {
-  it('shows Geral | Notificações | Chamadas | Unidades | Departamentos in that order', async () => {
-    await render()
-    expect(tabs()).toEqual(['Geral', 'Notificações', 'Chamadas', 'Unidades', 'Departamentos'])
-  })
-
-  it('shows the units tab content for ?tab=units, without the general settings page', async () => {
-    route.query = { tab: 'units' }
-    await render()
-    expect($('units-view')).not.toBeNull()
-    expect($('departments-view')).toBeNull()
-  })
-
-  it('shows the departments tab content for ?tab=departments', async () => {
-    route.query = { tab: 'departments' }
-    await render()
-    expect($('departments-view')).not.toBeNull()
-  })
-
-  it('hides Unidades and Departamentos without their read permission', async () => {
-    perms.granted = new Set(['settings.general:read'])
+  // Unidades and Departamentos moved to Settings → Pessoas e acesso (their
+  // rules are covered in SettingsTabHub.spec.ts); General keeps its own three.
+  it('shows only Geral | Notificações | Chamadas', async () => {
     await render()
     expect(tabs()).toEqual(['Geral', 'Notificações', 'Chamadas'])
   })
 
-  it('a user with only units:read lands on Unidades, not on a general tab they cannot read', async () => {
-    perms.granted = new Set(['units:read', 'occurrences:read'])
-    await render()
-    expect(tabs()).toEqual(['Unidades'])
-    expect($('units-view')).not.toBeNull()
-    expect(router.replace).toHaveBeenCalledWith({ query: { tab: 'units' } })
-  })
-
-  it('hides Unidades and Departamentos without occurrences:read, since their lists would answer 403', async () => {
-    perms.granted = new Set(['settings.general:read', 'units:read', 'departments:read'])
-    await render()
-    expect(tabs()).toEqual(['Geral', 'Notificações', 'Chamadas'])
-  })
-
-  it('shows only the tab whose own read permission is present (plus occurrences:read)', async () => {
-    perms.granted = new Set(['settings.general:read', 'occurrences:read', 'departments:read'])
-    await render()
-    expect(tabs()).toEqual(['Geral', 'Notificações', 'Chamadas', 'Departamentos'])
-  })
-
-  it('ignores ?tab=units when the user cannot read units', async () => {
-    perms.granted = new Set(['settings.general:read'])
+  it('never renders the units or departments lists here', async () => {
     route.query = { tab: 'units' }
     await render()
     expect($('units-view')).toBeNull()
-    expect(router.replace).toHaveBeenCalledWith({ query: { tab: 'general' } })
+    expect($('departments-view')).toBeNull()
   })
 })

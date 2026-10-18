@@ -10,7 +10,6 @@ export class ChatbotSettingsPage extends BasePage {
   readonly agentsTab: Locator
   readonly hoursTab: Locator
   readonly slaTab: Locator
-  readonly aiTab: Locator
   readonly saveButton: Locator
 
   constructor(page: Page) {
@@ -20,7 +19,6 @@ export class ChatbotSettingsPage extends BasePage {
     this.agentsTab = page.getByRole('tab', { name: /Agents/i })
     this.hoursTab = page.getByRole('tab', { name: /Hours/i })
     this.slaTab = page.getByRole('tab', { name: /SLA/i })
-    this.aiTab = page.getByRole('tab', { name: /AI/i })
     this.saveButton = page.getByRole('button', { name: /Save Changes/i })
   }
 
@@ -46,8 +44,10 @@ export class ChatbotSettingsPage extends BasePage {
     await this.slaTab.click()
   }
 
+  // The AI provider settings moved to Settings → Integrations → IA.
   async switchToAITab() {
-    await this.aiTab.click()
+    await this.page.goto('/settings/integrations?tab=ai')
+    await this.page.waitForLoadState('networkidle')
   }
 
   // Messages tab helpers

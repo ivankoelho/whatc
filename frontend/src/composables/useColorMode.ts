@@ -2,8 +2,12 @@ import { ref, watch, onMounted } from 'vue'
 
 export type ColorMode = 'light' | 'dark' | 'system'
 
-const colorMode = ref<ColorMode>('dark')
-const isDark = ref(true)
+// Light (with the green wallpaper) is everyone's default. The storage key moved
+// to color-mode:v2 so the old saved 'dark' choices reset once to light; anything
+// picked from now on is kept.
+const STORAGE_KEY = 'color-mode:v2'
+const colorMode = ref<ColorMode>('light')
+const isDark = ref(false)
 
 function getSystemTheme(): boolean {
   return window.matchMedia('(prefers-color-scheme: dark)').matches
@@ -29,7 +33,7 @@ function updateTheme() {
 export function useColorMode() {
   onMounted(() => {
     // Load saved preference
-    const saved = localStorage.getItem('color-mode') as ColorMode | null
+    const saved = localStorage.getItem(STORAGE_KEY) as ColorMode | null
     if (saved) {
       colorMode.value = saved
     }
@@ -44,7 +48,7 @@ export function useColorMode() {
   })
 
   watch(colorMode, (newMode) => {
-    localStorage.setItem('color-mode', newMode)
+    localStorage.setItem(STORAGE_KEY, newMode)
     updateTheme()
   })
 

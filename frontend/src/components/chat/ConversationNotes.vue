@@ -17,6 +17,8 @@ import {
 
 const props = defineProps<{
   contactId: string
+  /** Full-width inside the Notes page: no close button, no fixed side-panel width. */
+  embedded?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -160,7 +162,7 @@ function formatNoteTime(dateStr: string) {
 </script>
 
 <template>
-  <div id="notes-panel" class="w-80 border-l border-white/[0.08] light:border-gray-200 bg-[#111113] light:bg-white flex flex-col">
+  <div id="notes-panel" :class="['flex flex-col bg-[#111113] light:bg-white', embedded ? 'min-w-0 flex-1' : 'w-80 border-l border-white/[0.08] light:border-gray-200']">
     <!-- Header -->
     <div class="px-4 py-3 border-b border-white/[0.08] light:border-gray-200 flex items-center justify-between">
       <div class="flex items-center gap-2">
@@ -173,6 +175,7 @@ function formatNoteTime(dateStr: string) {
         </Badge>
       </div>
       <Button
+        v-if="!embedded"
         variant="ghost"
         size="icon"
         class="h-7 w-7 text-white/40 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100"

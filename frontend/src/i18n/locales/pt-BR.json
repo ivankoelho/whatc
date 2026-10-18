@@ -267,8 +267,9 @@
   "nav": {
     "dashboard": "Painel",
     "chat": "Conversas",
-    "crm": "CRM",
-    "salesOperation": "Minha Operação",
+    "teamChat": "Chat interno",
+    "crm": "Protocolos",
+    "salesOperation": "CRM",
     "salesDashboard": "Dashboard de Vendas",
     "contacts": "Contatos",
     "analytics": "Análises",
@@ -310,8 +311,8 @@
     "groupChannels": "Canais",
     "whatsappUsage": "Consumo do WhatsApp",
     "groupService": "Atendimento",
-    "groupOccurrences": "Ocorrências",
-    "groupAccess": "Acesso",
+    "groupOccurrences": "Protocolos",
+    "groupAccess": "Pessoas e acesso",
     "groupIntegrations": "Integrações",
     "calling": "Chamadas",
     "callLogs": "Histórico de chamadas",
@@ -325,7 +326,16 @@
     "expandSidebar": "Expandir barra lateral",
     "collapseSidebar": "Recolher barra lateral",
     "toggleMenu": "Alternar menu",
-    "mainNavigation": "Navegação principal"
+    "mainNavigation": "Navegação principal",
+    "wallpaper": "Plano de fundo",
+    "wallpaperUpload": "Enviar imagem",
+    "wallpaperCustom": "Imagem personalizada",
+    "wallpaperRemove": "Remover imagem personalizada",
+    "wallpaperNotImage": "Escolha um arquivo de imagem",
+    "wallpaperTooLarge": "Não foi possível salvar a imagem. Tente uma menor.",
+    "conversations": "Conversas",
+    "notes": "Notas",
+    "phone": "Telefone"
   },
   "userMenu": {
     "myAccount": "Minha conta",
@@ -345,6 +355,190 @@
     "goAway": "Ficar ausente",
     "ariaUserMenu": "Menu do usuário",
     "ariaToggleAvailability": "Alternar status de disponibilidade"
+  },
+  "teamChat": {
+    "title": "Chat interno",
+    "sectionTeams": "Equipes",
+    "sectionChannels": "Canais",
+    "sectionDirect": "Mensagens diretas",
+    "newChannel": "Novo canal",
+    "newChannelDesc": "Um canal privado: só quem você adicionar consegue ler.",
+    "newDm": "Nova mensagem direta",
+    "newDmDesc": "Inicie uma conversa privada com um colega.",
+    "channelName": "Nome do canal",
+    "pickPerson": "Com quem você quer conversar?",
+    "pickMembers": "Membros",
+    "searchPeople": "Buscar pessoas",
+    "noPeople": "Nenhuma pessoa encontrada.",
+    "startDm": "Iniciar conversa",
+    "createFailed": "Não foi possível criar. Tente novamente.",
+    "unnamed": "Sem nome",
+    "online": "Online",
+    "offline": "Offline",
+    "unreadCount": "{n} mensagens não lidas",
+    "noChannels": "Você ainda não está em nenhum canal. Entre em uma equipe ou inicie uma mensagem direta.",
+    "loadFailedTitle": "Não foi possível carregar seus canais",
+    "loadFailed": "Verifique a conexão e tente novamente.",
+    "pickTitle": "Escolha uma conversa",
+    "pickDescription": "Selecione um canal ou uma mensagem direta à esquerda.",
+    "noAccessTitle": "Sem acesso a esta conversa",
+    "noAccess": "Ela não existe, ou você não participa dela.",
+    "messagesFailedTitle": "Não foi possível carregar as mensagens",
+    "messagesFailed": "Verifique a conexão e tente novamente.",
+    "noMessagesTitle": "Nenhuma mensagem ainda",
+    "noMessages": "Seja o primeiro a escrever aqui.",
+    "composerPlaceholder": "Escreva uma mensagem",
+    "composerHint": "Enter envia, Shift+Enter quebra a linha.",
+    "send": "Enviar",
+    "sendFailed": "Não foi possível enviar a mensagem.",
+    "readOnly": "Você pode ler este chat, mas não escrever nele.",
+    "tooLong": "As mensagens são limitadas a {max} caracteres.",
+    "typingOne": "{name} está digitando…",
+    "typingMany": "Várias pessoas estão digitando…",
+    "edited": "(editada)",
+    "editMessage": "Editar mensagem",
+    "editFailed": "Não foi possível editar a mensagem.",
+    "deleteMessage": "Excluir mensagem",
+    "reply": "Responder",
+    "react": "Reagir",
+    "replyingTo": "Respondendo a {name}",
+    "cancelReply": "Cancelar resposta",
+    "removedMessage": "Mensagem removida",
+    "emoji": {
+      "title": "Emojis",
+      "open": "Adicionar emoji",
+      "categories": {
+        "smileys": "Rostos",
+        "people": "Pessoas",
+        "symbols": "Símbolos",
+        "things": "Objetos"
+      }
+    },
+    "attachments": {
+      "queue": "Arquivos para enviar",
+      "attach": "Anexar arquivo",
+      "drop": "Solte os arquivos para anexar",
+      "uploading": "Enviando {pct}%",
+      "queued": "Aguardando…",
+      "retry": "Tentar de novo",
+      "remove": "Remover {name}",
+      "openImage": "Abrir imagem {name}",
+      "voice": "Mensagem de voz",
+      "download": "Baixar",
+      "quote": {
+        "image": "🖼 {name}",
+        "audio": "🎤 Mensagem de voz",
+        "file": "📎 {name}"
+      }
+    },
+    "recorder": {
+      "record": "Gravar mensagem de voz",
+      "stop": "Parar gravação",
+      "cancel": "Cancelar gravação",
+      "discard": "Descartar",
+      "send": "Enviar mensagem de voz",
+      "preview": "Ouvir antes de enviar",
+      "tooShort": "Gravação curta demais (mínimo 1 segundo).",
+      "denied": "Microfone bloqueado. Libere na barra de endereço do navegador e tente de novo.",
+      "noMic": "Nenhum microfone encontrado.",
+      "failed": "Não foi possível iniciar a gravação.",
+      "unsupported": "A gravação não está disponível neste navegador.",
+      "cancelledOnSwitch": "Gravação descartada porque você mudou de conversa."
+    },
+    "reactions": {
+      "thumbs_up": "Joinha",
+      "heart": "Coração",
+      "laugh": "Risada",
+      "wow": "Surpresa",
+      "sad": "Triste",
+      "pray": "Obrigado",
+      "check": "Feito",
+      "eyes": "Olhando",
+      "fire": "Fogo",
+      "party": "Comemorar",
+      "thinking": "Pensando",
+      "clap": "Palmas"
+    },
+    "confirmDelete": "Excluir esta mensagem?",
+    "deleteFailed": "Não foi possível excluir a mensagem.",
+    "sectionArchived": "Arquivados",
+    "showArchived": "Mostrar canais arquivados",
+    "hideArchived": "Ocultar canais arquivados",
+    "sameName": "de {name} · {n} pessoas",
+    "manage": {
+      "title": "Membros do canal",
+      "desc": "Quem está neste canal e o que você pode fazer a respeito.",
+      "name": "Nome",
+      "archivedBadge": "Arquivado",
+      "rename": "Renomear canal",
+      "members": "Membros ({n})",
+      "noMembers": "Ninguém está neste canal.",
+      "you": "você",
+      "owner": "Dono",
+      "add": "Adicionar membro",
+      "remove": "Remover {name}",
+      "promote": "Tornar {name} dono(a)",
+      "demote": "Tornar {name} membro comum",
+      "leave": "Sair do canal",
+      "archive": "Arquivar canal",
+      "reopen": "Reabrir canal",
+      "pickDesc": "Escolha alguém da sua organização. A pessoa verá todo o histórico do canal.",
+      "confirmRemove": "Remover {name} deste canal? A pessoa perde o acesso a ele, inclusive ao que escreveu.",
+      "confirmLeave": "Sair deste canal? Você perderá o acesso a ele.",
+      "confirmArchive": "Arquivar este canal? Ele sai da lista e deixa de aceitar mensagens; o histórico é mantido.",
+      "added": "Membro adicionado.",
+      "removed": "Membro removido.",
+      "left": "Você saiu do canal.",
+      "renamed": "Canal renomeado.",
+      "archivedOk": "Canal arquivado.",
+      "reopenedOk": "Canal reaberto.",
+      "archivedNotice": "Este canal está arquivado: você pode lê-lo, mas não escrever nele."
+    },
+    "errors": {
+      "generic": "Não foi possível fazer isso. Tente novamente.",
+      "last_owner": "O último dono não pode sair nem deixar de ser dono: torne outra pessoa dona ou arquive o canal antes.",
+      "archived": "O canal está arquivado.",
+      "forbidden": "Você não tem permissão para fazer isso neste canal.",
+      "self_add": "Ninguém se adiciona por aqui. Use a entrada administrativa, que pede um motivo.",
+      "already_member": "Esta pessoa já está no canal.",
+      "not_archived": "O canal não está arquivado.",
+      "not_found": "O canal ou a pessoa não foi encontrado.",
+      "invalid": "Confira os dados e tente novamente.",
+      "reply_target_gone": "A mensagem que você está respondendo não existe mais.",
+      "bad_reaction": "Essa reação não está disponível.",
+      "too_many_reactions": "Esta mensagem já tem reações diferentes demais.",
+      "file_too_large": "O arquivo é grande demais (limite de 10 MB).",
+      "file_type_not_allowed": "Este tipo de arquivo não é permitido.",
+      "invalid_file": "O arquivo está vazio, danificado ou não corresponde ao tipo.",
+      "too_many_attachments": "No máximo 5 arquivos por mensagem (e 10 aguardando).",
+      "attachment_gone": "Um arquivo não está mais disponível e foi tirado da lista. Anexe de novo.",
+      "rate_limited": "Envios demais. Espere um minuto e tente de novo.",
+      "storage_unavailable": "O armazenamento de arquivos está indisponível. Tente mais tarde."
+    },
+    "admin": {
+      "title": "Administração de canais",
+      "subtitle": "Quem está em cada canal e o estado dele. As mensagens nunca aparecem aqui.",
+      "emptyTitle": "Nenhum canal ainda",
+      "empty": "Os canais privados criados na sua organização aparecerão aqui.",
+      "createdBy": "Criado por {name}",
+      "youAreIn": "Você é membro",
+      "joinTitle": "Entrar em \"{name}\"",
+      "joinDesc": "Você não é membro deste canal privado. Entrar permite ler todo o histórico dele. Todos os membros verão que você entrou e por quê, e isso fica registrado na auditoria.",
+      "reason": "Motivo",
+      "reasonHint": "De {min} a {max} caracteres ({n} até agora). É exibido aos membros do canal.",
+      "joinAction": "Entrar como administrador",
+      "joined": "Você entrou no canal."
+    },
+    "system": {
+      "member_added": "{actor} adicionou {target}.",
+      "member_removed": "{actor} removeu {target}.",
+      "member_left": "{actor} saiu do canal.",
+      "owner_changed": "{actor} alterou o papel de {target}.",
+      "renamed": "{actor} renomeou o canal de \"{old}\" para \"{new}\".",
+      "archived": "{actor} arquivou o canal.",
+      "reopened": "{actor} reabriu o canal.",
+      "admin_joined": "{actor} entrou como administrador. Motivo: {reason}"
+    }
   },
   "chat": {
     "marketingOptOut": "Recusa de marketing",
@@ -390,6 +584,7 @@
     "addReaction": "Adicionar reação",
     "filterByTags": "Filtrar por etiquetas",
     "filterAll": "Todos",
+    "filterByStatus": "Filtrar por status",
     "agentTyping": "{name} está digitando…",
     "statusNew": "Novo",
     "statusInProgress": "Em andamento",
@@ -515,7 +710,10 @@
     "serviceWindowExpired": "A janela de mensagens de 24 horas expirou. Somente mensagens de modelo podem ser enviadas até o cliente responder.",
     "sendTemplateAction": "Enviar modelo",
     "retrySending": "Tentar enviar novamente",
-    "conversationOwnedByAnother": "Esta conversa está atribuída a outro agente. Sua mensagem não foi enviada."
+    "conversationOwnedByAnother": "Esta conversa está atribuída a outro agente. Sua mensagem não foi enviada.",
+    "notesPickContact": "Selecione um contato",
+    "notesPickContactDesc": "Escolha um contato à esquerda para ler e escrever notas internas sobre ele.",
+    "openConversation": "Abrir conversa"
   },
   "contacts": {
     "title": "Contatos",
@@ -738,7 +936,16 @@
     "themeLight": "Tema claro",
     "themeDark": "Tema escuro",
     "themeSystem": "Tema do sistema",
-    "themeColor": "Tema de cor"
+    "themeColor": "Tema de cor",
+    "uiTheme": "Tema do sistema",
+    "uiThemeDesc": "Define a moldura do sistema (menu, topo e fundo) para todos os usuários. O conteúdo das páginas é o mesmo nos dois temas.",
+    "uiThemeBitrix": "Bitrix",
+    "uiThemeBitrixDesc": "Plano de fundo, menu translúcido e abas no topo.",
+    "uiThemeClassic": "Clássico",
+    "uiThemeClassicDesc": "Menu lateral sólido com submenus, sem plano de fundo.",
+    "uiThemeApply": "Aplicar tema para todos",
+    "uiThemeSaved": "Tema do sistema atualizado para todos os usuários",
+    "uiThemeSaveFailed": "Não foi possível salvar o tema do sistema"
   },
   "users": {
     "title": "Gerenciamento de usuários",
@@ -1519,7 +1726,30 @@
     "contextFixed": "Seu contexto: {context}.",
     "contextGlobalOnly": "somente conteúdo global",
     "contextChooseHelp": "Deixe a unidade e o departamento vazios para buscar só o conteúdo disponível a todos.",
-    "contextOutOfReach": "Este contexto está fora do seu alcance."
+    "contextOutOfReach": "Este contexto está fora do seu alcance.",
+    "tabHome": "Central de ajuda",
+    "tabDocs": "Documentos",
+    "homeTitle": "Como podemos ajudar?",
+    "homeSubtitle": "Encontre respostas nos manuais, processos e perguntas frequentes.",
+    "homeSearchPlaceholder": "Buscar na base de conhecimento",
+    "homeSuggested": "Sugestões:",
+    "homeCategories": "Categorias",
+    "homeDocCount": "Nenhum documento | 1 documento | {n} documentos",
+    "homeRecent": "Atualizados recentemente",
+    "homeResults": "Nenhum resultado | 1 resultado | {n} resultados",
+    "homeBack": "Voltar para a central",
+    "loadMore": "Carregar mais",
+    "readerBreadcrumb": "Caminho",
+    "readerManage": "Gerenciar documento",
+    "readerInCategory": "Em {category}",
+    "readerUpdated": "Atualizado em {date}",
+    "readerMinutes": "{n} min de leitura",
+    "readerOnThisPage": "Neste artigo",
+    "readerPrev": "Anterior",
+    "readerNext": "Próximo",
+    "readerPager": "Navegação entre artigos",
+    "readerTop": "Voltar ao topo",
+    "homeResultsFor": "Resultados para \"{q}\""
   },
   "xprocessIntegration": {
     "title": "Integração ERP X2",
@@ -1754,6 +1984,11 @@
     "chartLine": "Linha",
     "chartBar": "Barra",
     "chartPie": "Pizza",
+    "chartMap": "Mapa (Brasil)",
+    "mapAria": "Contatos por estado",
+    "mapTotal": "{count} contatos",
+    "mapOther": "Outros",
+    "mapOtherHint": "Números de outros países ou sem DDD reconhecível",
     "groupBy": "Agrupar por",
     "selectGroupBy": "Selecionar campo para agrupar",
     "noneTimeSeries": "Nenhum (série temporal)",
@@ -2157,6 +2392,10 @@
     "strictConversationVisibilityDesc": "Quando ligado, uma conversa atribuída é visível e respondível apenas pelo agente responsável. Supervisores e managers mantêm acesso conforme permissões.",
     "signWithAgentName": "Assinar mensagens com o nome do agente",
     "signWithAgentNameDesc": "Quando ligado, o texto livre e as legendas de mídia enviadas recebem, no início, o primeiro nome do agente (em negrito), para o cliente ver quem está respondendo. Não afeta modelos nem o rótulo interno.",
+    "awayReassign": "Manter as conversas enquanto o agente está ausente",
+    "awayReassignDesc": "Desligado: ao marcar ausente, as conversas do agente voltam para a fila na hora. Ligado: elas ficam com o agente e só voltam para a fila depois do tempo abaixo.",
+    "awayReassignAfter": "Devolver à fila após (minutos)",
+    "awayReassignAfterDesc": "Contado a partir do momento em que o agente marcou ausente. Entre 1 e 1440.",
     "businessHours": "Horário comercial",
     "businessHoursDesc": "Defina quando o chatbot está ativo e configure o comportamento fora do horário",
     "enableBusinessHours": "Ativar horário comercial",
@@ -2330,7 +2569,7 @@
     "changedByAnother": "Outra pessoa já assumiu ou alterou este atendimento. A lista foi atualizada."
   },
   "occurrences": {
-    "title": "Ocorrências",
+    "title": "Protocolos",
     "subtitle": "Casos de atendimento e protocolos",
     "searchPlaceholder": "Buscar por protocolo...",
     "allStages": "Todas as etapas",
@@ -3199,9 +3438,32 @@
     }
   },
   "agentAnalytics": {
+    "live": {
+      "title": "Ao vivo",
+      "scopeAll": "Toda a organização",
+      "scopeTeam": "Suas equipes",
+      "loadFailed": "Não foi possível atualizar",
+      "online": "Online",
+      "away": "Ausentes",
+      "offline": "Offline",
+      "queue": "Na fila",
+      "empty": "Nenhum atendente para mostrar.",
+      "agent": "Atendente",
+      "state": "Status",
+      "active": "Abertas",
+      "awaitingAgent": "Cliente aguardando",
+      "awaitingCustomer": "Aguardando cliente",
+      "slaAtRisk": "SLA em risco",
+      "states": {
+        "online": "Online",
+        "away": "Ausente",
+        "offline": "Offline"
+      }
+    },
     "title": "Análises de agentes",
     "subtitle": "Métricas de desempenho de todos os agentes",
     "myMetrics": "Suas métricas de desempenho",
+    "myMetricsTeamHint": "Os cartões abaixo são as suas métricas; o painel Ao vivo mostra as suas equipes",
     "allAgents": "Todos os agentes",
     "selectAgent": "Selecionar agente",
     "searchAgent": "Buscar agente...",
@@ -3731,7 +3993,7 @@
     "permissionSentDesc": "O contato precisa aceitar a permissão de chamada no WhatsApp antes de você ligar. Tente novamente após ele aceitar."
   },
   "sales": {
-    "title": "Minha Operação",
+    "title": "CRM",
     "subtitle": "Acompanhe suas oportunidades de venda do funil ao fechamento",
     "tabMyWallet": "Minha carteira",
     "walletLoadFailed": "Falha ao carregar sua carteira. Tente novamente.",
@@ -3839,7 +4101,24 @@
     "estimatedValueChangeFailed": "Falha ao atualizar o valor estimado",
     "dashboardTitle": "Dashboard de Vendas",
     "dashboardSubtitle": "Indicadores gerenciais do funil de vendas",
-    "dashboardEmpty": "Nenhum indicador disponível ainda"
+    "dashboardEmpty": "Nenhum indicador disponível ainda",
+    "tabBoard": "Quadro",
+    "tabList": "Lista",
+    "scope_all": "Todas as oportunidades da organização",
+    "scope_team": "Oportunidades dos vendedores da sua equipe",
+    "scope_own": "Suas oportunidades, do funil ao fechamento",
+    "filtersLabel": "Filtros de vendas",
+    "filterStore": "Filtrar por loja",
+    "filterSeller": "Filtrar por vendedor",
+    "allStores": "Todas as lojas",
+    "allSellers": "Todos os vendedores",
+    "noSeller": "Sem vendedor",
+    "tabDashboard": "Painel",
+    "valueTotal": "Total",
+    "valueEmpty": "Nenhum valor registrado no período.",
+    "valueColStatus": "Situação",
+    "valueColValue": "Valor",
+    "valueColShare": "Participação"
   },
   "occurrenceDocuments": {
     "sectionLabel": "Notas fiscais e cupons",
@@ -3949,6 +4228,10 @@
       "chat_assign": {
         "label": "Atribuição de conversas",
         "description": "Defina qual atendente cuida de cada conversa."
+      },
+      "team_chat": {
+        "label": "Chat interno",
+        "description": "Converse com a equipe em canais e mensagens diretas."
       },
       "conversations": {
         "label": "Visibilidade de conversas",
@@ -4260,6 +4543,26 @@
         "label": "Atribuir conversas",
         "description": "Escolher qual atendente cuida de cada conversa."
       },
+      "team_chat_read": {
+        "label": "Ver o chat interno",
+        "description": "Abrir os canais e as mensagens de que participa."
+      },
+      "team_chat_write": {
+        "label": "Enviar mensagens internas",
+        "description": "Escrever nos canais e iniciar mensagens diretas."
+      },
+      "team_chat_manage": {
+        "label": "Gerenciar canais internos",
+        "description": "Criar e gerenciar os canais do chat interno."
+      },
+      "team_chat_delete": {
+        "label": "Excluir mensagens de outros",
+        "description": "Remover mensagens internas escritas por outras pessoas."
+      },
+      "team_chat_join_any": {
+        "label": "Entrar em canais privados",
+        "description": "Entrar em um canal interno privado sem ser membro. Exige um motivo e fica registrado para os membros e na auditoria."
+      },
       "conversations_view_all": {
         "label": "Ver todas as conversas",
         "description": "Ver e atuar em conversas de qualquer atendente."
@@ -4432,6 +4735,10 @@
         "label": "Ver todas as oportunidades",
         "description": "Ver e gerenciar oportunidades de qualquer vendedor."
       },
+      "sales_opportunities_view_team": {
+        "label": "Ver oportunidades da equipe",
+        "description": "Ver e gerenciar as oportunidades dos vendedores das equipes da pessoa (ex.: supervisor de loja)."
+      },
       "sales_opportunities_delete": {
         "label": "Excluir oportunidades definitivamente",
         "description": "Apagar uma oportunidade para sempre. Só tem efeito para super administradores."
@@ -4540,6 +4847,10 @@
         "label": "Visualizar desempenho dos atendentes",
         "description": "Consultar indicadores de produtividade dos atendentes."
       },
+        "analytics_agents_view_team": {
+          "label": "Supervisionar agentes da equipe",
+          "description": "Ver o painel ao vivo dos atendentes das equipes das quais a pessoa faz parte."
+        },
       "call_logs_read": {
         "label": "Visualizar histórico de chamadas",
         "description": "Consultar as chamadas registradas."
@@ -4713,5 +5024,16 @@
     "repriceOff": "A medição está desligada neste servidor.",
     "loadForbidden": "Você não tem acesso ao consumo.",
     "priceRequired": "Preencha país, categoria, preço, moeda e início."
+  },
+  "phone": {
+    "notConfiguredTitle": "Telefone ainda não configurado",
+    "notConfiguredAgent": "O discador VoIP será liberado quando o administrador conectar o provedor de telefonia.",
+    "notConfiguredAdmin": "Conecte o provedor de telefonia VoIP (SIP) para liberar as ligações. A integração entra quando a validação do provedor for concluída.",
+    "configPath": "Configurações → Integrações → Telefonia (VoIP)",
+    "numberLabel": "Número de telefone",
+    "numberPlaceholder": "Digite um número",
+    "backspace": "Apagar último dígito",
+    "keypad": "Teclado numérico",
+    "call": "Ligar"
   }
 }

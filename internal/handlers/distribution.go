@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -209,14 +210,17 @@ func (a *App) sendTransferConflict(r *fastglue.Request, orgID, userID, transferI
 // Distribution audit events, written to the existing audit log (resource type
 // "transfers", resource id = the transfer) so there is a single trail.
 const (
-	distEventClaimed         = "claimed"          // an agent took an unassigned attendance (reply, self-assign, queue pick)
-	distEventAssigned        = "assigned"         // a supervisor or the system set/changed the responsible agent
-	distEventReleased        = "released"         // returned to the queue by a person
-	distEventReturnedAway    = "returned_away"    // returned because the agent went away
-	distEventReturnedOffline = "returned_offline" // returned because the agent stayed disconnected past the grace
-	distEventAutoAssigned    = "auto_assigned"    // chosen by the distribution strategy
-	distEventQueued          = "queued"           // no eligible agent: left in the queue
-	distEventConflict        = "conflict"         // an attempt lost a race or was refused ownership
+	distEventClaimed                   = "claimed"                     // an agent took an unassigned attendance (reply, self-assign, queue pick)
+	distEventAssigned                  = "assigned"                    // a supervisor or the system set/changed the responsible agent
+	distEventReleased                  = "released"                    // returned to the queue by a person
+	distEventReturnedAway              = "returned_away"               // returned because the agent went away
+	distEventReturnedOffline           = "returned_offline"            // returned because the agent stayed disconnected past the grace
+	distEventReturnedAwayTimeout       = "returned_away_timeout"       // returned because the agent stayed away past the organization's tolerance
+	distEventReassignedAwayTimeout     = "reassigned_away_timeout"     // handed to another agent because the owner stayed away past the tolerance
+	distEventReassignedCustomerWaiting = "reassigned_customer_waiting" // handed to another agent because the customer wrote to an agent away past the tolerance
+	distEventAutoAssigned              = "auto_assigned"               // chosen by the distribution strategy
+	distEventQueued                    = "queued"                      // no eligible agent: left in the queue
+	distEventConflict                  = "conflict"                    // an attempt lost a race or was refused ownership
 )
 
 // auditDistribution records a distribution event. actor == nil means the system
@@ -235,6 +239,10 @@ func (a *App) auditDistribution(orgID uuid.UUID, actor *uuid.UUID, transferID uu
 	}
 	audit.LogAudit(a.DB, orgID, actorID, actorName, models.ResourceTransfers, transferID,
 		models.AuditActionUpdated, nil, nil, changes...)
+
+	if ownershipEvents[event] {
+		a.recordOwnership(orgID, actor, transferID, event, from, to)
+	}
 }
 
 func uuidString(id *uuid.UUID) any {
@@ -252,8 +260,26 @@ func (a *App) BroadcastAgentPresence(orgID, userID uuid.UUID, online bool) {
 	}
 	a.WSHub.BroadcastToOrg(orgID, websocket.WSMessage{
 		Type:    websocket.TypeAgentPresence,
-		Payload: map[string]any{"user_id": userID.String(), "online": online},
+		Payload: a.withPresence(orgID, userID, map[string]any{"user_id": userID.String(), "online": online}),
 	})
+}
+
+// withPresence adds the agent's backend-computed state and the instant it began
+// to a presence/availability payload, so clients show "away for 08:32" from a
+// server timestamp instead of timing it themselves. "online" and "is_available"
+// keep their meaning; "state" is the combined answer ("since" is null when the
+// log cannot say when it began).
+func (a *App) withPresence(orgID, userID uuid.UUID, payload map[string]any) map[string]any {
+	info := a.CurrentPresence(orgID, userID)
+	if info.State == "" {
+		return payload
+	}
+	payload["state"] = string(info.State)
+	payload["since"] = nil
+	if info.Since != nil {
+		payload["since"] = info.Since.UTC().Format(time.RFC3339Nano)
+	}
+	return payload
 }
 
 // broadcastAgentAvailability tells the organization an agent toggled
@@ -264,7 +290,7 @@ func (a *App) broadcastAgentAvailability(orgID, userID uuid.UUID, available bool
 	}
 	a.WSHub.BroadcastToOrg(orgID, websocket.WSMessage{
 		Type:    websocket.TypeAgentAvailability,
-		Payload: map[string]any{"user_id": userID.String(), "is_available": available},
+		Payload: a.withPresence(orgID, userID, map[string]any{"user_id": userID.String(), "is_available": available}),
 	})
 }
 

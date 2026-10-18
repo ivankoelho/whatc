@@ -29,11 +29,24 @@ type AgentPerformanceStats struct {
 	AvgResolutionMins    float64 `json:"avg_resolution_mins"`
 	TransfersHandled     int64   `json:"transfers_handled"`
 	ActiveTransfers      int64   `json:"active_transfers"`
-	MessagesSent         int64   `json:"messages_sent"`
-	TotalBreakTimeMins   float64 `json:"total_break_time_mins"`
-	BreakCount           int64   `json:"break_count"`
-	IsAvailable          bool    `json:"is_available"`
-	CurrentBreakStart    *string `json:"current_break_start,omitempty"`
+	// ActiveTransfers split by who the attendance is waiting for (see
+	// calculateStatsFor). Both can be below ActiveTransfers: an attendance with
+	// no message since it started is in neither.
+	AwaitingAgent    int64 `json:"awaiting_agent"`
+	AwaitingCustomer int64 `json:"awaiting_customer"`
+	// SLAAtRisk: escalated, not breached and the customer is waiting right now.
+	// SLABreached: breached at some point (historical, "SLA violado").
+	SLAAtRisk   int64 `json:"sla_at_risk"`
+	SLABreached int64 `json:"sla_breached"`
+	// Ownership moves in the period (see calculateStatsFor).
+	ReassignedAway     int64   `json:"reassigned_away"`
+	ReassignedIn       int64   `json:"reassigned_in"`
+	ReturnedToQueue    int64   `json:"returned_to_queue"`
+	MessagesSent       int64   `json:"messages_sent"`
+	TotalBreakTimeMins float64 `json:"total_break_time_mins"`
+	BreakCount         int64   `json:"break_count"`
+	IsAvailable        bool    `json:"is_available"`
+	CurrentBreakStart  *string `json:"current_break_start,omitempty"`
 }
 
 // TrendPoint represents a data point for time-series charts
@@ -228,17 +241,29 @@ func (a *App) calculateSummaryStats(orgID uuid.UUID, start, end time.Time, summa
 		Where("organization_id = ? AND status = ?", orgID, models.TransferStatusActive).
 		Count(&summary.ActiveTransfers)
 
-	// Average queue time (time from transfer to assignment for assigned transfers)
+	// Average queue time: from entering the queue to the FIRST pickup
+	// (picked_up_at, never rewritten). Attendances still waiting have no
+	// picked_up_at and are not part of the average. updated_at is not used: it
+	// moves for any edit, so it measured nothing.
 	type AvgResult struct {
 		Avg float64
 	}
 	var queueTimeResult AvgResult
 	a.DB.Model(&models.AgentTransfer{}).
-		Select("AVG(EXTRACT(EPOCH FROM (updated_at - transferred_at))/60) as avg").
-		Where("organization_id = ? AND agent_id IS NOT NULL AND transferred_at >= ? AND transferred_at <= ?",
+		Select("COALESCE(AVG(EXTRACT(EPOCH FROM (picked_up_at - transferred_at))/60), 0) as avg").
+		Where("organization_id = ? AND picked_up_at IS NOT NULL AND transferred_at >= ? AND transferred_at <= ?",
 			orgID, start, end).
 		Scan(&queueTimeResult)
 	summary.AvgQueueTimeMins = queueTimeResult.Avg
+
+	// Average first response: entering the queue to the agent's first reply.
+	var firstResponseResult AvgResult
+	a.DB.Model(&models.AgentTransfer{}).
+		Select("COALESCE(AVG(EXTRACT(EPOCH FROM (first_response_at - transferred_at))/60), 0) as avg").
+		Where("organization_id = ? AND first_response_at IS NOT NULL AND transferred_at >= ? AND transferred_at <= ?",
+			orgID, start, end).
+		Scan(&firstResponseResult)
+	summary.AvgFirstResponseMins = firstResponseResult.Avg
 
 	// Average resolution time (time from transfer to resume)
 	var resolutionTimeResult AvgResult
@@ -264,170 +289,6 @@ func (a *App) calculateSummaryStats(orgID uuid.UUID, start, end time.Time, summa
 	for _, sc := range sourceCounts {
 		summary.TransfersBySource[sc.Source] = sc.Count
 	}
-}
-
-func (a *App) calculateAgentSummaryStats(orgID, agentID uuid.UUID, start, end time.Time, summary *AgentAnalyticsSummary) {
-	// Total transfers handled by this agent (resumed)
-	a.DB.Model(&models.AgentTransfer{}).
-		Where("organization_id = ? AND agent_id = ? AND status = ? AND transferred_at >= ? AND transferred_at <= ?",
-			orgID, agentID, models.TransferStatusResumed, start, end).
-		Count(&summary.TotalTransfersHandled)
-
-	// Active transfers for this agent
-	a.DB.Model(&models.AgentTransfer{}).
-		Where("organization_id = ? AND agent_id = ? AND status = ?", orgID, agentID, models.TransferStatusActive).
-		Count(&summary.ActiveTransfers)
-
-	// Average resolution time for this agent
-	type AvgResult struct {
-		Avg float64
-	}
-	var resolutionTimeResult AvgResult
-	a.DB.Model(&models.AgentTransfer{}).
-		Select("AVG(EXTRACT(EPOCH FROM (resumed_at - transferred_at))/60) as avg").
-		Where("organization_id = ? AND agent_id = ? AND status = ? AND resumed_at IS NOT NULL AND transferred_at >= ? AND transferred_at <= ?",
-			orgID, agentID, models.TransferStatusResumed, start, end).
-		Scan(&resolutionTimeResult)
-	summary.AvgResolutionMins = resolutionTimeResult.Avg
-
-	// Transfers by source for this agent
-	type SourceCount struct {
-		Source string
-		Count  int64
-	}
-	var sourceCounts []SourceCount
-	a.DB.Model(&models.AgentTransfer{}).
-		Select("source, COUNT(*) as count").
-		Where("organization_id = ? AND agent_id = ? AND transferred_at >= ? AND transferred_at <= ?", orgID, agentID, start, end).
-		Group("source").
-		Scan(&sourceCounts)
-
-	for _, sc := range sourceCounts {
-		summary.TransfersBySource[sc.Source] = sc.Count
-	}
-
-	// Calculate break time
-	summary.TotalBreakTimeMins, summary.BreakCount = a.calculateBreakTime(agentID, start, end)
-}
-
-func (a *App) calculateAgentStats(orgID, agentID uuid.UUID, start, end time.Time) AgentPerformanceStats {
-	stats := AgentPerformanceStats{
-		AgentID: agentID.String(),
-	}
-
-	// Get agent name and availability
-	var agent models.User
-	if a.DB.Where("id = ?", agentID).First(&agent).Error == nil {
-		stats.AgentName = agent.FullName
-		stats.IsAvailable = agent.IsAvailable
-	}
-
-	// Transfers handled (resumed)
-	a.DB.Model(&models.AgentTransfer{}).
-		Where("organization_id = ? AND agent_id = ? AND status = ? AND transferred_at >= ? AND transferred_at <= ?",
-			orgID, agentID, models.TransferStatusResumed, start, end).
-		Count(&stats.TransfersHandled)
-
-	// Active transfers
-	a.DB.Model(&models.AgentTransfer{}).
-		Where("organization_id = ? AND agent_id = ? AND status = ?", orgID, agentID, models.TransferStatusActive).
-		Count(&stats.ActiveTransfers)
-
-	// Messages sent - count outgoing messages to contacts during agent's active transfers
-	// This captures all messages sent while the agent was handling the conversation
-	a.DB.Model(&models.Message{}).
-		Where("organization_id = ? AND direction = ? AND created_at >= ? AND created_at <= ?", orgID, models.DirectionOutgoing, start, end).
-		Where("contact_id IN (SELECT contact_id FROM agent_transfers WHERE agent_id = ? AND organization_id = ?)", agentID, orgID).
-		Count(&stats.MessagesSent)
-
-	// Average resolution time
-	type AvgResult struct {
-		Avg float64
-	}
-	var resolutionTimeResult AvgResult
-	a.DB.Model(&models.AgentTransfer{}).
-		Select("AVG(EXTRACT(EPOCH FROM (resumed_at - transferred_at))/60) as avg").
-		Where("organization_id = ? AND agent_id = ? AND status = ? AND resumed_at IS NOT NULL AND transferred_at >= ? AND transferred_at <= ?",
-			orgID, agentID, models.TransferStatusResumed, start, end).
-		Scan(&resolutionTimeResult)
-	stats.AvgResolutionMins = resolutionTimeResult.Avg
-
-	// Calculate break time from availability logs
-	stats.TotalBreakTimeMins, stats.BreakCount = a.calculateBreakTime(agentID, start, end)
-
-	// Check if currently on break and get break start time
-	if !stats.IsAvailable {
-		var currentBreak models.UserAvailabilityLog
-		if a.DB.Where("user_id = ? AND is_available = false AND ended_at IS NULL", agentID).
-			Order("started_at DESC").First(&currentBreak).Error == nil {
-			breakStart := currentBreak.StartedAt.Format(time.RFC3339)
-			stats.CurrentBreakStart = &breakStart
-		}
-	}
-
-	return stats
-}
-
-func (a *App) calculateAllAgentStats(orgID uuid.UUID, start, end time.Time) []AgentPerformanceStats {
-	// Get all agents in the organization through team membership
-	var agents []models.User
-	if err := a.DB.
-		Joins("JOIN team_members ON team_members.user_id = users.id").
-		Joins("JOIN teams ON teams.id = team_members.team_id").
-		Where("users.organization_id = ? AND team_members.role = ?", orgID, models.TeamRoleAgent).
-		Distinct().
-		Find(&agents).Error; err != nil {
-		a.Log.Error("Failed to fetch agents for analytics", "error", err, "org_id", orgID)
-		return []AgentPerformanceStats{}
-	}
-
-	stats := make([]AgentPerformanceStats, 0, len(agents))
-	for _, agent := range agents {
-		agentStats := a.calculateAgentStats(orgID, agent.ID, start, end)
-		stats = append(stats, agentStats)
-	}
-
-	return stats
-}
-
-// calculateBreakTime calculates total break time and count for an agent within a time period
-func (a *App) calculateBreakTime(agentID uuid.UUID, start, end time.Time) (totalMins float64, count int64) {
-	// Get all "away" periods that overlap with the time range
-	var logs []models.UserAvailabilityLog
-	if err := a.DB.Where("user_id = ? AND is_available = false AND started_at <= ? AND (ended_at >= ? OR ended_at IS NULL)",
-		agentID, end, start).
-		Find(&logs).Error; err != nil {
-		a.Log.Error("Failed to fetch availability logs for break time calculation", "error", err, "agent_id", agentID)
-		return 0, 0
-	}
-
-	for _, log := range logs {
-		// Calculate the overlap with our time range
-		logStart := log.StartedAt
-		if logStart.Before(start) {
-			logStart = start
-		}
-
-		var logEnd time.Time
-		if log.EndedAt != nil {
-			logEnd = *log.EndedAt
-		} else {
-			// Still on break, use current time but cap at end of period
-			logEnd = time.Now()
-		}
-		if logEnd.After(end) {
-			logEnd = end
-		}
-
-		// Add duration in minutes
-		if logEnd.After(logStart) {
-			duration := logEnd.Sub(logStart).Minutes()
-			totalMins += duration
-			count++
-		}
-	}
-
-	return totalMins, count
 }
 
 func (a *App) calculateTrendData(orgID uuid.UUID, start, end time.Time, groupBy string, agentID *uuid.UUID) []TrendPoint {

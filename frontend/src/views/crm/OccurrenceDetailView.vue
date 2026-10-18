@@ -37,6 +37,7 @@ import {
   CheckCircle2,
   Copy,
   Trash2,
+  MessageCircle,
 } from 'lucide-vue-next'
 
 const route = useRoute()
@@ -325,6 +326,12 @@ onUnmounted(() => {
               </SelectItem>
             </SelectContent>
           </Select>
+          <Button size="sm" variant="outline" as-child>
+            <RouterLink :to="`/chat/${occurrence.contact_id}`">
+              <MessageCircle class="h-4 w-4 mr-2 text-emerald-500" aria-hidden="true" />
+              {{ $t('chat.openConversation') }}
+            </RouterLink>
+          </Button>
           <Button size="sm" :disabled="isSendingProtocol" @click="sendProtocol">
             <Loader2 v-if="isSendingProtocol" class="h-4 w-4 mr-2 animate-spin" />
             <Send v-else class="h-4 w-4 mr-2" />

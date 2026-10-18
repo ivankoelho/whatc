@@ -3,6 +3,10 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import compression from 'vite-plugin-compression'
 
+// Backend the dev server proxies to. Override to run a second backend (e.g. a
+// branch on another port) without touching one already bound to 8080.
+const apiTarget = process.env.API_PROXY_TARGET || 'http://localhost:8080'
+
 export default defineConfig({
   base: './',
   plugins: [
@@ -70,11 +74,11 @@ export default defineConfig({
     },
     proxy: {
       '/api': {
-        target: 'http://localhost:8080',
+        target: apiTarget,
         changeOrigin: true
       },
       '/ws': {
-        target: 'ws://localhost:8080',
+        target: apiTarget.replace(/^http/, 'ws'),
         ws: true
       }
     }

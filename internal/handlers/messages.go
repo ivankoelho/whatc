@@ -324,6 +324,7 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 	// takes a conversation out of the 'new' queue. Chatbot sends carry no
 	// SentByUserID and deliberately do not count.
 	if opts.SentByUserID != nil {
+		a.recordFirstResponse(req.Account.OrganizationID, req.Contact.ID, *opts.SentByUserID)
 		if _, err := a.transitionContactStatus(req.Contact,
 			models.ContactStatusInProgress,
 			[]models.ContactStatus{models.ContactStatusNew},
@@ -671,6 +672,20 @@ func (a *App) dispatchMessageSentWebhook(account *models.WhatsAppAccount, contac
 		Direction:       models.DirectionOutgoing,
 		SentByUserID:    sentByUserID,
 	})
+}
+
+// recordFirstResponse stamps first_response_at on the active attendance the
+// sending agent owns, only the first time. It is called from the send path: the
+// SLA processor used to be the only writer, which left the field empty for any
+// organization without auto-close. A message from someone who does not own the
+// attendance (a supervisor stepping in) is not the owner's first response.
+func (a *App) recordFirstResponse(orgID, contactID, agentID uuid.UUID) {
+	if err := a.DB.Model(&models.AgentTransfer{}).
+		Where("organization_id = ? AND contact_id = ? AND agent_id = ? AND status = ? AND first_response_at IS NULL",
+			orgID, contactID, agentID, models.TransferStatusActive).
+		Update("first_response_at", time.Now()).Error; err != nil {
+		a.Log.Error("Failed to record first response", "error", err, "contact_id", contactID)
+	}
 }
 
 // updateContactLastMessage updates contact's last_message_at and preview

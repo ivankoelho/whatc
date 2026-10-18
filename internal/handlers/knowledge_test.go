@@ -371,3 +371,27 @@ func TestKnowledge_PutRequiresTheScopeToBeStated(t *testing.T) {
 	b["unit_id"] = "not-a-uuid"
 	assert.Equal(t, fasthttp.StatusBadRequest, put(b))
 }
+
+// The help center's "recently updated" asks for ?sort=updated; the default
+// stays alphabetical.
+func TestKnowledge_ListSortUpdated(t *testing.T) {
+	e := newKnowEnv(t)
+	first := e.create(t, "Alfa", "primeiro texto", nil, nil)
+	e.create(t, "Beta", "segundo texto", nil, nil)
+	require.NoError(t, e.app.DB.Model(&models.KnowledgeDocument{}).Where("id = ?", first).
+		Update("updated_at", time.Now().Add(time.Hour)).Error)
+
+	titles := func(q map[string]string) []string {
+		_, list := e.do(t, e.app.ListKnowledgeDocuments, kreq{user: e.admin.ID, query: q})
+		out := []string{}
+		for _, d := range list["documents"].([]any) {
+			out = append(out, d.(map[string]any)["title"].(string))
+		}
+		return out
+	}
+	assert.Equal(t, []string{"Alfa", "Beta"}, titles(nil))
+	assert.Equal(t, []string{"Alfa", "Beta"}, titles(map[string]string{"sort": "updated"}))
+	require.NoError(t, e.app.DB.Model(&models.KnowledgeDocument{}).Where("id = ?", first).
+		Update("updated_at", time.Now().Add(-time.Hour)).Error)
+	assert.Equal(t, []string{"Beta", "Alfa"}, titles(map[string]string{"sort": "updated"}))
+}

@@ -1908,6 +1908,16 @@ async function sendMediaMessage() {
 
 <template>
   <div class="flex h-full bg-[#0a0a0b] light:bg-gray-50">
+    <!-- Status rail (Bitrix's All / Tasks / CoPilot column) — desktop only;
+         mobile keeps the pills inside the list header. -->
+    <ConversationStatusFilter
+      v-if="!isMobile"
+      rail
+      :model-value="contactsStore.statusFilter"
+      :new-count="contactsStore.newCount"
+      @update:model-value="contactsStore.setStatusFilter"
+    />
+
     <!-- Contacts List — on mobile, this pane takes the full screen and
          hides once a contact is selected (Chat Area below takes over). -->
     <div
@@ -2020,8 +2030,9 @@ async function sendMediaMessage() {
         </div>
       </div>
 
-      <!-- Status filter -->
+      <!-- Status filter (mobile; desktop uses the rail) -->
       <ConversationStatusFilter
+        v-if="isMobile"
         :model-value="contactsStore.statusFilter"
         :new-count="contactsStore.newCount"
         @update:model-value="contactsStore.setStatusFilter"

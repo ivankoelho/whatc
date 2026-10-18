@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -15,7 +15,7 @@ import { slaStatus } from '@/lib/occurrence-sla'
 import { getErrorMessage } from '@/lib/api-utils'
 import { toast } from 'vue-sonner'
 import { useSearchPagination } from '@/composables/useSearchPagination'
-import { ClipboardList, List, LayoutGrid } from 'lucide-vue-next'
+import { ClipboardList, List, LayoutGrid, ListTodo, FilePlus2 } from 'lucide-vue-next'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useOccurrenceViewMode } from '@/composables/useOccurrenceViewMode'
 import OccurrenceBoard from '@/components/crm/OccurrenceBoard.vue'
@@ -100,16 +100,43 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="flex flex-col h-full bg-[#0a0a0b] light:bg-gray-50">
-    <PageHeader :title="$t('occurrences.title')" :description="$t('occurrences.subtitle')" :icon="ClipboardList" icon-gradient="bg-gradient-to-br from-violet-500 to-purple-600 shadow-violet-500/20" />
+  <div class="flex h-full bg-[#0a0a0b] light:bg-gray-50">
+    <Tabs v-model="activeTab" orientation="vertical" class="flex min-h-0 min-w-0 flex-1">
+      <TabsList class="page-rail">
+        <TabsTrigger value="list" :title="$t('occurrences.tabInProgress')" class="page-rail-item"><ListTodo class="h-5 w-5" aria-hidden="true" /><span class="page-rail-label">{{ $t('occurrences.tabInProgress') }}</span></TabsTrigger>
+        <TabsTrigger value="open" :title="$t('occurrences.tabOpenProtocol')" class="page-rail-item"><FilePlus2 class="h-5 w-5" aria-hidden="true" /><span class="page-rail-label">{{ $t('occurrences.tabOpenProtocol') }}</span></TabsTrigger>
+      </TabsList>
 
-    <Tabs v-model="activeTab" class="flex-1 min-h-0 flex flex-col">
-      <div class="px-6 pt-4">
-        <TabsList>
-          <TabsTrigger value="list">{{ $t('occurrences.tabInProgress') }}</TabsTrigger>
-          <TabsTrigger value="open">{{ $t('occurrences.tabOpenProtocol') }}</TabsTrigger>
-        </TabsList>
-      </div>
+      <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+      <!-- Search, stage filter and the List/Board switch sit next to the title. -->
+      <PageHeader :title="$t('occurrences.title')" :description="$t('occurrences.subtitle')" :icon="ClipboardList" icon-gradient="bg-gradient-to-br from-violet-500 to-purple-600 shadow-violet-500/20">
+        <template v-if="activeTab === 'list'" #actions>
+          <div class="flex flex-wrap items-center gap-2">
+            <SearchInput v-model="searchQuery" :placeholder="$t('occurrences.searchPlaceholder')" class="w-64" />
+            <Select v-if="mode === 'list'" v-model="stageFilter" @update:model-value="onStageFilterChange">
+              <SelectTrigger id="occurrences-stage-filter" class="w-48">
+                <SelectValue :placeholder="$t('occurrences.filterByStage')" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{{ $t('occurrences.allStages') }}</SelectItem>
+                <SelectItem v-for="stage in store.stages" :key="stage.id" :value="stage.id">
+                  {{ stage.name }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <ToggleGroup v-model="mode" type="single" :aria-label="$t('occurrences.viewModeLabel')">
+              <ToggleGroupItem value="list" :aria-label="$t('occurrences.viewList')">
+                <List class="h-4 w-4 mr-1.5" />
+                {{ $t('occurrences.viewList') }}
+              </ToggleGroupItem>
+              <ToggleGroupItem value="board" :aria-label="$t('occurrences.viewBoard')">
+                <LayoutGrid class="h-4 w-4 mr-1.5" />
+                {{ $t('occurrences.viewBoard') }}
+              </ToggleGroupItem>
+            </ToggleGroup>
+          </div>
+        </template>
+      </PageHeader>
 
       <TabsContent value="open" class="flex-1 min-h-0">
         <ScrollArea orientation="vertical" class="flex-1 h-full">
@@ -129,40 +156,17 @@ onMounted(async () => {
       @retry="fetchOccurrences"
     />
 
+    <!-- Board: the Kanban takes the whole area, no card behind it. -->
+    <div v-else-if="mode === 'board'" class="h-full">
+      <OccurrenceBoard :protocol="searchQuery || undefined" />
+    </div>
+
+    <!-- List: the table keeps its card. -->
     <ScrollArea v-else orientation="vertical" class="flex-1 h-full">
       <div class="p-6">
         <Card>
-          <CardHeader>
-            <div class="flex items-center justify-between flex-wrap gap-4">
-              <CardTitle>{{ $t('occurrences.title') }}</CardTitle>
-              <div class="flex items-center gap-2">
-                <SearchInput v-model="searchQuery" :placeholder="$t('occurrences.searchPlaceholder')" class="w-64" />
-                <Select v-if="mode === 'list'" v-model="stageFilter" @update:model-value="onStageFilterChange">
-                  <SelectTrigger id="occurrences-stage-filter" class="w-48">
-                    <SelectValue :placeholder="$t('occurrences.filterByStage')" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">{{ $t('occurrences.allStages') }}</SelectItem>
-                    <SelectItem v-for="stage in store.stages" :key="stage.id" :value="stage.id">
-                      {{ stage.name }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-                <ToggleGroup v-model="mode" type="single" :aria-label="$t('occurrences.viewModeLabel')">
-                  <ToggleGroupItem value="list" :aria-label="$t('occurrences.viewList')">
-                    <List class="h-4 w-4 mr-1.5" />
-                    {{ $t('occurrences.viewList') }}
-                  </ToggleGroupItem>
-                  <ToggleGroupItem value="board" :aria-label="$t('occurrences.viewBoard')">
-                    <LayoutGrid class="h-4 w-4 mr-1.5" />
-                    {{ $t('occurrences.viewBoard') }}
-                  </ToggleGroupItem>
-                </ToggleGroup>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div v-if="mode === 'list'" id="occurrences-list">
+          <CardContent class="pt-6">
+            <div id="occurrences-list">
               <DataTable
                 :items="store.occurrences"
                 :columns="columns"
@@ -229,12 +233,12 @@ onMounted(async () => {
                 </template>
               </DataTable>
             </div>
-            <OccurrenceBoard v-else :protocol="searchQuery || undefined" />
           </CardContent>
         </Card>
       </div>
     </ScrollArea>
       </TabsContent>
+      </div>
     </Tabs>
   </div>
 </template>

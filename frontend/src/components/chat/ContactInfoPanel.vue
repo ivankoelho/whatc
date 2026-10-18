@@ -22,7 +22,7 @@ import {
   CommandItem,
   CommandList
 } from '@/components/ui/command'
-import { X, ArrowLeft, ChevronDown, Phone, Plus, Check, Tags, Loader2, Copy, Pencil } from 'lucide-vue-next'
+import { X, ArrowLeft, ChevronDown, Phone, Plus, Check, Tags, Loader2, Copy, Pencil, SquareUser } from 'lucide-vue-next'
 import { TagBadge } from '@/components/ui/tag-badge'
 import { IconButton } from '@/components/shared'
 import { Input } from '@/components/ui/input'
@@ -366,7 +366,7 @@ async function updateContactTags(tags: string[]) {
 
 <template>
   <div
-    class="flex flex-col bg-card h-full relative"
+    class="flex flex-col bg-muted/60 h-full relative"
     :class="isMobile && 'w-full'"
     :style="!isMobile && { width: `${panelWidth}px` }"
   >
@@ -378,27 +378,30 @@ async function updateContactTags(tags: string[]) {
       @mousedown="startResize"
     />
 
-    <!-- Header -->
-    <div class="h-12 px-3 border-b flex items-center justify-between">
-      <h3 class="font-medium text-sm">{{ $t('chat.contactInfo') }}</h3>
-      <Button variant="ghost" size="icon" class="h-8 w-8" :aria-label="isMobile ? $t('common.back') : undefined" @click="emit('close')">
-        <ArrowLeft v-if="isMobile" class="h-4 w-4" />
-        <X v-else class="h-4 w-4" />
+    <!-- Header: title, close on the right (mobile: back arrow on the left) -->
+    <div class="h-14 shrink-0 px-4 border-b bg-card flex items-center gap-2">
+      <Button v-if="isMobile" variant="ghost" size="icon" class="-ml-2 h-8 w-8" :aria-label="$t('common.back')" @click="emit('close')">
+        <ArrowLeft class="h-4 w-4" />
+      </Button>
+      <h3 class="flex-1 font-semibold text-[15px]">{{ $t('chat.contactInfo') }}</h3>
+      <Button v-if="!isMobile" variant="ghost" size="icon" class="-mr-2 h-8 w-8" :aria-label="$t('common.close')" @click="emit('close')">
+        <X class="h-4 w-4" />
       </Button>
     </div>
 
-    <ScrollArea class="flex-1">
-      <div class="p-4 space-y-4">
+    <!-- Each block is a white card on the grey panel, like Bitrix's sidebar -->
+    <ScrollArea class="scroll-clamp-x flex-1">
+      <div class="p-3 space-y-3">
         <!-- Contact Header -->
-        <div class="flex items-start gap-3 pb-4 border-b">
-          <Avatar class="h-16 w-16 shrink-0">
+        <div class="relative flex flex-col items-center gap-3 rounded-xl bg-card p-5 text-center shadow-sm">
+          <Avatar class="h-20 w-20 shrink-0">
             <AvatarImage :src="contact.avatar_url" />
-            <AvatarFallback :class="'text-lg bg-gradient-to-br text-white ' + getAvatarGradient(contact.name || contact.phone_number)">
+            <AvatarFallback :class="'text-2xl bg-gradient-to-br text-white ' + getAvatarGradient(contact.name || contact.phone_number)">
               {{ getInitials(contact.name || contact.phone_number) }}
             </AvatarFallback>
           </Avatar>
-          <div class="min-w-0 flex-1">
-          <div v-if="!(isEditing && canRenameContact)" class="flex items-center gap-1">
+          <div class="min-w-0 w-full">
+          <div v-if="!(isEditing && canRenameContact)" class="flex items-center justify-center gap-1">
             <h4 id="contact-info-name" class="font-medium break-words min-w-0">{{ displayName }}</h4>
             <IconButton
               id="contact-info-copy-name"
@@ -418,7 +421,7 @@ async function updateContactTags(tags: string[]) {
               @keyup.enter="saveAll"
             />
           </div>
-          <div class="flex items-center gap-1 text-sm text-muted-foreground mt-1">
+          <div class="flex items-center justify-center gap-1 text-sm text-muted-foreground mt-1">
             <Phone class="h-3 w-3" />
             <span id="contact-info-phone">{{ contact.phone_number }}</span>
             <IconButton
@@ -429,9 +432,28 @@ async function updateContactTags(tags: string[]) {
               @click="copyText(contact.phone_number)"
             />
           </div>
-          <!-- Registration: type and document always; unit/department only for a colaborador -->
+          </div>
+          <IconButton
+            v-if="canEdit && !isEditing"
+            id="contact-info-edit-name"
+            :icon="Pencil"
+            :label="$t('contacts.editContact')"
+            class="absolute right-2 top-2 h-7 w-7"
+            @click="startEdit"
+          />
+        </div>
+
+        <!-- Registration card: type and document always; unit/department only
+             for a colaborador. Save/cancel live here, at the end of the
+             editable fields, and also commit the name edited above. -->
+        <div class="rounded-xl bg-card px-4 pb-4 pt-2 shadow-sm">
+          <h5 class="flex items-center gap-2 py-2 text-sm font-medium">
+            <SquareUser class="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+            {{ $t('contacts.registration') }}
+          </h5>
           <ContactRegistrationSection
             ref="registrationRef"
+            class="!mt-1"
             :contact="contact"
             :editing="isEditing && canEditRegistration"
             :units="placementUnits"
@@ -446,19 +468,10 @@ async function updateContactTags(tags: string[]) {
               {{ $t('common.save') }}
             </Button>
           </div>
-          </div>
-          <IconButton
-            v-if="canEdit && !isEditing"
-            id="contact-info-edit-name"
-            :icon="Pencil"
-            :label="$t('contacts.editContact')"
-            class="h-7 w-7 shrink-0"
-            @click="startEdit"
-          />
         </div>
 
         <!-- Tags Section (always shown) -->
-        <div class="pb-4">
+        <div class="rounded-xl bg-card px-4 pb-4 pt-2 shadow-sm">
           <div class="flex items-center justify-between py-2">
             <h5 class="text-sm font-medium flex items-center gap-2">
               <Tags class="h-4 w-4 text-muted-foreground" />
@@ -525,7 +538,7 @@ async function updateContactTags(tags: string[]) {
         </div>
 
         <!-- Contact Metadata -->
-        <div v-if="hasMetadata" class="space-y-3">
+        <div v-if="hasMetadata" class="space-y-3 rounded-xl bg-card p-4 shadow-sm">
           <!-- General section: top-level primitives -->
           <MetadataSection
             v-if="metadataPrimitives.length > 0"
@@ -542,7 +555,7 @@ async function updateContactTags(tags: string[]) {
         </div>
 
         <!-- Flow panel: nothing at all (not even the flow name) without a session or without anything to show -->
-        <template v-if="props.sessionData && sortedSections.length > 0">
+        <div v-if="props.sessionData && sortedSections.length > 0" class="space-y-2 rounded-xl bg-card p-4 shadow-sm">
           <!-- Flow Name Badge -->
           <div v-if="props.sessionData?.flow_name" class="flex items-center gap-2">
             <Badge variant="outline" class="text-xs">
@@ -635,7 +648,7 @@ async function updateContactTags(tags: string[]) {
               </div>
             </div>
           </div>
-        </template>
+        </div>
 
         <ContactSalesOpportunitiesPanel
           v-if="canReadSalesOpportunities"

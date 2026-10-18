@@ -6,6 +6,7 @@
 // gets none and the server uses their own context. Nothing here infers a context.
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -19,6 +20,8 @@ import KnowledgeDocumentDialog from '@/components/knowledge/KnowledgeDocumentDia
 import KnowledgeDocumentPanel from '@/components/knowledge/KnowledgeDocumentPanel.vue'
 import KnowledgeSearchPanel from '@/components/knowledge/KnowledgeSearchPanel.vue'
 import KnowledgeIndexBar from '@/components/knowledge/KnowledgeIndexBar.vue'
+import KnowledgeHome from '@/components/knowledge/KnowledgeHome.vue'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   knowledgeService,
   type KnowledgeDocument,
@@ -40,9 +43,10 @@ import {
   scopeName,
   whoArchived,
 } from '@/lib/knowledge'
-import { BookOpen, Plus, Pencil, Trash2, Archive, ArchiveRestore, Search, X } from 'lucide-vue-next'
+import { BookOpen, Plus, Pencil, Trash2, Archive, ArchiveRestore, Search, X, LibraryBig, List } from 'lucide-vue-next'
 
 const { t } = useI18n()
+const route = useRoute()
 const authStore = useAuthStore()
 const ALL = '__all'
 
@@ -66,6 +70,9 @@ const departmentFilter = ref(ALL)
 const searchOpen = ref(false)
 
 const selectedId = ref<string | null>(null)
+// Help center first; the full list/admin is one click away in the rail.
+const activeTab = ref<'home' | 'docs'>('home')
+const homeRef = ref<InstanceType<typeof KnowledgeHome> | null>(null)
 const reloadToken = ref(0)
 const dialogOpen = ref(false)
 const dialogDocId = ref<string | null>(null)
@@ -152,6 +159,7 @@ async function loadStatus() {
 }
 
 async function refresh() {
+  homeRef.value?.refresh()
   await Promise.all([loadDocs(), loadStatus()])
   reloadToken.value++
 }
@@ -171,6 +179,11 @@ function clearFilters() {
 }
 
 onMounted(async () => {
+  // ?doc=<id> (the reader's "Manage" button): open that document's panel on the admin tab.
+  if (typeof route.query.doc === 'string') {
+    activeTab.value = 'docs'
+    selectedId.value = route.query.doc
+  }
   await loadScopes()
   await Promise.all([loadDocs(), loadStatus()])
 })
@@ -247,7 +260,26 @@ async function reindex(onlyStale: boolean) {
 </script>
 
 <template>
-  <div class="flex flex-col h-full bg-[#0a0a0b] light:bg-gray-50">
+  <div class="flex h-full bg-[#0a0a0b] light:bg-gray-50">
+   <Tabs v-model="activeTab" orientation="vertical" class="flex min-h-0 min-w-0 flex-1">
+    <TabsList class="page-rail">
+      <TabsTrigger value="home" :title="t('knowledge.tabHome')" class="page-rail-item">
+        <LibraryBig class="h-5 w-5" aria-hidden="true" /><span class="page-rail-label">{{ t('knowledge.tabHome') }}</span>
+      </TabsTrigger>
+      <TabsTrigger value="docs" :title="t('knowledge.tabDocs')" class="page-rail-item">
+        <List class="h-5 w-5" aria-hidden="true" /><span class="page-rail-label">{{ t('knowledge.tabDocs') }}</span>
+      </TabsTrigger>
+    </TabsList>
+
+    <!-- Help center (Docy-style): what most people come here for -->
+    <TabsContent value="home" class="mt-0 h-full min-h-0 min-w-0 flex-1">
+      <ScrollArea class="scroll-clamp-x h-full">
+        <KnowledgeHome ref="homeRef" :can-write="canWrite" />
+      </ScrollArea>
+    </TabsContent>
+
+    <!-- Full list + administration -->
+    <TabsContent value="docs" class="mt-0 h-full min-h-0 min-w-0 flex-1 flex-col data-[state=active]:flex">
     <PageHeader :title="t('knowledge.title')" :icon="BookOpen" icon-gradient="bg-gradient-to-br from-emerald-500 to-teal-600 shadow-emerald-500/20">
       <template #actions>
         <div class="flex items-center gap-2">
@@ -406,6 +438,8 @@ async function reindex(onlyStale: boolean) {
         </div>
       </div>
     </ScrollArea>
+    </TabsContent>
+   </Tabs>
 
     <KnowledgeDocumentPanel
       :doc-id="selectedId"

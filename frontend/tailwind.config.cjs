@@ -7,7 +7,8 @@ module.exports = {
   plugins: [
     require("tailwindcss-animate"),
     function({ addVariant }) {
-      addVariant('light', '.light &')
+      // Chrome over the wallpaper (.shell-glass) stays white-on-glass in both modes.
+      addVariant('light', '.light &:not(.shell-glass *)')
     }
   ],
   content: [
@@ -15,6 +16,13 @@ module.exports = {
     "./src/**/*.{vue,js,ts,jsx,tsx}",
   ],
   theme: {
+  	// The app's html font-size is 14px (type scale), so Tailwind's rem-based
+  	// spacing came out 12.5% short (p-6 = 21px). Spacing (padding, margin,
+  	// gap, sizes, inset) is pinned to its intended 4px grid in px instead;
+  	// text sizes stay rem.
+  	spacing: Object.fromEntries(
+  		Object.entries(defaultTheme.spacing).map(([k, v]) => [k, v.endsWith('rem') ? `${parseFloat(v) * 16}px` : v])
+  	),
   	container: {
   		center: true,
   		padding: '2rem',

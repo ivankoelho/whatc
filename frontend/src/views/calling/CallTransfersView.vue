@@ -7,7 +7,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import { Phone, PhoneOff, PhoneForwarded, RefreshCw, Clock } from 'lucide-vue-next'
+import { Phone, PhoneOff, PhoneForwarded, RefreshCw, Clock, PhoneIncoming, History } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import DataTable from '@/components/shared/DataTable.vue'
 import type { Column } from '@/components/shared/types'
@@ -101,7 +101,20 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="p-6 space-y-6">
+  <Tabs v-model="activeTab" orientation="vertical" class="flex h-full min-h-0">
+    <TabsList class="page-rail">
+      <TabsTrigger value="waiting" :title="t('callTransfers.waiting')" class="page-rail-item">
+        <PhoneIncoming class="h-5 w-5" aria-hidden="true" />
+        <span class="page-rail-label">{{ t('callTransfers.waiting') }}</span>
+        <span v-if="store.waitingTransfers.length > 0" class="page-rail-badge">{{ store.waitingTransfers.length }}</span>
+      </TabsTrigger>
+      <TabsTrigger value="history" :title="t('callTransfers.history')" class="page-rail-item">
+        <History class="h-5 w-5" aria-hidden="true" />
+        <span class="page-rail-label">{{ t('callTransfers.history') }}</span>
+      </TabsTrigger>
+    </TabsList>
+
+    <div class="min-w-0 flex-1 space-y-6 overflow-y-auto p-6">
     <div class="flex items-center justify-between">
       <div>
         <h1 class="text-2xl font-bold">{{ t('callTransfers.title') }}</h1>
@@ -111,17 +124,6 @@ onMounted(() => {
         {{ t('common.refresh') }}
       </Button>
     </div>
-
-    <Tabs v-model="activeTab">
-      <TabsList>
-        <TabsTrigger value="waiting">
-          {{ t('callTransfers.waiting') }}
-          <Badge v-if="store.waitingTransfers.length > 0" variant="destructive" class="ml-2 h-5 min-w-[20px]">
-            {{ store.waitingTransfers.length }}
-          </Badge>
-        </TabsTrigger>
-        <TabsTrigger value="history">{{ t('callTransfers.history') }}</TabsTrigger>
-      </TabsList>
 
       <TabsContent value="waiting" class="mt-4">
         <Card>
@@ -213,6 +215,6 @@ onMounted(() => {
           </CardContent>
         </Card>
       </TabsContent>
-    </Tabs>
-  </div>
+    </div>
+  </Tabs>
 </template>

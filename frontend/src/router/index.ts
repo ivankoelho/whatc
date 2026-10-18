@@ -7,7 +7,7 @@ declare module 'vue-router' {
     requiresAuth?: boolean
     permission?: string // Resource permission required (e.g., 'analytics', 'chat')
     // Action to check `permission` against — defaults to 'read'. Use
-    // 'view_all' for org-wide aggregate views (see /sales/dashboard).
+    // 'view_all' for org-wide aggregate views.
     permissionAction?: string
     anyPermission?: string[] // Route is allowed if the user has read on ANY of these (settings hubs)
   }
@@ -50,11 +50,45 @@ const router = createRouter({
           meta: { permission: 'analytics' }
         },
         {
+          path: 'chat/usage',
+          name: 'whatsapp-usage',
+          component: () => import('@/views/settings/WhatsAppUsageHubView.vue'),
+          meta: { permission: 'whatsapp_usage' }
+        },
+        {
+          path: 'chat/phone',
+          name: 'chat-phone',
+          component: () => import('@/views/chat/PhoneView.vue'),
+          meta: { permission: 'chat' }
+        },
+        {
+          // Before chat/:contactId? — otherwise "notes" is read as a contact id.
+          path: 'chat/notes',
+          name: 'chat-notes',
+          component: () => import('@/views/chat/NotesView.vue'),
+          meta: { permission: 'chat' }
+        },
+        {
           path: 'chat/:contactId?',
           name: 'chat-conversation',
           component: () => import('@/views/chat/ChatView.vue'),
           props: true,
           meta: { permission: 'chat', stableKey: true }
+        },
+        {
+          // Administration of free channels (composition and state, never messages).
+          path: 'team-chat/admin',
+          name: 'team-chat-admin',
+          component: () => import('@/views/team-chat/TeamChatAdminView.vue'),
+          meta: { permission: 'team_chat', permissionAction: 'manage' }
+        },
+        {
+          // Independent of /chat (WhatsApp support): own permission, own screen.
+          path: 'team-chat/:channelId?',
+          name: 'team-chat',
+          component: () => import('@/views/team-chat/TeamChatView.vue'),
+          props: true,
+          meta: { permission: 'team_chat', stableKey: true }
         },
         {
           path: 'profile',
@@ -169,12 +203,9 @@ const router = createRouter({
           meta: { permission: 'sales_opportunities' }
         },
         {
+          // Merged into the single sales screen; old links/bookmarks land there.
           path: 'sales/dashboard',
-          name: 'sales-dashboard',
-          component: () => import('@/views/sales/SalesDashboardView.vue'),
-          // Finding 7: org-wide aggregates — spec §7 reserves this for
-          // manager/admin (view_all), not every agent with base 'read'.
-          meta: { permission: 'sales_opportunities', permissionAction: 'view_all' }
+          redirect: '/sales/operation'
         },
         {
           path: 'analytics/agents',
@@ -192,9 +223,19 @@ const router = createRouter({
           path: 'settings',
           name: 'settings',
           component: () => import('@/views/settings/SettingsView.vue'),
-          // Geral | Notificações | Chamadas need settings.general; Unidades and Departamentos
-          // are tabs of the same page with their own read permission.
-          meta: { anyPermission: ['settings.general', 'units', 'departments'] }
+          // Geral | Notificações | Chamadas (settings.general). Unidades/Departamentos moved to
+          // the access hub; old ?tab= links follow them.
+          // units/departments stay in anyPermission so someone with only those (no
+          // settings.general) still reaches this route and gets sent to their new home.
+          meta: { anyPermission: ['settings.general', 'units', 'departments'] },
+          beforeEnter: (to) => {
+            if (to.query.tab === 'units' || to.query.tab === 'departments') {
+              return { path: '/settings/access', query: { tab: to.query.tab }, replace: true }
+            }
+            return useAuthStore().hasPermission('settings.general', 'read')
+              ? true
+              : { path: '/settings/access', replace: true }
+          }
         },
         {
           path: 'settings/service',
@@ -211,6 +252,12 @@ const router = createRouter({
           meta: { permission: 'knowledge' }
         },
         {
+          path: 'knowledge/:id',
+          name: 'knowledge-article',
+          component: () => import('@/views/settings/KnowledgeArticleView.vue'),
+          meta: { permission: 'knowledge' }
+        },
+        {
           path: 'settings/chatbot',
           name: 'chatbot-settings',
           redirect: () => ({ path: '/settings/service', query: { tab: 'chatbot' } })
@@ -222,10 +269,9 @@ const router = createRouter({
           meta: { permission: 'accounts' }
         },
         {
+          // Moved next to Conversas; keep old links (and their ?tab=) working.
           path: 'settings/whatsapp-usage',
-          name: 'whatsapp-usage',
-          component: () => import('@/views/settings/WhatsAppUsageHubView.vue'),
-          meta: { permission: 'whatsapp_usage' }
+          redirect: (to) => ({ path: '/chat/usage', query: to.query })
         },
         {
           path: 'settings/accounts/:id',
@@ -267,7 +313,7 @@ const router = createRouter({
           path: 'settings/access',
           name: 'settings-access',
           component: () => import('@/views/settings/AccessSettingsHubView.vue'),
-          meta: { anyPermission: ['teams', 'users', 'roles'] }
+          meta: { anyPermission: ['teams', 'users', 'roles', 'units', 'departments'] }
         },
         {
           path: 'settings/users',
@@ -355,12 +401,12 @@ const router = createRouter({
         {
           path: 'settings/units',
           name: 'units',
-          redirect: () => ({ path: '/settings', query: { tab: 'units' } })
+          redirect: () => ({ path: '/settings/access', query: { tab: 'units' } })
         },
         {
           path: 'settings/departments',
           name: 'departments',
-          redirect: () => ({ path: '/settings', query: { tab: 'departments' } })
+          redirect: () => ({ path: '/settings/access', query: { tab: 'departments' } })
         },
         {
           path: 'settings/occurrence-sla-policies',
@@ -437,9 +483,9 @@ const router = createRouter({
 const navigationOrder = [
   { path: '/', permission: 'analytics' },
   { path: '/chat', permission: 'chat' },
+  { path: '/team-chat', permission: 'team_chat' },
   { path: '/crm/occurrences', permission: 'occurrences' },
   { path: '/sales/operation', permission: 'sales_opportunities' },
-  { path: '/sales/dashboard', permission: 'sales_opportunities', action: 'view_all' },
   { path: '/knowledge', permission: 'knowledge' },
   { path: '/chatbot', permission: 'settings.chatbot', childPaths: [
     { path: '/chatbot', permission: 'settings.chatbot' },
@@ -462,7 +508,7 @@ const navigationOrder = [
     { path: '/settings', permission: 'settings.general' },
     { path: '/settings/service', permission: 'settings.chatbot' },
     { path: '/settings/accounts', permission: 'accounts' },
-    { path: '/settings/whatsapp-usage', permission: 'whatsapp_usage' },
+    { path: '/chat/usage', permission: 'whatsapp_usage' },
     { path: '/settings/service', permission: 'canned_responses' },
     { path: '/settings/service', permission: 'contacts' },
     { path: '/settings/service', permission: 'tags' },
@@ -487,7 +533,7 @@ const navigationOrder = [
 function getFirstAccessibleRoute(authStore: ReturnType<typeof useAuthStore>): string {
   for (const item of navigationOrder) {
     // Check if user has permission for this item
-    if (authStore.hasPermission(item.permission, item.action || 'read')) {
+    if (authStore.hasPermission(item.permission, 'read')) {
       return item.path
     }
     // Check child paths if available

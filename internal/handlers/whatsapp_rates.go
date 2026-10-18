@@ -114,8 +114,11 @@ func (a *App) rateUsage(orgID, rateID uuid.UUID) (used bool, lastSent time.Time,
 
 // ListWhatsAppRates returns the organization's price table.
 func (a *App) ListWhatsAppRates(r *fastglue.Request) error {
-	orgID, _, err := a.requireAuth(r, models.ResourceWhatsAppUsage, models.ActionRead)
+	orgID, userID, err := a.requireAuth(r, models.ResourceWhatsAppUsage, models.ActionRead)
 	if err != nil {
+		return nil
+	}
+	if !a.requireRatesSuperAdmin(r, userID) {
 		return nil
 	}
 	rates := []whatsAppRateView{} // never null in the JSON
@@ -130,10 +133,24 @@ func (a *App) ListWhatsAppRates(r *fastglue.Request) error {
 	return r.SendEnvelope(map[string]any{"rates": rates})
 }
 
+// requireRatesSuperAdmin: the price table (read and write) is super-admin
+// only, on top of whatsapp_usage — consumption itself stays visible to
+// whoever has whatsapp_usage:read. Sends the 403 itself.
+func (a *App) requireRatesSuperAdmin(r *fastglue.Request, userID uuid.UUID) bool {
+	if a.IsSuperAdmin(userID) {
+		return true
+	}
+	_ = r.SendErrorEnvelope(fasthttp.StatusForbidden, "Only super admins can access the price table", nil, "")
+	return false
+}
+
 // CreateWhatsAppRate registers a price for a validity period.
 func (a *App) CreateWhatsAppRate(r *fastglue.Request) error {
 	orgID, userID, err := a.requireAuth(r, models.ResourceWhatsAppUsage, models.ActionWrite)
 	if err != nil {
+		return nil
+	}
+	if !a.requireRatesSuperAdmin(r, userID) {
 		return nil
 	}
 	var req WhatsAppRateRequest
@@ -172,6 +189,9 @@ func (a *App) CreateWhatsAppRate(r *fastglue.Request) error {
 func (a *App) UpdateWhatsAppRate(r *fastglue.Request) error {
 	orgID, userID, err := a.requireAuth(r, models.ResourceWhatsAppUsage, models.ActionWrite)
 	if err != nil {
+		return nil
+	}
+	if !a.requireRatesSuperAdmin(r, userID) {
 		return nil
 	}
 	id, err := parsePathUUID(r, "id", "price")
@@ -233,6 +253,9 @@ func (a *App) UpdateWhatsAppRate(r *fastglue.Request) error {
 func (a *App) DeleteWhatsAppRate(r *fastglue.Request) error {
 	orgID, userID, err := a.requireAuth(r, models.ResourceWhatsAppUsage, models.ActionWrite)
 	if err != nil {
+		return nil
+	}
+	if !a.requireRatesSuperAdmin(r, userID) {
 		return nil
 	}
 	id, err := parsePathUUID(r, "id", "price")

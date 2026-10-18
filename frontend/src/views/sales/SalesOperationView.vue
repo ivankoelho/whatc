@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import { Card } from '@/components/ui/card'
@@ -10,11 +11,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Skeleton } from '@/components/ui/skeleton'
-import { PageHeader, DataTable, ErrorState, DeleteConfirmDialog, type Column } from '@/components/shared'
-import { TrendingUp, Briefcase, Target, CheckCircle2, XCircle, Percent, AlertTriangle, Wallet, PiggyBank, TrendingDown, Trash2, Pencil } from 'lucide-vue-next'
+import { PageHeader, DataTable, ErrorState, DeleteConfirmDialog, DateRangePicker, type Column } from '@/components/shared'
+import { TrendingUp, Briefcase, Target, CheckCircle2, XCircle, Percent, AlertTriangle, Trash2, Pencil, Columns3, List, Store, UserRound, X, LayoutDashboard } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
+import { useDateRange } from '@/composables/useDateRange'
 import { salesOpportunitiesService } from '@/services/api'
-import type { SalesOpportunity } from '@/services/api'
+import type { SalesOpportunity, SalesScopeInfo, SalesSummary } from '@/services/api'
 import { getErrorMessage } from '@/lib/api-utils'
 import { formatDate } from '@/lib/utils'
 import { formatCurrency } from '@/lib/currency'
@@ -26,27 +28,87 @@ import SalesOpportunityDetailsDialog from '@/components/sales/SalesOpportunityDe
 
 const { t } = useI18n()
 const authStore = useAuthStore()
-const currentUserId = computed(() => authStore.user?.id ?? '')
 
-const activeTab = ref<'wallet' | 'closed'>('wallet')
+// Painel | Quadro | Lista. The Kanban is the day-to-day view, so it opens
+// first; ?tab= keeps the choice shareable and survives a reload.
+type CrmTab = 'dashboard' | 'board' | 'list'
+const CRM_TABS: CrmTab[] = ['dashboard', 'board', 'list']
+const route = useRoute()
+const router = useRouter()
+const activeTab = computed<CrmTab>({
+  get: () => (CRM_TABS.includes(route.query.tab as CrmTab) ? (route.query.tab as CrmTab) : 'board'),
+  set: (tab) => { router.replace({ query: { ...route.query, tab } }) },
+})
 const boardRef = ref<InstanceType<typeof SalesOpportunityBoard> | null>(null)
 
-// ponytail: "Minha carteira" is client-aggregated for this first cut (spec
-// §8/Task 15) — a single fetch of the current user's opportunities (all
-// statuses, up to the 100-item API cap) drives both the stats row and the
-// closed-sales tab, instead of a dedicated backend aggregation endpoint. A
-// user with more than 100 opportunities gets undercounted stats. Upgrade
-// path: Task 16's widget-engine numbers replace this entirely.
+// One sales screen for everyone (it replaced "Minha Operação" + "Dashboard de
+// Vendas"). The backend scopes every request to what the user may see —
+// admin/SAC supervisor: all; store supervisor (view_team): their teams'
+// sellers; seller: their own — and /scope says which sellers/stores the
+// manual filters below may offer.
+const scopeInfo = ref<SalesScopeInfo>({ scope: 'own', sellers: [], units: [] })
+const unitFilter = ref('all')
+const sellerFilter = ref('all')
+const filterParams = computed(() => {
+  const p: { assigned_user_id?: string; unit_id?: string } = {}
+  if (sellerFilter.value !== 'all') p.assigned_user_id = sellerFilter.value
+  if (unitFilter.value !== 'all') p.unit_id = unitFilter.value
+  return p
+})
+const hasFilters = computed(() => unitFilter.value !== 'all' || sellerFilter.value !== 'all')
+function clearFilters() {
+  unitFilter.value = 'all'
+  sellerFilter.value = 'all'
+}
+
+async function fetchScope() {
+  try {
+    const { data } = await salesOpportunitiesService.scope()
+    scopeInfo.value = data.data
+  } catch {
+    // Without it the screen still works, just without the manual filters.
+  }
+}
+
+// Indicator period (closings inside it; the open pipeline is always "now").
+const {
+  selectedRange,
+  customDateRange,
+  isDatePickerOpen,
+  dateRange,
+  formatDateRangeDisplay,
+  applyCustomRange: applyCustomRangeBase,
+} = useDateRange({ storageKey: 'sales_operation' })
+
+const summary = ref<SalesSummary | null>(null)
+async function fetchSummary() {
+  try {
+    const { from, to } = dateRange.value
+    const { data } = await salesOpportunitiesService.summary({ ...filterParams.value, from, to })
+    summary.value = data.data
+  } catch (e) {
+    toast.error(getErrorMessage(e, t('sales.walletLoadFailed')))
+  }
+}
+function applyCustomRange() {
+  applyCustomRangeBase()
+  fetchSummary()
+}
+watch(selectedRange, (v) => { if (v !== 'custom') fetchSummary() })
+
+// ponytail: the list tab still loads one page of up to 100 (API cap) and
+// filters by stage client-side; paginate server-side if a scope outgrows it.
 const wallet = ref<SalesOpportunity[]>([])
 const walletLoading = ref(false)
 const walletFailed = ref(false)
 
+// Every mutation path below calls this: list + indicators stay in step.
 async function fetchWallet() {
-  if (!currentUserId.value) return
   walletLoading.value = true
   walletFailed.value = false
+  fetchSummary()
   try {
-    const { data } = await salesOpportunitiesService.list({ assigned_user_id: currentUserId.value, limit: '100' })
+    const { data } = await salesOpportunitiesService.list({ ...filterParams.value, limit: '100' })
     wallet.value = data.data.opportunities
   } catch (e) {
     walletFailed.value = true
@@ -55,39 +117,64 @@ async function fetchWallet() {
     walletLoading.value = false
   }
 }
-
-function sumEstimatedValue(opportunities: SalesOpportunity[]): number {
-  return opportunities.reduce((sum, o) => sum + (o.estimated_value ?? 0), 0)
-}
+watch(filterParams, fetchWallet)
 
 const stats = computed(() => {
-  const total = wallet.value.length
-  const potencial = wallet.value.filter(o => o.stage === 'potencial').length
-  const convertida = wallet.value.filter(o => o.status === 'convertida').length
-  const perdida = wallet.value.filter(o => o.status === 'perdida').length
-  const semDirecionamento = wallet.value.filter(o => o.status === 'aberta' && !o.direcionamento).length
-  const closedTotal = convertida + perdida
-  const conversionRate = closedTotal > 0 ? (convertida / closedTotal) * 100 : 0
-  // Value totals the agent needs alongside the counts above — how much is
-  // still open (prospecção/pipeline) vs. how much already closed either way.
-  const valorProspecto = sumEstimatedValue(wallet.value.filter(o => o.status === 'aberta'))
-  const valorConvertido = sumEstimatedValue(wallet.value.filter(o => o.status === 'convertida'))
-  const valorPerdido = sumEstimatedValue(wallet.value.filter(o => o.status === 'perdida'))
-  return { total, potencial, convertida, perdida, semDirecionamento, conversionRate, valorProspecto, valorConvertido, valorPerdido }
+  const s = summary.value
+  return {
+    total: s?.total ?? 0,
+    potencial: s?.potencial ?? 0,
+    convertida: s?.convertida ?? 0,
+    perdida: s?.perdida ?? 0,
+    semDirecionamento: s?.sem_direcionamento ?? 0,
+    conversionRate: s?.conversion_rate ?? 0,
+    valorProspecto: s?.valor_prospecto ?? 0,
+    valorConvertido: s?.valor_convertido ?? 0,
+    valorPerdido: s?.valor_perdido ?? 0,
+  }
 })
+const statsLoading = computed(() => summary.value === null)
+
+// Painel KPI tiles. Tones are semantic (sky = volume, amber = early stage,
+// emerald = won, rose = lost, teal = rate, orange = needs action).
+const kpis = computed(() => [
+  { key: 'total', label: t('sales.statAttendances'), value: String(stats.value.total), icon: Briefcase, tone: 'bg-sky-500/15 text-sky-600 dark:text-sky-300' },
+  { key: 'potencial', label: t('sales.statPotential'), value: String(stats.value.potencial), icon: Target, tone: 'bg-amber-500/15 text-amber-600 dark:text-amber-300' },
+  { key: 'convertida', label: t('sales.statConverted'), value: String(stats.value.convertida), icon: CheckCircle2, tone: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300' },
+  { key: 'perdida', label: t('sales.statLost'), value: String(stats.value.perdida), icon: XCircle, tone: 'bg-rose-500/15 text-rose-600 dark:text-rose-300' },
+  { key: 'conversion', label: t('sales.statConversion'), value: `${stats.value.conversionRate.toFixed(1)}%`, icon: Percent, tone: 'bg-teal-500/15 text-teal-600 dark:text-teal-300' },
+  { key: 'semDirecionamento', label: t('sales.statNoDirecionamento'), value: String(stats.value.semDirecionamento), icon: AlertTriangle, tone: 'bg-orange-500/15 text-orange-600 dark:text-orange-300' },
+])
+
+// Value distribution: 3 slices, so a donut fits; the legend beside it is a
+// table with value and share (the accessible view, and no need to hover).
+// Sky/emerald/rose rather than red-vs-green alone.
+const valueSlices = computed(() => {
+  const rows = [
+    { key: 'prospect', label: t('sales.statValueProspect'), value: stats.value.valorProspecto, color: '#0ea5e9' },
+    { key: 'converted', label: t('sales.statValueConverted'), value: stats.value.valorConvertido, color: '#10b981' },
+    { key: 'lost', label: t('sales.statValueLost'), value: stats.value.valorPerdido, color: '#f43f5e' },
+  ]
+  const total = rows.reduce((sum, r) => sum + r.value, 0)
+  return { total, rows: rows.map(r => ({ ...r, share: total > 0 ? (r.value / total) * 100 : 0 })) }
+})
+const valueChartSummary = computed(() =>
+  valueSlices.value.rows.map(r => `${r.label}: ${formatCurrency(r.value)} (${r.share.toFixed(0)}%)`).join('; '))
 
 const valueChartData = computed(() => ({
-  labels: [t('sales.statValueProspect'), t('sales.statValueConverted'), t('sales.statValueLost')],
+  labels: valueSlices.value.rows.map(r => r.label),
   datasets: [{
-    data: [stats.value.valorProspecto, stats.value.valorConvertido, stats.value.valorPerdido],
-    backgroundColor: ['#8b5cf6', '#10b981', '#ef4444'],
-    borderWidth: 0,
+    data: valueSlices.value.rows.map(r => r.value),
+    backgroundColor: valueSlices.value.rows.map(r => r.color),
+    borderWidth: 2,
+    borderColor: 'transparent',
   }],
 }))
 
 const valueChartOptions = {
   responsive: true,
   maintainAspectRatio: false,
+  cutout: '68%',
   // The global Chart.js defaults set in lib/charts.ts (mode: 'index',
   // intersect: false) are meant for line/bar charts, where "index" means
   // an x-axis category. On a Doughnut those defaults make Chart.js treat
@@ -98,7 +185,7 @@ const valueChartOptions = {
   // the slice the cursor is actually over.
   interaction: { mode: 'nearest' as const, intersect: true },
   plugins: {
-    legend: { position: 'bottom' as const },
+    legend: { display: false }, // the table beside the chart is the legend
     tooltip: { callbacks: { label: (ctx: { label: string; raw: unknown }) => `${ctx.label}: ${formatCurrency(ctx.raw as number)}` } },
   },
 }
@@ -266,161 +353,158 @@ function handleDetailsChange() {
   fetchWallet()
 }
 
-onMounted(fetchWallet)
+onMounted(() => {
+  fetchScope()
+  fetchWallet()
+})
 </script>
 
 <template>
-  <div class="flex flex-col h-full bg-[#0a0a0b] light:bg-gray-50">
-    <PageHeader :title="$t('sales.title')" :description="$t('sales.subtitle')" :icon="TrendingUp" icon-gradient="bg-gradient-to-br from-emerald-500 to-teal-600 shadow-emerald-500/20" />
+  <div class="flex h-full bg-[#0a0a0b] light:bg-gray-50">
+    <Tabs v-model="activeTab" orientation="vertical" class="flex min-h-0 min-w-0 flex-1">
+      <TabsList class="page-rail">
+        <TabsTrigger value="dashboard" :title="$t('sales.tabDashboard')" class="page-rail-item"><LayoutDashboard class="h-5 w-5" aria-hidden="true" /><span class="page-rail-label">{{ $t('sales.tabDashboard') }}</span></TabsTrigger>
+        <TabsTrigger value="board" :title="$t('sales.tabBoard')" class="page-rail-item"><Columns3 class="h-5 w-5" aria-hidden="true" /><span class="page-rail-label">{{ $t('sales.tabBoard') }}</span></TabsTrigger>
+        <TabsTrigger value="list" :title="$t('sales.tabList')" class="page-rail-item"><List class="h-5 w-5" aria-hidden="true" /><span class="page-rail-label">{{ $t('sales.tabList') }}</span></TabsTrigger>
+      </TabsList>
 
-    <Tabs v-model="activeTab" class="flex-1 min-h-0 flex flex-col">
-      <div class="px-6 pt-4">
-        <TabsList>
-          <TabsTrigger value="wallet">{{ $t('sales.tabMyWallet') }}</TabsTrigger>
-          <TabsTrigger value="closed">{{ $t('sales.tabAllOpportunities') }}</TabsTrigger>
-        </TabsList>
-      </div>
+      <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+      <PageHeader :title="$t('sales.title')" :description="$t('sales.scope_' + scopeInfo.scope)" :icon="TrendingUp" icon-gradient="bg-gradient-to-br from-emerald-500 to-teal-600 shadow-emerald-500/20">
+        <!-- Filters and period sit next to the title, like Protocolos.
+             Store/seller only for supervisors/admins (sellers only see their own). -->
+        <template #actions>
+          <div class="flex flex-wrap items-center justify-end gap-2" role="group" :aria-label="$t('sales.filtersLabel')">
+        <template v-if="scopeInfo.scope !== 'own'">
+        <Select v-if="scopeInfo.units.length" v-model="unitFilter">
+          <SelectTrigger class="h-9 w-44 text-[13px]" :aria-label="$t('sales.filterStore')">
+            <Store class="mr-1.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{{ $t('sales.allStores') }}</SelectItem>
+            <SelectItem v-for="u in scopeInfo.units" :key="u.id" :value="u.id">{{ u.name }}</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select v-model="sellerFilter">
+          <SelectTrigger class="h-9 w-52 text-[13px]" :aria-label="$t('sales.filterSeller')">
+            <UserRound class="mr-1.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{{ $t('sales.allSellers') }}</SelectItem>
+            <SelectItem v-for="s in scopeInfo.sellers" :key="s.id" :value="s.id">{{ s.name }}</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button v-if="hasFilters" variant="ghost" size="sm" class="h-9 text-[13px]" @click="clearFilters">
+          <X class="mr-1 h-3.5 w-3.5" aria-hidden="true" />{{ $t('common.clear') }}
+        </Button>
+        </template>
+          <!-- The period only drives the Painel's numbers. -->
+          <DateRangePicker
+            v-if="activeTab === 'dashboard'"
+            v-model:selected-range="selectedRange"
+            v-model:custom-date-range="customDateRange"
+            v-model:is-date-picker-open="isDatePickerOpen"
+            :format-date-range-display="formatDateRangeDisplay"
+            @apply-custom="applyCustomRange"
+          />
+          </div>
+        </template>
+      </PageHeader>
 
-      <TabsContent value="wallet" class="flex-1 min-h-0">
+
+      <!-- Painel: indicators and value distribution only -->
+      <TabsContent value="dashboard" class="mt-0 min-h-0 flex-1">
+        <ScrollArea orientation="vertical" class="h-full">
+          <div class="space-y-6 p-6">
+            <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+              <template v-if="statsLoading">
+                <div v-for="i in 6" :key="i" class="rounded-2xl bg-card p-5 shadow-sm ring-1 ring-black/[0.05] dark:ring-white/[0.07]">
+                  <Skeleton class="mb-3 h-4 w-24" />
+                  <Skeleton class="h-8 w-16" />
+                </div>
+              </template>
+              <template v-else>
+                <div
+                  v-for="k in kpis"
+                  :key="k.key"
+                  class="rounded-2xl bg-card p-5 shadow-sm ring-1 ring-black/[0.05] dark:ring-white/[0.07]"
+                >
+                  <div class="flex items-start justify-between gap-3">
+                    <span class="text-[13px] font-medium leading-snug text-muted-foreground">{{ k.label }}</span>
+                    <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl" :class="k.tone">
+                      <component :is="k.icon" class="h-[18px] w-[18px]" aria-hidden="true" />
+                    </span>
+                  </div>
+                  <div class="mt-3 text-[28px] font-bold leading-none tabular-nums text-foreground">{{ k.value }}</div>
+                </div>
+              </template>
+            </div>
+
+            <section class="rounded-2xl bg-card p-6 shadow-sm ring-1 ring-black/[0.05] dark:ring-white/[0.07]" aria-labelledby="crm-value-title">
+              <div class="flex flex-wrap items-baseline justify-between gap-2">
+                <h3 id="crm-value-title" class="text-[15px] font-semibold text-foreground">{{ $t('sales.valueChartTitle') }}</h3>
+                <span class="text-sm text-muted-foreground">{{ $t('sales.valueTotal') }}: <span class="font-semibold tabular-nums text-foreground">{{ formatCurrency(valueSlices.total) }}</span></span>
+              </div>
+              <div v-if="statsLoading" class="mt-6 grid items-center gap-8 md:grid-cols-[220px_minmax(0,1fr)]">
+                <Skeleton class="mx-auto h-48 w-48 rounded-full" />
+                <div class="space-y-3"><Skeleton v-for="i in 3" :key="i" class="h-10 w-full" /></div>
+              </div>
+              <p v-else-if="valueSlices.total === 0" class="mt-6 rounded-xl bg-muted/50 px-4 py-10 text-center text-sm text-muted-foreground">
+                {{ $t('sales.valueEmpty') }}
+              </p>
+              <div v-else class="mt-6 grid items-center gap-8 md:grid-cols-[220px_minmax(0,1fr)]">
+                <div class="mx-auto h-52 w-52" role="img" :aria-label="valueChartSummary">
+                  <Doughnut :data="valueChartData" :options="valueChartOptions" />
+                </div>
+                <table class="w-full text-sm">
+                  <caption class="sr-only">{{ $t('sales.valueChartTitle') }}</caption>
+                  <thead class="sr-only"><tr><th>{{ $t('sales.valueColStatus') }}</th><th>{{ $t('sales.valueColValue') }}</th><th>{{ $t('sales.valueColShare') }}</th></tr></thead>
+                  <tbody>
+                    <tr v-for="r in valueSlices.rows" :key="r.key" class="border-b last:border-0">
+                      <th scope="row" class="py-3 pr-4 text-left font-medium text-foreground">
+                        <span class="inline-flex items-center gap-2.5">
+                          <span class="h-3 w-3 shrink-0 rounded-full" :style="{ backgroundColor: r.color }" aria-hidden="true" />
+                          {{ r.label }}
+                        </span>
+                      </th>
+                      <td class="py-3 pr-4 text-right font-semibold tabular-nums text-foreground">{{ formatCurrency(r.value) }}</td>
+                      <td class="w-16 py-3 text-right tabular-nums text-muted-foreground">{{ r.share.toFixed(0) }}%</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        </ScrollArea>
+      </TabsContent>
+
+      <!-- Quadro: the Kanban takes the whole area, like Protocolos -->
+      <TabsContent value="board" class="mt-0 min-h-0 flex-1">
+        <div class="h-full">
+          <SalesOpportunityBoard
+            ref="boardRef"
+            :filters="filterParams"
+            @convert="handleConvert"
+            @lose="handleLose"
+            @stage-change="handleStageChange"
+            @direcionamento-change="handleDirecionamentoChange"
+            @details-change="handleDetailsChange"
+          />
+        </div>
+      </TabsContent>
+
+      <!-- Lista: the full table -->
+      <TabsContent value="list" class="mt-0 min-h-0 flex-1">
         <ErrorState
           v-if="walletFailed"
           :title="$t('common.loadErrorTitle')"
           :description="$t('common.loadErrorDescription')"
           :retry-label="$t('common.retryLoad')"
-          class="flex-1"
+          class="h-full"
           @retry="fetchWallet"
         />
         <ScrollArea v-else orientation="vertical" class="flex-1 h-full">
-          <div class="p-6 space-y-6">
-            <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-              <template v-if="walletLoading">
-                <div v-for="i in 6" :key="i" class="rounded-xl border border-white/[0.08] bg-white/[0.02] p-6 light:bg-white light:border-gray-200">
-                  <Skeleton class="h-4 w-24 mb-3 bg-white/[0.08] light:bg-gray-200" />
-                  <Skeleton class="h-8 w-16 bg-white/[0.08] light:bg-gray-200" />
-                </div>
-              </template>
-              <template v-else>
-                <div class="card-depth rounded-xl border border-white/[0.08] bg-white/[0.04] p-6 light:bg-white light:border-gray-200">
-                  <div class="flex items-center justify-between pb-2">
-                    <span class="text-sm font-medium text-white/50 light:text-gray-500">{{ $t('sales.statAttendances') }}</span>
-                    <div class="h-10 w-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
-                      <Briefcase class="h-5 w-5 text-blue-400" />
-                    </div>
-                  </div>
-                  <div class="text-3xl font-bold text-white light:text-gray-900">{{ stats.total }}</div>
-                </div>
-                <div class="card-depth rounded-xl border border-white/[0.08] bg-white/[0.04] p-6 light:bg-white light:border-gray-200">
-                  <div class="flex items-center justify-between pb-2">
-                    <span class="text-sm font-medium text-white/50 light:text-gray-500">{{ $t('sales.statPotential') }}</span>
-                    <div class="h-10 w-10 rounded-lg bg-amber-500/20 flex items-center justify-center">
-                      <Target class="h-5 w-5 text-amber-400" />
-                    </div>
-                  </div>
-                  <div class="text-3xl font-bold text-white light:text-gray-900">{{ stats.potencial }}</div>
-                </div>
-                <div class="card-depth rounded-xl border border-white/[0.08] bg-white/[0.04] p-6 light:bg-white light:border-gray-200">
-                  <div class="flex items-center justify-between pb-2">
-                    <span class="text-sm font-medium text-white/50 light:text-gray-500">{{ $t('sales.statConverted') }}</span>
-                    <div class="h-10 w-10 rounded-lg bg-emerald-500/20 flex items-center justify-center">
-                      <CheckCircle2 class="h-5 w-5 text-emerald-400" />
-                    </div>
-                  </div>
-                  <div class="text-3xl font-bold text-white light:text-gray-900">{{ stats.convertida }}</div>
-                </div>
-                <div class="card-depth rounded-xl border border-white/[0.08] bg-white/[0.04] p-6 light:bg-white light:border-gray-200">
-                  <div class="flex items-center justify-between pb-2">
-                    <span class="text-sm font-medium text-white/50 light:text-gray-500">{{ $t('sales.statLost') }}</span>
-                    <div class="h-10 w-10 rounded-lg bg-red-500/20 flex items-center justify-center">
-                      <XCircle class="h-5 w-5 text-red-400" />
-                    </div>
-                  </div>
-                  <div class="text-3xl font-bold text-white light:text-gray-900">{{ stats.perdida }}</div>
-                </div>
-                <div class="card-depth rounded-xl border border-white/[0.08] bg-white/[0.04] p-6 light:bg-white light:border-gray-200">
-                  <div class="flex items-center justify-between pb-2">
-                    <span class="text-sm font-medium text-white/50 light:text-gray-500">{{ $t('sales.statConversion') }}</span>
-                    <div class="h-10 w-10 rounded-lg bg-violet-500/20 flex items-center justify-center">
-                      <Percent class="h-5 w-5 text-violet-400" />
-                    </div>
-                  </div>
-                  <div class="text-3xl font-bold text-white light:text-gray-900">{{ stats.conversionRate.toFixed(1) }}%</div>
-                </div>
-                <div class="card-depth rounded-xl border border-white/[0.08] bg-white/[0.04] p-6 light:bg-white light:border-gray-200">
-                  <div class="flex items-center justify-between pb-2">
-                    <span class="text-sm font-medium text-white/50 light:text-gray-500">{{ $t('sales.statNoDirecionamento') }}</span>
-                    <div class="h-10 w-10 rounded-lg bg-orange-500/20 flex items-center justify-center">
-                      <AlertTriangle class="h-5 w-5 text-orange-400" />
-                    </div>
-                  </div>
-                  <div class="text-3xl font-bold text-white light:text-gray-900">{{ stats.semDirecionamento }}</div>
-                </div>
-              </template>
-            </div>
-
-            <!-- Value totals — how much is still in the pipeline vs. already
-                 closed either way, in R$ rather than a headcount. -->
-            <div class="grid gap-4 md:grid-cols-3">
-              <template v-if="walletLoading">
-                <div v-for="i in 3" :key="i" class="rounded-xl border border-white/[0.08] bg-white/[0.02] p-6 light:bg-white light:border-gray-200">
-                  <Skeleton class="h-4 w-24 mb-3 bg-white/[0.08] light:bg-gray-200" />
-                  <Skeleton class="h-8 w-32 bg-white/[0.08] light:bg-gray-200" />
-                </div>
-              </template>
-              <template v-else>
-                <div class="card-depth rounded-xl border border-white/[0.08] bg-white/[0.04] p-6 light:bg-white light:border-gray-200">
-                  <div class="flex items-center justify-between pb-2">
-                    <span class="text-sm font-medium text-white/50 light:text-gray-500">{{ $t('sales.statValueProspect') }}</span>
-                    <div class="h-10 w-10 rounded-lg bg-violet-500/20 flex items-center justify-center">
-                      <Wallet class="h-5 w-5 text-violet-400" />
-                    </div>
-                  </div>
-                  <div class="text-2xl font-bold text-white light:text-gray-900">{{ formatCurrency(stats.valorProspecto) }}</div>
-                </div>
-                <div class="card-depth rounded-xl border border-white/[0.08] bg-white/[0.04] p-6 light:bg-white light:border-gray-200">
-                  <div class="flex items-center justify-between pb-2">
-                    <span class="text-sm font-medium text-white/50 light:text-gray-500">{{ $t('sales.statValueConverted') }}</span>
-                    <div class="h-10 w-10 rounded-lg bg-emerald-500/20 flex items-center justify-center">
-                      <PiggyBank class="h-5 w-5 text-emerald-400" />
-                    </div>
-                  </div>
-                  <div class="text-2xl font-bold text-white light:text-gray-900">{{ formatCurrency(stats.valorConvertido) }}</div>
-                </div>
-                <div class="card-depth rounded-xl border border-white/[0.08] bg-white/[0.04] p-6 light:bg-white light:border-gray-200">
-                  <div class="flex items-center justify-between pb-2">
-                    <span class="text-sm font-medium text-white/50 light:text-gray-500">{{ $t('sales.statValueLost') }}</span>
-                    <div class="h-10 w-10 rounded-lg bg-red-500/20 flex items-center justify-center">
-                      <TrendingDown class="h-5 w-5 text-red-400" />
-                    </div>
-                  </div>
-                  <div class="text-2xl font-bold text-white light:text-gray-900">{{ formatCurrency(stats.valorPerdido) }}</div>
-                </div>
-              </template>
-            </div>
-
-            <Card v-if="!walletLoading && (stats.valorProspecto || stats.valorConvertido || stats.valorPerdido)" class="p-6">
-              <h3 class="text-sm font-medium text-white/70 light:text-gray-600 mb-4">{{ $t('sales.valueChartTitle') }}</h3>
-              <div class="h-64">
-                <Doughnut :data="valueChartData" :options="valueChartOptions" />
-              </div>
-            </Card>
-
-            <Card class="overflow-hidden">
-              <SalesOpportunityBoard
-                ref="boardRef"
-                :assigned-user-id="currentUserId"
-                @convert="handleConvert"
-                @lose="handleLose"
-                @stage-change="handleStageChange"
-                @direcionamento-change="handleDirecionamentoChange"
-                @details-change="handleDetailsChange"
-              />
-            </Card>
-          </div>
-        </ScrollArea>
-      </TabsContent>
-
-      <TabsContent value="closed" class="flex-1 min-h-0">
-        <ScrollArea orientation="vertical" class="flex-1 h-full">
           <div class="p-6 space-y-4">
             <!-- One row, aligned to the same left edge as the table below —
                  filter and bulk-selection controls used to be two separate
@@ -521,6 +605,7 @@ onMounted(fetchWallet)
           </div>
         </ScrollArea>
       </TabsContent>
+      </div>
     </Tabs>
 
     <SalesOpportunityDetailsDialog

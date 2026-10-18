@@ -8,6 +8,9 @@ const logoUrl = ref<string | null>(null)
 const systemName = ref<string | null>(null)
 const footerText = ref<string | null>(null)
 const footerVersion = ref<string | null>(null)
+// System theme (app shell), the same for every user; set by a super admin.
+export type UiTheme = 'bitrix' | 'classic'
+const uiTheme = ref<UiTheme>('bitrix')
 const loaded = ref(false)
 
 function withBasePath(url: string): string {
@@ -25,6 +28,7 @@ async function loadBranding() {
     systemName.value = data?.system_name ?? null
     footerText.value = data?.footer_text ?? null
     footerVersion.value = data?.footer_version ?? null
+    uiTheme.value = data?.ui_theme === 'classic' ? 'classic' : 'bitrix'
   } catch {
     // Branding is purely cosmetic and optional -- a failure here (network,
     // 500, malformed JSON) must never block the page it's decorating.
@@ -39,5 +43,7 @@ async function loadBranding() {
 }
 
 export function useBranding() {
-  return { loginBackgroundUrl, logoUrl, systemName, footerText, footerVersion, loadBranding }
+  // setUiTheme: after a super admin saves the theme, switch this session too.
+  const setUiTheme = (theme: UiTheme) => { uiTheme.value = theme }
+  return { loginBackgroundUrl, logoUrl, systemName, footerText, footerVersion, uiTheme, setUiTheme, loadBranding, brandingLoaded: loaded }
 }

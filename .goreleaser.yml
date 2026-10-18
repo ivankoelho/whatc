@@ -53,10 +53,8 @@ dockers:
     goos: linux
     goarch: amd64
     image_templates:
-      - "{{ .Env.DOCKER_ORG }}/whatomate:{{ .Version }}-amd64"
-      - "{{ .Env.DOCKER_ORG }}/whatomate:latest-amd64"
-      - "ghcr.io/{{ .Env.GITHUB_ORG }}/whatomate:{{ .Version }}-amd64"
-      - "ghcr.io/{{ .Env.GITHUB_ORG }}/whatomate:latest-amd64"
+      - "ghcr.io/{{ .Env.GITHUB_ORG }}/whatc:{{ .Version }}-amd64"
+      - "ghcr.io/{{ .Env.GITHUB_ORG }}/whatc:latest-amd64"
     dockerfile: docker/Dockerfile.goreleaser
     build_flag_templates:
       - "--platform=linux/amd64"
@@ -69,10 +67,8 @@ dockers:
     goos: linux
     goarch: arm64
     image_templates:
-      - "{{ .Env.DOCKER_ORG }}/whatomate:{{ .Version }}-arm64"
-      - "{{ .Env.DOCKER_ORG }}/whatomate:latest-arm64"
-      - "ghcr.io/{{ .Env.GITHUB_ORG }}/whatomate:{{ .Version }}-arm64"
-      - "ghcr.io/{{ .Env.GITHUB_ORG }}/whatomate:latest-arm64"
+      - "ghcr.io/{{ .Env.GITHUB_ORG }}/whatc:{{ .Version }}-arm64"
+      - "ghcr.io/{{ .Env.GITHUB_ORG }}/whatc:latest-arm64"
     dockerfile: docker/Dockerfile.goreleaser
     build_flag_templates:
       - "--platform=linux/arm64"
@@ -82,30 +78,20 @@ dockers:
     use: buildx
 
 docker_manifests:
-  - name_template: "{{ .Env.DOCKER_ORG }}/whatomate:{{ .Version }}"
+  - name_template: "ghcr.io/{{ .Env.GITHUB_ORG }}/whatc:{{ .Version }}"
     image_templates:
-      - "{{ .Env.DOCKER_ORG }}/whatomate:{{ .Version }}-amd64"
-      - "{{ .Env.DOCKER_ORG }}/whatomate:{{ .Version }}-arm64"
+      - "ghcr.io/{{ .Env.GITHUB_ORG }}/whatc:{{ .Version }}-amd64"
+      - "ghcr.io/{{ .Env.GITHUB_ORG }}/whatc:{{ .Version }}-arm64"
 
-  - name_template: "{{ .Env.DOCKER_ORG }}/whatomate:latest"
+  - name_template: "ghcr.io/{{ .Env.GITHUB_ORG }}/whatc:latest"
     image_templates:
-      - "{{ .Env.DOCKER_ORG }}/whatomate:{{ .Version }}-amd64"
-      - "{{ .Env.DOCKER_ORG }}/whatomate:{{ .Version }}-arm64"
-
-  - name_template: "ghcr.io/{{ .Env.GITHUB_ORG }}/whatomate:{{ .Version }}"
-    image_templates:
-      - "ghcr.io/{{ .Env.GITHUB_ORG }}/whatomate:{{ .Version }}-amd64"
-      - "ghcr.io/{{ .Env.GITHUB_ORG }}/whatomate:{{ .Version }}-arm64"
-
-  - name_template: "ghcr.io/{{ .Env.GITHUB_ORG }}/whatomate:latest"
-    image_templates:
-      - "ghcr.io/{{ .Env.GITHUB_ORG }}/whatomate:{{ .Version }}-amd64"
-      - "ghcr.io/{{ .Env.GITHUB_ORG }}/whatomate:{{ .Version }}-arm64"
+      - "ghcr.io/{{ .Env.GITHUB_ORG }}/whatc:{{ .Version }}-amd64"
+      - "ghcr.io/{{ .Env.GITHUB_ORG }}/whatc:{{ .Version }}-arm64"
 
 release:
   github:
-    owner: shridarpatil
-    name: whatomate
+    owner: ivankoelho
+    name: whatc
   draft: false
   prerelease: auto
   name_template: "v{{ .Version }}"

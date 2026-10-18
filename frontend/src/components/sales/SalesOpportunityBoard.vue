@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import axios from 'axios'
 import draggable from 'vuedraggable'
 import { useI18n } from 'vue-i18n'
@@ -10,8 +10,11 @@ import { Button } from '@/components/ui/button'
 import { salesOpportunitiesService } from '@/services/api'
 import type { SalesOpportunity, SalesOpportunityStage } from '@/services/api'
 import SalesOpportunityCard from './SalesOpportunityCard.vue'
+import { byOpenedAtDesc, cardOrder, placePreview } from '@/lib/board-order'
 
-const props = defineProps<{ assignedUserId?: string }>()
+// Manual filters from the sales screen (seller / store). The backend already
+// scopes every request to what the user may see (own / team / all).
+const props = defineProps<{ filters?: { assigned_user_id?: string; unit_id?: string } }>()
 
 const emit = defineEmits<{
   convert: [opportunity: SalesOpportunity]
@@ -29,13 +32,15 @@ const { t } = useI18n()
 // restructuring). ColumnKey covers both kinds; STAGE_KEYS is the subset
 // that changeStage() actually accepts.
 type ColumnKey = SalesOpportunityStage | 'convertida' | 'perdida'
-const COLUMN_DEFS: { key: ColumnKey; labelKey: string; accent: string }[] = [
-  { key: 'potencial', labelKey: 'sales.stagePotencial', accent: '' },
-  { key: 'abrir_orcamento', labelKey: 'sales.stageAbrirOrcamento', accent: '' },
-  { key: 'direcionada', labelKey: 'sales.stageDirecionada', accent: '' },
-  { key: 'convertida', labelKey: 'sales.statusConvertida', accent: 'border-t-2 border-t-emerald-500/60' },
-  { key: 'perdida', labelKey: 'sales.statusPerdida', accent: 'border-t-2 border-t-red-500/60' },
+// color: the column's band (same treatment as the CRM board's stage colours).
+const COLUMN_DEFS: { key: ColumnKey; labelKey: string; color: string }[] = [
+  { key: 'potencial', labelKey: 'sales.stagePotencial', color: '#0ea5e9' },
+  { key: 'abrir_orcamento', labelKey: 'sales.stageAbrirOrcamento', color: '#f59e0b' },
+  { key: 'direcionada', labelKey: 'sales.stageDirecionada', color: '#6366f1' },
+  { key: 'convertida', labelKey: 'sales.statusConvertida', color: '#10b981' },
+  { key: 'perdida', labelKey: 'sales.statusPerdida', color: '#ef4444' },
 ]
+const columnDef = (key: ColumnKey) => COLUMN_DEFS.find(c => c.key === key)!
 
 // A page per column, fetched server-side-filtered — replaces the old
 // single "up to 100 across every column" fetch (see git history), which
@@ -69,7 +74,8 @@ function emptyColumn(key: ColumnKey): ColumnState {
 
 function paramsFor(key: ColumnKey, offset: number): Record<string, string> {
   const params: Record<string, string> = { limit: String(PAGE_SIZE), offset: String(offset) }
-  if (props.assignedUserId) params.assigned_user_id = props.assignedUserId
+  if (props.filters?.assigned_user_id) params.assigned_user_id = props.filters.assigned_user_id
+  if (props.filters?.unit_id) params.unit_id = props.filters.unit_id
   if (key === 'convertida' || key === 'perdida') {
     params.status = key
   } else {
@@ -125,11 +131,18 @@ function onDragStart(col: ColumnState, evt: { oldIndex: number }) {
   dragOrigin = item ? { opportunityId: item.id, fromKey: col.key } : null
 }
 
-function canMove(evt: { draggedContext: { element: SalesOpportunity } }): boolean {
-  return !pending.value.has(evt.draggedContext.element.id)
+// Também posiciona o espaço do cartão onde ele vai cair (opened_at DESC, a
+// mesma ordem aplicada ao soltar), para ele não pular depois.
+function canMove(evt: { draggedContext: { element: SalesOpportunity }; relatedContext?: { list?: SalesOpportunity[] }; dragged?: HTMLElement }): boolean {
+  if (pending.value.has(evt.draggedContext.element.id)) return false
+  if (evt.relatedContext?.list) placePreview(evt.dragged, evt.relatedContext.list, evt.draggedContext.element)
+  return true
 }
 
 async function onColumnChange(toCol: ColumnState, evt: { added?: { element: SalesOpportunity } }) {
+  // A ordem nunca é manual: a coluna volta a opened_at DESC (onde a prévia
+  // do arrasto mostrou que o cartão ia cair).
+  toCol.items.sort(byOpenedAtDesc)
   if (!evt.added) return // reordenar dentro da mesma coluna não muda nada no servidor
 
   const origin = dragOrigin
@@ -151,6 +164,7 @@ async function onColumnChange(toCol: ColumnState, evt: { added?: { element: Sale
     const idx = toCol.items.findIndex(i => i.id === opp.id)
     if (idx !== -1) toCol.items.splice(idx, 1)
     if (fromCol) fromCol.items.push(opp)
+    fromCol?.items.sort(byOpenedAtDesc)
     if (toCol.key === 'convertida') emit('convert', opp)
     else emit('lose', opp)
     return
@@ -169,6 +183,7 @@ async function onColumnChange(toCol: ColumnState, evt: { added?: { element: Sale
     const idx = toCol.items.findIndex(i => i.id === opp.id)
     if (idx !== -1) toCol.items.splice(idx, 1)
     if (fromCol) fromCol.items.push(opp)
+    fromCol?.items.sort(byOpenedAtDesc)
 
     // Entrar em "direcionada" sem direcionamento é a única falha de validação
     // realista neste board (etapa e status já são controlados pelo próprio
@@ -202,12 +217,15 @@ function onDetailsChange(updated: SalesOpportunity) {
 }
 
 onMounted(loadAll)
+watch(() => [props.filters?.assigned_user_id, props.filters?.unit_id], loadAll)
 
 defineExpose({ refresh: loadAll })
 </script>
 
 <template>
-  <div id="sales-opportunities-board" class="flex gap-4 overflow-x-auto p-4">
+  <!-- Fills its container's height: each column scrolls on its own, so the
+       board never ends short of the screen (it has a full tab to itself). -->
+  <div id="sales-opportunities-board" class="flex h-full gap-3 overflow-x-auto p-4">
     <div v-if="failed" class="p-3 text-center w-full">
       <p class="text-xs text-muted-foreground">{{ $t('sales.boardLoadFailed') }}</p>
       <Button variant="outline" size="sm" class="mt-2" @click="loadAll">{{ $t('common.retryLoad') }}</Button>
@@ -218,16 +236,31 @@ defineExpose({ refresh: loadAll })
         v-for="col in columns"
         :key="col.key"
         :data-board-column="col.key"
-        :class="['flex w-72 shrink-0 flex-col rounded-lg border border-white/[0.08] light:border-gray-200 bg-white/[0.02] light:bg-gray-50', COLUMN_DEFS.find(c => c.key === col.key)?.accent]"
+        class="flex min-h-0 w-[288px] shrink-0 flex-col gap-2"
       >
-        <div class="flex items-center justify-between gap-2 border-b border-white/[0.08] light:border-gray-200 p-3 shrink-0">
-          <span class="text-sm font-medium">{{ $t(COLUMN_DEFS.find(c => c.key === col.key)!.labelKey) }}</span>
-          <span class="text-xs text-muted-foreground" data-board-column-count>{{ col.total }}</span>
+        <!-- Stage band, same as the CRM board: tinted stage colour + solid underline -->
+        <div
+          class="flex shrink-0 items-center justify-between gap-2 rounded-xl px-3 py-2.5"
+          :style="{
+            backgroundColor: `color-mix(in srgb, ${columnDef(col.key).color} 18%, hsl(var(--card)))`,
+            boxShadow: `inset 0 -3px 0 ${columnDef(col.key).color}`,
+          }"
+        >
+          <span class="flex min-w-0 items-center gap-2 text-[13px] font-semibold text-foreground">
+            <span class="h-2.5 w-2.5 shrink-0 rounded-full" :style="{ backgroundColor: columnDef(col.key).color }" aria-hidden="true" />
+            <span class="truncate">{{ $t(columnDef(col.key).labelKey) }}</span>
+          </span>
+          <span
+            class="min-w-[24px] rounded-full bg-card/80 px-2 py-0.5 text-center text-xs font-semibold text-foreground"
+            data-board-column-count
+          >{{ col.total }}</span>
         </div>
 
-        <!-- Fixed column height, own scrollbar — the board (and the page
-             around it) no longer grows with the column's content. -->
-        <div class="flex flex-1 flex-col gap-2 p-2 min-h-24 max-h-[65vh] overflow-y-auto">
+        <!-- Column fills the board's height with its own scrollbar — the board
+             (and the page around it) never grows with the column's content. -->
+        <!-- The drop zone fills the column body (padding inside it, "load more"
+             in its footer), so a drop anywhere in the column counts. -->
+        <div class="flex min-h-24 flex-1 flex-col overflow-y-auto rounded-xl bg-muted/50">
           <!-- flex-1 so the drop target always fills the column's free
                height, even with 0 items — it used to collapse to 0px tall
                when empty (a bare v-for renders no natural height), leaving
@@ -243,13 +276,14 @@ defineExpose({ refresh: loadAll })
             :disabled="col.key === 'convertida' || col.key === 'perdida'"
             item-key="id"
             data-board-dropzone
-            class="flex flex-1 flex-col gap-2"
+            class="flex flex-1 flex-col gap-2 p-2"
             @start="onDragStart(col, $event)"
             @change="onColumnChange(col, $event)"
             @end="dragOrigin = null"
           >
-            <template #item="{ element }">
+            <template #item="{ element, index }">
               <SalesOpportunityCard
+                :style="{ order: cardOrder(index) }"
                 :opportunity="element"
                 :disabled="pending.has(element.id)"
                 @convert="emit('convert', $event)"
@@ -258,28 +292,29 @@ defineExpose({ refresh: loadAll })
                 @details-change="onDetailsChange"
               />
             </template>
+            <!-- my-auto centres the state in the empty column (it is a flex column) -->
             <template #footer>
-              <div v-if="loading" class="flex justify-center p-3">
+              <div v-if="loading" class="order-last my-auto flex justify-center p-3">
                 <Spinner class="h-4 w-4" />
               </div>
-              <p v-else-if="col.items.length === 0" class="p-3 text-center text-xs text-muted-foreground">
+              <p v-else-if="col.items.length === 0" class="order-last my-auto p-3 text-center text-xs text-muted-foreground">
                 {{ $t('sales.columnEmpty') }}
               </p>
+              <Button
+                v-if="col.hasMore"
+                data-board-load-more
+                variant="ghost"
+                size="sm"
+                class="order-last w-full shrink-0 text-xs"
+                :disabled="col.loadingMore"
+                @click="loadMore(col)"
+              >
+                <Spinner v-if="col.loadingMore" class="h-3 w-3 mr-1.5" />
+                {{ $t('sales.loadMore') }} ({{ col.total - col.items.length }})
+              </Button>
             </template>
           </draggable>
 
-          <Button
-            v-if="col.hasMore"
-            data-board-load-more
-            variant="ghost"
-            size="sm"
-            class="w-full text-xs shrink-0"
-            :disabled="col.loadingMore"
-            @click="loadMore(col)"
-          >
-            <Spinner v-if="col.loadingMore" class="h-3 w-3 mr-1.5" />
-            {{ $t('sales.loadMore') }} ({{ col.total - col.items.length }})
-          </Button>
         </div>
       </div>
     </template>

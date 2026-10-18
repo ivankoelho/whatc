@@ -12,6 +12,7 @@ import { useOccurrencesStore } from '@/stores/occurrences'
 import { wsService } from '@/services/websocket'
 import type { Occurrence, OccurrenceStage } from '@/services/api'
 import OccurrenceCard from './OccurrenceCard.vue'
+import { byOpenedAtDesc, cardOrder, placePreview } from '@/lib/board-order'
 
 const props = defineProps<{ protocol?: string }>()
 
@@ -176,13 +177,17 @@ function onDragStart(col: ColumnState, evt: { oldIndex: number }) {
   dragOrigin = item ? { occurrenceId: item.id, fromStageId: col.stage.id } : null
 }
 
-/** Recusa arrastar um cartão cuja própria requisição ainda está em voo. */
-function canMove(evt: { draggedContext: { element: Occurrence } }): boolean {
-  return !pending.value.has(evt.draggedContext.element.id)
+/** Recusa arrastar um cartão cuja própria requisição ainda está em voo, e
+ * mostra o espaço do cartão já no lugar onde ele vai cair (opened_at DESC),
+ * em vez de sob o ponteiro — senão ele pula ao soltar. */
+function canMove(evt: { draggedContext: { element: Occurrence }; relatedContext?: { list?: Occurrence[] }; dragged?: HTMLElement }): boolean {
+  if (pending.value.has(evt.draggedContext.element.id)) return false
+  if (evt.relatedContext?.list) placePreview(evt.dragged, evt.relatedContext.list, evt.draggedContext.element)
+  return true
 }
 
 function sortByOpenedAtDesc(items: Occurrence[]) {
-  items.sort((a, b) => Date.parse(b.opened_at) - Date.parse(a.opened_at))
+  items.sort(byOpenedAtDesc)
 }
 
 async function onColumnChange(toCol: ColumnState, evt: { added?: { element: Occurrence } }) {
@@ -254,23 +259,39 @@ watchDebounced(() => props.protocol, loadAll, { debounce: 300 })
 </script>
 
 <template>
-  <div id="occurrences-board" class="flex gap-4 overflow-x-auto p-4">
+  <!-- Fills its container's height; each column scrolls on its own (same as
+       the CRM board), so short columns don't stretch to the longest one. -->
+  <div id="occurrences-board" class="flex h-full gap-3 overflow-x-auto p-4">
     <div
       v-for="col in columns"
       :key="col.stage.id"
       :data-board-column="col.stage.name"
-      class="flex w-72 shrink-0 flex-col rounded-lg border border-white/[0.08] light:border-gray-200 bg-white/[0.02] light:bg-gray-50"
+      class="flex min-h-0 w-[288px] shrink-0 flex-col gap-2"
     >
-      <div class="flex items-center justify-between gap-2 border-b border-white/[0.08] light:border-gray-200 p-3">
-        <span class="flex items-center gap-2 text-sm font-medium">
-          <span class="h-2.5 w-2.5 rounded-full" :style="{ backgroundColor: col.stage.color }" />
-          {{ col.stage.name }}
+      <!-- Stage band (Bitrix's coloured column header): a tint of the stage
+           colour with a solid underline, so any stage colour stays legible
+           in both themes. -->
+      <div
+        class="flex items-center justify-between gap-2 rounded-xl px-3 py-2.5"
+        :style="{
+          backgroundColor: `color-mix(in srgb, ${col.stage.color} 18%, hsl(var(--card)))`,
+          boxShadow: `inset 0 -3px 0 ${col.stage.color}`,
+        }"
+      >
+        <span class="flex min-w-0 items-center gap-2 text-[13px] font-semibold text-foreground">
+          <span class="h-2.5 w-2.5 shrink-0 rounded-full" :style="{ backgroundColor: col.stage.color }" aria-hidden="true" />
+          <span class="truncate">{{ col.stage.name }}</span>
         </span>
-        <span class="text-xs text-muted-foreground" data-board-column-count>{{ col.total }}</span>
+        <span
+          class="min-w-[24px] rounded-full bg-card/80 px-2 py-0.5 text-center text-xs font-semibold text-foreground"
+          data-board-column-count
+        >{{ col.total }}</span>
       </div>
 
-      <div class="flex flex-1 flex-col gap-2 p-2 min-h-24">
-        <div v-if="col.failed" class="p-3 text-center">
+      <!-- The drop zone fills the column body (padding lives inside it and
+           "load more" sits in its footer), so a drop anywhere in the column counts. -->
+      <div class="flex min-h-24 flex-1 flex-col overflow-y-auto rounded-xl bg-muted/50">
+        <div v-if="col.failed" class="p-5 text-center">
           <p class="text-xs text-muted-foreground">{{ $t('occurrences.columnLoadFailed') }}</p>
           <Button variant="outline" size="sm" class="mt-2" @click="loadColumn(col, 1)">
             {{ $t('common.retryLoad') }}
@@ -284,32 +305,34 @@ watchDebounced(() => props.protocol, loadAll, { debounce: 300 })
             :move="canMove"
             item-key="id"
             data-board-dropzone
-            class="flex flex-1 flex-col gap-2 min-h-16"
+            class="flex min-h-16 flex-1 flex-col gap-2 p-2"
             @start="onDragStart(col, $event)"
             @change="onColumnChange(col, $event)"
             @end="dragOrigin = null"
           >
-            <template #item="{ element }">
-              <OccurrenceCard :occurrence="element" :disabled="pending.has(element.id)" @click="goToDetail(element)" />
+            <template #item="{ element, index }">
+              <OccurrenceCard :style="{ order: cardOrder(index) }" :occurrence="element" :disabled="pending.has(element.id)" @click="goToDetail(element)" />
+            </template>
+            <!-- Inside the drop zone and centred (my-auto in a flex column), so an
+                 empty column reads clearly and still takes a drop anywhere. -->
+            <template #footer>
+              <div v-if="col.loading" class="order-last my-auto flex justify-center p-3">
+                <Spinner class="h-4 w-4" />
+              </div>
+              <p v-else-if="col.items.length === 0" class="order-last my-auto p-3 text-center text-xs text-muted-foreground">
+                {{ $t('occurrences.columnEmpty') }}
+              </p>
+              <Button
+                v-if="hasMore(col) && !col.loading"
+                variant="ghost"
+                size="sm"
+                class="order-last shrink-0"
+                @click="loadColumn(col, col.page + 1)"
+              >
+                {{ $t('occurrences.loadMore') }}
+              </Button>
             </template>
           </draggable>
-
-          <div v-if="col.loading" class="flex justify-center p-3">
-            <Spinner class="h-4 w-4" />
-          </div>
-
-          <p v-else-if="col.items.length === 0" class="p-3 text-center text-xs text-muted-foreground">
-            {{ $t('occurrences.columnEmpty') }}
-          </p>
-
-          <Button
-            v-if="hasMore(col) && !col.loading"
-            variant="ghost"
-            size="sm"
-            @click="loadColumn(col, col.page + 1)"
-          >
-            {{ $t('occurrences.loadMore') }}
-          </Button>
         </template>
       </div>
     </div>

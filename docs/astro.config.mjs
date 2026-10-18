@@ -2,14 +2,14 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
 export default defineConfig({
-  site: 'https://shridarpatil.github.io',
-  base: '/whatomate',
+  site: 'https://ivankoelho.github.io',
+  base: '/whatc',
   integrations: [
     starlight({
       title: 'Whatomate',
       description: 'A modern WhatsApp Business Platform',
       social: [
-        { icon: 'github', label: 'GitHub', href: 'https://github.com/shridarpatil/whatomate' },
+        { icon: 'github', label: 'GitHub', href: 'https://github.com/ivankoelho/whatc' },
       ],
       sidebar: [
         {

@@ -4,11 +4,21 @@ import { createTestScope, createUserWithPermissions, loginAs, SUPER_ADMIN, type 
 
 const scope = createTestScope('units-departments')
 
-test.describe('Settings → General: Units and Departments', () => {
-  test('tabs read General | Notifications | Calling | Units | Departments', async ({ page }) => {
+// Units and departments live in Settings → People & access, next to the users
+// and teams that hang on them; General keeps only its own settings.
+test.describe('Settings → People & access: Units and Departments', () => {
+  test('General reads General | Notifications | Calling; the access hub ends with Units | Departments', async ({ page }) => {
     await loginAsAdmin(page)
     await page.goto('/settings')
-    await expect(page.getByRole('tab')).toHaveText(['General', 'Notifications', 'Calling', 'Units', 'Departments'])
+    await expect(page.getByRole('tab')).toHaveText(['General', 'Notifications', 'Calling'])
+    await page.goto('/settings/access')
+    await expect(page.getByRole('tab')).toHaveText(['Teams', 'Users', 'Roles', 'Units', 'Departments'])
+  })
+
+  test('old /settings?tab=units links follow the move', async ({ page }) => {
+    await loginAsAdmin(page)
+    await page.goto('/settings?tab=units')
+    await expect(page).toHaveURL(/\/settings\/access\?tab=units/)
   })
 
   test('Occurrences no longer offers Units', async ({ page }) => {
@@ -21,10 +31,10 @@ test.describe('Settings → General: Units and Departments', () => {
   test('/settings/units and /settings/departments open their tab', async ({ page }) => {
     await loginAsAdmin(page)
     await page.goto('/settings/units')
-    await expect(page).toHaveURL(/\/settings\?tab=units/)
+    await expect(page).toHaveURL(/\/settings\/access\?tab=units/)
     await expect(page.getByRole('tab', { name: 'Units' })).toHaveAttribute('data-state', 'active')
     await page.goto('/settings/departments')
-    await expect(page).toHaveURL(/\/settings\?tab=departments/)
+    await expect(page).toHaveURL(/\/settings\/access\?tab=departments/)
     await expect(page.getByRole('tab', { name: 'Departments' })).toHaveAttribute('data-state', 'active')
   })
 })
@@ -34,7 +44,7 @@ test.describe('Departments tab: create, edit, deactivate, delete', () => {
     const name = scope.name('crud')
     const renamed = `${name}-renamed`
     await loginAsAdmin(page)
-    await page.goto('/settings?tab=departments')
+    await page.goto('/settings/access?tab=departments')
 
     await page.getByTestId('department-add').click()
     await page.getByTestId('department-name').fill(name)
@@ -173,8 +183,8 @@ test.describe('Departments tab: permissions', () => {
 
   test('read-only user sees the list but no create/edit/delete controls, and only the Departments tab', async ({ page }) => {
     await loginAs(page, readerUser)
-    await page.goto('/settings')
-    await expect(page).toHaveURL(/\/settings\?tab=departments/)
+    await page.goto('/settings') // no settings.general: sent to People & access
+    await expect(page).toHaveURL(/\/settings\/access\?tab=departments/)
     await expect(page.getByRole('tab')).toHaveCount(1)
     await expect(page.getByTestId('department-add')).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Edit department' })).toHaveCount(0)
@@ -197,7 +207,7 @@ test.describe('Departments tab: permissions', () => {
 
   test('writer can create but has no delete control', async ({ page }) => {
     await loginAs(page, writerUser)
-    await page.goto('/settings?tab=departments')
+    await page.goto('/settings/access?tab=departments')
     await expect(page.getByTestId('department-add')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Delete department' })).toHaveCount(0)
   })

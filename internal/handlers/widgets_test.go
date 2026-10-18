@@ -654,6 +654,28 @@ func TestApp_DeleteWidget_OnlyOwnerCanDelete(t *testing.T) {
 	assert.Equal(t, int64(1), count)
 }
 
+// Seeded SAC/sales defaults have no owner; any user with analytics delete
+// permission must be able to remove them.
+func TestApp_DeleteWidget_OwnerlessDefault(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	perms := getAnalyticsPermissions(t, app)
+	role := testutil.CreateTestRoleExact(t, app.DB, org.ID, "Analytics User", false, false, perms)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("del-ownerless")), testutil.WithPassword("password"), testutil.WithRoleID(&role.ID))
+	widget := createTestWidget(t, app, org.ID, nil, "Seeded", true, true)
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	testutil.SetPathParam(req, "id", widget.ID.String())
+
+	require.NoError(t, app.DeleteWidget(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var count int64
+	app.DB.Model(&models.Widget{}).Where("id = ?", widget.ID).Count(&count)
+	assert.Equal(t, int64(0), count)
+}
+
 func TestApp_DeleteWidget_NotFound(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)

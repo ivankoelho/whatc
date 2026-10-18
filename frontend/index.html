@@ -8,8 +8,11 @@
     <title>WhatsApp ATC</title>
     <script>
       (function() {
-        var mode = localStorage.getItem('color-mode');
-        var isDark = mode === 'dark' || (mode === 'system' || !mode) && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        // Light is the default for everyone; only an explicit choice (saved under
+        // color-mode:v2, see useColorMode) turns dark on before the app paints.
+        var mode = null;
+        try { mode = localStorage.getItem('color-mode:v2'); } catch (e) {}
+        var isDark = mode === 'dark' || mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches;
         if (isDark) document.documentElement.classList.add('dark');
       })();
     </script>

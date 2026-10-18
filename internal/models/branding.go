@@ -33,6 +33,20 @@ type BrandingSettings struct {
 	// build-time version stamping, so the version is whatever they type.
 	FooterText    string `gorm:"size:255" json:"footer_text,omitempty"`
 	FooterVersion string `gorm:"size:50" json:"footer_version,omitempty"`
+
+	// UITheme is the app shell layout for every user: "bitrix" (wallpaper,
+	// glass sidebar, top tabs) or "classic" (the original solid sidebar).
+	// Empty reads as the default, UIThemeDefault.
+	UITheme string `gorm:"size:20" json:"ui_theme,omitempty"`
 }
+
+const (
+	UIThemeBitrix  = "bitrix"
+	UIThemeClassic = "classic"
+	UIThemeDefault = UIThemeBitrix
+)
+
+// ValidUIThemes lists the themes a super admin may pick.
+var ValidUIThemes = map[string]bool{UIThemeBitrix: true, UIThemeClassic: true}
 
 func (BrandingSettings) TableName() string { return "branding_settings" }

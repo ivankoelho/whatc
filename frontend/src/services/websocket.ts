@@ -3,6 +3,7 @@ import { useTransfersStore } from '@/stores/transfers'
 import { useCallingStore } from '@/stores/calling'
 import { useAuthStore } from '@/stores/auth'
 import { useNotesStore } from '@/stores/notes'
+import { useTeamChatStore } from '@/stores/teamChat'
 import { useUsersStore } from '@/stores/users'
 import { contactsService } from '@/services/api'
 import { toast } from 'vue-sonner'
@@ -95,6 +96,18 @@ const WS_TYPE_OUTGOING_CALL_ENDED = 'outgoing_call_ended'
 const WS_TYPE_CONVERSATION_NOTE_CREATED = 'conversation_note_created'
 const WS_TYPE_CONVERSATION_NOTE_UPDATED = 'conversation_note_updated'
 const WS_TYPE_CONVERSATION_NOTE_DELETED = 'conversation_note_deleted'
+
+// Internal chat (ids only; content is fetched by REST)
+const TEAM_CHAT_EVENT_TYPES = new Set([
+  'team_chat_message',
+  'team_chat_message_updated',
+  'team_chat_message_deleted',
+  'team_chat_message_reactions',
+  'team_chat_read',
+  'team_chat_typing',
+  'team_chat_channel',
+  'team_chat_channel_updated'
+])
 
 // Occurrence types
 const WS_TYPE_OCCURRENCE_CHANGED = 'occurrence_changed'
@@ -282,10 +295,11 @@ class WebSocketService {
           this.handleAgentTransferAssign(message.payload)
           break
         case WS_TYPE_AGENT_PRESENCE:
-          useUsersStore().applyPresence(message.payload.user_id, !!message.payload.online)
+          useUsersStore().applyPresence(message.payload.user_id, !!message.payload.online, message.payload.state, message.payload.since)
+          useTeamChatStore().applyPresence(message.payload.user_id, !!message.payload.online)
           break
         case WS_TYPE_AGENT_AVAILABILITY:
-          useUsersStore().applyAvailability(message.payload.user_id, !!message.payload.is_available)
+          useUsersStore().applyAvailability(message.payload.user_id, !!message.payload.is_available, message.payload.state, message.payload.since)
           // Another tab/device of this same user toggled it: keep this tab's
           // toggle in step with the backend instead of showing a stale state.
           if (message.payload.user_id === useAuthStore().user?.id) {
@@ -338,6 +352,16 @@ class WebSocketService {
           break
         case WS_TYPE_CONVERSATION_NOTE_DELETED:
           useNotesStore().onNoteDeleted(message.payload.id)
+          break
+        case 'team_chat_message':
+        case 'team_chat_message_updated':
+        case 'team_chat_message_deleted':
+        case 'team_chat_message_reactions':
+        case 'team_chat_read':
+        case 'team_chat_typing':
+        case 'team_chat_channel':
+        case 'team_chat_channel_updated':
+          if (TEAM_CHAT_EVENT_TYPES.has(message.type)) useTeamChatStore().applyEvent(message.type, message.payload)
           break
         case WS_TYPE_OCCURRENCE_CHANGED:
           this.handleOccurrenceChanged(message.payload)
@@ -794,6 +818,9 @@ class WebSocketService {
     // Refresh transfers
     const transfersStore = useTransfersStore()
     transfersStore.fetchTransfers()
+
+    // Internal chat: events may have been missed while offline, re-read the lists
+    void useTeamChatStore().resync()
 
     // Show subtle notification
     toast.info('Connection restored', {

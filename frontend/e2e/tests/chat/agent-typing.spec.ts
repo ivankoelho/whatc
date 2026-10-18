@@ -106,14 +106,10 @@ test.describe('Agent Typing', () => {
     const chatPage = new ChatPage(page)
     await chatPage.goto(contactId)
 
-    // The sidebar starts collapsed by default now, and the viewer's name in
-    // UserMenu.vue is behind `v-if="!collapsed"` — not just CSS-hidden, it
-    // isn't in the DOM at all when collapsed. Expand it so the sanity check
-    // below has something to find.
-    await page.getByRole('button', { name: /expand sidebar|expandir/i }).click()
-
-    // Sanity: the sidebar shows the viewer, not the sender.
-    await expect(page.getByText('Test Manager').first()).toBeVisible({ timeout: 10000 })
+    // Sanity: the shell shows the viewer, not the sender. The user menu's
+    // avatar carries the initials in both system themes (the full name only
+    // shows in the classic sidebar when expanded).
+    await expect(page.getByTestId('user-menu-trigger').first()).toContainText('TM', { timeout: 10000 })
 
     const body = scope.name('bubble-msg')
     const reqContext = await playwrightRequest.newContext()

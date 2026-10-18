@@ -48,7 +48,7 @@ watch(() => props.contactId, load)
        same semantic tokens (bg-muted/50, border-t) ContactInfoPanel's other
        sections use, instead of the standalone panel's old hardcoded
        white/[0.08] + light: classes. -->
-  <div id="occurrences-panel" class="border-t pt-4">
+  <div id="occurrences-panel" class="rounded-xl bg-card px-4 pb-4 pt-2 shadow-sm">
     <div class="flex items-center justify-between py-2">
       <h5 class="text-sm font-medium">{{ $t('chat.occurrences') }}</h5>
       <Button variant="ghost" size="sm" class="h-7 px-2" @click="isDialogOpen = true">

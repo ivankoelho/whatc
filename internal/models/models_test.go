@@ -3,6 +3,8 @@ package models_test
 import (
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -383,4 +385,17 @@ func TestJSONBArray_Scan(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCanonicalDMPair_IsSymmetricAndOrdered(t *testing.T) {
+	a := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	b := uuid.MustParse("ffffffff-ffff-ffff-ffff-ffffffffffff")
+
+	low1, high1 := models.CanonicalDMPair(a, b)
+	low2, high2 := models.CanonicalDMPair(b, a)
+
+	assert.Equal(t, low1, low2)
+	assert.Equal(t, high1, high2)
+	assert.Equal(t, a, low1)
+	assert.Equal(t, b, high1)
 }

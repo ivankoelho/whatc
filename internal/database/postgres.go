@@ -110,6 +110,8 @@ func GetMigrationModels() []MigrationModel {
 
 		// User tracking
 		{"UserAvailabilityLog", &models.UserAvailabilityLog{}},
+		{"AgentPresenceLog", &models.AgentPresenceLog{}},
+		{"AgentTransferAssignment", &models.AgentTransferAssignment{}},
 
 		// Canned responses
 		{"CannedResponse", &models.CannedResponse{}},
@@ -144,6 +146,14 @@ func GetMigrationModels() []MigrationModel {
 		{"SalesOpportunityCounter", &models.SalesOpportunityCounter{}},
 		{"OccurrenceProcessMessage", &models.OccurrenceProcessMessage{}},
 		{"OccurrenceDocument", &models.OccurrenceDocument{}},
+
+		// Chat interno (team_chat)
+		{"ChatChannel", &models.ChatChannel{}},
+		{"ChatChannelMember", &models.ChatChannelMember{}},
+		{"ChatMessage", &models.ChatMessage{}},
+		{"ChatRead", &models.ChatRead{}},
+		{"ChatMessageReaction", &models.ChatMessageReaction{}},
+		{"ChatAttachment", &models.ChatAttachment{}},
 
 		// Help Desk — unidade e departamento
 		{"Unit", &models.Unit{}},
@@ -343,12 +353,18 @@ func coreIndexes() []string {
 		END $$`,
 		// Composite index matching the ListContacts filter + ordering exactly
 		`CREATE INDEX IF NOT EXISTS idx_contacts_org_status_lastmsg ON contacts(organization_id, contact_status, last_message_at DESC NULLS LAST)`,
+		// Chat interno: cursor de mensagens e unicidade de canal de time / DM.
+		`CREATE INDEX IF NOT EXISTS idx_chat_messages_channel_cursor ON chat_messages(channel_id, created_at DESC, id DESC)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_channels_team_unique ON chat_channels(organization_id, team_id) WHERE kind = 'team' AND deleted_at IS NULL`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_channels_dm_unique ON chat_channels(organization_id, dm_user_low_id, dm_user_high_id) WHERE kind = 'dm' AND deleted_at IS NULL`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_phone_status ON chatbot_sessions(organization_id, phone_number, status)`,
 		`CREATE INDEX IF NOT EXISTS idx_keyword_rules_priority ON keyword_rules(organization_id, is_enabled, priority DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_agent_transfers_active ON agent_transfers(organization_id, phone_number, status)`,
 		`CREATE INDEX IF NOT EXISTS idx_agent_transfers_org_contact ON agent_transfers(organization_id, contact_id, status)`,
 		`CREATE INDEX IF NOT EXISTS idx_agent_transfers_agent_active ON agent_transfers(agent_id, status) WHERE status = 'active'`,
 		`CREATE INDEX IF NOT EXISTS idx_agent_transfers_team ON agent_transfers(team_id, status) WHERE team_id IS NOT NULL`,
+		// Agent analytics: closed/active attendances of an organization over a period.
+		`CREATE INDEX IF NOT EXISTS idx_agent_transfers_org_status_time ON agent_transfers(organization_id, status, transferred_at DESC)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_whatsapp_accounts_org_phone ON whatsapp_accounts(organization_id, phone_id)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_templates_account_name_lang ON templates(whats_app_account, name, language)`,
 		`CREATE INDEX IF NOT EXISTS idx_keyword_rules_account ON keyword_rules(whats_app_account, is_enabled, priority DESC)`,
@@ -363,6 +379,13 @@ func coreIndexes() []string {
 		`CREATE INDEX IF NOT EXISTS idx_webhooks_org_active ON webhooks(organization_id, is_active)`,
 		`CREATE INDEX IF NOT EXISTS idx_availability_logs_user_time ON user_availability_logs(user_id, started_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_availability_logs_org_time ON user_availability_logs(organization_id, started_at DESC)`,
+		// Presence: exactly one open interval per agent and organization, and fast history reads.
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_presence_log_open ON agent_presence_log(organization_id, user_id) WHERE ended_at IS NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_presence_log_user_time ON agent_presence_log(organization_id, user_id, started_at DESC)`,
+		// Ownership history: one attendance's timeline, and what each agent lost or received.
+		`CREATE INDEX IF NOT EXISTS idx_transfer_assignments_transfer ON agent_transfer_assignments(organization_id, transfer_id, occurred_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_transfer_assignments_from ON agent_transfer_assignments(organization_id, from_agent_id, occurred_at) WHERE from_agent_id IS NOT NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_transfer_assignments_to ON agent_transfer_assignments(organization_id, to_agent_id, occurred_at) WHERE to_agent_id IS NOT NULL`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_sso_providers_org_provider ON sso_providers(organization_id, provider)`,
 		// Teams indexes
 		`CREATE INDEX IF NOT EXISTS idx_teams_org_active ON teams(organization_id, is_active)`,

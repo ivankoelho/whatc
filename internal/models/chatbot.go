@@ -30,6 +30,13 @@ type AgentAssignmentConfig struct {
 	// sees who is replying. Opt-in (default false); does not affect templates or
 	// interactive messages, nor the internal sent-by-agent label.
 	SignWithAgentName bool `gorm:"column:sign_with_agent_name;default:false" json:"sign_with_agent_name"`
+	// AwayReassignEnabled turns on the away tolerance for the organization. Off (the
+	// default, and the state of every existing organization): marking away returns
+	// the agent's attendances to the queue at once, as it always did. On: they stay
+	// with the agent, and only after AwayReassignAfterMins of being away are they
+	// released. Read from the organization's default row (whats_app_account = '').
+	AwayReassignEnabled   bool `gorm:"column:away_reassign_enabled;not null;default:false" json:"away_reassign_enabled"`
+	AwayReassignAfterMins int  `gorm:"column:away_reassign_after_mins;not null;default:10" json:"away_reassign_after_mins"`
 }
 
 // SLAConfig holds SLA tracking settings

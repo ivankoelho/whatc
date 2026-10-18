@@ -31,8 +31,11 @@ import LanguageSwitcher from '@/components/LanguageSwitcher.vue'
 
 const { t } = useI18n()
 
-defineProps<{
+const props = defineProps<{
   collapsed?: boolean
+  /** header: avatar on the Bitrix top bar (default); sidebar: the classic
+   *  layout's bottom block, opening upwards. */
+  placement?: 'header' | 'sidebar'
 }>()
 
 const emit = defineEmits<{
@@ -163,19 +166,20 @@ const handleLogout = () => {
 </script>
 
 <template>
-  <div class="border-t border-white/[0.08] light:border-gray-200 p-2">
+  <div :class="props.placement === 'sidebar' && 'border-t border-white/[0.08] light:border-gray-200 p-2'">
     <Popover v-model:open="isUserMenuOpen">
       <PopoverTrigger as-child>
         <Button
           variant="ghost"
           data-testid="user-menu-trigger"
           :class="[
-            'flex items-center justify-start w-full h-auto px-2 py-1.5 gap-2 hover:bg-white/[0.04] light:hover:bg-gray-100',
+            'flex items-center justify-start w-full h-auto px-2 py-1.5 gap-2',
+            props.placement === 'sidebar' ? 'hover:bg-white/[0.04] light:hover:bg-gray-100' : 'hover:bg-white/15',
             collapsed && 'md:justify-center'
           ]"
           :aria-label="$t('userMenu.ariaUserMenu')"
         >
-          <Avatar class="h-7 w-7 ring-2 ring-white/[0.1] light:ring-gray-200">
+          <Avatar :class="props.placement === 'sidebar' ? 'h-7 w-7 ring-2 ring-white/[0.1] light:ring-gray-200' : 'h-8 w-8 ring-2 ring-white/40'">
             <AvatarImage :src="undefined" />
             <AvatarFallback class="text-xs bg-gradient-to-br from-emerald-500 to-green-600 text-white">
               {{ getInitials(authStore.user?.full_name || 'U') }}
@@ -191,7 +195,7 @@ const handleLogout = () => {
           </div>
         </Button>
       </PopoverTrigger>
-      <PopoverContent side="top" align="start" class="w-52 p-1.5 bg-[#141414] light:bg-white border-white/[0.08] light:border-gray-200">
+      <PopoverContent :side="props.placement === 'sidebar' ? 'top' : 'bottom'" :align="props.placement === 'sidebar' ? 'start' : 'end'" class="w-52 p-1.5 bg-[#141414] light:bg-white border-white/[0.08] light:border-gray-200">
         <div class="text-xs font-medium px-2 py-1 text-white/40 light:text-gray-500">{{ $t('userMenu.myAccount') }}</div>
         <Separator class="my-1 bg-white/[0.08] light:bg-gray-200" />
         <!-- Availability Toggle -->

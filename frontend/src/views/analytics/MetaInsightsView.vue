@@ -642,7 +642,15 @@ const chartOptions = {
 </script>
 
 <template>
-  <div class="flex flex-col h-full">
+  <Tabs v-model="activeTab" orientation="vertical" class="flex h-full min-h-0">
+    <TabsList v-if="!error" class="page-rail">
+      <TabsTrigger value="analytics" :title="$t('metaInsights.messaging')" class="page-rail-item"><MessageSquare class="h-5 w-5" aria-hidden="true" /><span class="page-rail-label">{{ $t('metaInsights.messaging') }}</span></TabsTrigger>
+      <TabsTrigger value="pricing_analytics" :title="$t('metaInsights.pricing')" class="page-rail-item"><Wallet class="h-5 w-5" aria-hidden="true" /><span class="page-rail-label">{{ $t('metaInsights.pricing') }}</span></TabsTrigger>
+      <TabsTrigger value="template_analytics" :title="$t('metaInsights.templates')" class="page-rail-item"><FileText class="h-5 w-5" aria-hidden="true" /><span class="page-rail-label">{{ $t('metaInsights.templates') }}</span></TabsTrigger>
+      <TabsTrigger value="call_analytics" :title="$t('metaInsights.calls')" class="page-rail-item"><Phone class="h-5 w-5" aria-hidden="true" /><span class="page-rail-label">{{ $t('metaInsights.calls') }}</span></TabsTrigger>
+    </TabsList>
+
+  <div class="flex min-h-0 min-w-0 flex-1 flex-col">
     <PageHeader
       :title="$t('metaInsights.title')"
       :description="$t('metaInsights.subtitle')"
@@ -734,25 +742,7 @@ const chartOptions = {
         />
 
         <!-- Analytics Type Tabs -->
-        <Tabs v-if="!error" v-model="activeTab" class="w-full">
-          <TabsList class="grid w-full grid-cols-4 lg:w-auto lg:inline-flex">
-            <TabsTrigger value="analytics">
-              <MessageSquare class="h-4 w-4 lg:mr-2" />
-              <span class="hidden lg:inline">{{ $t('metaInsights.messaging') }}</span>
-            </TabsTrigger>
-            <TabsTrigger value="pricing_analytics">
-              <Wallet class="h-4 w-4 lg:mr-2" />
-              <span class="hidden lg:inline">{{ $t('metaInsights.pricing') }}</span>
-            </TabsTrigger>
-            <TabsTrigger value="template_analytics">
-              <FileText class="h-4 w-4 lg:mr-2" />
-              <span class="hidden lg:inline">{{ $t('metaInsights.templates') }}</span>
-            </TabsTrigger>
-            <TabsTrigger value="call_analytics">
-              <Phone class="h-4 w-4 lg:mr-2" />
-              <span class="hidden lg:inline">{{ $t('metaInsights.calls') }}</span>
-            </TabsTrigger>
-          </TabsList>
+        <div v-if="!error" class="w-full">
 
           <!-- Messaging Analytics -->
           <TabsContent value="analytics" class="space-y-6">
@@ -1272,8 +1262,9 @@ const chartOptions = {
               </div>
             </template>
           </TabsContent>
-        </Tabs>
+        </div>
       </div>
     </ScrollArea>
-  </div>
+    </div>
+  </Tabs>
 </template>

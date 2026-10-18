@@ -19,7 +19,10 @@ import {
   ClipboardList,
   TrendingUp,
   Receipt,
-  BookOpen
+  BookOpen,
+  StickyNote,
+  Phone,
+  MessagesSquare
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
@@ -67,7 +70,20 @@ export const navigationSections: NavSection[] = [
         path: '/chat',
         icon: MessageSquare,
         color: 'text-emerald-400 light:text-emerald-600',
-        permission: 'chat'
+        permission: 'chat',
+        children: [
+          { name: 'nav.conversations', path: '/chat', icon: MessageSquare, permission: 'chat' },
+          { name: 'nav.notes', path: '/chat/notes', icon: StickyNote, permission: 'chat' },
+          { name: 'nav.phone', path: '/chat/phone', icon: Phone, permission: 'chat' },
+          { name: 'nav.whatsappUsage', path: '/chat/usage', icon: Receipt, permission: 'whatsapp_usage' }
+        ]
+      },
+      {
+        name: 'nav.teamChat',
+        path: '/team-chat',
+        icon: MessagesSquare,
+        color: 'text-lime-400 light:text-lime-600',
+        permission: 'team_chat'
       },
       {
         name: 'nav.crm',
@@ -81,18 +97,9 @@ export const navigationSections: NavSection[] = [
         path: '/sales/operation',
         icon: TrendingUp,
         color: 'text-teal-400 light:text-teal-600',
+        // One screen for every profile (replaced the separate sales
+        // dashboard): the backend scopes it to own / team / all.
         permission: 'sales_opportunities'
-      },
-      {
-        name: 'nav.salesDashboard',
-        path: '/sales/dashboard',
-        icon: BarChart3,
-        color: 'text-blue-400 light:text-blue-600',
-        permission: 'sales_opportunities',
-        // Finding 7: this view shows org-wide aggregates, which spec §7
-        // reserves for manager/admin (view_all) — agents only get read/write
-        // on their own opportunities. /sales/operation stays plain 'read'.
-        permissionAction: 'view_all'
       },
       {
         name: 'nav.knowledge',
@@ -179,21 +186,19 @@ export const navigationSections: NavSection[] = [
         path: '/settings',
         icon: Settings,
         permission: 'settings.general',
-        childPermissions: ['settings.general', 'settings.chatbot', 'accounts', 'contacts', 'canned_responses', 'tags', 'teams', 'users', 'roles', 'api_keys', 'webhooks', 'custom_actions', 'occurrences.stages', 'occurrences.categories', 'occurrences.what_happened', 'occurrences.processes', 'occurrences.sla_policies', 'units', 'departments', 'whatsapp_usage', 'settings.sso', 'audit_logs'],
+        childPermissions: ['settings.general', 'settings.chatbot', 'accounts', 'contacts', 'canned_responses', 'tags', 'teams', 'users', 'roles', 'api_keys', 'webhooks', 'custom_actions', 'occurrences.stages', 'occurrences.categories', 'occurrences.what_happened', 'occurrences.processes', 'occurrences.sla_policies', 'units', 'departments', 'settings.sso', 'audit_logs'],
         groups: [
           {
             label: 'nav.groupOrganization',
             items: [
-              { name: 'nav.general', path: '/settings', icon: Settings, childPermissions: ['settings.general', 'units', 'departments'] },
-              { name: 'nav.sso', path: '/settings/sso', icon: ShieldCheck, permission: 'settings.sso' },
+              { name: 'nav.general', path: '/settings', icon: Settings, permission: 'settings.general' },
               { name: 'nav.auditLogs', path: '/settings/audit-logs', icon: ScrollText, permission: 'audit_logs' }
             ]
           },
           {
             label: 'nav.groupChannels',
             items: [
-              { name: 'nav.accounts', path: '/settings/accounts', icon: Users, permission: 'accounts' },
-              { name: 'nav.whatsappUsage', path: '/settings/whatsapp-usage', icon: Receipt, permission: 'whatsapp_usage' }
+              { name: 'nav.accounts', path: '/settings/accounts', icon: Users, permission: 'accounts' }
             ]
           },
           {
@@ -211,13 +216,14 @@ export const navigationSections: NavSection[] = [
           {
             label: 'nav.groupAccess',
             items: [
-              { name: 'nav.groupAccess', path: '/settings/access', icon: Users, childPermissions: ['teams', 'users', 'roles'] }
+              { name: 'nav.groupAccess', path: '/settings/access', icon: Users, childPermissions: ['teams', 'users', 'roles', 'units', 'departments'] },
+              { name: 'nav.sso', path: '/settings/sso', icon: ShieldCheck, permission: 'settings.sso' }
             ]
           },
           {
             label: 'nav.groupIntegrations',
             items: [
-              { name: 'nav.groupIntegrations', path: '/settings/integrations', icon: Key, childPermissions: ['api_keys', 'webhooks', 'custom_actions'] }
+              { name: 'nav.groupIntegrations', path: '/settings/integrations', icon: Key, childPermissions: ['settings.chatbot', 'api_keys', 'webhooks', 'custom_actions'] }
             ]
           }
         ]

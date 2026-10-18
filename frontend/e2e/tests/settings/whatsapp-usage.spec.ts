@@ -57,8 +57,9 @@ async function cleanup() {
   })
 }
 
+// Consumption moved next to Conversas (/chat/usage); the old settings URL redirects.
 async function openConsumption(page: Page) {
-  await page.goto('/settings/whatsapp-usage')
+  await page.goto('/chat/usage')
   await page.waitForLoadState('networkidle')
 }
 
@@ -67,27 +68,35 @@ test.describe.configure({ mode: 'serial' })
 test.describe('WhatsApp consumption', () => {
   let org: string
 
+  // The price table is super-admin only. These tests price messages of
+  // admin@test.com's organization, so that user is made super admin for the
+  // run (and put back after) instead of switching to another org's account.
   test.beforeAll(async () => {
     await cleanup()
     org = await db((c) => orgIdOf(c, 'admin@test.com'))
+    await db((c) => c.query("UPDATE users SET is_super_admin = true WHERE email = 'admin@test.com'"))
   })
 
   test.afterAll(async () => {
+    await db((c) => c.query("UPDATE users SET is_super_admin = false WHERE email = 'admin@test.com'"))
     await cleanup()
   })
 
-  test('the admin reaches the screen from Settings and sees both tabs', async ({ page }) => {
+  test('a super admin reaches the screen from Conversas and sees both tabs', async ({ page }) => {
     await loginAsAdmin(page)
-    await page.goto('/settings')
+    await page.goto('/chat')
     await page.waitForLoadState('networkidle')
-    await openConsumption(page)
-    await expect(page.getByRole('tab').first()).toBeVisible()
-    expect(await page.getByRole('tab').count()).toBe(2)
+    await page.locator('header a[href="/chat/usage"]').click()
+    await expect(page).toHaveURL(/\/chat\/usage/)
+    // Scoped to the usage hub's own rail (the chat page's status tabs may
+    // still be leaving during the page transition) and auto-waiting.
+    const rail = page.getByRole('tablist').filter({ has: page.getByRole('tab', { name: /Consumption/ }) })
+    await expect(rail.getByRole('tab')).toHaveCount(2)
   })
 
   test('registers a price in the price table, and refuses an overlapping period', async ({ page }) => {
     await loginAsAdmin(page)
-    await page.goto('/settings/whatsapp-usage?tab=rates')
+    await page.goto('/chat/usage?tab=rates')
     await page.waitForLoadState('networkidle')
 
     const add = async (from: string, to: string) => {
@@ -136,7 +145,7 @@ test.describe('WhatsApp consumption', () => {
     await expect(page.getByTestId('usage-recording-since')).toBeVisible()
 
     // the price registered in the previous test reaches the waiting message when repricing
-    await page.goto('/settings/whatsapp-usage?tab=rates')
+    await page.goto('/chat/usage?tab=rates')
     await page.waitForLoadState('networkidle')
     await page.getByTestId('rate-reprice').click()
     await expect(page.getByText(/1 of 1 messages recalculated|1 de 1 mensagens recalculadas/)).toBeVisible()
@@ -193,11 +202,12 @@ test.describe('WhatsApp consumption permissions', () => {
     }
   })
 
-  test('a reader sees the consumption and the price table but cannot edit prices', async ({ page }) => {
+  test('a reader sees the consumption but not the price table (super admin only)', async ({ page }) => {
     await loginAs(page, reader)
-    await page.goto('/settings/whatsapp-usage?tab=rates')
+    await page.goto('/chat/usage?tab=rates')
     await page.waitForLoadState('networkidle')
-    await expect(page.getByRole('tab').first()).toBeVisible()
+    await expect(page.getByRole('tab')).toHaveCount(1)
+    await expect(page).toHaveURL(/tab=consumption/)
     await expect(page.getByTestId('rate-add')).toHaveCount(0)
     await expect(page.getByTestId('rate-reprice')).toHaveCount(0)
     await openConsumption(page)
@@ -206,8 +216,9 @@ test.describe('WhatsApp consumption permissions', () => {
 
   test('a user without the permission is sent away from the screen', async ({ page }) => {
     await loginAs(page, nobody)
-    await page.goto('/settings/whatsapp-usage')
+    await page.goto('/settings/whatsapp-usage') // old URL: redirects, then the guard turns them away
     await page.waitForLoadState('networkidle')
+    expect(page.url()).not.toContain('/chat/usage')
     expect(page.url()).not.toContain('/settings/whatsapp-usage')
   })
 })

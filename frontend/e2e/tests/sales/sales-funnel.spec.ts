@@ -183,12 +183,11 @@ test.describe('Central de Vendas', () => {
     await expect(submit).toBeDisabled()
   })
 
-  test('navigates to sales dashboard from nav', async ({ page }) => {
+  // The sales dashboard was merged into /sales/operation; old links redirect.
+  test('the old sales dashboard URL lands on the unified sales screen', async ({ page }) => {
     await loginAsAdmin(page)
-    await page.goto('/')
-    await page.waitForLoadState('networkidle')
-
-    await page.locator('a[href="/sales/dashboard"]').first().click()
-    await expect(page).toHaveURL(/\/sales\/dashboard/)
+    await page.goto('/sales/dashboard')
+    await expect(page).toHaveURL(/\/sales\/operation/)
+    await expect(page.locator('#sales-opportunities-board')).toBeVisible()
   })
 })

@@ -19,7 +19,7 @@ import { useUsersStore } from '@/stores/users'
 import { useTeamsStore } from '@/stores/teams'
 import { toast } from 'vue-sonner'
 import { useRouter } from 'vue-router'
-import { UserX, Play, MessageSquare, User, Clock, Loader2, Users, UserPlus, AlertTriangle, CheckCircle2, XCircle } from 'lucide-vue-next'
+import { UserX, Play, MessageSquare, User, Clock, Loader2, Users, UserPlus, AlertTriangle, CheckCircle2, XCircle, UserCheck, ListOrdered, Activity, History } from 'lucide-vue-next'
 import { getErrorMessage, isConflictError } from '@/lib/api-utils'
 
 const { t } = useI18n()
@@ -328,7 +328,30 @@ function formatTimeRemaining(deadline: string | undefined): string {
 </script>
 
 <template>
-  <div class="flex flex-col h-full bg-[#0a0a0b] light:bg-gray-50">
+  <!-- Admins/managers get the section rail; agents only ever see their own list. -->
+  <Tabs v-model="activeTab" orientation="vertical" class="flex h-full min-h-0 bg-[#0a0a0b] light:bg-gray-50">
+    <TabsList v-if="isAdminOrManager" class="page-rail">
+      <TabsTrigger value="my-transfers" :title="$t('agentTransfers.myTransfers')" class="page-rail-item">
+        <UserCheck class="h-5 w-5" aria-hidden="true" />
+        <span class="page-rail-label">{{ $t('agentTransfers.myTransfers') }}</span>
+        <span v-if="myTransfers.length > 0" class="page-rail-badge">{{ myTransfers.length }}</span>
+      </TabsTrigger>
+      <TabsTrigger value="queue" :title="$t('agentTransfers.queue')" class="page-rail-item">
+        <ListOrdered class="h-5 w-5" aria-hidden="true" />
+        <span class="page-rail-label">{{ $t('agentTransfers.queue') }}</span>
+        <span v-if="queueTransfers.length > 0" class="page-rail-badge !bg-destructive">{{ queueTransfers.length }}</span>
+      </TabsTrigger>
+      <TabsTrigger value="all" :title="$t('agentTransfers.allActive')" class="page-rail-item">
+        <Activity class="h-5 w-5" aria-hidden="true" />
+        <span class="page-rail-label">{{ $t('agentTransfers.allActive') }}</span>
+      </TabsTrigger>
+      <TabsTrigger value="history" :title="$t('agentTransfers.history')" class="page-rail-item">
+        <History class="h-5 w-5" aria-hidden="true" />
+        <span class="page-rail-label">{{ $t('agentTransfers.history') }}</span>
+      </TabsTrigger>
+    </TabsList>
+
+  <div class="flex min-h-0 min-w-0 flex-1 flex-col">
     <PageHeader :title="$t('agentTransfers.title')" :subtitle="$t('agentTransfers.subtitle')" :icon="UserX" icon-gradient="bg-gradient-to-br from-red-500 to-orange-600 shadow-red-500/20">
       <template v-if="!isAdminOrManager" #actions>
         <div class="flex items-center gap-4">
@@ -424,23 +447,7 @@ function formatTimeRemaining(deadline: string | undefined): string {
 
         <!-- Admin/Manager View (with tabs) -->
         <div v-else>
-          <Tabs v-model="activeTab" class="w-full">
-            <TabsList class="mb-6">
-              <TabsTrigger value="my-transfers">
-                {{ $t('agentTransfers.myTransfers') }}
-                <Badge v-if="myTransfers.length > 0" class="ml-2" variant="secondary">
-                  {{ myTransfers.length }}
-                </Badge>
-              </TabsTrigger>
-              <TabsTrigger value="queue">
-                {{ $t('agentTransfers.queue') }}
-                <Badge v-if="queueTransfers.length > 0" class="ml-2" variant="destructive">
-                  {{ queueTransfers.length }}
-                </Badge>
-              </TabsTrigger>
-              <TabsTrigger value="all">{{ $t('agentTransfers.allActive') }}</TabsTrigger>
-              <TabsTrigger value="history">{{ $t('agentTransfers.history') }}</TabsTrigger>
-            </TabsList>
+          <div class="w-full">
 
             <!-- My Transfers Tab -->
             <TabsContent value="my-transfers">
@@ -744,10 +751,11 @@ function formatTimeRemaining(deadline: string | undefined): string {
                 </CardContent>
               </Card>
             </TabsContent>
-          </Tabs>
+          </div>
         </div>
       </div>
     </ScrollArea>
+  </div>
 
     <!-- Assign Dialog -->
     <Dialog v-model:open="assignDialogOpen">
@@ -818,5 +826,5 @@ function formatTimeRemaining(deadline: string | undefined): string {
       :is-submitting="isResuming"
       @confirm="confirmResumeTransfer"
     />
-  </div>
+  </Tabs>
 </template>

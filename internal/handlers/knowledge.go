@@ -242,8 +242,14 @@ func (a *App) ListKnowledgeDocuments(r *fastglue.Request) error {
 	if err := q.Count(&total).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to load documents", nil, "")
 	}
+	// ?sort=updated feeds the help center's "recently updated"; the default
+	// (and anything else) stays alphabetical.
+	order := "title ASC"
+	if string(args.Peek("sort")) == "updated" {
+		order = "updated_at DESC, title ASC"
+	}
 	var docs []models.KnowledgeDocument
-	if err := pg.Apply(q.Omit("body").Order("title ASC")).Find(&docs).Error; err != nil {
+	if err := pg.Apply(q.Omit("body").Order(order)).Find(&docs).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to load documents", nil, "")
 	}
 	return r.SendEnvelope(listEnvelope("documents", docs, total, pg))

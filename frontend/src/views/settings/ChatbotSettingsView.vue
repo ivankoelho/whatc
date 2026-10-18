@@ -10,7 +10,6 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { PageHeader, AuditLogPanel } from '@/components/shared'
@@ -18,9 +17,7 @@ import MessageButtonsEditor from '@/components/shared/MessageButtonsEditor.vue'
 import type { ButtonConfig } from '@/types/flow-preview'
 import { validateWhatsAppButtons } from '@/lib/whatsappButtons'
 import { toast } from 'vue-sonner'
-import { getErrorMessage } from '@/lib/api-utils'
-import { knowledgeRagSwitch } from '@/lib/knowledge'
-import { Bot, Loader2, Brain, X, Clock, AlertTriangle, UserPlus, MessageSquare, Users } from 'lucide-vue-next'
+import { Bot, Loader2, X, Clock, AlertTriangle, UserPlus, MessageSquare, Users } from 'lucide-vue-next'
 import { chatbotService } from '@/services/api'
 import { useUsersStore } from '@/stores/users'
 import { useAuthStore } from '@/stores/auth'
@@ -44,7 +41,6 @@ const messagesLogKey = ref(0)
 const agentsLogKey = ref(0)
 const hoursLogKey = ref(0)
 const slaLogKey = ref(0)
-const aiLogKey = ref(0)
 
 function refreshActivityLog(key: typeof messagesLogKey) {
   setTimeout(() => { key.value++ }, 500)
@@ -95,80 +91,9 @@ const chatbotSettings = ref({
   assign_to_same_agent: true,
   agent_current_conversation_only: false,
   strict_conversation_visibility: false,
-  sign_with_agent_name: false
-})
-
-// AI Settings
-const aiSettings = ref({
-  ai_enabled: false,
-  ai_provider: '',
-  ai_api_key: '',
-  // Whether a key is stored. The key itself is never sent to the browser.
-  ai_api_key_configured: false,
-  ai_model: '',
-  ai_max_tokens: 500,
-  ai_system_prompt: '',
-  // Knowledge in the AI replies: the organization's own switch, and whether the SERVER allows it (read-only)
-  knowledge_enabled: false,
-  knowledge_rag_available: false
-})
-
-const isAIEnabled = ref(false)
-const knowledgeSwitch = computed(() => knowledgeRagSwitch(aiSettings.value.knowledge_rag_available))
-
-// Static suggestions only for the providers that had them before; Groq has none
-// on purpose: its models always come from the provider's own list.
-const aiProviders = [
-  { value: 'openai', label: 'OpenAI', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'] },
-  { value: 'anthropic', label: 'Anthropic', models: ['claude-3-5-sonnet-latest', 'claude-3-5-haiku-latest', 'claude-3-opus-latest'] },
-  { value: 'google', label: 'Google AI', models: ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-1.5-flash-8b'] },
-  { value: 'groq', label: 'Groq', models: [] as string[] }
-]
-
-// Models loaded from the provider (POST /chatbot/ai/models), per provider.
-const loadedModels = ref<Record<string, string[]>>({})
-const isLoadingModels = ref(false)
-
-const availableModels = computed(() => {
-  const provider = aiProviders.find(p => p.value === aiSettings.value.ai_provider)
-  const list = loadedModels.value[aiSettings.value.ai_provider] ?? provider?.models ?? []
-  // Keep the saved model selectable even if the provider no longer lists it.
-  const current = aiSettings.value.ai_model
-  return current && !list.includes(current) ? [current, ...list] : list
-})
-
-const canLoadModels = computed(() =>
-  !!aiSettings.value.ai_provider &&
-  (!!aiSettings.value.ai_api_key || aiSettings.value.ai_api_key_configured)
-)
-
-async function loadAIModels() {
-  const provider = aiSettings.value.ai_provider
-  if (!provider) return
-  isLoadingModels.value = true
-  try {
-    const response = await chatbotService.listAIModels(provider, aiSettings.value.ai_api_key || undefined)
-    const data = response.data.data || response.data
-    loadedModels.value = { ...loadedModels.value, [provider]: (data.models || []).map((m: { id: string }) => m.id) }
-    toast.success(t('chatbotSettings.modelsLoaded', { count: loadedModels.value[provider].length }))
-  } catch (error) {
-    toast.error(getErrorMessage(error, t('chatbotSettings.failedLoadModels')))
-  } finally {
-    isLoadingModels.value = false
-  }
-}
-
-// A key (typed or saved) belongs to one provider: switching provider drops the
-// typed key and the previous provider's model so they are never mixed.
-watch(() => aiSettings.value.ai_provider, (next, prev) => {
-  if (prev !== undefined && prev !== '' && next !== prev) {
-    aiSettings.value.ai_api_key = ''
-    aiSettings.value.ai_model = ''
-  }
-})
-
-watch(isAIEnabled, (newValue) => {
-  aiSettings.value.ai_enabled = newValue
+  sign_with_agent_name: false,
+  away_reassign_enabled: false,
+  away_reassign_after_mins: 10
 })
 
 // SLA Settings
@@ -263,21 +188,9 @@ onMounted(async () => {
         assign_to_same_agent: chatbotData.settings.assign_to_same_agent !== false,
         agent_current_conversation_only: chatbotData.settings.agent_current_conversation_only === true,
         strict_conversation_visibility: chatbotData.settings.strict_conversation_visibility === true,
-        sign_with_agent_name: chatbotData.settings.sign_with_agent_name === true
-      }
-
-      const aiEnabledValue = chatbotData.settings.ai_enabled === true
-      isAIEnabled.value = aiEnabledValue
-      aiSettings.value = {
-        ai_enabled: aiEnabledValue,
-        ai_provider: chatbotData.settings.ai_provider || '',
-        ai_api_key: '',
-        ai_api_key_configured: chatbotData.settings.ai_api_key_configured === true,
-        ai_model: chatbotData.settings.ai_model || '',
-        ai_max_tokens: chatbotData.settings.ai_max_tokens || 500,
-        ai_system_prompt: chatbotData.settings.ai_system_prompt || '',
-        knowledge_enabled: chatbotData.settings.knowledge_enabled === true,
-        knowledge_rag_available: chatbotData.settings.knowledge_rag_available === true
+        sign_with_agent_name: chatbotData.settings.sign_with_agent_name === true,
+        away_reassign_enabled: chatbotData.settings.away_reassign_enabled === true,
+        away_reassign_after_mins: chatbotData.settings.away_reassign_after_mins || 10
       }
 
       const slaEnabledValue = chatbotData.settings.sla_enabled === true
@@ -348,7 +261,10 @@ async function saveAgentSettings() {
       assign_to_same_agent: chatbotSettings.value.assign_to_same_agent,
       agent_current_conversation_only: chatbotSettings.value.agent_current_conversation_only,
       strict_conversation_visibility: chatbotSettings.value.strict_conversation_visibility,
-      sign_with_agent_name: chatbotSettings.value.sign_with_agent_name
+      sign_with_agent_name: chatbotSettings.value.sign_with_agent_name,
+      away_reassign_enabled: chatbotSettings.value.away_reassign_enabled,
+      // An empty or out-of-range field would be rejected by the server: keep it in 1..1440.
+      away_reassign_after_mins: Math.min(1440, Math.max(1, Math.round(Number(chatbotSettings.value.away_reassign_after_mins)) || 10))
     })
     toast.success(t('chatbotSettings.agentSettingsSaved'))
     refreshActivityLog(agentsLogKey)
@@ -372,34 +288,6 @@ async function saveBusinessHoursSettings() {
     refreshActivityLog(hoursLogKey)
   } catch (error) {
     toast.error(t('common.failedSave', { resource: t('resources.chatbotSettings') }))
-  } finally {
-    isSubmitting.value = false
-  }
-}
-
-async function saveAISettings() {
-  isSubmitting.value = true
-  try {
-    const payload: any = {
-      ai_enabled: aiSettings.value.ai_enabled,
-      ai_provider: aiSettings.value.ai_provider,
-      ai_model: aiSettings.value.ai_model,
-      ai_max_tokens: aiSettings.value.ai_max_tokens,
-      ai_system_prompt: aiSettings.value.ai_system_prompt,
-      knowledge_enabled: aiSettings.value.knowledge_enabled
-    }
-    if (aiSettings.value.ai_api_key) {
-      payload.ai_api_key = aiSettings.value.ai_api_key
-    }
-    await chatbotService.updateSettings(payload)
-    toast.success(t('chatbotSettings.aiSettingsSaved'))
-    if (aiSettings.value.ai_api_key) aiSettings.value.ai_api_key_configured = true
-    aiSettings.value.ai_api_key = ''
-    refreshActivityLog(aiLogKey)
-  } catch (error: any) {
-    toast.error(error?.response?.data?.error_type === 'AIEncryptionKeyUnavailable'
-      ? t('chatbotSettings.aiEncryptionKeyMissing')
-      : t('chatbotSettings.aiSaveFailed'))
   } finally {
     isSubmitting.value = false
   }
@@ -460,7 +348,7 @@ function removeEscalationUser(userId: string) {
     <ScrollArea class="flex-1">
       <div class="p-6 space-y-4 max-w-4xl mx-auto">
         <Tabs default-value="messages" class="w-full">
-          <TabsList class="grid w-full grid-cols-5 mb-6">
+          <TabsList class="grid w-full grid-cols-4 mb-6">
             <TabsTrigger value="messages">
               <MessageSquare class="h-4 w-4 mr-2" />
               {{ $t('chatbotSettings.messages') }}
@@ -476,10 +364,6 @@ function removeEscalationUser(userId: string) {
             <TabsTrigger value="sla">
               <AlertTriangle class="h-4 w-4 mr-2" />
               {{ $t('chatbotSettings.sla') }}
-            </TabsTrigger>
-            <TabsTrigger value="ai">
-              <Brain class="h-4 w-4 mr-2" />
-              {{ $t('chatbotSettings.ai') }}
             </TabsTrigger>
           </TabsList>
 
@@ -624,6 +508,27 @@ function removeEscalationUser(userId: string) {
                     :checked="chatbotSettings.sign_with_agent_name"
                     @update:checked="chatbotSettings.sign_with_agent_name = $event"
                   />
+                </div>
+
+                <Separator />
+
+                <div class="flex items-center justify-between py-2">
+                  <div>
+                    <p class="font-medium">{{ $t('chatbotSettings.awayReassign') }}</p>
+                    <p class="text-sm text-muted-foreground">{{ $t('chatbotSettings.awayReassignDesc') }}</p>
+                  </div>
+                  <Switch
+                    :checked="chatbotSettings.away_reassign_enabled"
+                    @update:checked="chatbotSettings.away_reassign_enabled = $event"
+                  />
+                </div>
+
+                <div v-if="chatbotSettings.away_reassign_enabled" class="flex items-center justify-between gap-4 py-2 pl-4">
+                  <div>
+                    <p class="font-medium">{{ $t('chatbotSettings.awayReassignAfter') }}</p>
+                    <p class="text-sm text-muted-foreground">{{ $t('chatbotSettings.awayReassignAfterDesc') }}</p>
+                  </div>
+                  <Input v-model.number="chatbotSettings.away_reassign_after_mins" type="number" min="1" max="1440" class="w-24" />
                 </div>
 
                 <div class="flex justify-end pt-4">
@@ -942,126 +847,6 @@ function removeEscalationUser(userId: string) {
             </div>
           </TabsContent>
 
-          <!-- AI Tab -->
-          <TabsContent value="ai">
-            <Card>
-              <CardHeader>
-                <CardTitle>{{ $t('chatbotSettings.aiSettings') }}</CardTitle>
-                <CardDescription>{{ $t('chatbotSettings.aiSettingsDesc') }}</CardDescription>
-              </CardHeader>
-              <CardContent class="space-y-4">
-                <div class="flex items-center justify-between">
-                  <div>
-                    <p class="font-medium">{{ $t('chatbotSettings.enableAiResponses') }}</p>
-                    <p class="text-sm text-muted-foreground">{{ $t('chatbotSettings.enableAiResponsesDesc') }}</p>
-                  </div>
-                  <Switch
-                    :checked="isAIEnabled"
-                    @update:checked="(val: boolean) => isAIEnabled = val"
-                  />
-                </div>
-
-                <div v-if="isAIEnabled" class="space-y-4 pt-2">
-                  <Separator />
-
-                  <div class="grid grid-cols-2 gap-4">
-                    <div class="space-y-2">
-                      <Label>{{ $t('chatbotSettings.aiProvider') }}</Label>
-                      <Select v-model="aiSettings.ai_provider">
-                        <SelectTrigger>
-                          <SelectValue :placeholder="$t('chatbotSettings.selectProvider') + '...'" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem v-for="provider in aiProviders" :key="provider.value" :value="provider.value">
-                            {{ provider.label }}
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div class="space-y-2">
-                      <div class="flex items-center justify-between">
-                        <Label>{{ $t('chatbotSettings.model') }}</Label>
-                        <Button
-                          variant="link"
-                          size="sm"
-                          class="h-auto p-0 text-xs"
-                          :disabled="!canLoadModels || isLoadingModels"
-                          data-testid="load-ai-models"
-                          @click="loadAIModels"
-                        >
-                          <Loader2 v-if="isLoadingModels" class="mr-1 h-3 w-3 animate-spin" />
-                          {{ $t('chatbotSettings.loadModels') }}
-                        </Button>
-                      </div>
-                      <Select v-model="aiSettings.ai_model" :disabled="!aiSettings.ai_provider">
-                        <SelectTrigger>
-                          <SelectValue :placeholder="$t('chatbotSettings.selectModel') + '...'" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem v-for="model in availableModels" :key="model" :value="model">
-                            {{ model }}
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-
-                  <div class="space-y-2">
-                    <Label>{{ $t('chatbotSettings.apiKey') }}</Label>
-                    <Input
-                      v-model="aiSettings.ai_api_key"
-                      type="password"
-                      :placeholder="$t('chatbotSettings.apiKeyPlaceholder') + '...'"
-                    />
-                    <p class="text-xs text-muted-foreground">{{ $t('chatbotSettings.apiKeyHint') }}</p>
-                    <p v-if="aiSettings.ai_api_key_configured && !aiSettings.ai_api_key" class="text-xs text-emerald-600" data-testid="ai-key-saved">
-                      {{ $t('chatbotSettings.apiKeySaved') }}
-                    </p>
-                    <p v-if="aiSettings.ai_provider && !availableModels.length" class="text-xs text-muted-foreground">
-                      {{ $t('chatbotSettings.loadModelsHint') }}
-                    </p>
-                  </div>
-
-                  <div class="space-y-2">
-                    <Label>{{ $t('chatbotSettings.maxTokens') }}</Label>
-                    <Input v-model.number="aiSettings.ai_max_tokens" type="number" min="100" max="4000" class="w-32" />
-                  </div>
-
-                  <div class="space-y-2">
-                    <Label>{{ $t('chatbotSettings.systemPrompt') }}</Label>
-                    <Textarea
-                      v-model="aiSettings.ai_system_prompt"
-                      :placeholder="$t('chatbotSettings.systemPromptPlaceholder') + '...'"
-                      :rows="3"
-                    />
-                  </div>
-
-                  <div class="flex items-center justify-between gap-4 py-2" data-testid="chatbot-knowledge-switch">
-                    <div>
-                      <p class="font-medium">{{ $t('chatbotSettings.knowledgeTitle') }}</p>
-                      <p class="text-sm text-muted-foreground">{{ $t('chatbotSettings.knowledgeDesc') }}</p>
-                      <p class="text-xs text-muted-foreground mt-1">{{ $t(knowledgeSwitch.hint === 'ready' ? 'chatbotSettings.knowledgeReady' : 'chatbotSettings.knowledgeServerOff') }}</p>
-                    </div>
-                    <Switch
-                      :checked="aiSettings.knowledge_enabled"
-                      :disabled="knowledgeSwitch.disabled"
-                      @update:checked="aiSettings.knowledge_enabled = $event"
-                    />
-                  </div>
-                </div>
-
-                <div class="flex justify-end pt-2">
-                  <Button @click="saveAISettings" :disabled="isSubmitting">
-                    <Loader2 v-if="isSubmitting" class="mr-2 h-4 w-4 animate-spin" />
-                    {{ $t('chatbotSettings.saveChanges') }}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-            <div v-if="orgID" class="mt-4">
-              <AuditLogPanel :key="aiLogKey" resource-type="settings.chatbot.ai" :resource-id="orgID" />
-            </div>
-          </TabsContent>
         </Tabs>
       </div>
     </ScrollArea>

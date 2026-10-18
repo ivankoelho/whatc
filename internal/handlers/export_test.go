@@ -179,3 +179,47 @@ func (a *App) TransitionInTxWithBadCauseForTest(contact *models.Contact, to mode
 		return tx.Model(&models.Contact{}).Where("id = ?", contact.ID).Update("profile_name", "written-after").Error
 	})
 }
+
+// CanAccessChatChannelForTest exposes canAccessChatChannel to handlers_test.
+func (a *App) CanAccessChatChannelForTest(userID, orgID uuid.UUID, ch *models.ChatChannel) bool {
+	return a.canAccessChatChannel(userID, orgID, ch)
+}
+
+// LoadChatChannelForTest exposes loadChatChannel to handlers_test.
+func (a *App) LoadChatChannelForTest(orgID, channelID uuid.UUID) (*models.ChatChannel, bool) {
+	return a.loadChatChannel(orgID, channelID)
+}
+
+// CanDeleteChatMessageForTest exposes canDeleteChatMessage to handlers_test.
+func (a *App) CanDeleteChatMessageForTest(userID, orgID uuid.UUID, msg *models.ChatMessage, ch *models.ChatChannel) bool {
+	return a.canDeleteChatMessage(userID, orgID, msg, ch)
+}
+
+// ReassignAwayTransferForTest exposes reassignAwayTransfer.
+func (a *App) ReassignAwayTransferForTest(t *models.AgentTransfer, awayAgent uuid.UUID, event string) bool {
+	return a.reassignAwayTransfer(t, awayAgent, event)
+}
+
+// SetChatAuditWriterForTest swaps the function that writes the audit entry of a chat
+// change (to inject a failure) and returns the function that restores it.
+func SetChatAuditWriterForTest(fn func(db *gorm.DB, orgID, userID uuid.UUID, userName, resourceType string, resourceID uuid.UUID, action models.AuditAction, changes ...map[string]any) error) func() {
+	prev := chatAuditWriter
+	chatAuditWriter = fn
+	return func() { chatAuditWriter = prev }
+}
+
+// SetChatUploadsPerMinuteForTest lowers the chat upload rate limit and returns a restore func.
+func SetChatUploadsPerMinuteForTest(n int) func() {
+	old := chatUploadsPerMinute
+	chatUploadsPerMinute = n
+	return func() { chatUploadsPerMinute = old }
+}
+
+// CSV formula neutralization (csv_safe.go), exposed for the external test package.
+func CSVSafeCellForTest(s string) string   { return csvSafeCell(s) }
+func CSVUnsafeCellForTest(s string) string { return csvUnsafeCell(s) }
+
+// CSVLooksLikeFormulaForTest: what a spreadsheet would evaluate (a trigger first, and not a plain number).
+func CSVLooksLikeFormulaForTest(s string) bool {
+	return startsWithFormulaTrigger(s) && !numericCell.MatchString(s)
+}

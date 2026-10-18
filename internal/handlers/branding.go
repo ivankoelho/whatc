@@ -26,6 +26,8 @@ func brandingPublicNullFields() map[string]any {
 		"system_name":          nil,
 		"footer_text":          nil,
 		"footer_version":       nil,
+		// Never null: the app shell always needs a layout to render.
+		"ui_theme": models.UIThemeDefault,
 	}
 }
 
@@ -56,6 +58,9 @@ func (a *App) GetPublicBranding(r *fastglue.Request) error {
 	if row.FooterVersion != "" {
 		resp["footer_version"] = row.FooterVersion
 	}
+	if row.UITheme != "" {
+		resp["ui_theme"] = row.UITheme
+	}
 	return r.SendEnvelope(resp)
 }
 
@@ -70,6 +75,7 @@ type UpdateBrandingFooterRequest struct {
 	SystemName    *string `json:"system_name"`
 	FooterText    *string `json:"footer_text"`
 	FooterVersion *string `json:"footer_version"`
+	UITheme       *string `json:"ui_theme"`
 }
 
 func (a *App) UpdateBrandingFooter(r *fastglue.Request) error {
@@ -88,13 +94,16 @@ func (a *App) UpdateBrandingFooter(r *fastglue.Request) error {
 	if err := a.decodeRequest(r, &req); err != nil {
 		return nil
 	}
+	if req.UITheme != nil && !models.ValidUIThemes[*req.UITheme] {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "ui_theme must be bitrix or classic", nil, "")
+	}
 
 	var row models.BrandingSettings
 	if err := a.DB.Where("id = ?", models.BrandingSettingsSingletonID).First(&row).Error; err != nil {
 		a.Log.Error("Failed to load branding settings", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to load branding settings", nil, "")
 	}
-	old := map[string]any{"system_name": row.SystemName, "footer_text": row.FooterText, "footer_version": row.FooterVersion}
+	old := map[string]any{"system_name": row.SystemName, "footer_text": row.FooterText, "footer_version": row.FooterVersion, "ui_theme": row.UITheme}
 
 	updates := map[string]any{}
 	if req.SystemName != nil {
@@ -109,6 +118,10 @@ func (a *App) UpdateBrandingFooter(r *fastglue.Request) error {
 		row.FooterVersion = *req.FooterVersion
 		updates["footer_version"] = *req.FooterVersion
 	}
+	if req.UITheme != nil {
+		row.UITheme = *req.UITheme
+		updates["ui_theme"] = *req.UITheme
+	}
 	if len(updates) > 0 {
 		if err := a.DB.Model(&models.BrandingSettings{}).
 			Where("id = ?", models.BrandingSettingsSingletonID).Updates(updates).Error; err != nil {
@@ -122,6 +135,7 @@ func (a *App) UpdateBrandingFooter(r *fastglue.Request) error {
 
 	return r.SendEnvelope(map[string]any{
 		"system_name": row.SystemName, "footer_text": row.FooterText, "footer_version": row.FooterVersion,
+		"ui_theme": row.UITheme,
 	})
 }
 
