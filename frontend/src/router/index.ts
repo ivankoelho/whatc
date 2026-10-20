@@ -50,10 +50,9 @@ const router = createRouter({
           meta: { permission: 'analytics' }
         },
         {
+          // Moved to Análises; keep old links (and their ?tab=) working.
           path: 'chat/usage',
-          name: 'whatsapp-usage',
-          component: () => import('@/views/settings/WhatsAppUsageHubView.vue'),
-          meta: { permission: 'whatsapp_usage' }
+          redirect: (to) => ({ path: '/analytics/whatsapp-usage', query: to.query })
         },
         {
           path: 'chat/phone',
@@ -220,6 +219,12 @@ const router = createRouter({
           meta: { permission: 'analytics' }
         },
         {
+          path: 'analytics/whatsapp-usage',
+          name: 'whatsapp-usage',
+          component: () => import('@/views/settings/WhatsAppUsageHubView.vue'),
+          meta: { permission: 'whatsapp_usage' }
+        },
+        {
           path: 'settings',
           name: 'settings',
           component: () => import('@/views/settings/SettingsView.vue'),
@@ -269,9 +274,9 @@ const router = createRouter({
           meta: { permission: 'accounts' }
         },
         {
-          // Moved next to Conversas; keep old links (and their ?tab=) working.
+          // Moved to Análises; keep old links (and their ?tab=) working.
           path: 'settings/whatsapp-usage',
-          redirect: (to) => ({ path: '/chat/usage', query: to.query })
+          redirect: (to) => ({ path: '/analytics/whatsapp-usage', query: to.query })
         },
         {
           path: 'settings/accounts/:id',
@@ -496,6 +501,7 @@ const navigationOrder = [
   { path: '/chatbot/transfers', permission: 'transfers' },
   { path: '/analytics/agents', permission: 'analytics.agents' },
   { path: '/analytics/meta-insights', permission: 'analytics' },
+  { path: '/analytics/whatsapp-usage', permission: 'whatsapp_usage' },
   { path: '/templates', permission: 'templates' },
   { path: '/flows', permission: 'flows.whatsapp' },
   { path: '/campaigns', permission: 'campaigns' },
@@ -508,7 +514,6 @@ const navigationOrder = [
     { path: '/settings', permission: 'settings.general' },
     { path: '/settings/service', permission: 'settings.chatbot' },
     { path: '/settings/accounts', permission: 'accounts' },
-    { path: '/chat/usage', permission: 'whatsapp_usage' },
     { path: '/settings/service', permission: 'canned_responses' },
     { path: '/settings/service', permission: 'contacts' },
     { path: '/settings/service', permission: 'tags' },
