@@ -246,7 +246,9 @@ func (f *apiFixture) seed(t *testing.T, org uuid.UUID, rows ...seedRow) {
 			r.actor = "agent"
 		}
 		if r.sent.IsZero() {
-			r.sent = time.Now().Add(-time.Hour)
+			// Now, not an hour ago: between 0h and 1h in the org's zone an
+			// hour ago is yesterday, and the "today" filter misses the row.
+			r.sent = time.Now()
 		}
 		u := models.MessageUsage{OrganizationID: org, WhatsAppAccount: "acc", Wamid: "w-" + uuid.NewString()[:8], Direction: r.direction,
 			ActorType: r.actor, ActorUserID: r.agent, UnitID: r.unit, Quantity: 1, SentAt: r.sent, BillingState: r.state, LinkState: r.link,
