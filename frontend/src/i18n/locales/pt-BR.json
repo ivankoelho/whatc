@@ -939,7 +939,7 @@
     "themeColor": "Tema de cor",
     "uiTheme": "Tema do sistema",
     "uiThemeDesc": "Define a moldura do sistema (menu, topo e fundo) para todos os usuários. O conteúdo das páginas é o mesmo nos dois temas.",
-    "uiThemeBitrix": "Bitrix",
+    "uiThemeBitrix": "BiSoft",
     "uiThemeBitrixDesc": "Plano de fundo, menu translúcido e abas no topo.",
     "uiThemeClassic": "Clássico",
     "uiThemeClassicDesc": "Menu lateral sólido com submenus, sem plano de fundo.",

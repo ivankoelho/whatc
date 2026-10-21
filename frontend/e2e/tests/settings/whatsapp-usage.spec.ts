@@ -57,9 +57,9 @@ async function cleanup() {
   })
 }
 
-// Consumption moved next to Conversas (/chat/usage); the old settings URL redirects.
+// Consumption lives under Análises; the old /chat/usage and settings URLs redirect.
 async function openConsumption(page: Page) {
-  await page.goto('/chat/usage')
+  await page.goto('/analytics/whatsapp-usage')
   await page.waitForLoadState('networkidle')
 }
 
@@ -82,12 +82,12 @@ test.describe('WhatsApp consumption', () => {
     await cleanup()
   })
 
-  test('a super admin reaches the screen from Conversas and sees both tabs', async ({ page }) => {
+  test('a super admin reaches the screen from Análises and sees both tabs', async ({ page }) => {
     await loginAsAdmin(page)
     await page.goto('/chat')
     await page.waitForLoadState('networkidle')
-    await page.locator('header a[href="/chat/usage"]').click()
-    await expect(page).toHaveURL(/\/chat\/usage/)
+    await page.locator('nav a[href="/analytics/whatsapp-usage"]').click()
+    await expect(page).toHaveURL(/\/analytics\/whatsapp-usage/)
     // Scoped to the usage hub's own rail (the chat page's status tabs may
     // still be leaving during the page transition) and auto-waiting.
     const rail = page.getByRole('tablist').filter({ has: page.getByRole('tab', { name: /Consumption/ }) })
@@ -96,7 +96,7 @@ test.describe('WhatsApp consumption', () => {
 
   test('registers a price in the price table, and refuses an overlapping period', async ({ page }) => {
     await loginAsAdmin(page)
-    await page.goto('/chat/usage?tab=rates')
+    await page.goto('/analytics/whatsapp-usage?tab=rates')
     await page.waitForLoadState('networkidle')
 
     const add = async (from: string, to: string) => {
@@ -145,7 +145,7 @@ test.describe('WhatsApp consumption', () => {
     await expect(page.getByTestId('usage-recording-since')).toBeVisible()
 
     // the price registered in the previous test reaches the waiting message when repricing
-    await page.goto('/chat/usage?tab=rates')
+    await page.goto('/analytics/whatsapp-usage?tab=rates')
     await page.waitForLoadState('networkidle')
     await page.getByTestId('rate-reprice').click()
     await expect(page.getByText(/1 of 1 messages recalculated|1 de 1 mensagens recalculadas/)).toBeVisible()
@@ -204,7 +204,7 @@ test.describe('WhatsApp consumption permissions', () => {
 
   test('a reader sees the consumption but not the price table (super admin only)', async ({ page }) => {
     await loginAs(page, reader)
-    await page.goto('/chat/usage?tab=rates')
+    await page.goto('/analytics/whatsapp-usage?tab=rates')
     await page.waitForLoadState('networkidle')
     await expect(page.getByRole('tab')).toHaveCount(1)
     await expect(page).toHaveURL(/tab=consumption/)
@@ -218,7 +218,7 @@ test.describe('WhatsApp consumption permissions', () => {
     await loginAs(page, nobody)
     await page.goto('/settings/whatsapp-usage') // old URL: redirects, then the guard turns them away
     await page.waitForLoadState('networkidle')
-    expect(page.url()).not.toContain('/chat/usage')
+    expect(page.url()).not.toContain('/analytics/whatsapp-usage')
     expect(page.url()).not.toContain('/settings/whatsapp-usage')
   })
 })

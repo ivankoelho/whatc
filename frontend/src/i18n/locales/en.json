@@ -952,7 +952,7 @@
     "themeColor": "Color theme",
     "uiTheme": "System theme",
     "uiThemeDesc": "Sets the app shell (menu, top bar and background) for every user. Page contents are the same in both themes.",
-    "uiThemeBitrix": "Bitrix",
+    "uiThemeBitrix": "BiSoft",
     "uiThemeBitrixDesc": "Wallpaper, translucent menu and top tabs.",
     "uiThemeClassic": "Classic",
     "uiThemeClassicDesc": "Solid sidebar with submenus, no wallpaper.",

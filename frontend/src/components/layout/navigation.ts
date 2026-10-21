@@ -74,8 +74,7 @@ export const navigationSections: NavSection[] = [
         children: [
           { name: 'nav.conversations', path: '/chat', icon: MessageSquare, permission: 'chat' },
           { name: 'nav.notes', path: '/chat/notes', icon: StickyNote, permission: 'chat' },
-          { name: 'nav.phone', path: '/chat/phone', icon: Phone, permission: 'chat' },
-          { name: 'nav.whatsappUsage', path: '/chat/usage', icon: Receipt, permission: 'whatsapp_usage' }
+          { name: 'nav.phone', path: '/chat/phone', icon: Phone, permission: 'chat' }
         ]
       },
       {
@@ -175,6 +174,13 @@ export const navigationSections: NavSection[] = [
         icon: LineChart,
         color: 'text-violet-400 light:text-violet-600',
         permission: 'analytics'
+      },
+      {
+        name: 'nav.whatsappUsage',
+        path: '/analytics/whatsapp-usage',
+        icon: Receipt,
+        color: 'text-emerald-400 light:text-emerald-600',
+        permission: 'whatsapp_usage'
       },
     ]
   },
