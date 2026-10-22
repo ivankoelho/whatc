@@ -62,11 +62,29 @@ type AccountResponse struct {
 	DefaultTeamID          *uuid.UUID `json:"default_team_id,omitempty"`
 }
 
-// ListAccounts returns all WhatsApp accounts for the organization
+// AccountPublicResponse is the reduced account view for chat users without
+// accounts:read (e.g. to decide whether to show the call button).
+type AccountPublicResponse struct {
+	ID                     uuid.UUID `json:"id"`
+	Name                   string    `json:"name"`
+	PhoneNumber            string    `json:"phone_number,omitempty"`
+	DisplayName            string    `json:"display_name,omitempty"`
+	Status                 string    `json:"status"`
+	BusinessCallingEnabled bool      `json:"business_calling_enabled"`
+	IsDefaultIncoming      bool      `json:"is_default_incoming"`
+	IsDefaultOutgoing      bool      `json:"is_default_outgoing"`
+}
+
+// ListAccounts returns all WhatsApp accounts for the organization.
+// accounts:read gets the full view; chat:read alone gets AccountPublicResponse.
 func (a *App) ListAccounts(r *fastglue.Request) error {
-	orgID, _, err := a.requireAuth(r, models.ResourceAccounts, models.ActionRead)
+	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
-		return nil
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+	full := a.HasPermission(userID, models.ResourceAccounts, models.ActionRead, orgID)
+	if !full && !a.HasPermission(userID, models.ResourceChat, models.ActionRead, orgID) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Insufficient permissions", nil, "")
 	}
 
 	var accounts []models.WhatsAppAccount
@@ -76,9 +94,13 @@ func (a *App) ListAccounts(r *fastglue.Request) error {
 	}
 
 	// Convert to response format (hide sensitive data)
-	response := make([]AccountResponse, len(accounts))
+	response := make([]any, len(accounts))
 	for i, acc := range accounts {
-		response[i] = accountToResponse(acc)
+		if full {
+			response[i] = accountToResponse(acc)
+		} else {
+			response[i] = accountToPublicResponse(acc)
+		}
 	}
 
 	return r.SendEnvelope(map[string]any{
@@ -489,6 +511,17 @@ func (a *App) fetchMetaJSON(url, accessToken string) (map[string]any, int, error
 }
 
 // Helper functions
+
+func accountToPublicResponse(acc models.WhatsAppAccount) AccountPublicResponse {
+	return AccountPublicResponse{
+		ID:                     acc.ID,
+		Name:                   acc.Name,
+		Status:                 acc.Status,
+		BusinessCallingEnabled: acc.BusinessCallingEnabled,
+		IsDefaultIncoming:      acc.IsDefaultIncoming,
+		IsDefaultOutgoing:      acc.IsDefaultOutgoing,
+	}
+}
 
 func accountToResponse(acc models.WhatsAppAccount) AccountResponse {
 	resp := AccountResponse{

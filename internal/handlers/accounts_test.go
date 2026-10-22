@@ -136,6 +136,83 @@ func TestApp_ListAccounts_OrgIsolation(t *testing.T) {
 	assert.Len(t, resp2.Data.Accounts, 1)
 }
 
+func listAccountsAs(t *testing.T, app *handlers.App, orgID uuid.UUID, keys []string) (int, []byte) {
+	t.Helper()
+	role := testutil.CreateTestRoleWithKeys(t, app.DB, orgID, "acclist", keys)
+	user := testutil.CreateTestUser(t, app.DB, orgID, testutil.WithRoleID(&role.ID))
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, orgID, user.ID)
+	require.NoError(t, app.ListAccounts(req))
+	return testutil.GetResponseStatusCode(req), testutil.GetResponseBody(req)
+}
+
+func TestApp_ListAccounts_AccountsReadGetsFullView(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	acc := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+
+	status, body := listAccountsAs(t, app, org.ID, []string{"accounts:read"})
+	require.Equal(t, fasthttp.StatusOK, status)
+
+	var resp struct {
+		Data struct {
+			Accounts []handlers.AccountResponse `json:"accounts"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(body, &resp))
+	require.Len(t, resp.Data.Accounts, 1)
+	got := resp.Data.Accounts[0]
+	assert.Equal(t, acc.ID, got.ID)
+	assert.Equal(t, acc.PhoneID, got.PhoneID)
+	assert.Equal(t, acc.BusinessID, got.BusinessID)
+	assert.NotEmpty(t, got.WebhookVerifyToken)
+	assert.True(t, got.HasAccessToken)
+}
+
+func TestApp_ListAccounts_ChatReadGetsPublicView(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	acc := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(acc).Update("business_calling_enabled", true).Error)
+
+	status, body := listAccountsAs(t, app, org.ID, []string{"chat:read"})
+	require.Equal(t, fasthttp.StatusOK, status)
+
+	var resp struct {
+		Data struct {
+			Accounts []map[string]any `json:"accounts"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(body, &resp))
+	require.Len(t, resp.Data.Accounts, 1)
+	got := resp.Data.Accounts[0]
+	assert.Equal(t, acc.ID.String(), got["id"])
+	assert.Equal(t, true, got["business_calling_enabled"])
+
+	allowed := map[string]bool{
+		"id": true, "name": true, "phone_number": true, "display_name": true, "status": true,
+		"business_calling_enabled": true, "is_default_incoming": true, "is_default_outgoing": true,
+	}
+	for k := range got {
+		assert.True(t, allowed[k], "unexpected field %q in public account view", k)
+	}
+}
+
+func TestApp_ListAccounts_NoChatNoAccountsForbidden(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+
+	status, _ := listAccountsAs(t, app, org.ID, []string{"contacts:read"})
+	assert.Equal(t, fasthttp.StatusForbidden, status)
+}
+
 // --- CreateAccount Tests ---
 
 func TestApp_CreateAccount_Success(t *testing.T) {
