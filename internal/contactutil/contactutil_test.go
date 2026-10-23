@@ -19,7 +19,7 @@ func TestGetOrCreateContact_CreatesNew(t *testing.T) {
 	contact, isNew, err := GetOrCreateContact(db, org.ID, "1234567890", "Alice")
 	require.NoError(t, err)
 	assert.True(t, isNew)
-	assert.Equal(t, "1234567890", contact.PhoneNumber)
+	assert.Equal(t, "551234567890", contact.PhoneNumber)
 	assert.Equal(t, "Alice", contact.ProfileName)
 }
 

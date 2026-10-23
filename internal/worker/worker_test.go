@@ -807,7 +807,7 @@ func TestWorker_HandleRecipientJob_CreatesContact(t *testing.T) {
 
 	// Verify contact was created
 	var contact models.Contact
-	require.NoError(t, w.DB.Where("organization_id = ? AND phone_number = ?", org.ID, newPhone).First(&contact).Error)
+	require.NoError(t, w.DB.Where("organization_id = ? AND phone_number = ?", org.ID, "55"+newPhone).First(&contact).Error)
 	assert.Equal(t, "New Contact", contact.ProfileName)
 }
 

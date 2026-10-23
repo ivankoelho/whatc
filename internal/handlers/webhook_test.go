@@ -597,7 +597,7 @@ func TestWebhookHandler_smb_message_echoes(t *testing.T) {
 	// Verify contact was created
 	var contact models.Contact
 	assert.Eventually(t, func() bool {
-		return app.DB.Where("organization_id = ? AND phone_number = ?", org.ID, "9199998888").First(&contact).Error == nil
+		return app.DB.Where("organization_id = ? AND phone_number = ?", org.ID, "559199998888").First(&contact).Error == nil
 	}, 2*time.Second, 10*time.Millisecond)
 
 	// Verify message was saved as outgoing and status sent
@@ -663,7 +663,7 @@ func TestWebhookHandler_smb_app_state_sync(t *testing.T) {
 	// Verify contact was synced (add)
 	var contact models.Contact
 	assert.Eventually(t, func() bool {
-		return app.DB.Where("organization_id = ? AND phone_number = ?", org.ID, "9199997777").First(&contact).Error == nil
+		return app.DB.Where("organization_id = ? AND phone_number = ?", org.ID, "559199997777").First(&contact).Error == nil
 	}, 2*time.Second, 10*time.Millisecond)
 	assert.Equal(t, "Synced Contact Name", contact.ProfileName)
 
@@ -697,11 +697,11 @@ func TestWebhookHandler_smb_app_state_sync(t *testing.T) {
 	// Verify contact was soft-deleted (remove)
 	var checkUnscoped models.Contact
 	assert.Eventually(t, func() bool {
-		return app.DB.Unscoped().Where("organization_id = ? AND phone_number = ? AND deleted_at IS NOT NULL", org.ID, "9199997777").First(&checkUnscoped).Error == nil
+		return app.DB.Unscoped().Where("organization_id = ? AND phone_number = ? AND deleted_at IS NOT NULL", org.ID, "559199997777").First(&checkUnscoped).Error == nil
 	}, 2*time.Second, 10*time.Millisecond)
 
 	var checkDeleted models.Contact
-	err := app.DB.Where("organization_id = ? AND phone_number = ?", org.ID, "9199997777").First(&checkDeleted).Error
+	err := app.DB.Where("organization_id = ? AND phone_number = ?", org.ID, "559199997777").First(&checkDeleted).Error
 	assert.Error(t, err, "contact should have been soft-deleted and not found by standard query")
 	assert.True(t, checkUnscoped.DeletedAt.Valid, "DeletedAt should be populated")
 }

@@ -27,7 +27,8 @@ func TestMergeDuplicateContacts(t *testing.T) {
 	last := mk("557196002928", time.Hour) // legacy 8-digit form
 	other := mk("5511988887777", time.Hour)
 
-	note := models.ConversationNote{BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: org.ID, ContactID: last.ID}
+	author := testutil.CreateTestUser(t, db, org.ID)
+	note := models.ConversationNote{BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: org.ID, ContactID: last.ID, CreatedByID: author.ID, Content: "n"}
 	require.NoError(t, db.Create(&note).Error)
 
 	rep, err := MergeDuplicateContacts(db, org.ID, false)
