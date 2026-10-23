@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"gorm.io/gorm"
 	"io"
 	"net/http"
 	"os"
@@ -26,15 +27,15 @@ import (
 
 // ContactResponse represents a contact with additional fields for the frontend
 type ContactResponse struct {
-	ID          uuid.UUID `json:"id"`
-	PhoneNumber string    `json:"phone_number"`
-	Name        string    `json:"name"`
-	ProfileName string    `json:"profile_name"`
-	CPFCNPJ     string    `json:"cpf_cnpj,omitempty"`
+	ID           uuid.UUID          `json:"id"`
+	PhoneNumber  string             `json:"phone_number"`
+	Name         string             `json:"name"`
+	ProfileName  string             `json:"profile_name"`
+	CPFCNPJ      string             `json:"cpf_cnpj,omitempty"`
 	ContactType  models.ContactType `json:"contact_type"`
 	UnitID       *uuid.UUID         `json:"unit_id,omitempty"`
 	DepartmentID *uuid.UUID         `json:"department_id,omitempty"`
-	AvatarURL   string    `json:"avatar_url"`
+	AvatarURL    string             `json:"avatar_url"`
 	// Status is a legacy field, always "active". Kept untouched so existing
 	// integrations do not break; ContactStatus is the real service state.
 	Status             string               `json:"status"`
@@ -1645,6 +1646,48 @@ func (a *App) claimExistingContact(orgID, userID uuid.UUID, c *models.Contact, t
 	return claimOK, ""
 }
 
+// LookupContactByPhone answers "does this number already exist?" while the
+// create dialog is still being filled in, with the same identity rules as
+// CreateContact (any spelling, soft-deleted included). Read-only.
+func (a *App) LookupContactByPhone(r *fastglue.Request) error {
+	orgID, userID, err := a.getOrgAndUserID(r)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+	if !a.HasPermission(userID, models.ResourceContacts, models.ActionWrite, orgID) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You do not have permission to create contacts", nil, "")
+	}
+	phone := string(r.RequestCtx.QueryArgs().Peek("phone"))
+	if len(contactutil.NormalizePhone(phone)) < 8 {
+		return r.SendEnvelope(map[string]any{"found": false})
+	}
+	c, err := contactutil.FindContactUnscoped(a.DB, orgID, phone)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return r.SendEnvelope(map[string]any{"found": false})
+		}
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to look up contact", nil, "")
+	}
+	owner, attendance := a.currentContactOwner(orgID, c)
+	deleted := c.DeletedAt.Valid
+	out := map[string]any{"found": true, "contact_id": c.ID, "contact_name": c.ProfileName, "deleted": deleted}
+	switch {
+	case owner != nil:
+		var ownerName string
+		a.DB.Model(&models.User{}).Select("full_name").
+			Where("id = ? AND organization_id = ?", *owner, orgID).Scan(&ownerName)
+		out["code"] = contactExistsAssigned
+		out["assigned_user_name"] = ownerName
+		out["assigned_to_me"] = *owner == userID
+	default:
+		blocked := a.claimBlockReason(orgID, userID, c, attendance)
+		out["code"] = contactExistsUnassigned
+		out["can_claim"] = blocked == ""
+		out["claim_blocked_reason"] = blocked
+	}
+	return r.SendEnvelope(out)
+}
+
 // CreateContact creates a new contact or restores a soft-deleted one
 func (a *App) CreateContact(r *fastglue.Request) error {
 	orgID, userID, err := a.getOrgAndUserID(r)
@@ -1688,7 +1731,7 @@ func (a *App) CreateContact(r *fastglue.Request) error {
 	}
 
 	// Canonical digits-only identity (see contactutil.NormalizePhone).
-	normalizedPhone := contactutil.NormalizePhone(req.PhoneNumber)
+	normalizedPhone := contactutil.CanonicalPhone(req.PhoneNumber)
 
 	// Check if contact exists (including soft-deleted). Goes through the shared
 	// resolver so every spelling of the same subscriber counts as a duplicate --
