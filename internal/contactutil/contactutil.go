@@ -40,12 +40,40 @@ func NormalizePhone(phone string) string {
 // rule globally, or to Brazilian landlines, would fuse genuinely different
 // subscribers.
 func PhoneIdentities(phone string) []string {
-	normalized := NormalizePhone(phone)
+	normalized := CanonicalPhone(phone)
+	ids := []string{normalized}
 	if alt := brazilianMobileAlternate(normalized); alt != "" {
-		return []string{normalized, alt}
+		ids = append(ids, alt)
 	}
-	return []string{normalized}
+	// Rows saved before CanonicalPhone existed may lack the country code
+	// ("71996002928"); keep matching them so those duplicates collapse onto
+	// the oldest row instead of staying invisible to the lookup.
+	for _, id := range ids[:len(ids):len(ids)] {
+		if strings.HasPrefix(id, "55") && (len(id) == 12 || len(id) == 13) {
+			ids = append(ids, id[2:])
+		}
+	}
+	return ids
 }
+
+// CanonicalPhone is NormalizePhone plus the default country code: a bare
+// Brazilian number (DDD + 8 or 9 digits, 10 or 11 digits) gets "55" in front.
+// Country-coded numbers are 12+ digits, so the length alone tells them apart.
+// The DDD must be a real Brazilian area code and an 11-digit number must be a
+// mobile (9 after the DDD), which keeps e.g. US numbers ("12125551234") intact.
+// ponytail: assumes a Brazilian deployment; make the default country
+// Numbers starting with 55 are left alone: that is the country code far more
+// often than DDD 55 (RS), and prefixing would corrupt a short country-coded one.
+// configurable if a foreign number without its country code ever collides.
+func CanonicalPhone(phone string) string {
+	n := NormalizePhone(phone)
+	if (len(n) == 10 || len(n) == 11 && n[2] == '9') && !strings.HasPrefix(n, "55") && strings.Contains(brazilianDDDs, " "+n[:2]+" ") {
+		return "55" + n
+	}
+	return n
+}
+
+const brazilianDDDs = " 11 12 13 14 15 16 17 18 19 21 22 24 27 28 31 32 33 34 35 37 38 41 42 43 44 45 46 47 48 49 51 53 54 55 61 62 63 64 65 66 67 68 69 71 73 74 75 77 79 81 82 83 84 85 86 87 88 89 91 92 93 94 95 96 97 98 99 "
 
 // brazilianMobileAlternate returns the other valid form of a Brazilian mobile
 // number, or "" when n is not one. Layout is 55 + DD + subscriber, so the
@@ -111,7 +139,7 @@ func contactByPhone(db *gorm.DB, orgID uuid.UUID, phone string) (*models.Contact
 // Returns the contact, whether it was newly created, and any error.
 func GetOrCreateContact(db *gorm.DB, orgID uuid.UUID, phoneNumber, profileName string) (*models.Contact, bool, error) {
 	// Canonical digits-only identity (see NormalizePhone).
-	normalizedPhone := NormalizePhone(phoneNumber)
+	normalizedPhone := CanonicalPhone(phoneNumber)
 
 	// Any stored spelling of the same subscriber counts as a hit, including
 	// soft-deleted rows and Brazil's legacy 8-digit mobile form.
