@@ -19,7 +19,7 @@ func TestGetOrCreateContact_CreatesNew(t *testing.T) {
 	contact, isNew, err := GetOrCreateContact(db, org.ID, "1234567890", "Alice")
 	require.NoError(t, err)
 	assert.True(t, isNew)
-	assert.Equal(t, "1234567890", contact.PhoneNumber)
+	assert.Equal(t, "551234567890", contact.PhoneNumber)
 	assert.Equal(t, "Alice", contact.ProfileName)
 }
 
@@ -182,10 +182,10 @@ func TestPhoneIdentities_BrazilianNinthDigit(t *testing.T) {
 		phone string
 		want  []string
 	}{
-		{"mobile with 9th digit yields the legacy form", "5571991234567", []string{"5571991234567", "557191234567"}},
-		{"legacy mobile yields the 9th-digit form", "557191234567", []string{"557191234567", "5571991234567"}},
-		{"landline is never given a 9th digit", "557131234567", []string{"557131234567"}},
-		{"formatting is stripped before the rule is applied", "+55 (11) 99999-9999", []string{"5511999999999", "551199999999"}},
+		{"mobile with 9th digit yields the legacy form", "5571991234567", []string{"5571991234567", "557191234567", "71991234567", "7191234567"}},
+		{"legacy mobile yields the 9th-digit form", "557191234567", []string{"557191234567", "5571991234567", "71991234567", "7191234567"}},
+		{"landline is never given a 9th digit", "557131234567", []string{"557131234567", "7131234567"}},
+		{"formatting is stripped before the rule is applied", "+55 (11) 99999-9999", []string{"5511999999999", "551199999999", "11999999999", "1199999999"}},
 		{"a US number is never expanded", "12125551234", []string{"12125551234"}},
 		{"a 55-prefixed number of the wrong length is left alone", "5571991234", []string{"5571991234"}},
 	}
@@ -194,6 +194,17 @@ func TestPhoneIdentities_BrazilianNinthDigit(t *testing.T) {
 			assert.ElementsMatch(t, tt.want, PhoneIdentities(tt.phone))
 		})
 	}
+}
+
+// Same person typed three ways must be one identity set, and a bare number is
+// stored with the country code.
+func TestPhoneIdentities_MissingCountryCode(t *testing.T) {
+	want := []string{"5571996002928", "557196002928", "71996002928", "7196002928"}
+	for _, in := range []string{"5571996002928", "71996002928", "(71) 99600-2928", "557196002928", "7196002928"} {
+		assert.ElementsMatch(t, want, PhoneIdentities(in), in)
+	}
+	assert.Equal(t, "5571996002928", CanonicalPhone("71996002928"))
+	assert.Equal(t, "12125551234", CanonicalPhone("12125551234"))
 }
 
 // The end-to-end symptom: contact registered with the 9, reply arrives without

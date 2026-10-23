@@ -49,6 +49,8 @@ func main() {
 		runWorker(os.Args[2:])
 	case "knowledge":
 		runKnowledge(os.Args[2:])
+	case "contacts":
+		runContacts(os.Args[2:])
 	case "version":
 		fmt.Printf("Whatomate %s (built %s)\n", Version, BuildTime)
 	case "help", "-h", "--help":
@@ -816,6 +818,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/contacts", app.ListContacts)
 	// Registered before /api/contacts/{id} so "counts" is not captured as an id
 	g.GET("/api/contacts/counts", app.GetContactStatusCounts)
+	g.GET("/api/contacts/lookup", app.LookupContactByPhone)
 	g.POST("/api/contacts", app.CreateContact)
 	g.GET("/api/contacts/{id}", app.GetContact)
 	g.PUT("/api/contacts/{id}", app.UpdateContact)

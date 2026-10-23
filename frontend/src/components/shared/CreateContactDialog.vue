@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -18,6 +19,7 @@ import { getTagColorClass } from '@/lib/constants'
 
 const { t, te } = useI18n()
 const tagsStore = useTagsStore()
+const router = useRouter()
 
 interface Props {
   open: boolean
@@ -48,6 +50,7 @@ const isSubmitting = ref(false)
 // offering an action that would be refused.
 const duplicate = ref<{
   code: string
+  contactId: string
   contactName: string
   ownerName: string
   assignedToMe: boolean
@@ -63,10 +66,44 @@ const tagSelectorOpen = ref(false)
 const availableTags = ref<Tag[]>([])
 const availableAccounts = ref<{ id: string; name: string; phone_number: string }[]>([])
 
-// A different number is a different question: forget the previous answer.
-watch(() => formData.value.phone_number, () => {
+function applyDuplicate(info: any) {
+  duplicate.value = {
+    code: info.code,
+    contactId: info.contact_id || '',
+    contactName: info.contact_name || '',
+    ownerName: info.assigned_user_name || '',
+    assignedToMe: !!info.assigned_to_me,
+    deleted: !!info.deleted,
+    blockedReason: info.can_claim === false ? (info.claim_blocked_reason || 'unknown') : ''
+  }
+}
+
+// A different number is a different question: forget the previous answer, then
+// ask the backend (debounced) whether the new one is already registered, in any
+// spelling, so the agent is offered the conversation before filling the form.
+let lookupTimer: ReturnType<typeof setTimeout> | undefined
+watch(() => formData.value.phone_number, (phone) => {
   duplicate.value = null
+  clearTimeout(lookupTimer)
+  if (phone.replace(/\D/g, '').length < 8) return
+  lookupTimer = setTimeout(async () => {
+    try {
+      const res = await contactsService.lookup(phone.trim())
+      const info = res.data?.data || res.data
+      // Drop a stale answer: the field changed while the request was in flight.
+      if (info?.found && formData.value.phone_number === phone) applyDuplicate(info)
+    } catch {
+      // Best effort: the create call still enforces uniqueness.
+    }
+  }, 400)
 })
+
+function openConversation() {
+  if (!duplicate.value?.contactId) return
+  const id = duplicate.value.contactId
+  emit('update:open', false)
+  router.push(`/chat/${id}`)
+}
 
 watch(() => props.open, (isOpen) => {
   if (isOpen) {
@@ -120,14 +157,7 @@ async function saveContact(claim = false) {
   } catch (error: any) {
     const info = error?.response?.data?.data
     if (isConflictError(error) && (info?.code === 'contact_exists_assigned' || info?.code === 'contact_exists_unassigned')) {
-      duplicate.value = {
-        code: info.code,
-        contactName: info.contact_name || '',
-        ownerName: info.assigned_user_name || '',
-        assignedToMe: !!info.assigned_to_me,
-        deleted: !!info.deleted,
-        blockedReason: info.can_claim === false ? (info.claim_blocked_reason || 'unknown') : ''
-      }
+      applyDuplicate(info)
       return
     }
     // The claim was refused (403) with a stable code: show the reason in the
@@ -274,7 +304,10 @@ function closeDialog() {
       </div>
       <div class="flex justify-end gap-2">
         <Button variant="outline" @click="closeDialog">{{ $t('common.cancel') }}</Button>
-        <Button v-if="duplicate?.code === 'contact_exists_unassigned' && !duplicate.blockedReason" data-testid="create-contact-claim" @click="saveContact(true)" :disabled="isSubmitting">
+        <Button v-if="duplicate?.assignedToMe && duplicate.contactId && !duplicate.deleted" data-testid="create-contact-open" @click="openConversation">
+          {{ $t('contacts.openConversation') }}
+        </Button>
+        <Button v-else-if="duplicate?.code === 'contact_exists_unassigned' && !duplicate.blockedReason" data-testid="create-contact-claim" @click="saveContact(true)" :disabled="isSubmitting">
           <Loader2 v-if="isSubmitting" class="h-4 w-4 mr-2 animate-spin" />
           {{ $t('contacts.duplicateClaim') }}
         </Button>

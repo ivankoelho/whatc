@@ -226,6 +226,7 @@ export const contactsService = {
     api.put(`/contacts/${id}/status`, { contact_status: status }),
   get: (id: string) => api.get(`/contacts/${id}`),
   create: (data: any) => api.post('/contacts', data),
+  lookup: (phone: string) => api.get('/contacts/lookup', { params: { phone } }),
   update: (id: string, data: any) => api.put(`/contacts/${id}`, data),
   delete: (id: string) => api.delete(`/contacts/${id}`),
   assign: (id: string, userId: string | null) =>

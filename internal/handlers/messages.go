@@ -943,7 +943,7 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 		c := models.Contact{
 			BaseModel:       models.BaseModel{ID: uuid.New()},
 			OrganizationID:  orgID,
-			PhoneNumber:     contactutil.NormalizePhone(req.PhoneNumber),
+			PhoneNumber:     contactutil.CanonicalPhone(req.PhoneNumber),
 			WhatsAppAccount: account.Name,
 			AssignedUserID:  &userID,
 		}
