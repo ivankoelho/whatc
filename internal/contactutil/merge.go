@@ -120,6 +120,12 @@ func mergeGroup(db *gorm.DB, keep models.Contact, all []models.Contact, dupIdx [
 			}
 			moved += res.RowsAffected
 		}
+		// idx_contacts_org_phone is unique over soft-deleted rows too, so retire the
+		// duplicates' numbers (tagged, not lost) before the survivor can take the
+		// canonical one. It also stops a later inbound from resurrecting a dup.
+		if err := tx.Exec(`UPDATE contacts SET phone_number = phone_number || '#merged-' || left(id::text, 8) WHERE id IN ?`, dups).Error; err != nil {
+			return err
+		}
 		updates := map[string]any{}
 		if p := CanonicalPhone(keep.PhoneNumber); p != keep.PhoneNumber {
 			updates["phone_number"] = p
