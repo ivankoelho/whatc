@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spike SIP — Fase 0 (descartável)</title>
+<!--
+  DESCARTÁVEL. Harness do roteiro da fase 0 (docs/superpowers/specs/
+  2026-10-11-sip-softphone-phase0-checklist.md). Não é código de produto.
+  - Nada é persistido: sem localStorage, sem cookies. A senha vive só na memória
+    da página e nunca entra no log.
+  - Rodar em localhost (getUserMedia exige contexto seguro):
+      python -m http.server 8099   e abrir http://localhost:8099/
+-->
+<style>
+  :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+  body { margin: 0; padding: 16px; max-width: 980px; margin-inline: auto; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  fieldset { border: 1px solid #8884; border-radius: 8px; margin: 0 0 12px; }
+  legend { font-size: 1rem; font-weight: 600; }
+  label { display: grid; gap: 2px; font-size: .8rem; margin: 6px 0; }
+  input { padding: 6px; font: inherit; }
+  button { padding: 6px 10px; font: inherit; cursor: pointer; margin: 2px 4px 2px 0; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+  .state { font-weight: 600; }
+  #log { font: 12px/1.45 ui-monospace, monospace; white-space: pre-wrap; background: #8881;
+         padding: 8px; border-radius: 8px; max-height: 300px; overflow: auto; }
+  .warn { font-size: .8rem; opacity: .8; }
+  table { border-collapse: collapse; font-size: .8rem; width: 100%; }
+  td, th { border: 1px solid #8884; padding: 4px 6px; text-align: left; }
+</style>
+</head>
+<body>
+<h1>Spike SIP — Fase 0</h1>
+<p class="warn">Descartável. A senha fica só na memória e nunca vai para o log. O log exportado mascara telefones.
+Marque cada teste do roteiro (T1–T11) usando os botões abaixo e anexe o log exportado.</p>
+
+<fieldset>
+  <legend>Pré-requisitos (T1)</legend>
+  <div class="row">
+    <label>URL WSS <input id="wss" size="34" placeholder="wss://sip.exemplo.com.br:443"></label>
+    <label>Domínio/realm <input id="domain" size="22" placeholder="sip.exemplo.com.br"></label>
+    <label>Usuário (ramal) <input id="user" size="14" autocomplete="off"></label>
+    <label>Usuário de auth (opcional) <input id="authuser" size="14" autocomplete="off"></label>
+    <label>Senha <input id="pass" type="password" size="14" autocomplete="off"></label>
+  </div>
+  <div class="row">
+    <label>STUN/TURN (JSON de iceServers, opcional)
+      <input id="ice" size="60" placeholder='[{"urls":"stun:stun.l.google.com:19302"}]' autocomplete="off"></label>
+  </div>
+  <button id="btnReg">Registrar</button>
+  <button id="btnUnreg">Desregistrar</button>
+  <span>Registro: <span id="regState" class="state">offline</span></span>
+</fieldset>
+
+<fieldset>
+  <legend>Chamada (T2–T8)</legend>
+  <div class="row">
+    <label>Destino <input id="target" size="22" placeholder="número ou sip:ramal@dominio" autocomplete="off"></label>
+    <button id="btnCall">Ligar</button>
+    <button id="btnAnswer">Atender</button>
+    <button id="btnReject">Recusar</button>
+    <button id="btnHang">Desligar</button>
+  </div>
+  <div class="row">
+    <button id="btnMute">Mudo</button>
+    <button id="btnHold">Espera</button>
+    <button id="btnUnhold">Retomar</button>
+    <label>DTMF <input id="dtmf" size="8" placeholder="123#*"></label>
+    <button id="btnDtmf2833">Enviar (RFC 2833)</button>
+    <button id="btnDtmfInfo">Enviar (SIP INFO)</button>
+  </div>
+  <div class="row">
+    <label>Transferir para <input id="xfer" size="22" autocomplete="off"></label>
+    <button id="btnBlind">Transferência cega (T7)</button>
+    <button id="btnConsult">Ligar consulta (T8)</button>
+    <button id="btnAttended">Completar assistida (T8)</button>
+  </div>
+  <div>Chamada: <span id="callState" class="state">ociosa</span> ·
+       ICE: <span id="iceState" class="state">-</span> ·
+       Eventos de toque (ringing): <span id="ringSeen" class="state">-</span></div>
+</fieldset>
+
+<fieldset>
+  <legend>Mídia e codecs (T4)</legend>
+  <button id="btnStats">Ler getStats / codec usado</button>
+  <table id="statsTbl"><thead><tr><th>Direção</th><th>codecId → mimeType</th><th>payloadType</th><th>pacotes</th><th>bytes</th></tr></thead><tbody></tbody></table>
+  <audio id="remote" autoplay></audio>
+</fieldset>
+
+<fieldset>
+  <legend>Log (sanitizado)</legend>
+  <button id="btnClear">Limpar</button>
+  <button id="btnExport">Exportar log</button>
+  <div id="log"></div>
+</fieldset>
+
+<!-- Bundle oficial do JsSIP (o pacote npm não traz build de navegador). Só para o spike. -->
+<script src="https://jssip.net/download/releases/jssip-3.10.0.min.js"></script>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const t0 = performance.now();
+  const lines = [];
+  let ua = null, session = null, consult = null, muted = false;
+
+  // Mascara telefones (mantém os 4 últimos) e nunca recebe a senha.
+  const mask = (s) => String(s).replace(/\+?\d[\d\s().-]{6,}\d/g, (m) => '***' + m.replace(/\D/g, '').slice(-4));
+  function log(msg) {
+    const line = `[${((performance.now() - t0) / 1000).toFixed(2)}s] ${mask(msg)}`;
+    lines.push(line);
+    const el = $('log'); el.textContent += line + '\n'; el.scrollTop = el.scrollHeight;
+  }
+  const set = (id, v) => { $(id).textContent = v; };
+
+  function iceServers() {
+    const raw = $('ice').value.trim();
+    if (!raw) return [];
+    try { return JSON.parse(raw); } catch { log('iceServers inválido (JSON)'); return []; }
+  }
+
+  function wireSession(s, label) {
+    s.on('progress', () => { set('callState', label + ': tocando'); set('ringSeen', 'sim'); log(`${label}: progress (toque)`); });
+    s.on('accepted', () => { set('callState', label + ': atendida'); log(`${label}: accepted`); });
+    s.on('confirmed', () => { set('callState', label + ': em andamento'); log(`${label}: confirmed`); });
+    s.on('ended', (e) => { set('callState', 'ociosa'); log(`${label}: ended (${e.cause})`); if (s === session) session = null; });
+    s.on('failed', (e) => { set('callState', 'ociosa'); log(`${label}: failed (${e.cause})`); if (s === session) session = null; });
+    s.on('hold', (e) => log(`${label}: hold (origem ${e.originator})`));
+    s.on('unhold', (e) => log(`${label}: unhold (origem ${e.originator})`));
+    s.on('muted', () => log(`${label}: muted`));
+    s.on('unmuted', () => log(`${label}: unmuted`));
+    s.on('refer', () => log(`${label}: refer recebido`));
+    s.on('peerconnection', ({ peerconnection: pc }) => {
+      pc.addEventListener('iceconnectionstatechange', () => { set('iceState', pc.iceConnectionState); log(`ICE: ${pc.iceConnectionState}`); });
+      pc.addEventListener('track', (ev) => { $('remote').srcObject = ev.streams[0]; log('track remoto recebido'); });
+    });
+    // fallback caso o 'track' não dispare (JsSIP antigo): usa o stream do conexão
+    s.on('confirmed', () => {
+      const pc = s.connection;
+      if (pc && !$('remote').srcObject) {
+        const rs = new MediaStream(pc.getReceivers().map((r) => r.track).filter(Boolean));
+        $('remote').srcObject = rs;
+      }
+    });
+  }
+
+  $('btnReg').onclick = () => {
+    const wss = $('wss').value.trim(), domain = $('domain').value.trim(), user = $('user').value.trim();
+    if (!wss || !domain || !user) return log('preencha WSS, domínio e usuário');
+    try {
+      if (ua) ua.stop();
+      const socket = new JsSIP.WebSocketInterface(wss);
+      ua = new JsSIP.UA({
+        sockets: [socket],
+        uri: `sip:${user}@${domain}`,
+        authorization_user: $('authuser').value.trim() || undefined,
+        password: $('pass').value,
+        register: true,
+        session_timers: false,
+      });
+    } catch (e) { return log('erro ao criar UA: ' + e.message); }
+    ua.on('connected', () => { set('regState', 'WSS conectado'); log('WSS connected'); });
+    ua.on('disconnected', () => { set('regState', 'reconectando'); log('WSS disconnected'); });
+    ua.on('registered', () => { set('regState', 'registrado'); log('registered'); });
+    ua.on('unregistered', () => { set('regState', 'offline'); log('unregistered'); });
+    ua.on('registrationFailed', (e) => { set('regState', 'recusado'); log(`registrationFailed (${e.cause})`); });
+    ua.on('newRTCSession', (e) => {
+      if (e.originator === 'remote') {
+        if (session) { e.session.terminate({ status_code: 486, reason_phrase: 'Busy Here' }); return log('chamada recebida recusada: ocupado (486)'); }
+        session = e.session; wireSession(session, 'entrada');
+        set('callState', 'entrada: tocando'); log('INVITE recebido (Call-ID mascarado)');
+      } else if (!session) { session = e.session; wireSession(session, 'saída'); }
+    });
+    ua.start(); log('UA iniciado');
+  };
+  $('btnUnreg').onclick = () => { if (ua) { ua.unregister(); } };
+
+  const media = () => ({ mediaConstraints: { audio: true, video: false }, pcConfig: { iceServers: iceServers() } });
+  $('btnCall').onclick = () => {
+    if (!ua) return log('registre primeiro');
+    const target = $('target').value.trim(); if (!target) return log('informe o destino');
+    set('ringSeen', 'não'); set('callState', 'saída: iniciando');
+    ua.call(target.includes('@') ? target : `sip:${target}@${$('domain').value.trim()}`, media());
+    log('ligando (estado inicial: initiating)');
+  };
+  $('btnAnswer').onclick = () => session && session.answer(media());
+  $('btnReject').onclick = () => session && session.terminate({ status_code: 603 });
+  $('btnHang').onclick = () => { if (session) session.terminate(); if (consult) consult.terminate(); };
+  $('btnMute').onclick = () => { if (!session) return; muted ? session.unmute({ audio: true }) : session.mute({ audio: true }); muted = !muted; };
+  $('btnHold').onclick = () => session && session.hold();
+  $('btnUnhold').onclick = () => session && session.unhold();
+  const dtmf = (transportType) => session && session.sendDTMF($('dtmf').value, { transportType, duration: 160, interToneGap: 80 });
+  $('btnDtmf2833').onclick = () => dtmf('RFC2833');
+  $('btnDtmfInfo').onclick = () => dtmf('INFO');
+
+  // T7: transferência cega (REFER sem consulta)
+  $('btnBlind').onclick = () => {
+    if (!session) return log('sem chamada ativa');
+    const to = $('xfer').value.trim(); if (!to) return log('informe o destino da transferência');
+    session.refer(to.includes('@') ? to : `sip:${to}@${$('domain').value.trim()}`);
+    log('REFER enviado (cega)');
+  };
+  // T8: assistida — põe a original em espera, liga para a consulta, depois REFER com Replaces
+  $('btnConsult').onclick = () => {
+    if (!session || !ua) return log('sem chamada ativa');
+    const to = $('xfer').value.trim(); if (!to) return log('informe o destino da consulta');
+    session.hold();
+    const target = to.includes('@') ? to : `sip:${to}@${$('domain').value.trim()}`;
+    const orig = session;
+    ua.once('newRTCSession', (e) => { consult = e.session; session = orig; wireSession(consult, 'consulta'); });
+    ua.call(target, media());
+    log('consulta iniciada, original em espera');
+  };
+  $('btnAttended').onclick = () => {
+    if (!session || !consult) return log('inicie a consulta primeiro');
+    session.refer(consult.remote_identity.uri.toString(), { replaces: consult });
+    log('REFER com Replaces enviado (assistida)');
+  };
+
+  // T4: codec EFETIVAMENTE usado, relacionando codecId dos fluxos ao relatório de codec
+  $('btnStats').onclick = async () => {
+    const pc = session && session.connection; if (!pc) return log('sem chamada ativa');
+    const stats = await pc.getStats(); const body = $('statsTbl').tBodies[0]; body.innerHTML = '';
+    stats.forEach((r) => {
+      if ((r.type !== 'inbound-rtp' && r.type !== 'outbound-rtp') || r.kind !== 'audio') return;
+      const c = stats.get(r.codecId) || {};
+      const tr = body.insertRow();
+      [r.type === 'inbound-rtp' ? 'recebido' : 'enviado', `${r.codecId} → ${c.mimeType || '?'}`, c.payloadType ?? '?',
+       r.packetsReceived ?? r.packetsSent ?? 0, r.bytesReceived ?? r.bytesSent ?? 0].forEach((v) => (tr.insertCell().textContent = v));
+      log(`getStats ${r.type}: ${c.mimeType || '?'} pt=${c.payloadType ?? '?'} pacotes=${r.packetsReceived ?? r.packetsSent ?? 0}`);
+    });
+  };
+
+  $('btnClear').onclick = () => { lines.length = 0; $('log').textContent = ''; };
+  $('btnExport').onclick = () => {
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'sip-spike-log.txt'; a.click();
+  };
+
+  window.addEventListener('beforeunload', () => { try { ua && ua.stop(); } catch {} });
+  log(`pronto · navegador: ${navigator.userAgent}`);
+})();
+</script>
+</body>
+</html>
