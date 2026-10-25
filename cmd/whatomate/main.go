@@ -821,6 +821,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/accounts/{id}/business_profile/photo", app.UpdateProfilePicture)
 
 	// Contacts
+	g.GET("/api/contacts/find", app.LookupContacts)
 	g.GET("/api/contacts", app.ListContacts)
 	// Registered before /api/contacts/{id} so "counts" is not captured as an id
 	g.GET("/api/contacts/counts", app.GetContactStatusCounts)
