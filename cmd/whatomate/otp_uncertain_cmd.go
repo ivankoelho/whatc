@@ -43,7 +43,7 @@ func runOTPUncertain(args []string) {
 	}
 
 	if *release == "" {
-		list, err := authmask.ListUncertain(db, time.Now(), worker.DefaultClaimStale())
+		list, err := authmask.ListUncertain(db, worker.DefaultClaimStale())
 		if err != nil {
 			fatalf("%v", err)
 		}

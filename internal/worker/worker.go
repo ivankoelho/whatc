@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -35,8 +36,17 @@ type Worker struct {
 	// ClaimStale overrides how long a recipient claim may stay unresolved before it is
 	// declared delivery_uncertain (tests); zero = default.
 	ClaimStale time.Duration
-	// Now overrides the clock (tests); nil = time.Now.
+	// Now overrides the clock used for the code's validity (tests); nil = time.Now. Claim
+	// ageing never uses it: it uses the database clock (see claimStale).
 	Now func() time.Time
+
+	// closing is set when the worker starts shutting down: it takes on no new
+	// one-time-code send from then on (jobs already started are drained).
+	closing atomic.Bool
+	// inflight counts the jobs being handled, so shutdown can wait for them.
+	inflight inflightJobs
+	// afterClaim is a test hook, called right after a claim is made; nil in production.
+	afterClaim func()
 }
 
 // Ensure Worker implements JobHandler interface
@@ -104,6 +114,9 @@ func (w *Worker) Run(ctx context.Context) error {
 
 // HandleRecipientJob processes a single recipient message job
 func (w *Worker) HandleRecipientJob(ctx context.Context, job *queue.RecipientJob) error {
+	w.inflight.begin()
+	defer w.inflight.end()
+
 	// Check if campaign is still active before sending
 	var campaign models.BulkMessageCampaign
 	if err := w.DB.Where("id = ?", job.CampaignID).Preload("Template").First(&campaign).Error; err != nil {
@@ -373,8 +386,15 @@ func (w *Worker) decryptAccountSecrets(account *models.WhatsAppAccount) {
 	account.DecryptSecrets(key)
 }
 
-// Close cleans up worker resources
+// Close cleans up worker resources. It first stops the worker from starting new
+// one-time-code sends and gives the jobs already started a bounded time to finish
+// (a send that does not finish in time keeps its claim and is resolved as
+// delivery_uncertain, never resent).
 func (w *Worker) Close() error {
+	w.BeginShutdown()
+	if !w.Drain(w.drainTimeout()) {
+		w.Log.Warn("Shutdown left sends in flight; their claims stay and will be resolved as delivery_uncertain", "in_flight", w.inflight.count())
+	}
 	if w.Consumer != nil {
 		return w.Consumer.Close()
 	}

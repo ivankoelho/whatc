@@ -42,8 +42,9 @@ type Uncertain struct {
 }
 
 // ListUncertain returns them, oldest first, straight from PostgreSQL. stale is how old
-// a pending claim must be to count as stuck (the worker's limit). Read-only.
-func ListUncertain(db *gorm.DB, now time.Time, stale time.Duration) ([]Uncertain, error) {
+// a pending claim must be to count as stuck (the worker's limit), measured with the
+// database clock, like the worker does. Read-only.
+func ListUncertain(db *gorm.DB, stale time.Duration) ([]Uncertain, error) {
 	type row struct {
 		RecipientID  uuid.UUID
 		CampaignID   uuid.UUID
@@ -65,8 +66,9 @@ func ListUncertain(db *gorm.DB, now time.Time, stale time.Duration) ([]Uncertain
 		JOIN bulk_message_campaigns c ON c.id = r.campaign_id
 		JOIN templates t ON t.id = c.template_id
 		WHERE r.deleted_at IS NULL AND r.message_id IS NOT NULL AND upper(t.category) = 'AUTHENTICATION'
-		  AND (r.status = 'failed' OR (r.status = 'pending' AND m.status = 'pending' AND m.created_at < ?))
-		ORDER BY m.created_at`, StateUncertain, StateStuck, now.Add(-stale)).Scan(&rows).Error
+		  AND (r.status = 'failed' OR (r.status = 'pending' AND m.status = 'pending'
+		        AND m.created_at < clock_timestamp() - (? * interval '1 second')))
+		ORDER BY m.created_at`, StateUncertain, StateStuck, stale.Seconds()).Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}

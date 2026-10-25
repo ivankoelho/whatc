@@ -103,7 +103,7 @@ func TestReconciliation_ReleaseMakesAnUncertainRecipientRetryable(t *testing.T) 
 	op := f.adminOperator(t)
 	policy := templateutil.OTPPolicy{}
 
-	list, err := authmask.ListUncertain(f.app.DB, time.Now(), 2*time.Minute)
+	list, err := authmask.ListUncertain(f.app.DB, 2*time.Minute)
 	require.NoError(t, err)
 	var found bool
 	for _, u := range list {

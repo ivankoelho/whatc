@@ -36,7 +36,7 @@ func TestRecovery_StuckClaimIsResolvedFromPostgresWithoutRedisOrAJob(t *testing.
 	msgID := e.crashedClaim(t, 10*time.Minute) // the worker died; nothing will ever redeliver a job
 
 	// It can be seen straight from the database...
-	list, err := authmask.ListUncertain(e.w.DB, time.Now(), DefaultClaimStale())
+	list, err := authmask.ListUncertain(e.w.DB, DefaultClaimStale())
 	require.NoError(t, err)
 	var seen bool
 	for _, u := range list {

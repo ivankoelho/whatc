@@ -254,9 +254,19 @@ guarantees locally for authentication campaigns:
 - A claim that is never resolved (the worker died) is found **in PostgreSQL**, with no job
   having to come back from Redis: worker housekeeping runs every five minutes and declares
   it `delivery_uncertain` once it is older than a live send can be (twice the Meta call's
-  timeout plus the time for the writes around it: 2 × (30 s + 30 s) by default). The
-  update is atomic with that age check, so a live worker is never overridden; if one is cut
-  off and its answer arrives late, the result is refused and the recipient stays blocked.
+  timeout plus the time for the writes around it: 2 × (30 s + 30 s) by default). Both the
+  claim instant and its age are measured with the **database clock**, so workers whose own
+  clocks are off cannot make a live send look stuck. The update is atomic with that age
+  check, so a live worker is never overridden; if one is cut off and its answer arrives
+  late, the result is refused and the recipient stays blocked. Marking a delivery uncertain
+  changes the recipient and its message in one transaction.
+- **Shutdown.** A worker that is stopping makes no new claim and no new Meta call: a job
+  that has not claimed yet is left for the next process, and one that claimed but has not
+  made its request yet has its claim undone (the recipient goes back to pending). A request
+  that is already in flight is allowed to finish within its own timeout, and the worker
+  waits for it for a bounded time (the call's timeout plus 15 s) before exiting. If the
+  process is killed before the answer arrives, the claim stays and is resolved as
+  `delivery_uncertain`.
 - A confirmed send is recorded on the message created by the claim (no duplicate messages),
   and delivery and read receipts update it as for any message.
 

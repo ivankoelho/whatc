@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -65,9 +66,12 @@ func (w *Worker) metaCallTimeout() time.Duration {
 // derived, not picked: a live worker holds a claim for at most the Meta call plus
 // the writes around it, and the limit is twice that, so a worker that is merely
 // slow (a GC pause, a loaded database) is not mistaken for a dead one. A worker
-// that is restarted loses its claim immediately, so it never needs more. Even if
-// this is ever wrong, a late result cannot overwrite a recovered claim (see
-// finishSent): the recipient stays blocked and uncertain.
+// that is restarted loses its claim immediately, so it never needs more. Ageing is
+// measured with the DATABASE clock on both ends (the claim instant is stamped with
+// clock_timestamp() in the claim transaction and compared with clock_timestamp() when
+// recovering), so workers whose own clocks are off cannot make a live send look stuck
+// or a dead one look alive. Even if this limit is ever wrong, a late result cannot
+// overwrite a recovered claim (see finishSent): the recipient stays blocked and uncertain.
 func (w *Worker) claimStale() time.Duration {
 	if w.ClaimStale > 0 {
 		return w.ClaimStale
@@ -129,10 +133,20 @@ func (w *Worker) sendSecretRecipient(ctx context.Context, job *queue.RecipientJo
 		return nil
 	}
 
+	// A worker that is shutting down starts nothing new: no claim is made, the job is
+	// not acknowledged and is delivered again later.
+	if err := w.shutdownErr(ctx); err != nil {
+		return err
+	}
+
 	// Claim: one short transaction, closed before Meta is called.
 	msg := w.newSecretMessage(job, campaign, contact)
 	claimErr := w.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(msg).Error; err != nil {
+			return err
+		}
+		// The claim instant is the DATABASE's, not this worker's clock.
+		if err := tx.Exec("UPDATE messages SET created_at = clock_timestamp() WHERE id = ?", msg.ID).Error; err != nil {
 			return err
 		}
 		res := tx.Model(&models.BulkMessageRecipient{}).
@@ -157,10 +171,21 @@ func (w *Worker) sendSecretRecipient(ctx context.Context, job *queue.RecipientJo
 		return fmt.Errorf("failed to claim recipient: %w", claimErr)
 	}
 
+	if w.afterClaim != nil {
+		w.afterClaim()
+	}
+
 	// The claim took time: check the validity again right before Meta is called.
 	if cerr := w.otpPolicy().Check(sealedParams, w.now()); cerr != nil {
 		w.releaseClaim(ctx, job, msg, cerr.Error()+": the verification code is not valid for sending", true)
 		return nil
+	}
+
+	// No new Meta call while the worker is shutting down. Nothing has left yet, so the
+	// claim is undone (the recipient goes back to pending) and the job is redelivered.
+	if err := w.shutdownErr(ctx); err != nil {
+		w.unclaim(job, msg, "worker_shutdown: the worker was stopping before the request was made; the code was not sent")
+		return err
 	}
 
 	recipient := &models.BulkMessageRecipient{
@@ -169,8 +194,11 @@ func (w *Worker) sendSecretRecipient(ctx context.Context, job *queue.RecipientJo
 		TemplateParams: opened,
 		HeaderParams:   job.HeaderParams,
 	}
-	// The call is bounded by a deadline the claim-recovery limit is derived from.
-	callCtx, cancel := context.WithTimeout(ctx, w.metaCallTimeout())
+	// The call is bounded by a deadline the claim-recovery limit is derived from, and it
+	// does NOT depend on the shutdown signal: once a claim is held the request is allowed
+	// to finish within its own timeout, so a clean stop does not turn a send into an
+	// uncertain one (Close waits for it, for a bounded time).
+	callCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), w.metaCallTimeout())
 	defer cancel()
 	wamid, sendErr := w.sendTemplateMessage(callCtx, account, campaign.Template, recipient, campaign.HeaderMediaID, campaign.HeaderMediaFilename)
 	if sendErr != nil {
@@ -260,15 +288,14 @@ type staleClaim struct {
 // same moment either wins (its update runs first and the recipient is no longer
 // pending) or loses (this runs first and its late result is refused, see finishSent).
 func (w *Worker) resolveStaleClaims(ctx context.Context, only *uuid.UUID) (int, error) {
-	cutoff := w.now().Add(-w.claimStale())
 	reason := ReasonDeliveryUncertain + ": a claim older than the longest a live send can last was never resolved (the worker stopped or was cut off); the code is NOT resent automatically"
 	var claims []staleClaim
 	err := w.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		q := `UPDATE bulk_message_recipients r SET status = 'failed', error_message = @reason
 			FROM messages m
 			WHERE m.id = r.message_id AND r.status = 'pending' AND r.deleted_at IS NULL
-			  AND m.status = 'pending' AND m.created_at < @cutoff`
-		args := []any{sql.Named("reason", reason), sql.Named("cutoff", cutoff)}
+			  AND m.status = 'pending' AND m.created_at < clock_timestamp() - (@stale * interval '1 second')`
+		args := []any{sql.Named("reason", reason), sql.Named("stale", w.claimStale().Seconds())}
 		if only != nil {
 			q += " AND r.id = @only"
 			args = append(args, sql.Named("only", *only))
@@ -371,14 +398,36 @@ func (w *Worker) releaseClaim(ctx context.Context, job *queue.RecipientJob, msg 
 // The claim (message_id) stays, which is exactly what keeps RetryFailed away from it.
 // The sealed code is kept too, so a person can reconcile and release it deliberately.
 func (w *Worker) markUncertain(ctx context.Context, job *queue.RecipientJob, msg *models.Message, reason string) {
-	res := w.DB.Model(&models.BulkMessageRecipient{}).
-		Where("id = ? AND status = ? AND message_id = ?", job.RecipientID, models.MessageStatusPending, msg.ID).
-		Updates(map[string]any{"status": models.MessageStatusFailed, "error_message": reason})
-	if res.Error != nil || res.RowsAffected != 1 {
-		return // somebody else resolved it first
+	// Recipient and message change together or not at all: the compare-and-set on the
+	// recipient and the message update are one transaction, and the counters, usage and
+	// completion run only after it committed.
+	won := false
+	err := w.DB.Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&models.BulkMessageRecipient{}).
+			Where("id = ? AND status = ? AND message_id = ?", job.RecipientID, models.MessageStatusPending, msg.ID).
+			Updates(map[string]any{"status": models.MessageStatusFailed, "error_message": reason})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected != 1 {
+			return nil // somebody else resolved it first: nothing to undo, nothing to count
+		}
+		if err := tx.Model(&models.Message{}).Where("id = ?", msg.ID).
+			Updates(map[string]any{"status": models.MessageStatusFailed, "error_message": reason}).Error; err != nil {
+			return err // rolls the recipient update back as well
+		}
+		won = true
+		return nil
+	})
+	if err != nil {
+		// Both writes were rolled back: the recipient is still claimed (pending), and
+		// housekeeping resolves it as delivery_uncertain once the claim is old enough.
+		w.Log.Error("Failed to record an uncertain delivery; the claim stays for housekeeping", "error", err, "recipient_id", job.RecipientID)
+		return
 	}
-	w.DB.Model(&models.Message{}).Where("id = ?", msg.ID).
-		Updates(map[string]any{"status": models.MessageStatusFailed, "error_message": reason})
+	if !won {
+		return
+	}
 	w.incrementCampaignCount(job.CampaignID, "failed_count")
 	msg.Status, msg.ErrorMessage = models.MessageStatusFailed, reason
 	w.recordCampaignUsageUnsettled(ctx, msg, job.CampaignID)
@@ -428,3 +477,74 @@ const (
 // DefaultClaimStale is the claim-recovery limit with the default Meta timeout, for
 // tools that run outside a worker.
 func DefaultClaimStale() time.Duration { return 2 * (defaultMetaCall + claimWriteBudget) }
+
+// ---- graceful shutdown ----
+
+var errShuttingDown = errors.New("worker is shutting down")
+
+// shutdownErr is non-nil when the worker must start nothing new.
+func (w *Worker) shutdownErr(ctx context.Context) error {
+	if w.closing.Load() {
+		return errShuttingDown
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("%w: %v", errShuttingDown, err)
+	}
+	return nil
+}
+
+// BeginShutdown makes the worker refuse to start new one-time-code sends.
+func (w *Worker) BeginShutdown() { w.closing.Store(true) }
+
+// drainTimeout is how long shutdown waits for jobs already started: a Meta call plus
+// half the write budget around it.
+func (w *Worker) drainTimeout() time.Duration { return w.metaCallTimeout() + claimWriteBudget/2 }
+
+// Drain waits up to timeout for the jobs already started to finish. It reports
+// whether they all did.
+func (w *Worker) Drain(timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for w.inflight.count() > 0 {
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	return true
+}
+
+// inflightJobs counts the jobs being handled.
+type inflightJobs struct {
+	mu sync.Mutex
+	n  int
+}
+
+func (i *inflightJobs) begin() { i.mu.Lock(); i.n++; i.mu.Unlock() }
+func (i *inflightJobs) end()   { i.mu.Lock(); i.n--; i.mu.Unlock() }
+func (i *inflightJobs) count() int {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return i.n
+}
+
+// unclaim undoes a claim for an attempt that never made a request: the message is
+// failed (kept for the record) and the recipient goes back to pending with no claim,
+// so the redelivered job starts over. Compare-and-set on the claim.
+func (w *Worker) unclaim(job *queue.RecipientJob, msg *models.Message, reason string) {
+	err := w.DB.Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&models.BulkMessageRecipient{}).
+			Where("id = ? AND status = ? AND message_id = ?", job.RecipientID, models.MessageStatusPending, msg.ID).
+			UpdateColumn("message_id", nil)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected != 1 {
+			return errClaimNoLongerHeld
+		}
+		return tx.Model(&models.Message{}).Where("id = ?", msg.ID).
+			Updates(map[string]any{"status": models.MessageStatusFailed, "error_message": reason}).Error
+	})
+	if err != nil {
+		w.Log.Error("Failed to undo the claim", "error", err, "recipient_id", job.RecipientID)
+	}
+}

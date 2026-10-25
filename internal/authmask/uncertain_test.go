@@ -190,7 +190,7 @@ func TestListUncertain_ShowsStuckClaimsStraightFromPostgres(t *testing.T) {
 	stuck := e.uncertain(t, until, models.MessageStatusPending, 10*time.Minute) // claimed long ago, never resolved
 	inFlight := e.uncertain(t, until, models.MessageStatusPending, 5*time.Second)
 
-	list, err := authmask.ListUncertain(e.db, time.Now(), 2*time.Minute)
+	list, err := authmask.ListUncertain(e.db, 2*time.Minute)
 	require.NoError(t, err)
 	states := map[uuid.UUID]string{}
 	for _, u := range list {
