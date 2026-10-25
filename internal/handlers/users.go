@@ -505,6 +505,12 @@ func (a *App) UpdateUser(r *fastglue.Request) error {
 	}
 
 	// Native user: full update
+	// Credentials of a super admin can only be changed by a super admin (or
+	// themselves): otherwise users:write in their home org is a takeover of a
+	// principal with authority over every org.
+	if user.IsSuperAdmin && currentUserID != id && (req.Email != "" || req.Password != "") && !a.IsSuperAdmin(currentUserID) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Only super admins can change a super admin's credentials", nil, "")
+	}
 	if req.Email != "" {
 		if _, err := mail.ParseAddress(req.Email); err != nil {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid email format", nil, "")
@@ -599,8 +605,10 @@ func (a *App) UpdateUser(r *fastglue.Request) error {
 		a.DB.Model(&models.UserOrganization{}).
 			Where("user_id = ? AND organization_id = ?", user.ID, orgID).
 			Update("role_id", user.RoleID)
-		a.InvalidateUserPermissionsCache(user.ID)
 	}
+	// Always drop cached permissions: role, super admin and is_active changes
+	// must take effect now, not after the cache TTL.
+	a.InvalidateUserPermissionsCache(user.ID)
 
 	// Load role for response
 	a.DB.Preload("Role").First(&user, user.ID)

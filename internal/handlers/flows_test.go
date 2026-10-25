@@ -37,7 +37,7 @@ func TestApp_ListFlows_Success(t *testing.T) {
 
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin())
 	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
 
 	createTestFlow(t, app, org.ID, account.Name, "Flow 1")
@@ -65,7 +65,7 @@ func TestApp_ListFlows_EmptyList(t *testing.T) {
 
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin())
 
 	req := testutil.NewGETRequest(t)
 	testutil.SetAuthContext(req, org.ID, user.ID)
@@ -89,7 +89,7 @@ func TestApp_ListFlows_FilterByAccount(t *testing.T) {
 
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin())
 	account1 := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
 	account2 := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
 
@@ -138,7 +138,7 @@ func TestApp_CreateFlow_Success(t *testing.T) {
 
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin())
 	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
 
 	req := testutil.NewJSONRequest(t, map[string]any{
@@ -173,7 +173,7 @@ func TestApp_CreateFlow_DefaultJSONVersion(t *testing.T) {
 
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin())
 	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
 
 	req := testutil.NewJSONRequest(t, map[string]any{
@@ -201,7 +201,7 @@ func TestApp_CreateFlow_MissingName(t *testing.T) {
 
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin())
 	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
 
 	req := testutil.NewJSONRequest(t, map[string]any{
@@ -219,7 +219,7 @@ func TestApp_CreateFlow_MissingWhatsAppAccount(t *testing.T) {
 
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin())
 
 	req := testutil.NewJSONRequest(t, map[string]any{
 		"name": "Flow Without Account",
@@ -236,7 +236,7 @@ func TestApp_CreateFlow_AccountNotFound(t *testing.T) {
 
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin())
 
 	req := testutil.NewJSONRequest(t, map[string]any{
 		"whatsapp_account": "nonexistent-account",
@@ -272,7 +272,7 @@ func TestApp_GetFlow_Success(t *testing.T) {
 
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin())
 	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
 	flow := createTestFlow(t, app, org.ID, account.Name, "Test Flow")
 
@@ -302,7 +302,7 @@ func TestApp_GetFlow_NotFound(t *testing.T) {
 
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin())
 
 	req := testutil.NewGETRequest(t)
 	testutil.SetAuthContext(req, org.ID, user.ID)
@@ -318,7 +318,7 @@ func TestApp_GetFlow_InvalidID(t *testing.T) {
 
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin())
 
 	req := testutil.NewGETRequest(t)
 	testutil.SetAuthContext(req, org.ID, user.ID)
@@ -335,7 +335,7 @@ func TestApp_GetFlow_CrossOrgIsolation(t *testing.T) {
 	app := newTestApp(t)
 	org1 := testutil.CreateTestOrganization(t, app.DB)
 	org2 := testutil.CreateTestOrganization(t, app.DB)
-	user2 := testutil.CreateTestUser(t, app.DB, org2.ID)
+	user2 := testutil.CreateTestUser(t, app.DB, org2.ID, testutil.WithSuperAdmin())
 	account1 := testutil.CreateTestWhatsAppAccount(t, app.DB, org1.ID)
 	flow := createTestFlow(t, app, org1.ID, account1.Name, "Org1 Flow")
 
@@ -356,7 +356,7 @@ func TestApp_UpdateFlow_Success(t *testing.T) {
 
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin())
 	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
 	flow := createTestFlow(t, app, org.ID, account.Name, "Original Flow")
 
@@ -389,7 +389,7 @@ func TestApp_UpdateFlow_NotFound(t *testing.T) {
 
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin())
 
 	req := testutil.NewJSONRequest(t, map[string]any{
 		"name": "Updated Flow",
@@ -407,7 +407,7 @@ func TestApp_UpdateFlow_InvalidID(t *testing.T) {
 
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin())
 
 	req := testutil.NewJSONRequest(t, map[string]any{
 		"name": "Updated Flow",
@@ -443,7 +443,7 @@ func TestApp_DeleteFlow_Success(t *testing.T) {
 
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin())
 	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
 	flow := createTestFlow(t, app, org.ID, account.Name, "Flow To Delete")
 
@@ -475,7 +475,7 @@ func TestApp_DeleteFlow_NotFound(t *testing.T) {
 
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin())
 
 	req := testutil.NewGETRequest(t)
 	testutil.SetAuthContext(req, org.ID, user.ID)
@@ -491,7 +491,7 @@ func TestApp_DeleteFlow_InvalidID(t *testing.T) {
 
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin())
 
 	req := testutil.NewGETRequest(t)
 	testutil.SetAuthContext(req, org.ID, user.ID)
@@ -508,7 +508,7 @@ func TestApp_DeleteFlow_CrossOrgIsolation(t *testing.T) {
 	app := newTestApp(t)
 	org1 := testutil.CreateTestOrganization(t, app.DB)
 	org2 := testutil.CreateTestOrganization(t, app.DB)
-	user2 := testutil.CreateTestUser(t, app.DB, org2.ID)
+	user2 := testutil.CreateTestUser(t, app.DB, org2.ID, testutil.WithSuperAdmin())
 	account1 := testutil.CreateTestWhatsAppAccount(t, app.DB, org1.ID)
 	flow := createTestFlow(t, app, org1.ID, account1.Name, "Org1 Flow")
 
@@ -548,7 +548,7 @@ func TestApp_DuplicateFlow_Success(t *testing.T) {
 
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin())
 	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
 	flow := createTestFlow(t, app, org.ID, account.Name, "Original Flow")
 
@@ -597,7 +597,7 @@ func TestApp_DuplicateFlow_NotFound(t *testing.T) {
 
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin())
 
 	req := testutil.NewGETRequest(t)
 	testutil.SetAuthContext(req, org.ID, user.ID)
@@ -613,7 +613,7 @@ func TestApp_DuplicateFlow_InvalidID(t *testing.T) {
 
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin())
 
 	req := testutil.NewGETRequest(t)
 	testutil.SetAuthContext(req, org.ID, user.ID)
@@ -630,7 +630,7 @@ func TestApp_DuplicateFlow_CrossOrgIsolation(t *testing.T) {
 	app := newTestApp(t)
 	org1 := testutil.CreateTestOrganization(t, app.DB)
 	org2 := testutil.CreateTestOrganization(t, app.DB)
-	user2 := testutil.CreateTestUser(t, app.DB, org2.ID)
+	user2 := testutil.CreateTestUser(t, app.DB, org2.ID, testutil.WithSuperAdmin())
 	account1 := testutil.CreateTestWhatsAppAccount(t, app.DB, org1.ID)
 	flow := createTestFlow(t, app, org1.ID, account1.Name, "Org1 Flow")
 
@@ -663,7 +663,7 @@ func TestApp_DuplicateFlow_PreservesFlowJSON(t *testing.T) {
 
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin())
 	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
 
 	// Create a flow with flow_json and screens

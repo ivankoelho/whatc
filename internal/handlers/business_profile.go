@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -46,6 +47,9 @@ func (a *App) GetBusinessProfile(r *fastglue.Request) error {
 
 // UpdateBusinessProfile updates the business profile for a WhatsApp account
 func (a *App) UpdateBusinessProfile(r *fastglue.Request) error {
+	if !a.can(r, models.ResourceAccounts, models.ActionWrite) {
+		return nil
+	}
 	orgID, err := a.getOrgID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
@@ -87,6 +91,9 @@ func (a *App) UpdateBusinessProfile(r *fastglue.Request) error {
 
 // UpdateProfilePicture handles the profile picture upload
 func (a *App) UpdateProfilePicture(r *fastglue.Request) error {
+	if !a.can(r, models.ResourceAccounts, models.ActionWrite) {
+		return nil
+	}
 	orgID, err := a.getOrgID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")

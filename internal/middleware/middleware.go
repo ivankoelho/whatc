@@ -227,7 +227,7 @@ func validateAPIKey(r *fastglue.Request, key string, db *gorm.DB) bool {
 			}(apiKey.ID)
 
 			// Set context values from the user who created the key
-			if apiKey.User != nil {
+			if apiKey.User != nil && apiKey.User.IsActive {
 				r.RequestCtx.SetUserValue(ContextKeyUserID, apiKey.UserID)
 				r.RequestCtx.SetUserValue(ContextKeyOrganizationID, apiKey.OrganizationID)
 				r.RequestCtx.SetUserValue(ContextKeyEmail, apiKey.User.Email)

@@ -133,7 +133,7 @@ func TestApp_TestAccountConnection_Success(t *testing.T) {
 	}
 
 	req := testutil.NewGETRequest(t)
-	testutil.SetAuthContext(req, org.ID, uuid.New())
+	testutil.SetAuthContext(req, org.ID, testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin()).ID)
 	testutil.SetPathParam(req, "id", acc.ID.String())
 
 	require.NoError(t, app.TestAccountConnection(req))
@@ -172,7 +172,7 @@ func TestApp_TestAccountConnection_FallbackToWABA(t *testing.T) {
 	}
 
 	req := testutil.NewGETRequest(t)
-	testutil.SetAuthContext(req, org.ID, uuid.New())
+	testutil.SetAuthContext(req, org.ID, testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin()).ID)
 	testutil.SetPathParam(req, "id", acc.ID.String())
 
 	require.NoError(t, app.TestAccountConnection(req))
@@ -200,7 +200,7 @@ func TestApp_TestAccountConnection_SandboxFlagged(t *testing.T) {
 	}
 
 	req := testutil.NewGETRequest(t)
-	testutil.SetAuthContext(req, org.ID, uuid.New())
+	testutil.SetAuthContext(req, org.ID, testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin()).ID)
 	testutil.SetPathParam(req, "id", acc.ID.String())
 
 	require.NoError(t, app.TestAccountConnection(req))
@@ -226,7 +226,7 @@ func TestApp_TestAccountConnection_NotVerifiedRejected(t *testing.T) {
 	}
 
 	req := testutil.NewGETRequest(t)
-	testutil.SetAuthContext(req, org.ID, uuid.New())
+	testutil.SetAuthContext(req, org.ID, testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin()).ID)
 	testutil.SetPathParam(req, "id", acc.ID.String())
 
 	require.NoError(t, app.TestAccountConnection(req))
@@ -251,7 +251,7 @@ func TestApp_TestAccountConnection_PhoneNotInBusiness(t *testing.T) {
 	}
 
 	req := testutil.NewGETRequest(t)
-	testutil.SetAuthContext(req, org.ID, uuid.New())
+	testutil.SetAuthContext(req, org.ID, testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin()).ID)
 	testutil.SetPathParam(req, "id", acc.ID.String())
 
 	require.NoError(t, app.TestAccountConnection(req))
@@ -270,7 +270,7 @@ func TestApp_TestAccountConnection_AccountNotFound(t *testing.T) {
 	org := testutil.CreateTestOrganization(t, app.DB)
 
 	req := testutil.NewGETRequest(t)
-	testutil.SetAuthContext(req, org.ID, uuid.New())
+	testutil.SetAuthContext(req, org.ID, testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin()).ID)
 	testutil.SetPathParam(req, "id", uuid.New().String())
 
 	require.NoError(t, app.TestAccountConnection(req))
@@ -285,7 +285,7 @@ func TestApp_TestAccountConnection_CrossOrgIsolation(t *testing.T) {
 	acc := createTestAccountForValidation(t, app.DB, orgA.ID, "phone-1", "biz-1")
 
 	req := testutil.NewGETRequest(t)
-	testutil.SetAuthContext(req, orgB.ID, uuid.New())
+	testutil.SetAuthContext(req, orgB.ID, testutil.CreateTestUser(t, app.DB, orgB.ID, testutil.WithSuperAdmin()).ID)
 	testutil.SetPathParam(req, "id", acc.ID.String())
 
 	require.NoError(t, app.TestAccountConnection(req))
@@ -301,7 +301,7 @@ func TestApp_SubscribeApp_Success(t *testing.T) {
 	acc := createTestAccountForValidation(t, app.DB, org.ID, "phone-1", "biz-1")
 
 	req := testutil.NewGETRequest(t)
-	testutil.SetAuthContext(req, org.ID, uuid.New())
+	testutil.SetAuthContext(req, org.ID, testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin()).ID)
 	testutil.SetPathParam(req, "id", acc.ID.String())
 
 	require.NoError(t, app.SubscribeApp(req))
@@ -327,7 +327,7 @@ func TestApp_SubscribeApp_MetaFails(t *testing.T) {
 	acc := createTestAccountForValidation(t, app.DB, org.ID, "phone-1", "biz-1")
 
 	req := testutil.NewGETRequest(t)
-	testutil.SetAuthContext(req, org.ID, uuid.New())
+	testutil.SetAuthContext(req, org.ID, testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin()).ID)
 	testutil.SetPathParam(req, "id", acc.ID.String())
 
 	require.NoError(t, app.SubscribeApp(req))
@@ -346,7 +346,7 @@ func TestApp_SubscribeApp_AccountNotFound(t *testing.T) {
 	org := testutil.CreateTestOrganization(t, app.DB)
 
 	req := testutil.NewGETRequest(t)
-	testutil.SetAuthContext(req, org.ID, uuid.New())
+	testutil.SetAuthContext(req, org.ID, testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin()).ID)
 	testutil.SetPathParam(req, "id", uuid.New().String())
 
 	require.NoError(t, app.SubscribeApp(req))
@@ -361,7 +361,7 @@ func TestApp_SubscribeApp_CrossOrgIsolation(t *testing.T) {
 	acc := createTestAccountForValidation(t, app.DB, orgA.ID, "phone-1", "biz-1")
 
 	req := testutil.NewGETRequest(t)
-	testutil.SetAuthContext(req, orgB.ID, uuid.New())
+	testutil.SetAuthContext(req, orgB.ID, testutil.CreateTestUser(t, app.DB, orgB.ID, testutil.WithSuperAdmin()).ID)
 	testutil.SetPathParam(req, "id", acc.ID.String())
 
 	require.NoError(t, app.SubscribeApp(req))
