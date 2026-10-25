@@ -1510,6 +1510,12 @@ interface ApiEnvelope<T> {
   data: T
 }
 
+export interface OccurrenceParticipant {
+  user_id: string
+  user_name: string
+  capabilities: string[]
+}
+
 export interface OccurrenceStage {
   id: string
   name: string
@@ -1649,6 +1655,8 @@ export const occurrencesService = {
     priority?: 'low' | 'normal' | 'high' | 'urgent'
     assigned_user_id?: string
     source_transfer_id?: string
+    team_id?: string
+    order_ref?: string
     unit_id?: string
     department_id?: string
     category_id?: string
@@ -1675,6 +1683,18 @@ export const occurrencesService = {
     api.get<ApiEnvelope<{ events: OccurrenceEvent[] }>>(`/occurrences/${id}/events`),
   addNote: (id: string, content: string) =>
     api.post<ApiEnvelope<OccurrenceEvent>>(`/occurrences/${id}/events`, { content }),
+  // Atomic: 409 when another agent got there first.
+  claim: (id: string) => api.post<ApiEnvelope<Occurrence>>(`/occurrences/${id}/claim`, {}),
+  reassign: (id: string, assignedUserId: string) =>
+    api.post<ApiEnvelope<Occurrence>>(`/occurrences/${id}/reassign`, { assigned_user_id: assignedUserId }),
+  listParticipants: (id: string) =>
+    api.get<ApiEnvelope<{ participants: OccurrenceParticipant[] }>>(`/occurrences/${id}/participants`),
+  addParticipant: (id: string, userId: string, capabilities: string[] = ['comment']) =>
+    api.post<ApiEnvelope<OccurrenceParticipant>>(`/occurrences/${id}/participants`, { user_id: userId, capabilities }),
+  removeParticipant: (id: string, userId: string) =>
+    api.delete<ApiEnvelope<{ removed: boolean }>>(`/occurrences/${id}/participants/${userId}`),
+  summary: (params?: Record<string, string>) =>
+    api.get<ApiEnvelope<{ counts: Record<string, number>; total: number }>>('/occurrences/summary', { params }),
   // The ONLY way to send a public message from an occurrence: also stamps the first-response SLA.
   reply: (id: string, content: string) =>
     api.post<ApiEnvelope<{ sent: boolean }>>(`/occurrences/${id}/reply`, { content }),

@@ -16,6 +16,7 @@ import {
   contactsService,
   occurrenceDocumentsService,
   unitsService,
+  teamsService,
   occurrenceCategoriesService,
   occurrenceWhatHappenedService,
   occurrenceProcessesService,
@@ -97,6 +98,18 @@ function changeContact() {
 const saleChannel = ref('')
 const unitId = ref('')
 const units = ref<Unit[]>([])
+// Forwarding: the case goes to a team's queue without an owner (see the
+// backend's forwarding rules). Teams are listed only for roles that may read them.
+const teamId = ref('')
+const orderRef = ref('')
+const teams = ref<{ id: string; name: string }[]>([])
+async function fetchTeams() {
+  try {
+    const res = await teamsService.list({ limit: 500 })
+    teams.value = (((res.data as any).data || res.data).teams || []).filter((tm: any) => tm.is_active !== false)
+  } catch { /* no access: the picker stays hidden */ }
+}
+onMounted(fetchTeams)
 // An inactive unit/department is not offered for a new link; the one already linked stays listed.
 const unitOptions = computed(() => selectableOptions(units.value, unitId.value))
 // NFs and cupons/pedidos, each with its products and optional file.
@@ -211,6 +224,8 @@ function resetForm() {
   cpfCnpj.value = ''
   saleChannel.value = ''
   unitId.value = ''
+  teamId.value = ''
+  orderRef.value = ''
   documents.value = [newDocumentDraft()]
   categoryId.value = ''
   autoCategoryId.value = ''
@@ -277,7 +292,9 @@ async function submit() {
       category_id: categoryId.value || undefined,
       what_happened_id: whatHappenedId.value || undefined,
       process_id: resolvedProcess.value?.id || undefined,
-      unit_id: unitId.value || undefined,
+      unit_id: teamId.value ? undefined : (unitId.value || undefined),
+      team_id: teamId.value || undefined,
+      order_ref: orderRef.value.trim() || undefined,
       sale_channel: saleChannel.value || undefined,
       documents: filledDocuments.value.map(draftToInput),
       internal_note: internalNote.value.trim() || undefined,
@@ -460,6 +477,18 @@ function goToProtocol() {
                 <SelectItem v-for="u in unitOptions" :key="u.id" :value="u.id">{{ u.name }}</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+          <div v-if="teams.length > 0" class="space-y-2">
+            <Label>{{ t('occurrences.forwardTeam') }}</Label>
+            <select v-model="teamId" class="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="forward-team">
+              <option value="">{{ t('occurrences.forwardTeamNone') }}</option>
+              <option v-for="tm in teams" :key="tm.id" :value="tm.id">{{ tm.name }}</option>
+            </select>
+            <p v-if="teamId" class="text-xs text-muted-foreground">{{ t('occurrences.forwardTeamHint') }}</p>
+          </div>
+          <div class="space-y-2">
+            <Label>{{ t('occurrences.orderRef') }}</Label>
+            <Input v-model="orderRef" maxlength="60" data-testid="order-ref" />
           </div>
           <div class="space-y-2 col-span-2">
             <Label>{{ t('occurrenceDocuments.sectionLabel') }}</Label>

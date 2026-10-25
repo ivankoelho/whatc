@@ -6,6 +6,7 @@ import { toast } from 'vue-sonner'
 import DetailPageLayout from '@/components/shared/DetailPageLayout.vue'
 import { IconButton, DeleteConfirmDialog } from '@/components/shared'
 import OccurrenceDocumentsCard from '@/components/crm/OccurrenceDocumentsCard.vue'
+import OccurrenceParticipantsCard from '@/components/crm/OccurrenceParticipantsCard.vue'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -70,6 +71,7 @@ const lastSuggestedStage = ref<OccurrenceMessageStage | null>(null)
 const canWrite = computed(() => authStore.hasPermission('occurrences', 'write'))
 const newNoteContent = ref('')
 const isUpdatingAssignee = ref(false)
+const isClaiming = ref(false)
 const isDeleteDialogOpen = ref(false)
 const isDeleting = ref(false)
 
@@ -82,6 +84,11 @@ const eventIcons: Record<string, any> = {
   closed: CheckCircle2,
   reply: Reply,
   process_message_used: Lightbulb,
+  forwarded: Send,
+  participant_added: UserPlus,
+  participant_removed: UserPlus,
+  reopened: ArrowRightLeft,
+  scope_regularized: ClipboardList,
 }
 
 const priorityLabels: Record<string, string> = {
@@ -100,6 +107,11 @@ const eventLabels: Record<string, string> = {
   closed: 'occurrences.eventClosed',
   reply: 'occurrences.eventReply',
   process_message_used: 'occurrences.eventProcessMessageUsed',
+  forwarded: 'occurrences.eventForwarded',
+  participant_added: 'occurrences.eventParticipantAdded',
+  participant_removed: 'occurrences.eventParticipantRemoved',
+  reopened: 'occurrences.eventReopened',
+  scope_regularized: 'occurrences.eventScopeRegularized',
 }
 
 const breadcrumbs = computed(() => [
@@ -109,6 +121,22 @@ const breadcrumbs = computed(() => [
 
 const activeUsers = computed(() => usersStore.users.filter(u => u.is_active))
 const assigneeSelectValue = computed(() => occurrence.value?.assigned_user_id || UNASSIGNED)
+
+// Atomic on the server: when someone else claimed first this answers 409 and
+// the case is reloaded so the new owner shows.
+async function claimOccurrence() {
+  if (!occurrence.value) return
+  isClaiming.value = true
+  try {
+    await occurrencesService.claim(occurrence.value.id)
+    toast.success(t('occurrences.claimed'))
+  } catch (e) {
+    toast.error(getErrorMessage(e, t('occurrences.claimFailed')))
+  } finally {
+    isClaiming.value = false
+    await loadOccurrence()
+  }
+}
 
 async function loadOccurrence() {
   isLoading.value = true
@@ -332,6 +360,11 @@ onUnmounted(() => {
               {{ $t('chat.openConversation') }}
             </RouterLink>
           </Button>
+          <Button v-if="canWrite && !occurrence.assigned_user_id" size="sm" data-testid="claim-occurrence" :disabled="isClaiming" @click="claimOccurrence">
+            <Loader2 v-if="isClaiming" class="h-4 w-4 mr-2 animate-spin" />
+            <UserPlus v-else class="h-4 w-4 mr-2" />
+            {{ $t('occurrences.claim') }}
+          </Button>
           <Button size="sm" :disabled="isSendingProtocol" @click="sendProtocol">
             <Loader2 v-if="isSendingProtocol" class="h-4 w-4 mr-2 animate-spin" />
             <Send v-else class="h-4 w-4 mr-2" />
@@ -407,6 +440,8 @@ onUnmounted(() => {
         </Card>
 
         <OccurrenceDocumentsCard :occurrence-id="occurrence.id" :can-write="canWrite" />
+
+        <OccurrenceParticipantsCard :occurrence-id="occurrence.id" :can-write="canWrite" />
 
         <!-- Timeline -->
         <Card>

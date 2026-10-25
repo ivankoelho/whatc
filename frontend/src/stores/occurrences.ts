@@ -59,6 +59,8 @@ export const useOccurrencesStore = defineStore('occurrences', () => {
     description?: string
     priority?: 'low' | 'normal' | 'high' | 'urgent'
     source_transfer_id?: string
+    team_id?: string
+    order_ref?: string
     unit_id?: string
     department_id?: string
     category_id?: string
@@ -72,7 +74,8 @@ export const useOccurrencesStore = defineStore('occurrences', () => {
     documents?: OccurrenceDocumentInput[]
   }) {
     const res = await occurrencesService.create(payload)
-    await fetchContactOccurrences(payload.contact_id)
+    // A forwarding agent may not read this conversation: the refresh is best-effort.
+    try { await fetchContactOccurrences(payload.contact_id) } catch { /* no access to the contact panel */ }
     return res.data.data
   }
 
