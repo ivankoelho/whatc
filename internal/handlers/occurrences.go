@@ -68,6 +68,9 @@ type OccurrenceResponse struct {
 	GeneralState     string     `json:"general_state"`
 	TeamID           *uuid.UUID `json:"team_id,omitempty"`
 	ReopenedCount    int        `json:"reopened_count"`
+	OrderRef         string     `json:"order_ref,omitempty"`
+	TeamName         string     `json:"team_name,omitempty"`
+	UpdatedAt        time.Time  `json:"updated_at"`
 	// Can is filled only by GetOccurrence: what the viewer may do on this case.
 	Can map[string]bool `json:"can,omitempty"`
 	Priority         string     `json:"priority"`
@@ -117,6 +120,8 @@ func occurrenceToResponse(o models.Occurrence) OccurrenceResponse {
 		GeneralState:          o.GeneralState,
 		TeamID:                o.TeamID,
 		ReopenedCount:         o.ReopenedCount,
+		OrderRef:              o.OrderRef,
+		UpdatedAt:             o.UpdatedAt,
 		Priority:              string(o.Priority),
 		AssignedUserID:        o.AssignedUserID,
 		OpenedAt:              o.OpenedAt,
@@ -767,6 +772,9 @@ func (a *App) GetOccurrence(r *fastglue.Request) error {
 	a.DB.Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").Preload("WhatHappened").Preload("Process").First(occ, occ.ID)
 	resp := occurrenceToResponse(*occ)
 	resp.Can = viewerCapabilities(acc, occ, userID)
+	if occ.TeamID != nil {
+		a.DB.Model(&models.Team{}).Where("id = ? AND organization_id = ?", *occ.TeamID, orgID).Select("name").Scan(&resp.TeamName)
+	}
 	return r.SendEnvelope(resp)
 }
 

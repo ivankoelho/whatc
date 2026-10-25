@@ -911,6 +911,8 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/occurrences/{id}/notifications", app.ListOccurrenceNotifications)
 	g.POST("/api/occurrences/{id}/notifications/{nid}/resolve", app.ResolveOccurrenceNotification)
 	g.GET("/api/occurrences/{id}/chat", app.GetOccurrenceChat)
+	g.GET("/api/occurrences/{id}/whatsapp", app.GetOccurrenceWhatsApp)
+	g.POST("/api/occurrences/{id}/whatsapp", app.SendOccurrenceWhatsApp)
 	g.GET("/api/occurrences/{id}/participants", app.ListOccurrenceParticipants)
 	g.POST("/api/occurrences/{id}/participants", app.AddOccurrenceParticipant)
 	g.DELETE("/api/occurrences/{id}/participants/{userId}", app.RemoveOccurrenceParticipant)
