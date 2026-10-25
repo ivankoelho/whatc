@@ -186,7 +186,9 @@ func (a *App) ListOccurrenceChannelConfigs(r *fastglue.Request) error {
 			Where("organization_id = ? AND config_id = ? AND status IN ? AND updated_at > now() - interval '7 days'",
 				orgID, c.ID, []string{models.NotificationFailed, models.NotificationUncertain}).Count(&out[i].RecentFailed)
 	}
-	return r.SendEnvelope(map[string]any{"configs": out})
+	// sending_enabled: the instance-wide switch. While off, nothing is sent, whatever
+	// the automations say; the screen shows it so nobody assumes otherwise.
+	return r.SendEnvelope(map[string]any{"configs": out, "sending_enabled": a.Config.WhatsApp.AutomationSendingEnabled})
 }
 
 // SetOccurrenceChannelConfig creates or updates the automation of one scope

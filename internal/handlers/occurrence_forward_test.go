@@ -29,6 +29,7 @@ func (w *isoWorld) call(t *testing.T, h func(*fastglue.Request) error, userID uu
 func (w *isoWorld) forward(t *testing.T, extra map[string]any) uuid.UUID {
 	t.Helper()
 	contact := testutil.CreateTestContact(t, w.app.DB, w.org.ID)
+	w.customerWrote(t, contact.ID) // the customer started the conversation
 	body := map[string]any{"contact_id": contact.ID.String(), "title": "Pedido 45872 atrasado",
 		"team_id": w.teamPorto.ID.String(), "order_ref": "45872", "priority": "high", "description": "Cliente sem previsão"}
 	for k, v := range extra {
@@ -141,4 +142,15 @@ func TestForwardTargets_ListOrgTeamsOnlyAndNeedsWritePermission(t *testing.T) {
 	u := testutil.CreateTestUser(t, w.app.DB, w.org.ID, testutil.WithRoleID(&reader.ID))
 	code, _ = get(u.ID)
 	assert.Equal(t, fasthttp.StatusForbidden, code)
+}
+
+// customerWrote records an inbound WhatsApp message: the customer-initiated
+// contact the automatic follow-up is allowed to build on.
+func (w *isoWorld) customerWrote(t *testing.T, contactID uuid.UUID) *models.Message {
+	t.Helper()
+	m := &models.Message{BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: w.org.ID, WhatsAppAccount: "customer-chat",
+		ContactID: contactID, Direction: models.DirectionIncoming, MessageType: models.MessageTypeText, Content: "cadê meu pedido?",
+		Status: models.MessageStatusDelivered}
+	require.NoError(t, w.app.DB.Create(m).Error)
+	return m
 }

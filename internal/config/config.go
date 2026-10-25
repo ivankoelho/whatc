@@ -156,12 +156,17 @@ type JWTConfig struct {
 }
 
 type WhatsAppConfig struct {
-	WebhookVerifyToken string `koanf:"webhook_verify_token"`
-	APIVersion         string `koanf:"api_version"`
-	BaseURL            string `koanf:"base_url"` // Meta Graph API base URL
-	AppID              string `koanf:"app_id"`   // WhatsApp App ID for frontend
-	AppSecret          string `koanf:"app_secret"`
-	ConfigID           string `koanf:"config_id"` // WhatsApp Config ID for frontend
+	// AutomationSendingEnabled lets the background worker send customer
+	// communications of cases (templates). Off by default: nothing leaves the
+	// instance until someone turns it on after the consent/eligibility checklist
+	// (docs/superpowers/specs/2026-10-25-chamados-etapa6-*.md) was met.
+	AutomationSendingEnabled bool   `koanf:"automation_sending_enabled"`
+	WebhookVerifyToken       string `koanf:"webhook_verify_token"`
+	APIVersion               string `koanf:"api_version"`
+	BaseURL                  string `koanf:"base_url"` // Meta Graph API base URL
+	AppID                    string `koanf:"app_id"`   // WhatsApp App ID for frontend
+	AppSecret                string `koanf:"app_secret"`
+	ConfigID                 string `koanf:"config_id"` // WhatsApp Config ID for frontend
 }
 
 type AIConfig struct {

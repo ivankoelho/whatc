@@ -309,7 +309,6 @@ const (
 
 func (OccurrenceChannelConfig) TableName() string { return "occurrence_channel_configs" }
 
-
 // OccurrenceNotification is one customer communication triggered by a case
 // event. The row is the durable INTENT: it is written in the same transaction
 // as the case, survives a dead worker, and carries a stable idempotency key
@@ -351,9 +350,16 @@ type OccurrenceNotification struct {
 	MessageID         *uuid.UUID `gorm:"type:uuid" json:"message_id,omitempty"`
 	TemplateCategory  string     `gorm:"size:50" json:"template_category,omitempty"`
 	LastError         string     `gorm:"size:500" json:"last_error,omitempty"`
-	AcceptedAt        *time.Time `json:"accepted_at,omitempty"`
-	DeliveredAt       *time.Time `json:"delivered_at,omitempty"`
-	ReadAt            *time.Time `json:"read_at,omitempty"`
+	// Why this customer may be contacted, recorded at send time: Purpose is the
+	// reason for the communication; ConsentBasis how the relationship exists
+	// (customer_initiated = the customer wrote to us); ConsentEvidence is the id of
+	// the inbound message that shows it.
+	Purpose         string     `gorm:"size:40;not null;default:'order_service_update'" json:"purpose"`
+	ConsentBasis    string     `gorm:"size:40" json:"consent_basis,omitempty"`
+	ConsentEvidence string     `gorm:"size:100" json:"consent_evidence,omitempty"`
+	AcceptedAt      *time.Time `json:"accepted_at,omitempty"`
+	DeliveredAt     *time.Time `json:"delivered_at,omitempty"`
+	ReadAt          *time.Time `json:"read_at,omitempty"`
 }
 
 func (OccurrenceNotification) TableName() string { return "occurrence_notifications" }

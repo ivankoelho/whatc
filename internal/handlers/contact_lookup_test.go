@@ -111,6 +111,7 @@ func TestContactFind_LogisticsStartsTheAuthorizedFlowFromAFoundContact(t *testin
 	enableStrictVisibility(t, w.app, w.org.ID)
 	contact := testutil.CreateTestContactWith(t, w.app.DB, w.org.ID, testutil.WithPhoneNumber("5511955554444"))
 	require.NoError(t, w.app.DB.Model(contact).Update("assigned_user_id", w.sac.ID).Error)
+	w.customerWrote(t, contact.ID)
 
 	_, body := w.find(t, w.org.ID, w.logPorto.ID, "5511955554444")
 	require.Contains(t, body, contact.ID.String())

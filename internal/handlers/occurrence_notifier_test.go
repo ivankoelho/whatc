@@ -105,6 +105,7 @@ func newNotifWorld(t *testing.T) *notifWorld {
 	t.Helper()
 	w := &notifWorld{autoWorld: newAutoWorld(t), meta: newFakeMeta(t)}
 	w.app.WhatsApp = whatsapp.NewWithBaseURL(testutil.NopLogger(), w.meta.srv.URL)
+	w.app.Config.WhatsApp.AutomationSendingEnabled = true
 	// The worker is global (it serves every organization), so intents left by other
 	// tests in this database would be processed here. Park them before starting.
 	require.NoError(t, w.app.DB.Model(&models.OccurrenceNotification{}).

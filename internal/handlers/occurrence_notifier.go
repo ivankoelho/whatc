@@ -35,6 +35,9 @@ const (
 	notificationSendTimeout  = 30 * time.Second
 	notificationTickEvery    = 5 * time.Second
 	notificationBatch        = 20
+	// customerInitiatedWindow: how recent the customer's own message must be for an
+	// automatic operational follow-up to be sent.
+	customerInitiatedWindow = 90 * 24 * time.Hour
 )
 
 var notifierID = uuid.NewString()[:8]
@@ -81,6 +84,12 @@ func (a *App) RecoverStuckNotifications(now time.Time) int64 {
 // how many it handled. Two workers racing for one row: the conditional UPDATE
 // lets exactly one proceed.
 func (a *App) ProcessDueNotifications(ctx context.Context, limit int) int {
+	// The master switch: while it is off, intents wait as "pending" and nothing is
+	// claimed, so enabling it later sends what is still wanted, never something
+	// that was cancelled meanwhile.
+	if !a.Config.WhatsApp.AutomationSendingEnabled {
+		return 0
+	}
 	var due []models.OccurrenceNotification
 	a.DB.Where("status = ? AND (next_attempt_at IS NULL OR next_attempt_at <= ?)", models.NotificationPending, time.Now()).
 		Order("next_attempt_at").Limit(limit).Find(&due)
@@ -178,6 +187,19 @@ func (a *App) sendNotification(ctx context.Context, n *models.OccurrenceNotifica
 	if err := a.DB.Where("organization_id = ? AND name = ?", n.OrganizationID, n.WhatsAppAccount).First(&account).Error; err != nil {
 		return notificationOutcome{status: models.NotificationFailed, reason: "account_not_found_in_organization", err: "the configured account does not exist in this organization"}
 	}
+
+	// Eligibility: automatic messages are limited to the customer who wrote to us
+	// (an operational follow-up to their own request). A template classified as
+	// UTILITY is not, by itself, permission to contact someone. Without an inbound
+	// message in the window there is no recorded basis, so nothing is sent.
+	var inbound models.Message
+	if err := a.DB.Where("organization_id = ? AND contact_id = ? AND direction = ? AND created_at >= ?",
+		n.OrganizationID, contact.ID, models.DirectionIncoming, time.Now().Add(-customerInitiatedWindow)).
+		Order("created_at DESC").First(&inbound).Error; err != nil {
+		return skip("no_customer_initiated_contact")
+	}
+	a.DB.Model(&models.OccurrenceNotification{}).Where("id = ?", n.ID).
+		Updates(map[string]any{"consent_basis": "customer_initiated", "consent_evidence": inbound.ID.String()})
 
 	customer := strings.TrimSpace(contact.ProfileName)
 	if customer == "" {
