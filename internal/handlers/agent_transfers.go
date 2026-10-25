@@ -418,6 +418,9 @@ func (a *App) CreateAgentTransfer(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
+	if !a.canInteractWithConversation(userID, orgID, contact) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You do not have access to this conversation", nil, "")
+	}
 
 	// Check for existing active transfer
 	var existingCount int64
@@ -783,6 +786,15 @@ func (a *App) ResumeFromTransfer(r *fastglue.Request) error {
 
 	if transfer.Status != models.TransferStatusActive {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Transfer is not active", nil, "")
+	}
+
+	// Closing an attendance requires access to the conversation, same as Assign.
+	var gateContact models.Contact
+	// A contact that no longer loads has no conversation to protect; the close
+	// below already handles that case by skipping the release.
+	if err := a.DB.Where("id = ? AND organization_id = ?", transfer.ContactID, orgID).First(&gateContact).Error; err == nil &&
+		!a.canInteractWithConversation(userID, orgID, &gateContact) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You do not have access to this conversation", nil, "")
 	}
 
 	// Get contact for webhook data and release. The load error must be

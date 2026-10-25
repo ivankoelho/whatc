@@ -385,6 +385,9 @@ func (a *App) DeleteAccount(r *fastglue.Request) error {
 // TestAccountConnection tests the WhatsApp API connection
 // This validates both PhoneID and BusinessID to ensure all credentials are correct
 func (a *App) TestAccountConnection(r *fastglue.Request) error {
+	if !a.can(r, models.ResourceAccounts, models.ActionWrite) {
+		return nil
+	}
 	orgID, err := a.getOrgID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
@@ -574,6 +577,9 @@ func (a *App) validateAccountCredentials(phoneID, businessID, accessToken, apiVe
 // SubscribeApp subscribes the app to webhooks for the WhatsApp Business Account.
 // This is required after phone number registration to receive incoming messages from Meta.
 func (a *App) SubscribeApp(r *fastglue.Request) error {
+	if !a.can(r, models.ResourceAccounts, models.ActionWrite) {
+		return nil
+	}
 	orgID, err := a.getOrgID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")

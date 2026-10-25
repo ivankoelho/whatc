@@ -267,6 +267,15 @@ func (a *App) requirePermission(r *fastglue.Request, userID uuid.UUID, resource,
 	return nil
 }
 
+// can is requireAuth for handlers that resolve org/user themselves: it writes
+// the 401/403 envelope and returns false when the caller lacks resource:action.
+// The route-level RBAC hook in main.go does nothing, so every handler that
+// changes org configuration must call this (or requireAuth) first.
+func (a *App) can(r *fastglue.Request, resource, action string) bool {
+	_, _, err := a.requireAuth(r, resource, action)
+	return err == nil
+}
+
 // requireAuth extracts the organization ID and user ID from the request and
 // verifies the user holds the given permission. On failure it writes the
 // appropriate error envelope (401 if unauthenticated, 403 if the permission is
