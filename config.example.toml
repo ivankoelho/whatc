@@ -191,3 +191,9 @@ integrity_interval_minutes = 5
 integrity_window_hours = 48
 # Without delivered/read/failed after this long, a message becomes `unconfirmed`.
 undelivered_after_hours = 72
+
+# One-time codes sent through campaigns (AUTHENTICATION templates).
+# Validity belongs to the system that issues the code (recipient "valid_until", RFC 3339).
+[otp]
+max_validity_minutes = 5       # send window counted from upload; the smaller of this and valid_until wins
+require_valid_until = false    # true: refuse recipients/sends without valid_until (see `whatomate otp-validity-report` first)

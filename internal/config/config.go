@@ -33,6 +33,7 @@ type Config struct {
 	XProcess     XProcessConfig     `koanf:"xprocess"`
 	Knowledge    KnowledgeConfig    `koanf:"knowledge"`
 	AITools      AIToolsConfig      `koanf:"ai_tools"`
+	OTP          OTPConfig          `koanf:"otp"`
 	Usage        UsageConfig        `koanf:"usage"`
 }
 
@@ -508,4 +509,26 @@ type KnowledgeConfig struct {
 	// false, and an unparseable value makes the configuration fail to load (it never turns
 	// the switch on). With it off the chatbot behaves exactly as before.
 	RAGEnabled bool `koanf:"rag_enabled"`
+}
+
+// OTPConfig holds the policy for one-time codes sent through campaigns
+// (AUTHENTICATION templates). Validity belongs to the external issuer; this is
+// only the guard rail around it.
+type OTPConfig struct {
+	// MaxValidityMinutes caps how long after upload a code may still be sent,
+	// whatever valid_until says (default 5, max 90).
+	MaxValidityMinutes int `koanf:"max_validity_minutes"`
+	// RequireValidUntil rejects recipients of authentication campaigns that come
+	// without the issuer's valid_until, and refuses to send codes that lack it.
+	// Off by default so existing campaigns keep working during the transition.
+	RequireValidUntil bool `koanf:"require_valid_until"`
+}
+
+// MaxValidity returns the send window, bounded and defaulted.
+func (c OTPConfig) MaxValidity() time.Duration {
+	m := c.MaxValidityMinutes
+	if m < 1 || m > 90 {
+		m = 5
+	}
+	return time.Duration(m) * time.Minute
 }

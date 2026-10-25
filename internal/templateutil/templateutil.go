@@ -9,6 +9,21 @@ import (
 // ParameterPattern matches template parameters like {{1}}, {{name}}, {{order_id}}
 var ParameterPattern = regexp.MustCompile(`\{\{([^}]+)\}\}`)
 
+// AuthCodeMask replaces the one-time code of an AUTHENTICATION template
+// everywhere it would otherwise be stored or shown to an agent.
+const AuthCodeMask = "••••••"
+
+// IsAuthCategory reports whether a template category is AUTHENTICATION.
+func IsAuthCategory(category string) bool {
+	return strings.EqualFold(strings.TrimSpace(category), "AUTHENTICATION")
+}
+
+// MaskAllParams replaces every {{...}} placeholder with AuthCodeMask. Used for
+// authentication bodies, whose only variable is the code.
+func MaskAllParams(content string) string {
+	return ParameterPattern.ReplaceAllLiteralString(content, AuthCodeMask)
+}
+
 // isPositionalParam returns true if the parameter name is purely numeric (e.g. "1", "2").
 func isPositionalParam(name string) bool {
 	for _, c := range name {

@@ -70,13 +70,19 @@ func (c *Client) getBaseURL() string {
 // doRequest performs an HTTP request to the Meta API
 func (c *Client) doRequest(ctx context.Context, method, url string, body any, accessToken string) ([]byte, error) {
 	var reqBody io.Reader
+	var jsonBody []byte
 	if body != nil {
-		jsonBody, err := json.Marshal(body)
+		var err error
+		jsonBody, err = json.Marshal(body)
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal request body: %w", err)
 		}
 		reqBody = bytes.NewBuffer(jsonBody)
 	}
+	// Values that must never come back in an error or a log line (one-time
+	// codes): errors leave this function already redacted, so every caller's
+	// logging is covered at once.
+	secrets := requestSecrets(ctx, jsonBody)
 
 	req, err := http.NewRequestWithContext(ctx, method, url, reqBody)
 	if err != nil {
@@ -88,17 +94,17 @@ func (c *Client) doRequest(ctx context.Context, method, url string, body any, ac
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
+		return nil, redactError(fmt.Errorf("request failed: %w", err), secrets)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
+		return nil, redactError(fmt.Errorf("failed to read response body: %w", err), secrets)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, ParseMetaAPIError(resp.StatusCode, respBody)
+		return nil, parseMetaAPIErrorRedacted(resp.StatusCode, respBody, secrets)
 	}
 
 	return respBody, nil

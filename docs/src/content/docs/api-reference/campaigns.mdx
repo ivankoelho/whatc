@@ -182,6 +182,47 @@ POST /api/campaigns/{id}/recipients/import
 positional header `{{1}}` doesn't collide with body `{{1}}`. Omit the field
 entirely for templates without a header variable.
 
+### Authentication templates (one-time codes)
+
+For campaigns whose template category is `AUTHENTICATION`, each recipient may carry
+`valid_until`:
+
+```json
+{
+  "phone_number": "+5511999990001",
+  "template_params": { "1": "482913" },
+  "valid_until": "2030-01-01T10:05:00-03:00"
+}
+```
+
+- **Meaning:** the instant until which the system that **issued** the code (the one
+  that generates and validates it) says the code works. Whatomate does not generate,
+  validate or renew codes, and never assumes a validity the issuer did not give.
+- **Format:** RFC 3339 date-time **with a time zone** (`Z` or `±hh:mm`). Any offset is
+  accepted and stored in UTC, so `2030-01-01T10:05:00-03:00` and
+  `2030-01-01T13:05:00Z` are the same instant. A value in the past is rejected with
+  `400`.
+- **Effect:** the code is never sent after `valid_until`, nor later than
+  `otp.max_validity_minutes` (default 5) after it was uploaded; the earlier of the two
+  wins. This is checked right before the request to Meta, again on every retry
+  (a retry never extends the validity) and when a worker picks the job up late. A code
+  that can no longer be sent marks the recipient as failed with the reason
+  `otp_expired` and the stored code is deleted.
+- **Optional for now, and a risk:** without `valid_until` the request is still accepted,
+  but Whatomate cannot know whether the code is still valid. The code keeps the previous
+  behaviour (it is only deleted after 24 hours of retention) and **may be sent after the
+  issuer has already expired it**, for example when a campaign is started or scheduled
+  long after the import, or when a failed recipient is retried. This is a temporary
+  compatibility exception, not a safe default: always send `valid_until`.
+  When `otp.require_valid_until` is enabled, recipients of authentication campaigns
+  without `valid_until` are rejected with `400` and codes without it are not sent
+  (`otp_validity_missing`). The 24-hour retention is not a validity period.
+- Ignored for templates that are not `AUTHENTICATION`.
+- The code is stored encrypted and is never returned by the API.
+
+The CSV import in the UI accepts a `valid_until` column for these templates, and the
+import dialog has an optional "valid until" field for recipients without their own.
+
 ### Response
 
 ```json

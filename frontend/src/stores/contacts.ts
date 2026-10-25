@@ -334,11 +334,19 @@ export const useContactsStore = defineStore('contacts', () => {
     replyingTo.value = null
   }
 
+  function isAuthCodeMessage(message: Message): boolean {
+    return message.message_type === 'template' && (message.interactive_data as any)?.type === 'auth_code'
+  }
+
   function addMessage(message: Message) {
     // Update contact metadata regardless of account filter
     const contact = contacts.value.find(c => c.id === message.contact_id)
     if (contact) {
-      contact.last_message_at = message.created_at
+      // Masked verification-code messages (AUTHENTICATION templates) must not
+      // promote the conversation; the server does not bump it either.
+      if (!isAuthCodeMessage(message)) {
+        contact.last_message_at = message.created_at
+      }
       if (message.direction === 'incoming') {
         contact.unread_count++
         contact.last_inbound_at = message.created_at

@@ -178,8 +178,16 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 	// 0. Ownership gate for human sends: claim the attendance (or open one)
 	// BEFORE anything is created or sent, so the loser of a race, or an agent
 	// writing into another agent's conversation, never reaches the customer.
+	isAuth := isAuthTemplateRequest(req)
 	if opts.SentByUserID != nil && req.Contact != nil && req.Account != nil {
-		if err := a.ensureAgentOwnsConversation(req.Account, req.Contact, *opts.SentByUserID, opts.AllowOtherOwner); err != nil {
+		if isAuth {
+			// A verification code never claims or opens an attendance: only
+			// refuse when another agent owns the conversation (same rule as
+			// a normal send, without the side effects).
+			if err := a.checkNotOwnedByOther(req.Contact, *opts.SentByUserID, opts.AllowOtherOwner); err != nil {
+				return nil, err
+			}
+		} else if err := a.ensureAgentOwnsConversation(req.Account, req.Contact, *opts.SentByUserID, opts.AllowOtherOwner); err != nil {
 			return nil, err
 		}
 	}
@@ -278,6 +286,16 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 			// Add URL/COPY_CODE button components with dynamic params
 			buttonComponents := whatsapp.ButtonURLParamsToComponents(req.ButtonURLParams, req.Template.Buttons)
 			components = append(components, buttonComponents...)
+			if isAuth {
+				// The client redacts echoed codes from errors before any logging.
+				secrets := make([]string, 0, len(req.BodyParams)+len(req.ButtonURLParams))
+				for _, m := range []map[string]string{req.BodyParams, req.ButtonURLParams, req.HeaderParams} {
+					for _, v := range m {
+						secrets = append(secrets, v)
+					}
+				}
+				sendCtx = whatsapp.WithSecrets(sendCtx, secrets...)
+			}
 			return a.WhatsApp.SendTemplateMessage(sendCtx, waAccount, rcpt, req.Template.Name, req.Template.Language, components)
 
 		case models.MessageTypeFlow:
@@ -312,6 +330,13 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 		a.broadcastNewMessage(req.Account.OrganizationID, msg, req.Contact)
 	}
 
+	// Authentication templates (one-time codes) stay out of the inbox: no
+	// reordering, preview, SLA tracking, first response or status change.
+	// The message itself still shows up in the conversation history.
+	if isAuth {
+		return msg, nil
+	}
+
 	if opts.TrackSLA {
 		a.UpdateContactChatbotMessage(req.Contact.ID)
 	}
@@ -340,6 +365,35 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 // ============================================================================
 // Internal Helpers
 // ============================================================================
+
+const (
+	// MetadataAuthCodeMasked flags a stored message whose one-time code was masked.
+	MetadataAuthCodeMasked = "auth_code_masked"
+	// InteractiveTypeAuthCode is the technical marker clients use to render a
+	// masked verification-code message without actions.
+	InteractiveTypeAuthCode = "auth_code"
+)
+
+// isAuthTemplateRequest reports whether the request sends an AUTHENTICATION
+// template (identified by its category, not by name).
+func isAuthTemplateRequest(req OutgoingMessageRequest) bool {
+	return req.Type == models.MessageTypeTemplate && req.Template != nil &&
+		templateutil.IsAuthCategory(req.Template.Category)
+}
+
+// checkNotOwnedByOther is the read-only half of ensureAgentOwnsConversation:
+// it refuses a send into a conversation owned by another agent but never
+// claims, opens or audits anything.
+func (a *App) checkNotOwnedByOther(contact *models.Contact, userID uuid.UUID, allowOtherOwner bool) error {
+	t, has := a.activeTransferFor(contact.OrganizationID, contact.ID)
+	if !has || t.AgentID == nil || *t.AgentID == userID {
+		return nil
+	}
+	if allowOtherOwner || a.canOverrideConversationOwner(userID, contact.OrganizationID) {
+		return nil
+	}
+	return ErrConversationOwned
+}
 
 // toWhatsAppAccount converts models.WhatsAppAccount to whatsapp.Account
 func (a *App) toWhatsAppAccount(account *models.WhatsAppAccount) *whatsapp.Account {
@@ -385,8 +439,16 @@ func (a *App) createOutgoingMessage(req OutgoingMessageRequest, opts MessageSend
 
 	case models.MessageTypeTemplate:
 		if req.Template != nil {
-			// Store actual rendered content instead of just template name
-			content := templateutil.ReplaceWithStringParams(req.Template.BodyContent, req.BodyParams)
+			// Store actual rendered content instead of just template name.
+			// Authentication bodies are masked BEFORE persisting: the real
+			// code only ever exists in the request sent to Meta.
+			isAuth := isAuthTemplateRequest(req)
+			var content string
+			if isAuth {
+				content = templateutil.MaskAllParams(req.Template.BodyContent)
+			} else {
+				content = templateutil.ReplaceWithStringParams(req.Template.BodyContent, req.BodyParams)
+			}
 			if content == "" {
 				content = fmt.Sprintf("[Template: %s]", req.Template.DisplayName)
 			}
@@ -395,6 +457,14 @@ func (a *App) createOutgoingMessage(req OutgoingMessageRequest, opts MessageSend
 			msg.Metadata = models.JSONB{
 				"template_name": req.Template.Name,
 				"template_id":   req.Template.ID.String(),
+			}
+			if isAuth {
+				msg.Metadata[MetadataAuthCodeMasked] = true
+				// Technical marker for the UI (no copy button, no promotion
+				// to the top of the list). Detection on the backend relies on
+				// the template category and metadata, never on this field.
+				msg.InteractiveData = models.JSONB{"type": InteractiveTypeAuthCode}
+				return msg
 			}
 			// Store header media so it renders in the chat bubble
 			if req.MediaURL != "" {
@@ -501,6 +571,17 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 	// Use Where instead of Model(msg) to avoid mutating the shared msg struct,
 	// which may be read concurrently by the caller when sending is async.
 	if err != nil {
+		if isAuthTemplateRequest(req) {
+			// Error text can echo request details: the code must not reach the
+			// message row, the logs or the websocket broadcast below.
+			secrets := map[string]any{}
+			for _, m := range []map[string]string{req.BodyParams, req.ButtonURLParams, req.HeaderParams} {
+				for k, v := range m {
+					secrets[k] = v
+				}
+			}
+			err = errors.New(templateutil.RedactValues(err.Error(), secrets))
+		}
 		errMsg := err.Error()
 
 		a.DB.Model(&models.Message{}).Where("id = ?", msg.ID).Updates(map[string]any{
@@ -1061,20 +1142,7 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 	// Auto-populate from template_params["1"] so callers don't need button_params.
 	buttonParams := req.ButtonParams
 	if strings.EqualFold(template.Category, "AUTHENTICATION") && len(buttonParams) == 0 {
-		if code, ok := req.TemplateParams["1"]; ok && code != "" {
-			for i, raw := range template.Buttons {
-				if btn, ok := raw.(map[string]any); ok {
-					btnType, _ := btn["type"].(string)
-					if strings.EqualFold(btnType, "OTP") {
-						if buttonParams == nil {
-							buttonParams = make(map[string]string)
-						}
-						buttonParams[fmt.Sprintf("%d", i)] = code
-						break
-					}
-				}
-			}
-		}
+		buttonParams = whatsapp.OTPButtonParams(template.Buttons, req.TemplateParams["1"])
 	}
 
 	// Resolve filename for DOCUMENT headers — required by Meta (#351).
