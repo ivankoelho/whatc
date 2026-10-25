@@ -4,6 +4,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/test/testutil"
 	"github.com/stretchr/testify/assert"
@@ -20,9 +22,11 @@ func TestOccurrences_ClaimIsExclusiveUnderConcurrency(t *testing.T) {
 	stage, err := app.InitialStageForTest(org.ID)
 	require.NoError(t, err)
 	opener := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
+	team := models.Team{OrganizationID: org.ID, Name: "log-" + uuid.NewString()[:6], IsActive: true}
+	require.NoError(t, app.DB.Create(&team).Error)
 	occ := models.Occurrence{
 		OrganizationID: org.ID, ContactID: contact.ID, Title: "Atraso", StageID: stage.ID,
-		OpenedByUserID: opener.ID,
+		OpenedByUserID: opener.ID, TeamID: &team.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))
 
@@ -31,6 +35,7 @@ func TestOccurrences_ClaimIsExclusiveUnderConcurrency(t *testing.T) {
 	users := make([]*models.User, n)
 	for i := range users {
 		users[i] = testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
+		require.NoError(t, app.DB.Create(&models.TeamMember{TeamID: team.ID, UserID: users[i].ID}).Error)
 	}
 	var wg sync.WaitGroup
 	for i := 0; i < n; i++ {

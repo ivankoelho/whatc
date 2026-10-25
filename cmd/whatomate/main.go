@@ -333,6 +333,7 @@ func runServer(args []string) {
 	// the single visibility rule) exists. This gates all WebSocket conversation
 	// delivery — without it the hub would fall back to legacy (insecure) behaviour.
 	wsHub.SetConversationAuthorizer(app.CanViewConversationByID)
+	wsHub.SetOccurrenceAuthorizer(app.CanViewOccurrenceByID)
 
 	// Presence reaper: releases an agent's attendances only after they stay
 	// disconnected past the grace period (reconnects within it change nothing).

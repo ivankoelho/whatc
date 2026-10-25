@@ -156,24 +156,6 @@ func occurrenceToResponse(o models.Occurrence) OccurrenceResponse {
 	return resp
 }
 
-// visibleOccurrences scopes a query on the occurrences table to what the user
-// may see.
-//
-// Subquery, NOT a join: scopeVisibleConversations writes `id`,
-// `assigned_user_id` and `contacts.*` unqualified, so joined onto occurrences
-// it would resolve `id` to occurrences.id and silently return wrong rows. This
-// mirrors ListAgentTransfers and the chatbot session listing.
-func (a *App) visibleOccurrences(query *gorm.DB, userID, orgID uuid.UUID) *gorm.DB {
-	visibleContacts := a.scopeVisibleConversations(
-		a.DB.Model(&models.Contact{}).Where("organization_id = ?", orgID).Select("id"),
-		userID, orgID)
-
-	// The OR is the assignee exception: a case assigned to you is always yours
-	// to open, even when the contact itself is outside your scope.
-	return query.Where("occurrences.contact_id IN (?) OR occurrences.assigned_user_id = ?",
-		visibleContacts, userID)
-}
-
 // suggestedCategory is the category an occurrence gets from its reason ("O que
 // aconteceu"), falling back to the reason's process. Nil when neither has one
 // or it no longer belongs to the org.
@@ -231,35 +213,6 @@ func (a *App) unitDepartmentFromTransfer(orgID, transferID uuid.UUID) (unitID, d
 		return nil, nil
 	}
 	return team.UnitID, team.DepartmentID
-}
-
-// broadcastOccurrenceMessage delivers a WebSocket message about an occurrence
-// to everyone authorized to view its conversation, plus its assignee even
-// when the assignee's own visibility scope doesn't otherwise cover the
-// contact — mirroring the exception loadAuthorizedOccurrence already grants
-// on the REST path (see the isAssignee comment there).
-func (a *App) broadcastOccurrenceMessage(orgID, contactID uuid.UUID, assignedUserID *uuid.UUID, msg websocket.WSMessage) {
-	if a.WSHub == nil {
-		return
-	}
-	var alsoUserID uuid.UUID
-	if assignedUserID != nil {
-		alsoUserID = *assignedUserID
-	}
-	// One broadcast pass, not two: BroadcastToAuthorizedViewers followed by a
-	// separate BroadcastToUser would deliver twice to a client that is both
-	// authorized AND the assignee (the common case — CreateOccurrence
-	// defaults the assignee to the creator, who can almost always see their
-	// own conversation). occurrence_changed's board handler isn't idempotent
-	// for an unseen occurrence (it increments a counter), so a duplicate
-	// isn't harmless the way it is for occurrence_event_created.
-	a.WSHub.Broadcast(websocket.BroadcastMessage{
-		OrgID:               orgID,
-		ContactID:           contactID,
-		IgnoreContactFilter: true,
-		AlsoUserID:          alsoUserID,
-		Message:             msg,
-	})
 }
 
 // CreateOccurrence opens a case and issues its protocol.
@@ -538,7 +491,7 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 	resp := occurrenceToResponse(occ)
 	resp.Documents = documents
 
-	a.broadcastOccurrenceMessage(orgID, occ.ContactID, occ.AssignedUserID, websocket.WSMessage{
+	a.broadcastOccurrence(orgID, occ.ID, websocket.WSMessage{
 		Type:    websocket.TypeOccurrenceChanged,
 		Payload: resp,
 	})
@@ -645,7 +598,7 @@ func (a *App) ListContactOccurrences(r *fastglue.Request) error {
 	}
 
 	var occurrences []models.Occurrence
-	if err := a.DB.Where("organization_id = ? AND contact_id = ?", orgID, contactID).
+	if err := a.visibleOccurrences(a.DB.Where("organization_id = ? AND contact_id = ?", orgID, contactID), userID, orgID).
 		Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").Preload("WhatHappened").Preload("Process").
 		Order("opened_at DESC").Find(&occurrences).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError,
@@ -699,51 +652,6 @@ type OccurrenceEventResponse struct {
 	CreatedByID   *uuid.UUID `json:"created_by_id,omitempty"`
 	CreatedByName string     `json:"created_by_name,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
-}
-
-// loadAuthorizedOccurrence resolves the occurrence from the path and applies the
-// conversation gate. Every occurrence endpoint goes through it — the repetition
-// is the point: in this codebase's four visibility leaks, the hole was always an
-// endpoint someone forgot to gate.
-//
-// needInteract asks for write access; false checks view access only.
-func (a *App) loadAuthorizedOccurrence(r *fastglue.Request, orgID, userID uuid.UUID, needInteract bool) (*models.Occurrence, error) {
-	occurrenceID, err := parsePathUUID(r, "id", "occurrence")
-	if err != nil {
-		return nil, errEnvelopeSent
-	}
-
-	occ, err := findByIDAndOrg[models.Occurrence](a.DB, r, occurrenceID, orgID, "Occurrence")
-	if err != nil {
-		return nil, errEnvelopeSent
-	}
-
-	var contact models.Contact
-	if err := a.DB.Where("id = ? AND organization_id = ?", occ.ContactID, orgID).
-		First(&contact).Error; err != nil {
-		_ = r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
-		return nil, errEnvelopeSent
-	}
-
-	// The assignee exception, mirroring visibleOccurrences.
-	isAssignee := occ.AssignedUserID != nil && *occ.AssignedUserID == userID
-
-	allowed := isAssignee
-	if !allowed {
-		if needInteract {
-			allowed = a.canInteractWithConversation(userID, orgID, &contact)
-		} else {
-			allowed = a.canViewConversation(userID, orgID, &contact)
-		}
-	}
-	if !allowed {
-		_ = r.SendErrorEnvelope(fasthttp.StatusForbidden,
-			"You do not have access to this occurrence", nil, "")
-		return nil, errEnvelopeSent
-	}
-
-	occ.Contact = &contact
-	return occ, nil
 }
 
 // GetOccurrence returns one case.
@@ -906,7 +814,7 @@ func (a *App) UpdateOccurrence(r *fastglue.Request) error {
 	a.DB.Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").Preload("WhatHappened").Preload("Process").First(occ, occ.ID)
 	resp := occurrenceToResponse(*occ)
 
-	a.broadcastOccurrenceMessage(orgID, occ.ContactID, occ.AssignedUserID, websocket.WSMessage{
+	a.broadcastOccurrence(orgID, occ.ID, websocket.WSMessage{
 		Type:    websocket.TypeOccurrenceChanged,
 		Payload: resp,
 	})
@@ -1027,7 +935,7 @@ func (a *App) ChangeOccurrenceStage(r *fastglue.Request) error {
 	a.DB.Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").Preload("WhatHappened").Preload("Process").First(occ, occ.ID)
 
 	resp := occurrenceToResponse(*occ)
-	a.broadcastOccurrenceMessage(orgID, occ.ContactID, occ.AssignedUserID, websocket.WSMessage{
+	a.broadcastOccurrence(orgID, occ.ID, websocket.WSMessage{
 		Type:    websocket.TypeOccurrenceChanged,
 		Payload: resp,
 	})
@@ -1041,7 +949,7 @@ func (a *App) ChangeOccurrenceStage(r *fastglue.Request) error {
 		CreatedByID:    &userID,
 	}
 	if err := a.DB.Create(&stageChangeEvent).Error; err == nil {
-		a.broadcastOccurrenceMessage(orgID, occ.ContactID, occ.AssignedUserID, websocket.WSMessage{
+		a.broadcastOccurrence(orgID, occ.ID, websocket.WSMessage{
 			Type: websocket.TypeOccurrenceEventCreated,
 			Payload: OccurrenceEventResponse{
 				ID:            stageChangeEvent.ID,
@@ -1153,7 +1061,7 @@ func (a *App) CreateOccurrenceEvent(r *fastglue.Request) error {
 		CreatedAt:     event.CreatedAt,
 	}
 
-	a.broadcastOccurrenceMessage(orgID, occ.ContactID, occ.AssignedUserID, websocket.WSMessage{
+	a.broadcastOccurrence(orgID, occ.ID, websocket.WSMessage{
 		Type:    websocket.TypeOccurrenceEventCreated,
 		Payload: resp,
 	})

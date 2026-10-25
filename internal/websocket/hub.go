@@ -14,6 +14,10 @@ import (
 // the single source of truth stays in authorizeConversation.
 type ConversationAuthorizer func(userID, orgID, contactID uuid.UUID) bool
 
+// OccurrenceAuthorizer is the occurrence counterpart: whether a user may see
+// the occurrence (identified by occurrenceID). Same injection rationale.
+type OccurrenceAuthorizer func(userID, orgID, occurrenceID uuid.UUID) bool
+
 // Hub maintains the set of active clients and broadcasts messages to them
 type Hub struct {
 	// clients maps organization ID -> user ID -> set of clients (supports multiple tabs)
@@ -39,6 +43,9 @@ type Hub struct {
 	// preserved; production always injects it via SetConversationAuthorizer.
 	authorize ConversationAuthorizer
 
+	// authorizeOccurrence gates occurrence-targeted events; nil fails closed.
+	authorizeOccurrence OccurrenceAuthorizer
+
 	// onPresence, when set, is told when a user's FIRST connection opens or
 	// their LAST one closes (not on every tab). It runs in its own goroutine so
 	// a slow listener can never stall the hub loop.
@@ -63,6 +70,10 @@ func (h *Hub) notifyPresence(orgID, userID uuid.UUID, online bool) {
 // SetConversationAuthorizer injects the authorization function used to gate
 // contact-targeted delivery. It is set once at startup, after the application
 // layer that owns the visibility rule has been constructed.
+func (h *Hub) SetOccurrenceAuthorizer(fn OccurrenceAuthorizer) {
+	h.authorizeOccurrence = fn
+}
+
 func (h *Hub) SetConversationAuthorizer(fn ConversationAuthorizer) {
 	h.authorize = fn
 }
@@ -211,6 +222,9 @@ func (h *Hub) broadcastMessage(msg BroadcastMessage) {
 	for _, userClients := range orgClients {
 		// Iterate through all clients (tabs) for each user
 		for client := range userClients {
+			if msg.OccurrenceID != uuid.Nil && (h.authorizeOccurrence == nil || !h.authorizeOccurrence(client.userID, msg.OrgID, msg.OccurrenceID)) {
+				continue
+			}
 			// If ContactID is specified, authorize and (optionally) filter by interest.
 			if msg.ContactID != uuid.Nil {
 				// Authorization gate: a client must be authorized to view this

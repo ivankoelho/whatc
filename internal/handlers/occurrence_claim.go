@@ -49,7 +49,7 @@ func (a *App) ClaimOccurrence(r *fastglue.Request) error {
 		Type:           models.OccurrenceEventAssignment,
 		CreatedByID:    &userID,
 	})
-	a.broadcastOccurrenceMessage(orgID, occ.ContactID, occ.AssignedUserID, websocket.WSMessage{
+	a.broadcastOccurrence(orgID, occ.ID, websocket.WSMessage{
 		Type:    websocket.TypeOccurrenceChanged,
 		Payload: resp,
 	})
