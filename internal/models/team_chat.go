@@ -24,6 +24,13 @@ const (
 	ChatChannelKindChannel ChatChannelKind = "channel"
 	// ChatChannelKindDM: exactly two users, identified by DMUserLowID/DMUserHighID.
 	ChatChannelKindDM ChatChannelKind = "dm"
+	// ChatChannelKindOccurrence: the internal discussion of ONE case (Occurrence).
+	// It has no membership rows and no team: who may read and who may write is
+	// decided by the case itself (authorizeOccurrence), so the discussion can never
+	// be wider or narrower than the case. It never carries anything to a customer:
+	// chat_messages is a different table from the WhatsApp messages and no code path
+	// connects them.
+	ChatChannelKindOccurrence ChatChannelKind = "occurrence"
 )
 
 // ChatChannel is a team channel, a free channel or a direct message.
@@ -35,8 +42,10 @@ type ChatChannel struct {
 	OrganizationID uuid.UUID       `gorm:"type:uuid;index;not null" json:"organization_id"`
 	Kind           ChatChannelKind `gorm:"size:20;not null" json:"kind"`
 	TeamID         *uuid.UUID      `gorm:"type:uuid;index" json:"team_id,omitempty"`
-	Name           string          `gorm:"size:100" json:"name"`
-	CreatedByID    *uuid.UUID      `gorm:"type:uuid" json:"created_by_id,omitempty"`
+	// OccurrenceID is set only for kind=occurrence (one channel per case).
+	OccurrenceID *uuid.UUID `gorm:"type:uuid;index" json:"occurrence_id,omitempty"`
+	Name         string     `gorm:"size:100" json:"name"`
+	CreatedByID  *uuid.UUID `gorm:"type:uuid" json:"created_by_id,omitempty"`
 
 	// ArchivedAt is set while the channel is archived (free channels only): hidden
 	// from the normal list, closed to new messages, edits and members; history stays.

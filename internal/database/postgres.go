@@ -336,6 +336,8 @@ func coreIndexes() []string {
 		// source transfer, filled only where still empty. Cases without one stay restricted.
 		`UPDATE occurrences o SET team_id = t.team_id FROM agent_transfers t WHERE o.source_transfer_id = t.id AND o.team_id IS NULL AND t.team_id IS NOT NULL`,
 		`UPDATE occurrences o SET unit_id = t.unit_id FROM teams t WHERE o.team_id = t.id AND o.unit_id IS NULL AND t.unit_id IS NOT NULL`,
+		// One internal discussion per case.
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_channel_occurrence ON chat_channels(organization_id, occurrence_id) WHERE occurrence_id IS NOT NULL AND deleted_at IS NULL`,
 		// Indexes
 		`CREATE INDEX IF NOT EXISTS idx_messages_contact_created ON messages(contact_id, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id)`,
