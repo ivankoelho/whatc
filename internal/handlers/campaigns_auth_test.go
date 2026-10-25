@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fasthttp"
+	"gorm.io/gorm"
 )
 
 const campaignOTP = "558201"
@@ -30,7 +31,7 @@ func newAuthCampaign(t *testing.T, status models.CampaignStatus) *authCampaignFi
 	q := testutil.NewMockQueue()
 	app := newTestApp(t, withQueue(q))
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("auth-camp")), testutil.WithPassword("password"))
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&campaignOperatorRole(t, app.DB, org.ID).ID), testutil.WithEmail(testutil.UniqueEmail("auth-camp")), testutil.WithPassword("password"))
 	account := testutil.CreateTestWhatsAppAccountWith(t, app.DB, org.ID, testutil.WithAccountName("auth-camp-"+uuid.New().String()[:6]))
 	tpl := testutil.CreateTestTemplate(t, app.DB, org.ID, account.Name)
 	require.NoError(t, app.DB.Model(tpl).Update("category", "AUTHENTICATION").Error)
@@ -162,7 +163,7 @@ func TestNonAuthCampaign_RecipientParamsStayAsBefore(t *testing.T) {
 	q := testutil.NewMockQueue()
 	app := newTestApp(t, withQueue(q))
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("plain-camp")), testutil.WithPassword("password"))
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&campaignOperatorRole(t, app.DB, org.ID).ID), testutil.WithEmail(testutil.UniqueEmail("plain-camp")), testutil.WithPassword("password"))
 	account := testutil.CreateTestWhatsAppAccountWith(t, app.DB, org.ID, testutil.WithAccountName("plain-camp-"+uuid.New().String()[:6]))
 	tpl := testutil.CreateTestTemplate(t, app.DB, org.ID, account.Name)
 	c := createTestCampaign(t, app, org.ID, tpl.ID, user.ID, account.Name, models.CampaignStatusDraft)
@@ -246,7 +247,7 @@ func TestNonAuthCampaign_ValidUntilIsIgnoredAndNotRequired(t *testing.T) {
 	app := newTestApp(t, withQueue(q))
 	app.Config.OTP.RequireValidUntil = true // must not affect normal templates
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("plain-vu")), testutil.WithPassword("password"))
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&campaignOperatorRole(t, app.DB, org.ID).ID), testutil.WithEmail(testutil.UniqueEmail("plain-vu")), testutil.WithPassword("password"))
 	account := testutil.CreateTestWhatsAppAccountWith(t, app.DB, org.ID, testutil.WithAccountName("plain-vu-"+uuid.New().String()[:6]))
 	tpl := testutil.CreateTestTemplate(t, app.DB, org.ID, account.Name)
 	c := createTestCampaign(t, app, org.ID, tpl.ID, user.ID, account.Name, models.CampaignStatusDraft)
@@ -266,4 +267,12 @@ func TestNonAuthCampaign_ValidUntilIsIgnoredAndNotRequired(t *testing.T) {
 	for _, r := range rs {
 		assert.False(t, templateutil.IsSealed(r.TemplateParams), "normal params stay as before")
 	}
+}
+
+// campaignOperatorRole grants exactly the campaign permissions, so these tests
+// exercise the handlers as an authorized member instead of bypassing RBAC.
+func campaignOperatorRole(t *testing.T, db *gorm.DB, orgID uuid.UUID) *models.CustomRole {
+	t.Helper()
+	return testutil.CreateTestRoleWithKeys(t, db, orgID, "campaign-operator-"+uuid.New().String()[:6],
+		[]string{"campaigns:read", "campaigns:write", "campaigns:delete", "campaigns:execute"})
 }

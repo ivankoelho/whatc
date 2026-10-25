@@ -18,7 +18,7 @@ func newNormalCampaign(t *testing.T, status models.CampaignStatus) *authCampaign
 	q := testutil.NewMockQueue()
 	app := newTestApp(t, withQueue(q))
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("normal-camp")), testutil.WithPassword("password"))
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&campaignOperatorRole(t, app.DB, org.ID).ID), testutil.WithEmail(testutil.UniqueEmail("normal-camp")), testutil.WithPassword("password"))
 	account := testutil.CreateTestWhatsAppAccountWith(t, app.DB, org.ID, testutil.WithAccountName("normal-camp-"+uuid.New().String()[:6]))
 	tpl := testutil.CreateTestTemplate(t, app.DB, org.ID, account.Name)
 	c := createTestCampaign(t, app, org.ID, tpl.ID, user.ID, account.Name, status)
