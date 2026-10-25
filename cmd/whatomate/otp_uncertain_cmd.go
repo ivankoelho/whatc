@@ -37,6 +37,10 @@ func runOTPUncertain(args []string) {
 	if err != nil {
 		fatalf("failed to load config: %v", err)
 	}
+	if *release != "" && !cfg.OTP.AllowLocalRelease {
+		// Refused before even connecting. The core refuses too (authmask.ErrLocalReleaseDisabled).
+		fatalf("refused: %v. Listing (without -release) still works", authmask.ErrLocalReleaseDisabled)
+	}
 	db, err := database.NewPostgres(&cfg.Database, false)
 	if err != nil {
 		fatalf("failed to connect to the database: %v", err)
@@ -66,9 +70,12 @@ func runOTPUncertain(args []string) {
 		fatalf("-operator is required: the e-mail of a real administrator of the campaign's organization")
 	}
 	policy := templateutil.OTPPolicy{MaxValidity: cfg.OTP.MaxValidity(), RequireValidUntil: cfg.OTP.RequireValidUntil}
-	err = authmask.ReleaseUncertain(db, authmask.ReleaseRequest{RecipientID: id, OperatorEmail: *operator, Reason: *reason}, policy, time.Now(), !*apply)
+	err = authmask.ReleaseUncertain(db, authmask.ReleaseRequest{
+		RecipientID: id, OperatorEmail: *operator, Reason: *reason,
+		LocalReleaseEnabled: cfg.OTP.AllowLocalRelease, // the core refuses without it, whatever this command does
+	}, policy, time.Now(), !*apply)
 	switch {
-	case errors.Is(err, authmask.ErrNotUncertain), errors.Is(err, authmask.ErrOperatorNotAllowed), errors.Is(err, authmask.ErrInvalidReason),
+	case errors.Is(err, authmask.ErrLocalReleaseDisabled), errors.Is(err, authmask.ErrNotUncertain), errors.Is(err, authmask.ErrOperatorNotAllowed), errors.Is(err, authmask.ErrInvalidReason),
 		errors.Is(err, authmask.ErrNoCodeStored), errors.Is(err, authmask.ErrCodeNotValid):
 		fatalf("refused: %v", err)
 	case err != nil:

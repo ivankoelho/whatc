@@ -197,3 +197,4 @@ undelivered_after_hours = 72
 [otp]
 max_validity_minutes = 5       # send window counted from upload; the smaller of this and valid_until wins
 require_valid_until = false    # true: refuse recipients/sends without valid_until (see `whatomate otp-validity-report` first)
+allow_local_release = false    # EXCEPTIONAL. true lets `whatomate otp-uncertain -release` free an uncertain delivery for resend. Read from THIS FILE ONLY (the environment is ignored). The operator it records is not authenticated; see the docs

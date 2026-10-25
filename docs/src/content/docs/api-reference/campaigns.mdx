@@ -281,8 +281,25 @@ guarantees locally for authentication campaigns:
 #### Reconciling an uncertain delivery
 
 `whatomate otp-uncertain` lists these recipients (phone shown as its last four digits),
-including claims that are stuck and not yet resolved. To let one be sent again, **first
-confirm with Meta's logs or the customer that the code was not delivered**, then:
+including claims that are stuck and not yet resolved. Listing is read-only and always
+available.
+
+**Releasing is disabled by default.** It only works when the configuration **file** has
+
+```toml
+[otp]
+allow_local_release = true
+```
+
+An absent key, `false`, a value that is not a TOML boolean, and the environment
+(`WHATOMATE_OTP__ALLOW_LOCAL_RELEASE` is ignored on purpose) all mean *disabled*. The
+check lives in the release function itself, not only in the command, and it runs before
+anything is read or written, dry runs included. Enabling it is an **exceptional**
+decision: it requires administrative control of the server and its configuration, and it
+does not authenticate the operator it records (see below). Switch it back off when done.
+
+To let one be sent again, **first confirm with Meta's logs or the customer that the code
+was not delivered**, then:
 
 ```bash
 whatomate otp-uncertain -release <recipient-id> -operator admin@example.com \

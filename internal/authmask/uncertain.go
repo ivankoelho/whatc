@@ -96,6 +96,9 @@ var (
 	ErrNoCodeStored = errors.New("no sealed code is stored for this recipient")
 	// ErrCodeNotValid: the code is past its validity (or retention) and can no longer be sent.
 	ErrCodeNotValid = errors.New("the code is no longer valid and can no longer be sent")
+	// ErrLocalReleaseDisabled: releasing an uncertain delivery locally is switched off (the
+	// default). It is checked before anything is read or written.
+	ErrLocalReleaseDisabled = errors.New("local release of uncertain deliveries is disabled (otp.allow_local_release is not true in the config file)")
 )
 
 // ReleaseRequest is a deliberate, attributed reconciliation.
@@ -106,6 +109,9 @@ type ReleaseRequest struct {
 	OperatorEmail string
 	// Reason says why the code is known not to have been delivered. It is audited.
 	Reason string
+	// LocalReleaseEnabled must carry config OTP.AllowLocalRelease. The zero value refuses:
+	// a caller that forgets it, or a config that does not enable it, can never release.
+	LocalReleaseEnabled bool
 }
 
 var digitRun = regexp.MustCompile(`\d{4,}`)
@@ -124,6 +130,11 @@ func validReason(s string) (string, bool) {
 // held) and the audit entry is written. If any step fails nothing is changed. With
 // dryRun every check runs and nothing is written.
 func ReleaseUncertain(db *gorm.DB, req ReleaseRequest, policy templateutil.OTPPolicy, now time.Time, dryRun bool) error {
+	// First of all, before the database is touched, dry runs included: the release is off
+	// unless the configuration file turned it on.
+	if !req.LocalReleaseEnabled {
+		return ErrLocalReleaseDisabled
+	}
 	reason, ok := validReason(req.Reason)
 	if !ok {
 		return ErrInvalidReason

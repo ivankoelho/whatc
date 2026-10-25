@@ -206,10 +206,15 @@ type RateLimitConfig struct {
 // Load loads configuration from file and environment variables
 func Load(configPath string) (*Config, error) {
 	k := koanf.New(".")
+	// Switches that must never come from the environment are read from the FILE only.
+	fileOnly := koanf.New(".")
 
 	// Load from config file if provided
 	if configPath != "" {
 		if err := k.Load(file.Provider(configPath), toml.Parser()); err != nil {
+			return nil, err
+		}
+		if err := fileOnly.Load(file.Provider(configPath), toml.Parser()); err != nil {
 			return nil, err
 		}
 	}
@@ -233,6 +238,10 @@ func Load(configPath string) (*Config, error) {
 	if err := k.Unmarshal("", &cfg); err != nil {
 		return nil, err
 	}
+
+	// Only a real TOML boolean true enables it; anything else (absent, "true" as text) is false.
+	allow, _ := fileOnly.Get("otp.allow_local_release").(bool) // a type assertion, not koanf.Bool, which would read "true" and 1 as true
+	cfg.OTP.AllowLocalRelease = allow
 
 	// Set defaults
 	setDefaults(&cfg)
@@ -522,6 +531,13 @@ type OTPConfig struct {
 	// without the issuer's valid_until, and refuses to send codes that lack it.
 	// Off by default so existing campaigns keep working during the transition.
 	RequireValidUntil bool `koanf:"require_valid_until"`
+	// AllowLocalRelease lets `whatomate otp-uncertain -release` free a recipient whose
+	// delivery is uncertain so it can be sent again (the code may already have reached the
+	// customer). It is OFF unless the config FILE sets `allow_local_release = true` under
+	// [otp]: an absent key, a non-boolean value and the environment all mean false. The tag
+	// is "-" on purpose, so WHATOMATE_OTP__ALLOW_LOCAL_RELEASE can never switch it on; Load
+	// reads it from the file only. The operator it records is not authenticated.
+	AllowLocalRelease bool `koanf:"-"`
 }
 
 // MaxValidity returns the send window, bounded and defaulted.

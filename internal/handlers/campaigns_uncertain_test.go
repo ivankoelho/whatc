@@ -115,7 +115,7 @@ func TestReconciliation_ReleaseMakesAnUncertainRecipientRetryable(t *testing.T) 
 	}
 	require.True(t, found)
 
-	req := authmask.ReleaseRequest{RecipientID: r.ID, OperatorEmail: op.Email, Reason: "Meta message log shows no delivery for this wamid"}
+	req := authmask.ReleaseRequest{LocalReleaseEnabled: true, RecipientID: r.ID, OperatorEmail: op.Email, Reason: "Meta message log shows no delivery for this wamid"}
 	require.NoError(t, authmask.ReleaseUncertain(f.app.DB, req, policy, time.Now(), false))
 	assert.Empty(t, f.queue.Jobs, "releasing queues nothing: only an explicit retry-failed sends again")
 	assert.ErrorIs(t, authmask.ReleaseUncertain(f.app.DB, req, policy, time.Now(), false), authmask.ErrNotUncertain, "compare-and-set: a second release does nothing")

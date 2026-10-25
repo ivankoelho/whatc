@@ -60,7 +60,7 @@ func (e *releaseEnv) uncertain(t *testing.T, until time.Time, status models.Mess
 
 func (e *releaseEnv) release(t *testing.T, r *models.BulkMessageRecipient, email, reason string, dry bool) error {
 	t.Helper()
-	return authmask.ReleaseUncertain(e.db, authmask.ReleaseRequest{RecipientID: r.ID, OperatorEmail: email, Reason: reason},
+	return authmask.ReleaseUncertain(e.db, authmask.ReleaseRequest{LocalReleaseEnabled: true, RecipientID: r.ID, OperatorEmail: email, Reason: reason},
 		templateutil.OTPPolicy{}, time.Now(), dry)
 }
 
@@ -222,4 +222,75 @@ func TestRelease_AuditFailureRollsTheReleaseBack(t *testing.T) {
 	require.NoError(t, e.db.First(&got, r.ID).Error)
 	assert.Equal(t, models.MessageStatusFailed, got.Status)
 	assert.Contains(t, got.ErrorMessage, "delivery_uncertain", "the error text was not rewritten either")
+}
+
+// ---- the release is off unless the configuration enabled it ----
+
+func (e *releaseEnv) releaseWith(t *testing.T, r *models.BulkMessageRecipient, enabled, dry bool) error {
+	t.Helper()
+	return authmask.ReleaseUncertain(e.db, authmask.ReleaseRequest{
+		LocalReleaseEnabled: enabled, RecipientID: r.ID, OperatorEmail: e.admin.Email, Reason: "Meta log shows no delivery",
+	}, templateutil.OTPPolicy{}, time.Now(), dry)
+}
+
+func TestRelease_IsRefusedByDefaultAndTheDataIsUntouched(t *testing.T) {
+	e := newReleaseEnv(t)
+	r := e.uncertain(t, time.Now().Add(10*time.Minute), models.MessageStatusFailed, 0)
+	var before models.BulkMessageRecipient
+	require.NoError(t, e.db.First(&before, r.ID).Error)
+
+	// The zero value of the request is "disabled": a caller that forgets the switch cannot release.
+	zero := authmask.ReleaseUncertain(e.db, authmask.ReleaseRequest{RecipientID: r.ID, OperatorEmail: e.admin.Email, Reason: "Meta log shows no delivery"},
+		templateutil.OTPPolicy{}, time.Now(), false)
+	assert.ErrorIs(t, zero, authmask.ErrLocalReleaseDisabled)
+	assert.ErrorIs(t, e.releaseWith(t, r, false, false), authmask.ErrLocalReleaseDisabled, "apply")
+	assert.ErrorIs(t, e.releaseWith(t, r, false, true), authmask.ErrLocalReleaseDisabled, "even a dry run")
+
+	var after models.BulkMessageRecipient
+	require.NoError(t, e.db.First(&after, r.ID).Error)
+	assert.Equal(t, before.Status, after.Status)
+	require.NotNil(t, after.MessageID, "the claim is kept: the recipient stays uncertain")
+	assert.Equal(t, *before.MessageID, *after.MessageID)
+	assert.Equal(t, before.ErrorMessage, after.ErrorMessage)
+	assert.Equal(t, before.TemplateParams, after.TemplateParams, "the sealed code is untouched")
+	assert.Zero(t, e.audits(t), "nothing is audited when nothing happens")
+}
+
+// The refusal happens before anything else: it does not matter who asks or what the data is.
+func TestRelease_TheSwitchIsCheckedBeforeAnyOtherValidation(t *testing.T) {
+	e := newReleaseEnv(t)
+	err := authmask.ReleaseUncertain(e.db, authmask.ReleaseRequest{RecipientID: uuid.New(), OperatorEmail: "nobody@example.com", Reason: ""},
+		templateutil.OTPPolicy{}, time.Now(), false)
+	assert.ErrorIs(t, err, authmask.ErrLocalReleaseDisabled)
+}
+
+func TestRelease_WhenEnabledItStillNeedsEveryOtherCheck(t *testing.T) {
+	e := newReleaseEnv(t)
+	r := e.uncertain(t, time.Now().Add(10*time.Minute), models.MessageStatusFailed, 0)
+
+	// Enabled is not enough: operator, reason, validity and compare-and-set still apply.
+	bad := authmask.ReleaseUncertain(e.db, authmask.ReleaseRequest{LocalReleaseEnabled: true, RecipientID: r.ID, OperatorEmail: "nobody@example.com", Reason: "ok"},
+		templateutil.OTPPolicy{}, time.Now(), false)
+	assert.ErrorIs(t, bad, authmask.ErrOperatorNotAllowed)
+	noReason := authmask.ReleaseUncertain(e.db, authmask.ReleaseRequest{LocalReleaseEnabled: true, RecipientID: r.ID, OperatorEmail: e.admin.Email},
+		templateutil.OTPPolicy{}, time.Now(), false)
+	assert.ErrorIs(t, noReason, authmask.ErrInvalidReason)
+
+	require.NoError(t, e.releaseWith(t, r, true, false))
+	assert.Equal(t, int64(1), e.audits(t), "audited in the same transaction")
+	assert.ErrorIs(t, e.releaseWith(t, r, true, false), authmask.ErrNotUncertain, "compare-and-set: only once")
+}
+
+// Listing is read-only and has no switch: it keeps working whatever the configuration says.
+func TestListUncertain_WorksWithoutTheReleaseSwitch(t *testing.T) {
+	e := newReleaseEnv(t)
+	r := e.uncertain(t, time.Now().Add(10*time.Minute), models.MessageStatusFailed, 0)
+
+	list, err := authmask.ListUncertain(e.db, 2*time.Minute)
+	require.NoError(t, err)
+	var found bool
+	for _, u := range list {
+		found = found || u.RecipientID == r.ID
+	}
+	assert.True(t, found)
 }
