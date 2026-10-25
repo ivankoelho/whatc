@@ -23,7 +23,7 @@ defineProps<{
 
 <template>
   <header class="border-b border-white/[0.08] light:border-gray-200 bg-[#0a0a0b]/95 light:bg-white/95 backdrop-blur">
-    <div class="flex h-16 items-center px-6">
+    <div class="flex min-h-16 flex-wrap items-center gap-y-2 px-4 py-2 sm:px-6 sm:py-0">
       <RouterLink v-if="backLink" :to="backLink">
         <Button variant="ghost" size="icon" class="mr-3">
           <ArrowLeft class="h-5 w-5" />
@@ -36,7 +36,7 @@ defineProps<{
       >
         <component :is="icon" class="h-4 w-4 text-white" />
       </div>
-      <div class="flex-1">
+      <div class="min-w-0 flex-1">
         <h1 class="text-xl font-semibold text-white light:text-gray-900">{{ title }}</h1>
         <template v-if="breadcrumbs?.length">
           <Breadcrumb>

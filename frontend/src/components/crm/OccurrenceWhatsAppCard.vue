@@ -80,9 +80,9 @@ watch(() => props.occurrenceId, load, { immediate: true })
       <p v-else-if="data.restricted" class="text-muted-foreground" data-testid="wa-restricted">{{ $t('occurrences.waRestricted') }}</p>
       <template v-else>
         <p v-if="!data.messages?.length" class="text-muted-foreground">{{ $t('occurrences.waEmpty') }}</p>
-        <ul v-else class="max-h-72 space-y-2 overflow-y-auto pr-1" data-testid="wa-messages">
+        <ul v-else class="max-h-96 space-y-2 overflow-y-auto pr-1" data-testid="wa-messages">
           <li v-for="m in data.messages" :key="m.id" class="flex" :class="m.direction === 'outgoing' ? 'justify-end' : 'justify-start'">
-            <div class="max-w-[85%] rounded-lg px-3 py-2" :class="m.direction === 'outgoing' ? 'bg-emerald-500/15' : 'bg-muted'">
+            <div class="max-w-[85%] sm:max-w-2xl rounded-lg px-3 py-2" :class="m.direction === 'outgoing' ? 'bg-emerald-500/15' : 'bg-muted'">
               <p class="whitespace-pre-wrap [overflow-wrap:anywhere]">{{ m.content }}</p>
               <div class="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
                 <span>{{ formatDateTime(m.created_at) }}</span>

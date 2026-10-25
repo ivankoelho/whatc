@@ -66,9 +66,9 @@ onBeforeUnmount(() => { if (store.activeChannelId === channelId.value) void stor
       <template v-else-if="channelId">
         <p v-if="panel?.loading && messages.length === 0" class="text-sm text-muted-foreground">…</p>
         <p v-else-if="messages.length === 0" class="text-sm text-muted-foreground">{{ $t('occurrences.internalChatEmpty') }}</p>
-        <ul v-else class="max-h-80 space-y-2 overflow-y-auto pr-1" data-testid="internal-messages">
+        <ul v-else class="max-h-96 space-y-2 overflow-y-auto pr-1" data-testid="internal-messages">
           <li v-for="m in messages" :key="m.id" class="flex" :class="m.user_id === myId ? 'justify-end' : 'justify-start'">
-            <div class="max-w-[85%] rounded-lg px-3 py-2 text-sm" :class="m.user_id === myId ? 'bg-sky-500/15' : 'bg-muted'">
+            <div class="max-w-[85%] sm:max-w-2xl rounded-lg px-3 py-2 text-sm" :class="m.user_id === myId ? 'bg-sky-500/15' : 'bg-muted'">
               <div class="mb-0.5 flex flex-wrap items-baseline gap-2 text-xs text-muted-foreground">
                 <span class="font-medium text-foreground">{{ m.user_name }}</span>
                 <span>{{ formatDateTime(m.created_at) }}</span>
