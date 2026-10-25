@@ -1517,6 +1517,9 @@ export interface OccurrenceStage {
   position: number
   is_initial: boolean
   is_closing: boolean
+  general_state?: string
+  team_id?: string
+  allowed_from?: string[] | null
 }
 
 export interface Occurrence {
@@ -1529,6 +1532,9 @@ export interface Occurrence {
   description: string
   stage_id: string
   stage_name: string
+  general_state?: string
+  team_id?: string
+  reopened_count?: number
   priority: 'low' | 'normal' | 'high' | 'urgent'
   assigned_user_id?: string
   assigned_user_name?: string

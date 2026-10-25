@@ -210,3 +210,18 @@ type OccurrenceParticipant struct {
 }
 
 func (OccurrenceParticipant) TableName() string { return "occurrence_participants" }
+
+// EffectiveState is the stage's general state, deriving it from the legacy
+// flags for rows that predate the column.
+func (s OccurrenceStage) EffectiveState() string {
+	if IsValidGeneralState(s.GeneralState) {
+		return s.GeneralState
+	}
+	switch {
+	case s.IsClosing:
+		return GeneralStateResolved
+	case s.IsInitial:
+		return GeneralStateNew
+	}
+	return GeneralStateInProgress
+}

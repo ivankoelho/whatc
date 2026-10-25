@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { PageHeader, DataTable, CrudFormDialog, DeleteConfirmDialog, IconButton, ErrorState, type Column } from '@/components/shared'
-import { occurrencesService, type OccurrenceStage } from '@/services/api'
+import { occurrencesService, teamsService, type OccurrenceStage } from '@/services/api'
 import { useOccurrencesStore } from '@/stores/occurrences'
 import { useCrudState } from '@/composables/useCrudState'
 import { toast } from 'vue-sonner'
@@ -25,9 +25,11 @@ interface StageFormData {
   position: number
   is_initial: boolean
   is_closing: boolean
+  general_state: string
+  team_id: string
 }
 
-const defaultFormData: StageFormData = { name: '', color: '#6b7280', position: 0, is_initial: false, is_closing: false }
+const defaultFormData: StageFormData = { name: '', color: '#6b7280', position: 0, is_initial: false, is_closing: false, general_state: 'in_progress', team_id: '' }
 
 const isLoading = ref(false)
 const isDeleting = ref(false)
@@ -42,6 +44,7 @@ const columns = computed<Column<OccurrenceStage>[]>(() => [
   { key: 'color', label: t('occurrences.columnColor'), width: 'w-[70px]' },
   { key: 'name', label: t('occurrences.stageName') },
   { key: 'position', label: t('occurrences.columnPosition'), width: 'w-[100px]' },
+  { key: 'state', label: t('occurrences.generalState') },
   { key: 'initial', label: t('occurrences.columnInitial'), align: 'center' },
   { key: 'closing', label: t('occurrences.columnClosing'), align: 'center' },
   { key: 'actions', label: t('common.actions'), align: 'right' },
@@ -59,6 +62,8 @@ function openEditDialog(stage: OccurrenceStage) {
     position: s.position,
     is_initial: s.is_initial,
     is_closing: s.is_closing,
+    general_state: s.general_state || (s.is_closing ? 'resolved' : s.is_initial ? 'new' : 'in_progress'),
+    team_id: s.team_id || '',
   }))
 }
 
@@ -75,7 +80,14 @@ async function fetchStages() {
   }
 }
 
-onMounted(() => fetchStages())
+const teams = ref<{ id: string; name: string }[]>([])
+async function fetchTeams() {
+  try {
+    const res = await teamsService.list({ limit: 500 })
+    teams.value = ((res.data as any).data || res.data).teams || []
+  } catch { /* the team picker just stays empty without access */ }
+}
+onMounted(() => { fetchStages(); fetchTeams() })
 
 async function saveStage() {
   if (!formData.value.name.trim()) {
@@ -165,6 +177,9 @@ async function confirmDelete() {
                 <template #cell-position="{ item: stage }">
                   <span class="text-muted-foreground">{{ stage.position }}</span>
                 </template>
+                <template #cell-state="{ item: stage }">
+                  <Badge variant="secondary">{{ $t('occurrences.generalStates.' + (stage.general_state || (stage.is_closing ? 'resolved' : stage.is_initial ? 'new' : 'in_progress'))) }}</Badge>
+                </template>
                 <template #cell-initial="{ item: stage }">
                   <Badge :variant="stage.is_initial ? 'success' : 'secondary'">{{ stage.is_initial ? $t('common.yes') : $t('common.no') }}</Badge>
                 </template>
@@ -214,6 +229,21 @@ async function confirmDelete() {
             <Input type="color" v-model="formData.color" class="h-10 w-16 p-1 cursor-pointer" />
             <Input v-model="formData.color" class="flex-1 font-mono" maxlength="20" />
           </div>
+        </div>
+        <div class="space-y-2">
+          <Label>{{ $t('occurrences.generalState') }}</Label>
+          <select v-model="formData.general_state" class="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="stage-general-state" @change="formData.is_closing = formData.general_state === 'resolved'">
+            <option v-for="s in ['new', 'in_progress', 'waiting_customer', 'resolved']" :key="s" :value="s">{{ $t('occurrences.generalStates.' + s) }}</option>
+          </select>
+          <p class="text-xs text-muted-foreground">{{ $t('occurrences.generalStateHint') }}</p>
+        </div>
+        <div class="space-y-2">
+          <Label>{{ $t('occurrences.stageTeam') }}</Label>
+          <select v-model="formData.team_id" :disabled="!!editingStage" class="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm disabled:opacity-60" data-testid="stage-team">
+            <option value="">{{ $t('occurrences.stageTeamAll') }}</option>
+            <option v-for="tm in teams" :key="tm.id" :value="tm.id">{{ tm.name }}</option>
+          </select>
+          <p class="text-xs text-muted-foreground">{{ $t('occurrences.stageTeamHint') }}</p>
         </div>
         <div class="space-y-2">
           <Label>{{ $t('occurrences.stagePosition') }}</Label>

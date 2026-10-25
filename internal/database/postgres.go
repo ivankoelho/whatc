@@ -321,6 +321,9 @@ func coreIndexes() []string {
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_occ_stage_team_name ON occurrence_stages(organization_id, team_id, name) WHERE team_id IS NOT NULL AND deleted_at IS NULL`,
 		`UPDATE occurrence_stages SET general_state = CASE WHEN is_closing THEN 'resolved' WHEN is_initial THEN 'new' WHEN lower(name) = 'aguardando cliente' THEN 'waiting_customer' ELSE 'in_progress' END WHERE general_state = '' OR general_state IS NULL`,
 		`UPDATE occurrences o SET general_state = s.general_state FROM occurrence_stages s WHERE s.id = o.stage_id AND (o.general_state = '' OR o.general_state IS NULL)`,
+		// Cases attended by a team keep that team as their scope: a fact recorded on the
+		// source transfer, filled only where still empty. Cases without one stay restricted.
+		`UPDATE occurrences o SET team_id = t.team_id FROM agent_transfers t WHERE o.source_transfer_id = t.id AND o.team_id IS NULL AND t.team_id IS NOT NULL`,
 		// Indexes
 		`CREATE INDEX IF NOT EXISTS idx_messages_contact_created ON messages(contact_id, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id)`,

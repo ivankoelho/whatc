@@ -75,7 +75,9 @@ func (a *App) authorizeOccurrence(userID, orgID uuid.UUID, occ *models.Occurrenc
 		}
 	}
 	if inTeam {
-		return occurrenceAccess{view: true, interact: true}
+		// view_team makes the team member a supervisor of the team's cases.
+		return occurrenceAccess{view: true, interact: true,
+			supervisor: a.HasPermission(userID, models.ResourceConversations, models.ActionViewTeam, orgID)}
 	}
 
 	if a.HasPermission(userID, models.ResourceConversations, models.ActionViewTeam, orgID) && len(teams) > 0 {
@@ -155,4 +157,19 @@ func (a *App) loadOccurrenceWithAccess(r *fastglue.Request, orgID, userID uuid.U
 	}
 	occ.Contact = &contact
 	return occ, acc, nil
+}
+
+// teamFromTransfer returns the active team of the attendance a case came from,
+// or nil. It is a fact about the attendance, not a guess.
+func (a *App) teamFromTransfer(orgID, transferID uuid.UUID) *uuid.UUID {
+	var transfer models.AgentTransfer
+	if err := a.DB.Where("id = ? AND organization_id = ?", transferID, orgID).First(&transfer).Error; err != nil || transfer.TeamID == nil {
+		return nil
+	}
+	var n int64
+	a.DB.Model(&models.Team{}).Where("id = ? AND organization_id = ? AND is_active = ?", *transfer.TeamID, orgID, true).Count(&n)
+	if n == 0 {
+		return nil
+	}
+	return transfer.TeamID
 }
