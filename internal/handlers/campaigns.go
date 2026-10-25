@@ -13,6 +13,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/contactutil"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/queue"
+	"github.com/shridarpatil/whatomate/internal/templateutil"
 	"github.com/shridarpatil/whatomate/internal/utils"
 	"github.com/shridarpatil/whatomate/internal/websocket"
 	"github.com/valyala/fasthttp"
@@ -64,6 +65,11 @@ type RecipientRequest struct {
 	// Meta), keyed by the variable's name. Kept separate from TemplateParams
 	// so a positional header {{1}} doesn't collide with body {{1}}.
 	HeaderParams map[string]any `json:"header_params"`
+	// ValidUntil is, for authentication templates, the instant (RFC 3339, any
+	// offset; stored in UTC) until which the system that issued the one-time code
+	// confirms it is valid. Whatomate never sends the code after it, never renews
+	// it and caps it by otp.max_validity_minutes. Ignored for other templates.
+	ValidUntil *time.Time `json:"valid_until,omitempty"`
 }
 
 // ListCampaigns implements campaign listing
@@ -395,6 +401,9 @@ func (a *App) DeleteCampaign(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Cannot delete running campaign", nil, "")
 	}
 
+	// Soft delete would keep the stored codes: scrub them first.
+	a.scrubCampaignSecrets(campaign, uuid.Nil)
+
 	// Delete recipients first
 	if err := a.DB.Where("campaign_id = ?", id).Delete(&models.BulkMessageRecipient{}).Error; err != nil {
 		a.Log.Error("Failed to delete campaign recipients", "error", err)
@@ -461,6 +470,16 @@ func (a *App) StartCampaign(r *fastglue.Request) error {
 		}
 	}
 
+	// Pending recipients created before sealing existed get their codes sealed
+	// now, so neither the queue nor the database ever holds them in clear.
+	if a.campaignIsAuth(campaign) {
+		if err := a.protectLegacyRecipients(recipients); err != nil {
+			a.Log.Error("Failed to protect verification codes", "error", err, "campaign_id", id)
+			return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable,
+				"Campaigns with authentication templates require app.encryption_key to be configured", nil, "")
+		}
+	}
+
 	// Update status to processing
 	now := time.Now()
 	updates := map[string]any{
@@ -468,9 +487,19 @@ func (a *App) StartCampaign(r *fastglue.Request) error {
 		"started_at": now,
 	}
 
-	if err := a.DB.Model(campaign).Updates(updates).Error; err != nil {
-		a.Log.Error("Failed to start campaign", "error", err)
+	// Compare-and-set: only one concurrent request can move the campaign out of
+	// draft/scheduled/paused, so a double click (or two API callers) cannot enqueue
+	// every recipient twice.
+	started := a.DB.Model(&models.BulkMessageCampaign{}).
+		Where("id = ? AND status IN ?", id, []models.CampaignStatus{
+			models.CampaignStatusDraft, models.CampaignStatusScheduled, models.CampaignStatusPaused,
+		}).Updates(updates)
+	if started.Error != nil {
+		a.Log.Error("Failed to start campaign", "error", started.Error)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to start campaign", nil, "")
+	}
+	if started.RowsAffected == 0 {
+		return r.SendErrorEnvelope(fasthttp.StatusConflict, "Campaign is already being started", nil, "")
 	}
 
 	a.Log.Info("Campaign started", "campaign_id", id, "recipients", len(recipients))
@@ -570,6 +599,9 @@ func (a *App) CancelCampaign(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to cancel campaign", nil, "")
 	}
 
+	// A cancelled campaign is never retried: drop any code still stored.
+	a.scrubCampaignSecrets(campaign, uuid.Nil)
+
 	a.Log.Info("Campaign cancelled", "campaign_id", id)
 
 	return r.SendEnvelope(map[string]any{
@@ -614,20 +646,55 @@ func (a *App) RetryFailed(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "No failed messages to retry", nil, "")
 	}
 
-	// Reset failed recipients to pending
-	if err := a.DB.Model(&models.BulkMessageRecipient{}).
-		Where("campaign_id = ? AND status = ?", id, models.MessageStatusFailed).
+	if a.campaignIsAuth(campaign) {
+		if err := a.protectLegacyRecipients(failedRecipients); err != nil {
+			a.Log.Error("Failed to protect verification codes", "error", err, "campaign_id", id)
+			return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable,
+				"Campaigns with authentication templates require app.encryption_key to be configured", nil, "")
+		}
+	}
+
+	// Reset failed recipients to pending. UPDATE ... RETURNING is the atomic claim:
+	// each failed recipient is flipped, and later enqueued, by exactly one request,
+	// so concurrent retries cannot queue (and send) the same recipient twice.
+	//
+	// A failed recipient that still holds a claim (message_id set) is a one-time code
+	// whose delivery is UNCERTAIN: Meta may have sent it. It is never retried here;
+	// it needs a person to reconcile it (see "whatomate otp-uncertain"). Ordinary
+	// campaigns never set message_id, so for them this changes nothing.
+	var flipped []models.BulkMessageRecipient
+	reset := a.DB.Model(&flipped).Clauses(clause.Returning{}).
+		Where("campaign_id = ? AND status = ? AND message_id IS NULL", id, models.MessageStatusFailed).
 		Updates(map[string]any{
 			"status":        models.MessageStatusPending,
 			"error_message": "",
-		}).Error; err != nil {
-		a.Log.Error("Failed to reset failed recipients", "error", err)
+		})
+	if reset.Error != nil {
+		a.Log.Error("Failed to reset failed recipients", "error", reset.Error)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to reset failed recipients", nil, "")
 	}
+	var uncertain int64
+	a.DB.Model(&models.BulkMessageRecipient{}).
+		Where("campaign_id = ? AND status = ? AND message_id IS NOT NULL", id, models.MessageStatusFailed).
+		Count(&uncertain)
+	if len(flipped) == 0 {
+		if uncertain > 0 {
+			return r.SendErrorEnvelope(fasthttp.StatusConflict,
+				fmt.Sprintf("%d recipient(s) have an uncertain delivery (the code may already have been sent) and are not retried automatically; reconcile them first", uncertain), nil, "")
+		}
+		return r.SendErrorEnvelope(fasthttp.StatusConflict, "These failed messages are already being retried", nil, "")
+	}
+	failedRecipients = flipped
 
 	// Reset failed messages in messages table to pending
+	// (messages of recipients with an uncertain delivery keep their failed state, and so do
+	// the records of one-time-code attempts: each attempt is its own history, a new send
+	// creates a new record, and a reset one would be a pending message nobody sends)
 	if err := a.DB.Model(&models.Message{}).
 		Where("metadata->>'campaign_id' = ? AND status = ?", id.String(), models.MessageStatusFailed).
+		Where("COALESCE(metadata->>'auth_code_masked', '') <> 'true'").
+		Where("id NOT IN (?)", a.DB.Model(&models.BulkMessageRecipient{}).Select("message_id").
+			Where("campaign_id = ? AND status = ? AND message_id IS NOT NULL", id, models.MessageStatusFailed)).
 		Updates(map[string]any{
 			"status":        models.MessageStatusPending,
 			"error_message": "",
@@ -668,9 +735,10 @@ func (a *App) RetryFailed(r *fastglue.Request) error {
 	a.Log.Info("Failed recipients enqueued for retry", "campaign_id", id, "count", len(jobs))
 
 	return r.SendEnvelope(map[string]any{
-		"message":     "Retrying failed messages",
-		"retry_count": len(failedRecipients),
-		"status":      models.CampaignStatusProcessing,
+		"message":           "Retrying failed messages",
+		"retry_count":       len(failedRecipients),
+		"skipped_uncertain": uncertain,
+		"status":            models.CampaignStatusProcessing,
 	})
 }
 
@@ -732,6 +800,13 @@ func (a *App) AddRecipientsFromContacts(r *fastglue.Request) error {
 
 	if campaign.Status != models.CampaignStatusDraft {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Can only add recipients to draft campaigns", nil, "")
+	}
+
+	// Contacts carry no verification code: recipients added this way would have
+	// nothing to send. Refuse up front instead of creating campaigns that can only fail.
+	if a.campaignIsAuth(campaign) {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest,
+			"Authentication templates need a one-time code per recipient; add recipients with the import endpoint and their template_params", nil, "")
 	}
 
 	// Every filter is optional and they combine with AND; at least one is required
@@ -841,6 +916,24 @@ func (a *App) addCampaignRecipients(r *fastglue.Request, orgID, userID uuid.UUID
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to add recipients", nil, "")
 	}
 
+	// One-time codes (AUTHENTICATION templates) are never stored in clear: the
+	// params are sealed before they reach the database, and travel sealed
+	// through the queue too.
+	isAuth := a.campaignIsAuth(campaign)
+	if isAuth {
+		now := time.Now()
+		for _, rec := range reqs {
+			if rec.ValidUntil == nil && a.Config.OTP.RequireValidUntil {
+				return r.SendErrorEnvelope(fasthttp.StatusBadRequest,
+					"valid_until is required for recipients of authentication campaigns", nil, "")
+			}
+			if rec.ValidUntil != nil && !rec.ValidUntil.After(now) {
+				return r.SendErrorEnvelope(fasthttp.StatusBadRequest,
+					"valid_until is already in the past: the verification code would never be sent", nil, "")
+			}
+		}
+	}
+
 	skipped := []string{}
 	recipients := make([]models.BulkMessageRecipient, 0, len(reqs))
 	for _, rec := range reqs {
@@ -848,11 +941,21 @@ func (a *App) addCampaignRecipients(r *fastglue.Request, orgID, userID uuid.UUID
 			skipped = append(skipped, rec.PhoneNumber)
 			continue
 		}
+		params := models.JSONB(rec.TemplateParams)
+		if isAuth {
+			sealed, err := templateutil.SealParamsUntil(params, a.Config.App.EncryptionKey, time.Now(), rec.ValidUntil)
+			if err != nil {
+				a.Log.Error("Failed to protect verification codes for campaign", "error", err, "campaign_id", campaign.ID)
+				return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable,
+					"Campaigns with authentication templates require app.encryption_key to be configured", nil, "")
+			}
+			params = sealed
+		}
 		recipients = append(recipients, models.BulkMessageRecipient{
 			CampaignID:     campaign.ID,
 			PhoneNumber:    rec.PhoneNumber,
 			RecipientName:  rec.RecipientName,
-			TemplateParams: models.JSONB(rec.TemplateParams),
+			TemplateParams: params,
 			HeaderParams:   models.JSONB(rec.HeaderParams),
 			Status:         models.MessageStatusPending,
 		})
@@ -912,7 +1015,7 @@ func (a *App) GetCampaignRecipients(r *fastglue.Request) error {
 	}
 
 	// Verify campaign belongs to org
-	_, err = findByIDAndOrg[models.BulkMessageCampaign](a.DB, r, id, orgID, "Campaign")
+	campaign, err := findByIDAndOrg[models.BulkMessageCampaign](a.DB, r, id, orgID, "Campaign")
 	if err != nil {
 		return nil
 	}
@@ -921,6 +1024,13 @@ func (a *App) GetCampaignRecipients(r *fastglue.Request) error {
 	if err := a.DB.Where("campaign_id = ?", id).Order("created_at ASC").Find(&recipients).Error; err != nil {
 		a.Log.Error("Failed to list recipients", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list recipients", nil, "")
+	}
+
+	// Never expose verification codes (clear or sealed) through the API.
+	if a.campaignIsAuth(campaign) {
+		for i := range recipients {
+			recipients[i].TemplateParams = nil
+		}
 	}
 
 	if a.ShouldMaskPhoneNumbers(orgID) {
@@ -970,7 +1080,8 @@ func (a *App) DeleteCampaignRecipient(r *fastglue.Request) error {
 	var recipient models.BulkMessageRecipient
 	a.DB.Where("id = ? AND campaign_id = ?", recipientUUID, campaignUUID).First(&recipient)
 
-	// Delete recipient
+	// Delete recipient (scrub first: soft delete would keep the stored code)
+	a.scrubCampaignSecrets(campaign, recipientUUID)
 	result := a.DB.Where("id = ? AND campaign_id = ?", recipientUUID, campaignUUID).Delete(&models.BulkMessageRecipient{})
 	if result.Error != nil {
 		a.Log.Error("Failed to delete recipient", "error", result.Error)
@@ -1313,8 +1424,12 @@ func (a *App) recalculateCampaignStats(campaignID uuid.UUID) {
 			COUNT(CASE WHEN status IN ('sent','delivered','read') THEN 1 END) as sent,
 			COUNT(CASE WHEN status IN ('delivered','read') THEN 1 END) as delivered,
 			COUNT(CASE WHEN status = 'read' THEN 1 END) as read,
-			COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed
-		`).Scan(&stats).Error; err != nil {
+			COUNT(CASE WHEN status = 'failed' AND (
+				COALESCE(metadata->>'auth_code_masked', '') <> 'true'
+				OR id IN (SELECT message_id FROM bulk_message_recipients
+					WHERE campaign_id = ? AND status = 'failed' AND message_id IS NOT NULL AND deleted_at IS NULL)
+			) THEN 1 END) as failed
+		`, campaignID).Scan(&stats).Error; err != nil {
 		a.Log.Error("Failed to scan campaign message stats", "error", err, "campaign_id", campaignID)
 		return
 	}
@@ -1346,4 +1461,56 @@ func sanitizeFilename(name string) string {
 		name = "unnamed"
 	}
 	return name
+}
+
+// campaignIsAuth reports whether the campaign sends an AUTHENTICATION template,
+// whose params are one-time codes.
+func (a *App) campaignIsAuth(campaign *models.BulkMessageCampaign) bool {
+	if campaign.Template != nil {
+		return templateutil.IsAuthCategory(campaign.Template.Category)
+	}
+	var category string
+	a.DB.Unscoped().Model(&models.Template{}).Where("id = ?", campaign.TemplateID).Pluck("category", &category)
+	return templateutil.IsAuthCategory(category)
+}
+
+// scrubCampaignSecrets irreversibly drops the stored one-time codes of a
+// campaign's recipients, or of one recipient when recipientID is not Nil.
+//
+// Only secrets are touched: for an AUTHENTICATION campaign every recipient's
+// params are codes; for any other campaign only a sealed envelope is (a template
+// whose category changed after import), and ordinary template params are kept.
+// Soft-deleted rows are included: deleting never kept a secret alive.
+func (a *App) scrubCampaignSecrets(campaign *models.BulkMessageCampaign, recipientID uuid.UUID) {
+	q := a.DB.Unscoped().Model(&models.BulkMessageRecipient{}).Where("campaign_id = ?", campaign.ID)
+	if recipientID != uuid.Nil {
+		q = q.Where("id = ?", recipientID)
+	}
+	if !a.campaignIsAuth(campaign) {
+		q = q.Where("template_params->>? IS NOT NULL", templateutil.SealedKey)
+	}
+	if err := q.UpdateColumn("template_params", models.JSONB{}).Error; err != nil {
+		a.Log.Error("Failed to scrub campaign secrets", "error", err, "campaign_id", campaign.ID)
+	}
+}
+
+// protectLegacyRecipients seals, before they are queued, the clear-text codes
+// of recipients created before sealing existed (pending campaigns keep working).
+func (a *App) protectLegacyRecipients(recipients []models.BulkMessageRecipient) error {
+	for i := range recipients {
+		p := recipients[i].TemplateParams
+		if len(p) == 0 || templateutil.IsSealed(p) {
+			continue
+		}
+		sealed, err := templateutil.SealParams(p, a.Config.App.EncryptionKey, time.Now())
+		if err != nil {
+			return err
+		}
+		if err := a.DB.Model(&models.BulkMessageRecipient{}).Where("id = ?", recipients[i].ID).
+			UpdateColumn("template_params", models.JSONB(sealed)).Error; err != nil {
+			return err
+		}
+		recipients[i].TemplateParams = sealed
+	}
+	return nil
 }

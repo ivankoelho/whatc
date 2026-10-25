@@ -166,3 +166,30 @@ func TestConsume_SuccessfulJobIsAckedAndCleared(t *testing.T) {
 	assert.Equal(t, int64(0), pendingCount(t, client),
 		"successful jobs must be ACKed and cleared from pending")
 }
+
+// Processed jobs are removed from the stream, so payloads (which may carry
+// sealed secrets) do not pile up in Redis after they are acknowledged.
+func TestConsume_ProcessedJobIsDeletedFromStream(t *testing.T) {
+	client := skipIfNoRedis(t)
+	cleanStream(t, client)
+	log := testutil.NopLogger()
+	ctx := testutil.TestContextWithTimeout(t, 10*time.Second)
+
+	q := queue.NewRedisQueue(client, log)
+	require.NoError(t, q.EnqueueRecipient(ctx, makeRecipientJob()))
+
+	consumer, err := queue.NewRedisConsumer(client, log)
+	require.NoError(t, err)
+	defer func() { _ = consumer.Close() }()
+
+	handler := &mockHandler{}
+	consumeCtx, cancel := context.WithCancel(ctx)
+	go func() { _ = consumer.Consume(consumeCtx, handler) }()
+	testutil.AssertEventually(t, func() bool { return len(handler.getJobs()) >= 1 }, 8*time.Second, "handler should be invoked")
+	time.Sleep(300 * time.Millisecond)
+	cancel()
+
+	n, err := client.XLen(ctx, queue.StreamName).Result()
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), n, "acknowledged job must not stay in the stream")
+}

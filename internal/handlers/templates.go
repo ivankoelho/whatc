@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
@@ -11,6 +12,9 @@ import (
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
+	"golang.org/x/text/runes"
+	"golang.org/x/text/transform"
+	"golang.org/x/text/unicode/norm"
 )
 
 // TemplateRequest represents the request body for creating/updating a template
@@ -628,6 +632,11 @@ func templateToResponse(t models.Template) TemplateResponse {
 
 func normalizeTemplateName(name string) string {
 	// Convert to lowercase and replace spaces with underscores
+	// Transliterate accented letters (código -> codigo) instead of dropping
+	// them, which would turn "código_acesso" into "cdigo_acesso".
+	if decomposed, _, err := transform.String(transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC), name); err == nil {
+		name = decomposed
+	}
 	name = strings.ToLower(name)
 	name = strings.ReplaceAll(name, " ", "_")
 	name = strings.ReplaceAll(name, "-", "_")

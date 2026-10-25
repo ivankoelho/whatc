@@ -2,8 +2,11 @@ package worker
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -30,6 +33,20 @@ type Worker struct {
 	Publisher *queue.Publisher
 	// Usage records the WhatsApp consumption ledger (fail-open; nil or disabled = nothing).
 	Usage *usage.Recorder
+	// ClaimStale overrides how long a recipient claim may stay unresolved before it is
+	// declared delivery_uncertain (tests); zero = default.
+	ClaimStale time.Duration
+	// Now overrides the clock used for the code's validity (tests); nil = time.Now. Claim
+	// ageing never uses it: it uses the database clock (see claimStale).
+	Now func() time.Time
+
+	// closing is set when the worker starts shutting down: it takes on no new
+	// one-time-code send from then on (jobs already started are drained).
+	closing atomic.Bool
+	// inflight counts the jobs being handled, so shutdown can wait for them.
+	inflight inflightJobs
+	// afterClaim is a test hook, called right after a claim is made; nil in production.
+	afterClaim func()
 }
 
 // Ensure Worker implements JobHandler interface
@@ -60,6 +77,32 @@ func New(cfg *config.Config, db *gorm.DB, rdb *redis.Client, log logf.Logger) (*
 func (w *Worker) Run(ctx context.Context) error {
 	w.Log.Info("Worker starting")
 
+	// Housekeeping, independent of the queue: every few minutes, claims of one-time
+	// codes that were abandoned are declared uncertain (straight from PostgreSQL, no
+	// job has to come back from Redis); once an hour, retention drops the sealed
+	// verification codes that can no longer be sent.
+	go func() {
+		t := time.NewTicker(housekeepingEvery)
+		defer t.Stop()
+		for tick := 0; ; tick++ {
+			if _, err := w.ResolveStaleClaims(ctx); err != nil {
+				w.Log.Error("Failed to resolve stale claims", "error", err)
+			}
+			if tick%retentionEveryNthTick == 0 {
+				if n, err := ScrubExpiredSecrets(w.DB, w.now(), w.otpPolicy()); err != nil {
+					w.Log.Error("Failed to scrub expired verification codes", "error", err)
+				} else if n > 0 {
+					w.Log.Info("Scrubbed expired verification codes", "count", n)
+				}
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+			}
+		}
+	}()
+
 	err := w.Consumer.Consume(ctx, w)
 	if err != nil && ctx.Err() == nil {
 		return fmt.Errorf("consumer error: %w", err)
@@ -71,6 +114,9 @@ func (w *Worker) Run(ctx context.Context) error {
 
 // HandleRecipientJob processes a single recipient message job
 func (w *Worker) HandleRecipientJob(ctx context.Context, job *queue.RecipientJob) error {
+	w.inflight.begin()
+	defer w.inflight.end()
+
 	// Check if campaign is still active before sending
 	var campaign models.BulkMessageCampaign
 	if err := w.DB.Where("id = ?", job.CampaignID).Preload("Template").First(&campaign).Error; err != nil {
@@ -109,6 +155,12 @@ func (w *Worker) HandleRecipientJob(ctx context.Context, job *queue.RecipientJob
 		w.updateRecipientStatus(job.RecipientID, models.MessageStatusFailed, "", "Contact opted out of marketing messages")
 		w.incrementCampaignCount(job.CampaignID, "failed_count")
 		return nil
+	}
+
+	// One-time codes (authentication templates, or any sealed params) take a separate
+	// path: they are sent under a claim recorded in PostgreSQL (see worker_claim.go).
+	if (campaign.Template != nil && templateutil.IsAuthCategory(campaign.Template.Category)) || templateutil.IsSealed(job.TemplateParams) {
+		return w.sendSecretRecipient(ctx, job, &campaign, &account, contact)
 	}
 
 	// Build recipient for sending
@@ -299,11 +351,27 @@ func (w *Worker) sendTemplateMessage(ctx context.Context, account *models.WhatsA
 		campaignHeaderMediaID, campaignHeaderMediaFilename,
 	)
 	if err != nil {
-		return "", fmt.Errorf("failed to build template components: %w", err)
+		return "", whatsapp.NewNotSentError(fmt.Errorf("failed to build template components: %w", err))
 	}
 	// Add auto-generated button components (Flow needs flow_token)
 	flowComponents := whatsapp.AutoButtonComponents(template.Buttons)
 	components = append(components, flowComponents...)
+
+	// Authentication templates: Meta also wants the code on the OTP button
+	// (same rule and helper as the direct send in handlers.SendTemplateMessage).
+	if templateutil.IsAuthCategory(template.Category) && len(resolvedParams) > 0 {
+		code := resolvedParams[0]
+		if v, ok := recipient.TemplateParams["1"]; ok {
+			code = fmt.Sprintf("%v", v)
+		}
+		components = append(components,
+			whatsapp.ButtonURLParamsToComponents(whatsapp.OTPButtonParams(template.Buttons, code), template.Buttons)...)
+	}
+
+	if templateutil.IsAuthCategory(template.Category) {
+		// The client redacts echoed codes from errors before any logging.
+		ctx = whatsapp.WithSecrets(ctx, resolvedParams...)
+	}
 
 	rcpt := whatsapp.Recipient{Phone: recipient.PhoneNumber}
 	return w.WhatsApp.SendTemplateMessage(ctx, waAccount, rcpt, template.Name, template.Language, components)
@@ -318,8 +386,15 @@ func (w *Worker) decryptAccountSecrets(account *models.WhatsAppAccount) {
 	account.DecryptSecrets(key)
 }
 
-// Close cleans up worker resources
+// Close cleans up worker resources. It first stops the worker from starting new
+// one-time-code sends and gives the jobs already started a bounded time to finish
+// (a send that does not finish in time keeps its claim and is resolved as
+// delivery_uncertain, never resent).
 func (w *Worker) Close() error {
+	w.BeginShutdown()
+	if !w.Drain(w.drainTimeout()) {
+		w.Log.Warn("Shutdown left sends in flight; their claims stay and will be resolved as delivery_uncertain", "in_flight", w.inflight.count())
+	}
 	if w.Consumer != nil {
 		return w.Consumer.Close()
 	}
@@ -352,5 +427,75 @@ func (w *Worker) recordCampaignUsage(ctx context.Context, msg *models.Message, c
 	}
 	if err != nil {
 		w.Log.Error("Usage recording failed", "op", "settle", "error", err, "message_id", msg.ID)
+	}
+}
+
+// ScrubExpiredSecrets drops sealed codes older than templateutil.SealedTTL,
+// whatever the recipient's state (a failed recipient keeps its code only for
+// the retry window).
+func ScrubExpiredSecrets(db *gorm.DB, now time.Time, policy templateutil.OTPPolicy) (int64, error) {
+	maxSecs := int64(policy.MaxValidity / time.Second)
+	if maxSecs <= 0 {
+		maxSecs = int64(templateutil.DefaultOTPMaxValidity / time.Second)
+	}
+	// Same rule as OTPPolicy.Expired: a code with the issuer's valid_until goes at
+	// min(valid_until, sealed_at+max); one without it only at the retention limit,
+	// so pending legacy campaigns keep their (still sendable) codes.
+	res := db.Unscoped().Model(&models.BulkMessageRecipient{}).
+		Where(`template_params->>@sealed IS NOT NULL AND CASE
+			WHEN template_params->>@until IS NOT NULL THEN
+				LEAST((template_params->>@until)::bigint, COALESCE((template_params->>@at)::bigint + @max, (template_params->>@until)::bigint)) <= @now
+			ELSE COALESCE((template_params->>@at)::bigint, 0) < @cutoff END`,
+			sql.Named("sealed", templateutil.SealedKey), sql.Named("until", templateutil.SealedValidUntilKey),
+			sql.Named("at", templateutil.SealedAtKey), sql.Named("max", maxSecs),
+			sql.Named("now", now.Unix()), sql.Named("cutoff", now.Add(-templateutil.SealedTTL).Unix())).
+		UpdateColumn("template_params", models.JSONB{})
+	if res.Error != nil {
+		return res.RowsAffected, res.Error
+	}
+
+	// Clear-text codes of authentication campaigns that predate sealing have no
+	// sealed_at: their retention runs from the row's creation. Only recipients
+	// whose campaign template is KNOWN to be AUTHENTICATION are touched, so
+	// ordinary campaigns and rows that cannot be resolved are left alone. Plain
+	// SQL, no audit table and no updated_at involved, and a second run changes nothing.
+	legacy := db.Exec(`UPDATE bulk_message_recipients r SET template_params = '{}'::jsonb
+		FROM bulk_message_campaigns c JOIN templates t ON t.id = c.template_id
+		WHERE c.id = r.campaign_id AND upper(t.category) = 'AUTHENTICATION'
+		  AND r.template_params IS NOT NULL AND r.template_params <> '{}'::jsonb
+		  AND r.template_params->>@sealed IS NULL
+		  AND r.created_at < @created`,
+		sql.Named("sealed", templateutil.SealedKey), sql.Named("created", now.Add(-templateutil.SealedTTL)))
+	return res.RowsAffected + legacy.RowsAffected, legacy.Error
+}
+
+// now is the worker clock (injectable in tests).
+func (w *Worker) now() time.Time {
+	if w.Now != nil {
+		return w.Now()
+	}
+	return time.Now()
+}
+
+// otpPolicy builds the OTP validity policy from configuration.
+func (w *Worker) otpPolicy() templateutil.OTPPolicy {
+	if w.Config == nil {
+		return templateutil.OTPPolicy{}
+	}
+	return templateutil.OTPPolicy{
+		MaxValidity:       w.Config.OTP.MaxValidity(),
+		RequireValidUntil: w.Config.OTP.RequireValidUntil,
+	}
+}
+
+// otpOpenFailure says, without any secret, why a sealed code could not be opened.
+func otpOpenFailure(err error) string {
+	switch {
+	case errors.Is(err, templateutil.ErrSealKeyMissing):
+		return "encryption key not configured on this worker"
+	case errors.Is(err, templateutil.ErrSealInvalid):
+		return "stored value is not a valid ciphertext"
+	default:
+		return "cannot be decrypted (wrong encryption key?)"
 	}
 }
