@@ -145,7 +145,11 @@ func classifySendError(err error) (status string, retry bool, reason string) {
 
 func (a *App) processNotification(ctx context.Context, n *models.OccurrenceNotification) {
 	started := time.Now()
-	attempt := models.OccurrenceNotificationAttempt{OrganizationID: n.OrganizationID, NotificationID: n.ID, Number: n.Attempts,
+	// Numbered across the whole history: a manual retry resets the policy counter
+	// (n.Attempts) but never renumbers what already happened.
+	var done int64
+	a.DB.Model(&models.OccurrenceNotificationAttempt{}).Where("notification_id = ?", n.ID).Count(&done)
+	attempt := models.OccurrenceNotificationAttempt{OrganizationID: n.OrganizationID, NotificationID: n.ID, Number: int(done) + 1,
 		WhatsAppAccount: n.WhatsAppAccount, TemplateName: n.TemplateName, StartedAt: started, TriggeredByID: n.RetryRequestedByID}
 	a.DB.Create(&attempt)
 	out := a.sendNotification(ctx, n, &attempt)

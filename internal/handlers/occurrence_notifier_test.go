@@ -298,6 +298,7 @@ func TestNotifier_AmbiguousResultsAreNeverResentBlindly(t *testing.T) {
 			assert.Equal(t, models.NotificationAccepted, w.intent(t, id).Status)
 			as := w.attempts(t, n.ID)
 			require.Len(t, as, 2)
+			assert.Equal(t, []int{1, 2}, []int{as[0].Number, as[1].Number}, "numbering survives a manual retry")
 			require.NotNil(t, as[1].TriggeredByID, "who asked is on the attempt")
 			assert.Equal(t, w.supPorto.ID, *as[1].TriggeredByID)
 		})
