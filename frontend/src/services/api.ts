@@ -1541,6 +1541,9 @@ export interface Occurrence {
   general_state?: string
   team_id?: string
   reopened_count?: number
+  order_ref?: string
+  team_name?: string
+  updated_at?: string
   can?: Record<string, boolean>
   priority: 'low' | 'normal' | 'high' | 'urgent'
   assigned_user_id?: string
@@ -2342,7 +2345,7 @@ export const occurrenceNotificationsService = {
 }
 
 export const occurrenceAutomationsService = {
-  list: () => api.get<ApiEnvelope<{ configs: OccurrenceAutomation[] }>>('/occurrence-channel-config'),
+  list: () => api.get<ApiEnvelope<{ configs: OccurrenceAutomation[]; sending_enabled: boolean }>>('/occurrence-channel-config'),
   save: (data: {
     unit_id?: string
     team_id?: string
@@ -2362,4 +2365,49 @@ export const contactFinderService = {
   // Locates a contact of the organization by phone or name; returns only id, number and name.
   find: (q: string) =>
     api.get<ApiEnvelope<{ contacts: { id: string; phone_number: string; profile_name: string; can_open_conversation: boolean }[] }>>('/contacts/find', { params: { q } }),
+}
+
+// --- The case's internal discussion and its WhatsApp channel ---
+
+export interface OccurrenceChatState {
+  channel_id: string
+  unread: number
+  can_post: boolean
+  messages: number
+}
+
+export interface CaseWhatsAppMessage {
+  id: string
+  direction: 'incoming' | 'outgoing'
+  type: string
+  content: string
+  status: string
+  error?: string
+  template_name?: string
+  sent_by?: string
+  created_at: string
+}
+
+export interface CaseWhatsApp {
+  configured: boolean
+  restricted: boolean
+  account?: string
+  messages?: CaseWhatsAppMessage[]
+  window_open?: boolean
+  can_reply?: boolean
+  templates?: { name: string; language: string; body: string; params: string[] }[]
+}
+
+export const occurrenceChatService = {
+  // Internal only: messages between colleagues. Creates the channel on first use.
+  open: (occurrenceId: string) => api.get<ApiEnvelope<OccurrenceChatState>>(`/occurrences/${occurrenceId}/chat`),
+}
+
+export const caseWhatsAppService = {
+  // To the CUSTOMER, from the case's channel account. Not the internal chat.
+  get: (occurrenceId: string) => api.get<ApiEnvelope<CaseWhatsApp>>(`/occurrences/${occurrenceId}/whatsapp`),
+  sendText: (occurrenceId: string, content: string) =>
+    api.post(`/occurrences/${occurrenceId}/whatsapp`, { content }),
+  sendTemplate: (occurrenceId: string, template: string, language: string, params: string[]) =>
+    api.post(`/occurrences/${occurrenceId}/whatsapp`, { template, language, params }),
 }

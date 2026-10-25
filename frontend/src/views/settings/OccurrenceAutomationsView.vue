@@ -24,6 +24,7 @@ const auth = useAuthStore()
 const canWrite = computed(() => auth.hasPermission('accounts', 'write'))
 
 const items = ref<OccurrenceAutomation[]>([])
+const sendingEnabled = ref(true)
 const isLoading = ref(false)
 const error = ref(false)
 const isDialogOpen = ref(false)
@@ -72,6 +73,7 @@ async function load() {
     const res = await occurrenceAutomationsService.list()
     const b = res.data as any
     items.value = (b.data ?? b).configs ?? []
+    sendingEnabled.value = (b.data ?? b).sending_enabled !== false
   } catch (e) {
     error.value = true
     toast.error(getErrorMessage(e, t('common.failedLoad', { resource: t('occurrences.automations') })))
@@ -183,6 +185,7 @@ onMounted(() => { load(); loadOptions() })
             <CardDescription>{{ $t('occurrences.autoHint') }}</CardDescription>
           </CardHeader>
           <CardContent>
+            <p v-if="!sendingEnabled" class="mb-4 rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm" data-testid="sending-off">{{ $t('occurrences.autoSendingOff') }}</p>
             <ErrorState v-if="error" :title="$t('common.loadFailed')" @retry="load" />
             <DataTable v-else :items="items" :columns="columns" :is-loading="isLoading" :empty-icon="Send"
               :empty-title="$t('occurrences.autoNone')" :empty-description="$t('occurrences.autoNoneDesc')" item-name="automations">

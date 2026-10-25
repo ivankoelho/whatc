@@ -8,6 +8,8 @@ import { IconButton, DeleteConfirmDialog } from '@/components/shared'
 import OccurrenceDocumentsCard from '@/components/crm/OccurrenceDocumentsCard.vue'
 import OccurrenceParticipantsCard from '@/components/crm/OccurrenceParticipantsCard.vue'
 import OccurrenceCommunicationCard from '@/components/crm/OccurrenceCommunicationCard.vue'
+import OccurrenceChatPanel from '@/components/crm/OccurrenceChatPanel.vue'
+import OccurrenceWhatsAppCard from '@/components/crm/OccurrenceWhatsAppCard.vue'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -59,7 +61,6 @@ const occurrence = ref<Occurrence | null>(null)
 const isLoading = ref(true)
 const isNotFound = ref(false)
 const isSendingProtocol = ref(false)
-const isAddingNote = ref(false)
 // "Responder ao cliente": text SENT to the contact via WhatsApp (unlike newNoteContent,
 // which is internal). The stage-message picker prefills this ref.
 const replyContent = ref('')
@@ -70,9 +71,9 @@ const messageStage = ref<Exclude<OccurrenceMessageStage, 'registration'>>('docum
 const loadingSuggestion = ref(false)
 const lastSuggestedStage = ref<OccurrenceMessageStage | null>(null)
 const canWrite = computed(() => authStore.hasPermission('occurrences', 'write'))
-const newNoteContent = ref('')
 const isUpdatingAssignee = ref(false)
 const isClaiming = ref(false)
+const waConfigured = ref(false)
 const isDeleteDialogOpen = ref(false)
 const isDeleting = ref(false)
 
@@ -301,19 +302,7 @@ async function submitReply() {
   }
 }
 
-async function submitNote() {
-  if (!occurrence.value || !newNoteContent.value.trim()) return
-  isAddingNote.value = true
-  try {
-    await store.addNote(occurrence.value.id, newNoteContent.value.trim())
-    newNoteContent.value = ''
-    toast.success(t('occurrences.noteAdded'))
-  } catch (e) {
-    toast.error(getErrorMessage(e, t('occurrences.noteAddFailed')))
-  } finally {
-    isAddingNote.value = false
-  }
-}
+// Old internal notes stay in the history below; new discussion happens in the internal chat panel.
 
 onMounted(async () => {
   await Promise.all([
@@ -384,6 +373,9 @@ onUnmounted(() => {
       </template>
 
       <template v-if="occurrence">
+      <div class="grid items-start gap-4 xl:grid-cols-2" data-testid="unified-case">
+      <!-- Left: the case itself -->
+      <div class="min-w-0 space-y-4">
         <!-- Details -->
         <Card>
           <CardHeader class="pb-3">
@@ -443,14 +435,45 @@ onUnmounted(() => {
                 <p>{{ formatDateTime(occurrence.opened_at) }}</p>
               </div>
             </div>
+            <div class="grid grid-cols-2 gap-3 border-t pt-3 sm:grid-cols-3" data-testid="case-info">
+              <div>
+                <span class="text-muted-foreground text-xs">{{ $t('occurrences.generalState') }}</span>
+                <p>{{ $t('occurrences.generalStates.' + (occurrence.general_state || 'new')) }}</p>
+              </div>
+              <div>
+                <span class="text-muted-foreground text-xs">{{ $t('occurrences.stageLabel') }}</span>
+                <p>{{ occurrence.stage_name }}</p>
+              </div>
+              <div v-if="occurrence.team_name">
+                <span class="text-muted-foreground text-xs">{{ $t('occurrences.stageTeam') }}</span>
+                <p>{{ occurrence.team_name }}</p>
+              </div>
+              <div v-if="occurrence.unit_name">
+                <span class="text-muted-foreground text-xs">{{ $t('occurrences.unitLabel') }}</span>
+                <p>{{ occurrence.unit_name }}</p>
+              </div>
+              <div v-if="occurrence.category_name">
+                <span class="text-muted-foreground text-xs">{{ $t('occurrences.categoryLabel') }}</span>
+                <p>{{ occurrence.category_name }}</p>
+              </div>
+              <div v-if="occurrence.order_ref" data-testid="case-order">
+                <span class="text-muted-foreground text-xs">{{ $t('occurrences.orderRef') }}</span>
+                <p class="font-mono">{{ occurrence.order_ref }}</p>
+              </div>
+              <div v-if="occurrence.sla_resolution_deadline">
+                <span class="text-muted-foreground text-xs">{{ $t('occurrences.slaDeadline') }}</span>
+                <p :class="occurrence.sla_breached ? 'text-destructive' : ''">{{ formatDateTime(occurrence.sla_resolution_deadline) }}</p>
+              </div>
+              <div v-if="occurrence.updated_at">
+                <span class="text-muted-foreground text-xs">{{ $t('occurrences.updatedAt') }}</span>
+                <p>{{ formatDateTime(occurrence.updated_at) }}</p>
+              </div>
+            </div>
+            <p v-if="occurrence.order_ref" class="text-xs text-muted-foreground">{{ $t('occurrences.orderNoIntegration') }}</p>
           </CardContent>
         </Card>
 
         <OccurrenceDocumentsCard :occurrence-id="occurrence.id" :can-write="canWrite" />
-
-        <OccurrenceParticipantsCard :occurrence-id="occurrence.id" :can-write="canWrite && (occurrence.can?.add_participant ?? true)" />
-
-        <OccurrenceCommunicationCard :occurrence-id="occurrence.id" />
 
         <!-- Timeline -->
         <Card>
@@ -476,27 +499,23 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <!-- Add note (internal) -->
-            <div v-if="occurrence.can?.comment ?? true" class="mt-6 space-y-2">
-              <div>
-                <p class="text-sm font-medium">{{ $t('occurrences.internalNoteTitle') }}</p>
-                <p class="text-xs text-muted-foreground">{{ $t('occurrences.internalNoteHint') }}</p>
-              </div>
-              <Textarea
-                v-model="newNoteContent"
-                :placeholder="$t('occurrences.writeNote')"
-                :rows="3"
-              />
-              <Button size="sm" :disabled="!newNoteContent.trim() || isAddingNote" @click="submitNote">
-                <Loader2 v-if="isAddingNote" class="h-4 w-4 mr-2 animate-spin" />
-                {{ $t('occurrences.addNote') }}
-              </Button>
-            </div>
           </CardContent>
         </Card>
 
-        <!-- Reply to customer (sent via WhatsApp) -->
-        <Card v-if="canWrite && (occurrence.can?.reply ?? true)" class="border-primary/40">
+      </div>
+
+      <!-- Right: talking about it (internal) and with the customer (WhatsApp), kept apart -->
+      <div class="min-w-0 space-y-4">
+        <OccurrenceWhatsAppCard :occurrence-id="occurrence.id" @configured="waConfigured = $event" />
+
+        <OccurrenceCommunicationCard :occurrence-id="occurrence.id" />
+
+        <OccurrenceChatPanel :occurrence-id="occurrence.id" />
+
+        <OccurrenceParticipantsCard :occurrence-id="occurrence.id" :can-write="canWrite && (occurrence.can?.add_participant ?? true)" />
+
+        <!-- Legacy reply (from the contact's own account): only when the case has no channel account -->
+        <Card v-if="canWrite && (occurrence.can?.reply ?? true) && !waConfigured" class="border-primary/40">
           <CardHeader class="pb-3">
             <CardTitle class="text-sm font-medium">{{ $t('occurrences.replyTitle') }}</CardTitle>
             <p class="text-xs text-muted-foreground">{{ $t('occurrences.replyHint') }}</p>
@@ -535,6 +554,8 @@ onUnmounted(() => {
             </Button>
           </CardContent>
         </Card>
+      </div>
+      </div>
       </template>
     </DetailPageLayout>
 
