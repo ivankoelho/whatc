@@ -322,8 +322,6 @@ func coreIndexes() []string {
 		`DROP INDEX IF EXISTS idx_occ_stage_org_name`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_occ_stage_org_name_org ON occurrence_stages(organization_id, name) WHERE team_id IS NULL AND deleted_at IS NULL`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_occ_stage_team_name ON occurrence_stages(organization_id, team_id, name) WHERE team_id IS NOT NULL AND deleted_at IS NULL`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_occ_channel_org ON occurrence_channel_configs(organization_id, purpose) WHERE unit_id IS NULL AND deleted_at IS NULL`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_occ_channel_unit ON occurrence_channel_configs(organization_id, unit_id, purpose) WHERE unit_id IS NOT NULL AND deleted_at IS NULL`,
 		// Automations: one configuration per scope and event (team, unit, organization).
 		`DROP INDEX IF EXISTS idx_occ_channel_org`,
 		`DROP INDEX IF EXISTS idx_occ_channel_unit`,
