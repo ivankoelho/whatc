@@ -186,3 +186,19 @@ func TestExpiredDoesNotDropLegacyCodesBeforeRetention(t *testing.T) {
 		t.Fatal("retention limit must drop it")
 	}
 }
+
+func TestRedactValues_ShortValuesDoNotMangleIdsOrCodes(t *testing.T) {
+	// A short value that stands alone is still masked...
+	if got := RedactStrings("bad value 7 here", map[string]string{"1": "7"}); got != "bad value "+AuthCodeMask+" here" {
+		t.Fatalf("standalone short code not masked: %q", got)
+	}
+	// ...but it is never cut out of ids, error codes or words.
+	in := "API error 100: ref 1700000 trace a1b2 for user 17"
+	if got := RedactStrings(in, map[string]string{"1": "1"}); got != in {
+		t.Fatalf("short value mangled the text: %q", got)
+	}
+	// A normal code is masked wherever it stands alone, including at the edges.
+	if got := RedactStrings("123456 and (123456), not 1234567", map[string]string{"1": "123456"}); got != AuthCodeMask+" and ("+AuthCodeMask+"), not 1234567" {
+		t.Fatalf("got %q", got)
+	}
+}

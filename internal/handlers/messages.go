@@ -289,7 +289,7 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 			if isAuth {
 				// The client redacts echoed codes from errors before any logging.
 				secrets := make([]string, 0, len(req.BodyParams)+len(req.ButtonURLParams))
-				for _, m := range []map[string]string{req.BodyParams, req.ButtonURLParams, req.HeaderParams} {
+				for _, m := range []map[string]string{req.BodyParams, req.ButtonURLParams} {
 					for _, v := range m {
 						secrets = append(secrets, v)
 					}
@@ -575,7 +575,7 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 			// Error text can echo request details: the code must not reach the
 			// message row, the logs or the websocket broadcast below.
 			secrets := map[string]any{}
-			for _, m := range []map[string]string{req.BodyParams, req.ButtonURLParams, req.HeaderParams} {
+			for _, m := range []map[string]string{req.BodyParams, req.ButtonURLParams} {
 				for k, v := range m {
 					secrets[k] = v
 				}
@@ -1027,6 +1027,13 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 			PhoneNumber:     contactutil.CanonicalPhone(req.PhoneNumber),
 			WhatsAppAccount: account.Name,
 			AssignedUserID:  &userID,
+		}
+		if templateutil.IsAuthCategory(template.Category) {
+			// A verification code is not the start of a conversation: the contact
+			// is created (a message needs one) but stays unassigned, exactly like
+			// a number that wrote in first, instead of landing in the carteira of
+			// the user who owns the API key.
+			c.AssignedUserID = nil
 		}
 		if err := a.DB.Create(&c).Error; err != nil {
 			a.Log.Error("Failed to create contact", "error", err, "phone", req.PhoneNumber)

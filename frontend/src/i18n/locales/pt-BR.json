@@ -2331,6 +2331,7 @@
     "validUntilLabel": "Código válido até (opcional, seu fuso horário)",
     "validUntilHelp": "Deve vir do sistema que emitiu os códigos: o Whatomate não os gera nem os valida. Usado para destinatários sem valid_until próprio. Deixe vazio se não souber: nada é presumido, e um código sem validade pode ser enviado depois de já ter expirado. Os códigos nunca são enviados depois desse momento, nem depois da janela de envio contada a partir do upload.",
     "validUntilInvalid": "Data inválida",
+    "validUntilPast": "Esse momento já passou: os códigos nunca seriam enviados",
     "invalidValidUntilRows": "{count} linha(s) com valid_until inválido ({first})",
     "addedFromCsv": "{count} destinatários adicionados do CSV",
     "parseCsvFailed": "Falha ao processar o arquivo CSV",

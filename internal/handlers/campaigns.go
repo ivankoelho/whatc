@@ -387,7 +387,7 @@ func (a *App) DeleteCampaign(r *fastglue.Request) error {
 	}
 
 	// Soft delete would keep the stored codes: scrub them first.
-	a.scrubCampaignSecrets(id, uuid.Nil)
+	a.scrubCampaignSecrets(campaign, uuid.Nil)
 
 	// Delete recipients first
 	if err := a.DB.Where("campaign_id = ?", id).Delete(&models.BulkMessageRecipient{}).Error; err != nil {
@@ -469,9 +469,19 @@ func (a *App) StartCampaign(r *fastglue.Request) error {
 		"started_at": now,
 	}
 
-	if err := a.DB.Model(campaign).Updates(updates).Error; err != nil {
-		a.Log.Error("Failed to start campaign", "error", err)
+	// Compare-and-set: only one concurrent request can move the campaign out of
+	// draft/scheduled/paused, so a double click (or two API callers) cannot enqueue
+	// every recipient twice.
+	started := a.DB.Model(&models.BulkMessageCampaign{}).
+		Where("id = ? AND status IN ?", id, []models.CampaignStatus{
+			models.CampaignStatusDraft, models.CampaignStatusScheduled, models.CampaignStatusPaused,
+		}).Updates(updates)
+	if started.Error != nil {
+		a.Log.Error("Failed to start campaign", "error", started.Error)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to start campaign", nil, "")
+	}
+	if started.RowsAffected == 0 {
+		return r.SendErrorEnvelope(fasthttp.StatusConflict, "Campaign is already being started", nil, "")
 	}
 
 	a.Log.Info("Campaign started", "campaign_id", id, "recipients", len(recipients))
@@ -566,7 +576,7 @@ func (a *App) CancelCampaign(r *fastglue.Request) error {
 	}
 
 	// A cancelled campaign is never retried: drop any code still stored.
-	a.scrubCampaignSecrets(id, uuid.Nil)
+	a.scrubCampaignSecrets(campaign, uuid.Nil)
 
 	a.Log.Info("Campaign cancelled", "campaign_id", id)
 
@@ -617,16 +627,24 @@ func (a *App) RetryFailed(r *fastglue.Request) error {
 		}
 	}
 
-	// Reset failed recipients to pending
-	if err := a.DB.Model(&models.BulkMessageRecipient{}).
+	// Reset failed recipients to pending. UPDATE ... RETURNING is the atomic claim:
+	// each failed recipient is flipped, and later enqueued, by exactly one request,
+	// so concurrent retries cannot queue (and send) the same recipient twice.
+	var flipped []models.BulkMessageRecipient
+	reset := a.DB.Model(&flipped).Clauses(clause.Returning{}).
 		Where("campaign_id = ? AND status = ?", id, models.MessageStatusFailed).
 		Updates(map[string]any{
 			"status":        models.MessageStatusPending,
 			"error_message": "",
-		}).Error; err != nil {
-		a.Log.Error("Failed to reset failed recipients", "error", err)
+		})
+	if reset.Error != nil {
+		a.Log.Error("Failed to reset failed recipients", "error", reset.Error)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to reset failed recipients", nil, "")
 	}
+	if len(flipped) == 0 {
+		return r.SendErrorEnvelope(fasthttp.StatusConflict, "These failed messages are already being retried", nil, "")
+	}
+	failedRecipients = flipped
 
 	// Reset failed messages in messages table to pending
 	if err := a.DB.Model(&models.Message{}).
@@ -729,6 +747,13 @@ func (a *App) AddRecipientsFromContacts(r *fastglue.Request) error {
 
 	if campaign.Status != models.CampaignStatusDraft {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Can only add recipients to draft campaigns", nil, "")
+	}
+
+	// Contacts carry no verification code: recipients added this way would have
+	// nothing to send. Refuse up front instead of creating campaigns that can only fail.
+	if a.campaignIsAuth(campaign) {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest,
+			"Authentication templates need a one-time code per recipient; add recipients with the import endpoint and their template_params", nil, "")
 	}
 
 	// Every filter is optional and they combine with AND; at least one is required
@@ -997,7 +1022,7 @@ func (a *App) DeleteCampaignRecipient(r *fastglue.Request) error {
 	a.DB.Where("id = ? AND campaign_id = ?", recipientUUID, campaignUUID).First(&recipient)
 
 	// Delete recipient (scrub first: soft delete would keep the stored code)
-	a.scrubCampaignSecrets(campaignUUID, recipientUUID)
+	a.scrubCampaignSecrets(campaign, recipientUUID)
 	result := a.DB.Where("id = ? AND campaign_id = ?", recipientUUID, campaignUUID).Delete(&models.BulkMessageRecipient{})
 	if result.Error != nil {
 		a.Log.Error("Failed to delete recipient", "error", result.Error)
@@ -1380,16 +1405,23 @@ func (a *App) campaignIsAuth(campaign *models.BulkMessageCampaign) bool {
 	return templateutil.IsAuthCategory(category)
 }
 
-// scrubCampaignSecrets irreversibly drops the stored params (the codes) of a
+// scrubCampaignSecrets irreversibly drops the stored one-time codes of a
 // campaign's recipients, or of one recipient when recipientID is not Nil.
+//
+// Only secrets are touched: for an AUTHENTICATION campaign every recipient's
+// params are codes; for any other campaign only a sealed envelope is (a template
+// whose category changed after import), and ordinary template params are kept.
 // Soft-deleted rows are included: deleting never kept a secret alive.
-func (a *App) scrubCampaignSecrets(campaignID, recipientID uuid.UUID) {
-	q := a.DB.Unscoped().Model(&models.BulkMessageRecipient{}).Where("campaign_id = ?", campaignID)
+func (a *App) scrubCampaignSecrets(campaign *models.BulkMessageCampaign, recipientID uuid.UUID) {
+	q := a.DB.Unscoped().Model(&models.BulkMessageRecipient{}).Where("campaign_id = ?", campaign.ID)
 	if recipientID != uuid.Nil {
 		q = q.Where("id = ?", recipientID)
 	}
+	if !a.campaignIsAuth(campaign) {
+		q = q.Where("template_params->>? IS NOT NULL", templateutil.SealedKey)
+	}
 	if err := q.UpdateColumn("template_params", models.JSONB{}).Error; err != nil {
-		a.Log.Error("Failed to scrub campaign secrets", "error", err, "campaign_id", campaignID)
+		a.Log.Error("Failed to scrub campaign secrets", "error", err, "campaign_id", campaign.ID)
 	}
 }
 

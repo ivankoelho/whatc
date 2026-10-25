@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
+  batchValidUntilError,
   buildCsvRecipients,
   buildManualRecipients,
   localInputToUTC,
@@ -628,6 +629,8 @@ const templateCategory = computed(() => (selectedTemplate.value?.category || 'MA
 const isAuthTemplate = computed(() => templateCategory.value === 'AUTHENTICATION')
 const defaultValidUntilLocal = ref('') // <input type="datetime-local">, the user's own time zone
 const defaultValidUntilISO = computed(() => localInputToUTC(defaultValidUntilLocal.value))
+// The server is the authority; this only warns early and keeps the import buttons off.
+const defaultValidUntilError = computed(() => (isAuthTemplate.value ? batchValidUntilError(defaultValidUntilLocal.value) : null))
 const recipientContext = computed<RecipientContext>(() => ({
   headerName: templateHeaderParamName.value,
   bodyNames: templateBodyParamNames.value,
@@ -1408,8 +1411,10 @@ onUnmounted(() => {
         <p class="text-[10px] text-muted-foreground">
           {{ $t('campaigns.validUntilHelp', 'Must come from the system that issued the codes: Whatomate does not generate or validate them. Used for recipients without their own valid_until. Leave empty if unknown: nothing is assumed, and a code without validity may be sent after it has already expired. Codes are never sent after this moment, nor later than the send window after upload.') }}
         </p>
-        <p v-if="defaultValidUntilLocal && !defaultValidUntilISO" class="text-xs text-destructive">
-          {{ $t('campaigns.validUntilInvalid', 'Invalid date') }}
+        <p v-if="defaultValidUntilError" class="text-xs text-destructive">
+          {{ defaultValidUntilError === 'past'
+            ? $t('campaigns.validUntilPast', 'This moment has already passed: the codes would never be sent')
+            : $t('campaigns.validUntilInvalid', 'Invalid date') }}
         </p>
       </div>
 
@@ -1467,7 +1472,7 @@ onUnmounted(() => {
           <DialogFooter>
             <Button
               @click="addRecipients"
-              :disabled="isAddingRecipients || !manualInputValidation.isValid"
+              :disabled="isAddingRecipients || !manualInputValidation.isValid || !!defaultValidUntilError"
             >
               <UserPlus class="h-4 w-4 mr-1" />
               {{ isAddingRecipients ? $t('common.adding', 'Adding...') : $t('campaigns.addRecipients', 'Add Recipients') }}
@@ -1506,7 +1511,7 @@ onUnmounted(() => {
           <DialogFooter>
             <Button
               @click="addRecipientsFromCSV"
-              :disabled="isAddingRecipients || !csvFile"
+              :disabled="isAddingRecipients || !csvFile || !!defaultValidUntilError"
             >
               <FileSpreadsheet class="h-4 w-4 mr-1" />
               {{ isAddingRecipients ? $t('common.importing', 'Importing...') : $t('campaigns.importCSV', 'Import CSV') }}

@@ -153,19 +153,27 @@ func (w *Worker) HandleRecipientJob(ctx context.Context, job *queue.RecipientJob
 		sealedParams := params
 		opened, oerr := templateutil.OpenParams(params, key, w.now())
 		if oerr != nil || len(opened) == 0 {
-			reason := "otp_unavailable: the verification code cannot be decrypted"
-			if errors.Is(oerr, templateutil.ErrSealExpired) || (oerr == nil && len(opened) == 0) {
-				reason = "otp_expired: the verification code is no longer available"
+			// Two very different situations. A code that really expired (retention
+			// window) or that is simply gone is final: the secret is dropped. A key
+			// that is missing or wrong on this worker, or an envelope that does not
+			// open, is a configuration or data problem: the ciphertext is KEPT so it
+			// can be recovered once the key is restored (RetryFailed then works). In
+			// both cases the job is acknowledged (no endless redelivery) and the
+			// recipient is failed with a visible reason.
+			w.Log.Error("Verification code unavailable for recipient", "recipient_id", job.RecipientID, "campaign_id", job.CampaignID, "reason", otpOpenFailure(oerr))
+			switch {
+			case errors.Is(oerr, templateutil.ErrSealExpired), oerr == nil:
+				w.failOTPRecipient(job, "otp_expired: the verification code is no longer available", true)
+			default:
+				w.failOTPRecipient(job, "otp_unavailable: "+otpOpenFailure(oerr)+" (the stored code was kept; fix it and retry the failed recipients)", false)
 			}
-			w.Log.Error("Verification code unavailable for recipient", "recipient_id", job.RecipientID, "campaign_id", job.CampaignID)
-			w.failOTPRecipient(job, reason)
 			return nil
 		}
 		// Validity is checked as late as possible: right before the Meta call.
 		// A retry sees the same envelope, so it can never renew the validity.
 		if cerr := w.otpPolicy().Check(sealedParams, w.now()); cerr != nil {
 			w.Log.Warn("Verification code not sent", "reason", cerr.Error(), "recipient_id", job.RecipientID, "campaign_id", job.CampaignID)
-			w.failOTPRecipient(job, cerr.Error()+": the verification code is not valid for sending")
+			w.failOTPRecipient(job, cerr.Error()+": the verification code is not valid for sending", true)
 			return nil
 		}
 		params = opened
@@ -482,7 +490,23 @@ func ScrubExpiredSecrets(db *gorm.DB, now time.Time, policy templateutil.OTPPoli
 			sql.Named("at", templateutil.SealedAtKey), sql.Named("max", maxSecs),
 			sql.Named("now", now.Unix()), sql.Named("cutoff", now.Add(-templateutil.SealedTTL).Unix())).
 		UpdateColumn("template_params", models.JSONB{})
-	return res.RowsAffected, res.Error
+	if res.Error != nil {
+		return res.RowsAffected, res.Error
+	}
+
+	// Clear-text codes of authentication campaigns that predate sealing have no
+	// sealed_at: their retention runs from the row's creation. Only recipients
+	// whose campaign template is KNOWN to be AUTHENTICATION are touched, so
+	// ordinary campaigns and rows that cannot be resolved are left alone. Plain
+	// SQL, no audit table and no updated_at involved, and a second run changes nothing.
+	legacy := db.Exec(`UPDATE bulk_message_recipients r SET template_params = '{}'::jsonb
+		FROM bulk_message_campaigns c JOIN templates t ON t.id = c.template_id
+		WHERE c.id = r.campaign_id AND upper(t.category) = 'AUTHENTICATION'
+		  AND r.template_params IS NOT NULL AND r.template_params <> '{}'::jsonb
+		  AND r.template_params->>@sealed IS NULL
+		  AND r.created_at < @created`,
+		sql.Named("sealed", templateutil.SealedKey), sql.Named("created", now.Add(-templateutil.SealedTTL)))
+	return res.RowsAffected + legacy.RowsAffected, legacy.Error
 }
 
 // now is the worker clock (injectable in tests).
@@ -504,11 +528,27 @@ func (w *Worker) otpPolicy() templateutil.OTPPolicy {
 	}
 }
 
+// otpOpenFailure says, without any secret, why a sealed code could not be opened.
+func otpOpenFailure(err error) string {
+	switch {
+	case errors.Is(err, templateutil.ErrSealKeyMissing):
+		return "encryption key not configured on this worker"
+	case errors.Is(err, templateutil.ErrSealInvalid):
+		return "stored value is not a valid ciphertext"
+	default:
+		return "cannot be decrypted (wrong encryption key?)"
+	}
+}
+
 // failOTPRecipient ends a recipient whose code cannot be sent: it is marked
-// failed with the reason and its stored secret is dropped.
-func (w *Worker) failOTPRecipient(job *queue.RecipientJob, reason string) {
+// failed with the reason. The stored secret is dropped only when dropSecret is
+// set (the code can never be sent again); when the failure may be temporary it
+// stays so a retry can recover.
+func (w *Worker) failOTPRecipient(job *queue.RecipientJob, reason string, dropSecret bool) {
 	w.updateRecipientStatus(job.RecipientID, models.MessageStatusFailed, "", reason)
-	w.scrubRecipientSecret(job.RecipientID)
+	if dropSecret {
+		w.scrubRecipientSecret(job.RecipientID)
+	}
 	w.incrementCampaignCount(job.CampaignID, "failed_count")
 	w.checkCampaignCompletion(context.Background(), job.CampaignID, job.OrganizationID)
 }

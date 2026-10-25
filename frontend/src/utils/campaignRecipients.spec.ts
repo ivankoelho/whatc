@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  batchValidUntilError,
   buildCsvRecipients,
   buildManualRecipients,
   localInputToUTC,
@@ -144,5 +145,14 @@ describe('CSV import', () => {
     expect(buildCsvRecipients('phone_number\n', normal).error).toBe('empty')
     expect(buildCsvRecipients('name,order\nAna,1\n', normal).error).toBe('missing_phone')
     expect(buildCsvRecipients('phone_number,name\n,Ana\n', { headerName: null, bodyNames: [], isAuth: false }).error).toBe('no_valid_rows')
+  })
+})
+
+describe('batchValidUntilError (client-side hint, the server stays the authority)', () => {
+  it('accepts empty, flags garbage and past moments, accepts the future', () => {
+    expect(batchValidUntilError('', NOW)).toBeNull()
+    expect(batchValidUntilError('not a date', NOW)).toBe('invalid')
+    expect(batchValidUntilError('2020-01-01T10:00', NOW)).toBe('past')
+    expect(batchValidUntilError('2031-01-01T10:00', NOW)).toBeNull()
   })
 })

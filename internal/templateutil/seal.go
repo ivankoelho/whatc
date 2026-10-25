@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/shridarpatil/whatomate/internal/crypto"
 )
@@ -108,10 +109,47 @@ func RedactValues(s string, params map[string]any) string {
 	for _, v := range params {
 		val := strings.TrimSpace(fmt.Sprint(v))
 		if val != "" && val != "<nil>" {
-			s = strings.ReplaceAll(s, val, AuthCodeMask)
+			s = redactToken(s, val)
 		}
 	}
 	return s
+}
+
+// redactToken masks the whole-token occurrences of secret in s: it is not
+// replaced inside a longer word or number ("1" stays in "100", "123456" in
+// "91234567"), so a short value cannot mangle ids or error codes, while a short
+// code that stands alone is still masked.
+func redactToken(s, secret string) string {
+	var out strings.Builder
+	rest := s
+	for {
+		i := strings.Index(rest, secret)
+		if i < 0 {
+			out.WriteString(rest)
+			return out.String()
+		}
+		before, after := rest[:i], rest[i+len(secret):]
+		if tokenEdge(before, true) && tokenEdge(after, false) {
+			out.WriteString(before)
+			out.WriteString(AuthCodeMask)
+		} else {
+			out.WriteString(before + secret)
+		}
+		rest = after
+	}
+}
+
+// tokenEdge reports whether the text on one side of a match is not part of the same word.
+func tokenEdge(side string, trailing bool) bool {
+	if side == "" {
+		return true
+	}
+	rs := []rune(side)
+	r := rs[0]
+	if trailing {
+		r = rs[len(rs)-1]
+	}
+	return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 }
 
 // RedactStrings is RedactValues for map[string]string params.

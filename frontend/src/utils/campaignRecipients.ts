@@ -51,6 +51,18 @@ export function localInputToUTC(value: string): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toISOString()
 }
 
+/**
+ * Checks the batch validity typed in the datetime-local field. The server stays
+ * the authority (it refuses a past valid_until); this only tells the user early.
+ * null = fine (or empty, which means "no validity informed").
+ */
+export function batchValidUntilError(local: string, now: Date = new Date()): 'invalid' | 'past' | null {
+  if (!local) return null
+  const iso = localInputToUTC(local)
+  if (!iso) return 'invalid'
+  return new Date(iso).getTime() <= now.getTime() ? 'past' : null
+}
+
 /** Column position of valid_until in a manual-entry line (after the template values). */
 export function manualValidUntilIndex(ctx: RecipientContext): number {
   return 2 + (ctx.headerName ? 1 : 0) + ctx.bodyNames.length

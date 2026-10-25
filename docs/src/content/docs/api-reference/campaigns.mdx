@@ -219,6 +219,23 @@ For campaigns whose template category is `AUTHENTICATION`, each recipient may ca
   (`otp_validity_missing`). The 24-hour retention is not a validity period.
 - Ignored for templates that are not `AUTHENTICATION`.
 - The code is stored encrypted and is never returned by the API.
+- A worker that cannot decrypt a code (key missing or wrong, or a damaged value) does
+  not delete it: the recipient fails with `otp_unavailable`, and after the key is
+  restored `retry-failed` sends it, as long as its validity has not passed.
+- `from-contacts` cannot be used with authentication templates (contacts carry no code);
+  use `recipients/import`.
+
+### Deploying and operating (authentication campaigns)
+
+- **Server and worker must run the same version, the same `app.encryption_key` and the
+  same `[otp]` settings.** The server stores the codes sealed and queues them sealed; a
+  worker from an older version would read the sealed value as a template parameter and
+  fail every recipient (nothing is sent, but nothing is delivered either). The embedded
+  workers (`server -workers N`) always match the server; separately started `worker`
+  processes must be upgraded together with it.
+- Drain or pause authentication campaigns before upgrading or rolling back.
+- Start and retry are atomic: concurrent requests for the same campaign enqueue each
+  recipient once and the extra requests get `409`.
 
 The CSV import in the UI accepts a `valid_until` column for these templates, and the
 import dialog has an optional "valid until" field for recipients without their own.
