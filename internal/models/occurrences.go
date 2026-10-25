@@ -146,6 +146,10 @@ type Occurrence struct {
 	GeneralState  string `gorm:"size:20;default:'';index" json:"general_state"`
 	ReopenedCount int    `gorm:"not null;default:0" json:"reopened_count"`
 
+	// OrderRef is the commercial order the request is about (free text from the
+	// requester; never resolved against an ERP here).
+	OrderRef string `gorm:"size:60;index" json:"order_ref,omitempty"`
+
 	FirstResponseBy *User `gorm:"foreignKey:FirstResponseByID" json:"first_response_by,omitempty"`
 
 	// Relations
@@ -214,6 +218,8 @@ type OccurrenceParticipant struct {
 	OccurrenceID   uuid.UUID  `gorm:"type:uuid;not null;uniqueIndex:idx_occ_participant" json:"occurrence_id"`
 	UserID         uuid.UUID  `gorm:"type:uuid;not null;uniqueIndex:idx_occ_participant;index" json:"user_id"`
 	AddedByID      *uuid.UUID `gorm:"type:uuid" json:"added_by_id,omitempty"`
+	// Capabilities beyond viewing (see OccurrenceCap*). Empty = read only.
+	Capabilities []string `gorm:"serializer:json;type:jsonb" json:"capabilities"`
 }
 
 func (OccurrenceParticipant) TableName() string { return "occurrence_participants" }
@@ -232,3 +238,53 @@ func (s OccurrenceStage) EffectiveState() string {
 	}
 	return GeneralStateInProgress
 }
+
+// Capabilities a participant may be granted on one case. Viewing is implicit in
+// being a participant; nothing else is, so each right is granted on its own.
+const (
+	OccurrenceCapComment      = "comment"       // internal notes
+	OccurrenceCapChangeStatus = "change_status" // move between stages (not into resolved)
+	OccurrenceCapClaim        = "claim"         // take an unassigned case
+	OccurrenceCapReassign     = "reassign"      // hand the case to another agent
+	OccurrenceCapResolve      = "resolve"       // conclude or reopen
+)
+
+// IsValidOccurrenceCapability reports whether c is a grantable capability.
+func IsValidOccurrenceCapability(c string) bool {
+	switch c {
+	case OccurrenceCapComment, OccurrenceCapChangeStatus, OccurrenceCapClaim, OccurrenceCapReassign, OccurrenceCapResolve:
+		return true
+	}
+	return false
+}
+
+// OccurrenceChannelConfig says which WhatsApp account talks to customers about
+// a case: the unit's own when configured, otherwise the organization-wide one
+// (UnitID nil). The account is referenced by name, like everywhere else.
+type OccurrenceChannelConfig struct {
+	BaseModel
+	OrganizationID  uuid.UUID  `gorm:"type:uuid;index;not null" json:"organization_id"`
+	UnitID          *uuid.UUID `gorm:"type:uuid;index" json:"unit_id,omitempty"`
+	Purpose         string     `gorm:"size:30;not null;default:'logistics'" json:"purpose"`
+	WhatsAppAccount string     `gorm:"size:100;not null" json:"whatsapp_account"`
+}
+
+func (OccurrenceChannelConfig) TableName() string { return "occurrence_channel_configs" }
+
+// OccurrenceNotification records a customer notification PREPARED for a case.
+// Nothing sends from it yet: it fixes the account, the eligibility verdict and
+// an idempotency key now, so the dispatcher that comes later cannot duplicate
+// or guess. Status: "prepared" (account resolved) or "skipped" (with Reason).
+type OccurrenceNotification struct {
+	BaseModel
+	OrganizationID  uuid.UUID `gorm:"type:uuid;index;not null" json:"organization_id"`
+	OccurrenceID    uuid.UUID `gorm:"type:uuid;index;not null" json:"occurrence_id"`
+	Kind            string    `gorm:"size:30;not null" json:"kind"`
+	WhatsAppAccount string    `gorm:"size:100" json:"whatsapp_account"`
+	IdempotencyKey  string    `gorm:"size:120;not null;uniqueIndex" json:"idempotency_key"`
+	Status          string    `gorm:"size:20;not null" json:"status"`
+	Reason          string    `gorm:"size:200" json:"reason"`
+	Eligible        bool      `gorm:"not null;default:false" json:"eligible"`
+}
+
+func (OccurrenceNotification) TableName() string { return "occurrence_notifications" }

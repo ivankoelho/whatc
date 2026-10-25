@@ -25,6 +25,7 @@ type occurrenceAccess struct {
 	view       bool
 	interact   bool
 	supervisor bool // may reassign / override a case that is not theirs
+	caps       map[string]bool // participant capabilities (nil for everyone else)
 }
 
 func (a *App) myTeamIDs(userID uuid.UUID) *gorm.DB {
@@ -99,11 +100,15 @@ func (a *App) authorizeOccurrence(userID, orgID uuid.UUID, occ *models.Occurrenc
 		// no team of its own to work it.
 		acc.view, acc.interact = true, occ.TeamID == nil
 	}
-	if !acc.view {
-		var p int64
-		a.DB.Model(&models.OccurrenceParticipant{}).
-			Where("occurrence_id = ? AND user_id = ?", occ.ID, userID).Count(&p)
-		acc.view = p > 0
+	// A participant row adds view access and its granted capabilities, even for
+	// the opener (the SAC that forwarded the case is both).
+	var part models.OccurrenceParticipant
+	if err := a.DB.Where("occurrence_id = ? AND user_id = ?", occ.ID, userID).First(&part).Error; err == nil {
+		acc.view = true
+		acc.caps = map[string]bool{}
+		for _, c := range part.Capabilities {
+			acc.caps[c] = true
+		}
 	}
 	return acc
 }
@@ -202,4 +207,19 @@ func (a *App) occurrenceScopeSQL(dataSource string, orgID, viewerID uuid.UUID, c
 		return a.visibleOccurrences(q, viewerID, orgID).Find(&[]models.Occurrence{})
 	})
 	return " AND " + col + " IN (" + sub + ")"
+}
+
+// can answers whether the caller holds one capability on the case.
+// Supervisors hold all of them; team members and assignees hold everything but
+// "reassign" (handing a case over is the assignee's or a supervisor's call,
+// see UpdateOccurrence/ReassignOccurrence); a mere participant holds exactly
+// what was granted.
+func (acc occurrenceAccess) can(cap string) bool {
+	if acc.supervisor {
+		return true
+	}
+	if acc.interact && cap != models.OccurrenceCapReassign {
+		return true
+	}
+	return acc.caps[cap]
 }

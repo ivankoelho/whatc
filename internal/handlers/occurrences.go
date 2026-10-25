@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,6 +23,7 @@ type CreateOccurrenceRequest struct {
 	AssignedUserID   *string `json:"assigned_user_id"`
 	SourceTransferID *string `json:"source_transfer_id"`
 	TeamID           *string `json:"team_id"`
+	OrderRef         string  `json:"order_ref"`
 	UnitID           *string `json:"unit_id"`
 	DepartmentID     *string `json:"department_id"`
 	CategoryID       *string `json:"category_id"`
@@ -234,6 +236,9 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 		return nil
 	}
 
+	if len(strings.TrimSpace(req.OrderRef)) > 60 {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "order_ref is too long", nil, "")
+	}
 	if req.SaleChannel != "" && !occurrenceSaleChannels[req.SaleChannel] {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid sale_channel", nil, "")
 	}
@@ -382,6 +387,7 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 		StageID:            stage.ID,
 		GeneralState:       stage.EffectiveState(),
 		TeamID:             teamID,
+		OrderRef:           strings.TrimSpace(req.OrderRef),
 		Priority:           priority,
 		OpenedByUserID:     userID,
 		SaleChannel:        req.SaleChannel,
@@ -524,7 +530,11 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 		}
 	}
 
-	if err := a.insertOccurrenceWithProtocol(&occ); err != nil {
+	var hooks []func(tx *gorm.DB, o *models.Occurrence) error
+	if forwarding {
+		hooks = append(hooks, a.forwardArtifacts(userID, contact, a.userInTeam(userID, *teamID)))
+	}
+	if err := a.insertOccurrenceWithProtocol(&occ, hooks...); err != nil {
 		a.Log.Error("Failed to create occurrence", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError,
 			"Failed to create occurrence", nil, "")
@@ -1027,9 +1037,12 @@ func (a *App) CreateOccurrenceEvent(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
-	occ, err := a.loadAuthorizedOccurrence(r, orgID, userID, true)
+	occ, acc, err := a.loadOccurrenceWithAccess(r, orgID, userID, false)
 	if err != nil {
 		return nil
+	}
+	if !acc.can(models.OccurrenceCapComment) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You cannot comment on this occurrence", nil, "")
 	}
 
 	var req OccurrenceEventRequest

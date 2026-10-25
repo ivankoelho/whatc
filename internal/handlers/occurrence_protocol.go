@@ -75,7 +75,7 @@ func (a *App) nextProtocolNumber(tx *gorm.DB, orgID uuid.UUID, year int) (string
 
 // insertOccurrenceWithProtocol assigns the protocol and inserts the occurrence in one
 // transaction, then records the opening event.
-func (a *App) insertOccurrenceWithProtocol(occ *models.Occurrence) error {
+func (a *App) insertOccurrenceWithProtocol(occ *models.Occurrence, extra ...func(tx *gorm.DB, occ *models.Occurrence) error) error {
 	return a.DB.Transaction(func(tx *gorm.DB) error {
 		protocol, err := a.nextProtocolNumber(tx, occ.OrganizationID, time.Now().Year())
 		if err != nil {
@@ -92,14 +92,21 @@ func (a *App) insertOccurrenceWithProtocol(occ *models.Occurrence) error {
 		if err := tx.Create(occ).Error; err != nil {
 			return err
 		}
-
-		return tx.Create(&models.OccurrenceEvent{
+		if err := tx.Create(&models.OccurrenceEvent{
 			OrganizationID: occ.OrganizationID,
 			OccurrenceID:   occ.ID,
 			Type:           models.OccurrenceEventOpened,
 			Content:        occ.Title,
 			CreatedByID:    &occ.OpenedByUserID,
-		}).Error
+		}).Error; err != nil {
+			return err
+		}
+		for _, fn := range extra {
+			if err := fn(tx, occ); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
 

@@ -900,6 +900,8 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/occurrences/scope-audit", app.GetOccurrenceScopeAudit)
 	g.POST("/api/occurrences/scope-audit/apply", app.ApplyOccurrenceScopeSuggestions)
 	g.PUT("/api/occurrences/{id}/scope", app.SetOccurrenceScope)
+	g.GET("/api/occurrence-channel-config", app.ListOccurrenceChannelConfigs)
+	g.PUT("/api/occurrence-channel-config", app.SetOccurrenceChannelConfig)
 	g.POST("/api/occurrences", app.CreateOccurrence)
 	g.GET("/api/contacts/{id}/occurrences", app.ListContactOccurrences)
 	g.GET("/api/occurrences/{id}", app.GetOccurrence)
