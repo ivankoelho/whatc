@@ -68,6 +68,9 @@ type RecipientRequest struct {
 
 // ListCampaigns implements campaign listing
 func (a *App) ListCampaigns(r *fastglue.Request) error {
+	if !a.can(r, models.ResourceCampaigns, models.ActionRead) {
+		return nil
+	}
 	orgID, err := a.getOrgID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
@@ -219,6 +222,9 @@ func (a *App) CreateCampaign(r *fastglue.Request) error {
 
 // GetCampaign implements getting a single campaign
 func (a *App) GetCampaign(r *fastglue.Request) error {
+	if !a.can(r, models.ResourceCampaigns, models.ActionRead) {
+		return nil
+	}
 	orgID, err := a.getOrgID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
@@ -892,6 +898,9 @@ func (a *App) addCampaignRecipients(r *fastglue.Request, orgID, userID uuid.UUID
 
 // GetCampaignRecipients implements listing campaign recipients
 func (a *App) GetCampaignRecipients(r *fastglue.Request) error {
+	if !a.can(r, models.ResourceCampaigns, models.ActionRead) {
+		return nil
+	}
 	orgID, err := a.getOrgID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
@@ -1145,6 +1154,9 @@ func (a *App) saveCampaignMedia(campaignID string, data []byte, mimeType string)
 
 // ServeCampaignMedia serves campaign media files for preview
 func (a *App) ServeCampaignMedia(r *fastglue.Request) error {
+	if !a.can(r, models.ResourceCampaigns, models.ActionRead) {
+		return nil
+	}
 	// Get auth context
 	orgID, err := a.getOrgID(r)
 	if err != nil {
