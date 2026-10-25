@@ -687,9 +687,12 @@ func (a *App) RetryFailed(r *fastglue.Request) error {
 	failedRecipients = flipped
 
 	// Reset failed messages in messages table to pending
-	// (messages of recipients with an uncertain delivery keep their failed state)
+	// (messages of recipients with an uncertain delivery keep their failed state, and so do
+	// the records of one-time-code attempts: each attempt is its own history, a new send
+	// creates a new record, and a reset one would be a pending message nobody sends)
 	if err := a.DB.Model(&models.Message{}).
 		Where("metadata->>'campaign_id' = ? AND status = ?", id.String(), models.MessageStatusFailed).
+		Where("COALESCE(metadata->>'auth_code_masked', '') <> 'true'").
 		Where("id NOT IN (?)", a.DB.Model(&models.BulkMessageRecipient{}).Select("message_id").
 			Where("campaign_id = ? AND status = ? AND message_id IS NOT NULL", id, models.MessageStatusFailed)).
 		Updates(map[string]any{
@@ -1421,8 +1424,12 @@ func (a *App) recalculateCampaignStats(campaignID uuid.UUID) {
 			COUNT(CASE WHEN status IN ('sent','delivered','read') THEN 1 END) as sent,
 			COUNT(CASE WHEN status IN ('delivered','read') THEN 1 END) as delivered,
 			COUNT(CASE WHEN status = 'read' THEN 1 END) as read,
-			COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed
-		`).Scan(&stats).Error; err != nil {
+			COUNT(CASE WHEN status = 'failed' AND (
+				COALESCE(metadata->>'auth_code_masked', '') <> 'true'
+				OR id IN (SELECT message_id FROM bulk_message_recipients
+					WHERE campaign_id = ? AND status = 'failed' AND message_id IS NOT NULL AND deleted_at IS NULL)
+			) THEN 1 END) as failed
+		`, campaignID).Scan(&stats).Error; err != nil {
 		a.Log.Error("Failed to scan campaign message stats", "error", err, "campaign_id", campaignID)
 		return
 	}
