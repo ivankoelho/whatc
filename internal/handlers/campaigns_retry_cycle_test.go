@@ -23,11 +23,14 @@ import (
 // RetryFailed handler on one authentication campaign.
 type cycleEnv struct {
 	*authCampaignFixture
-	w      *worker.Worker
-	status atomic.Int32
-	body   atomic.Value
-	calls  atomic.Int32
-	srv    *httptest.Server
+	w       *worker.Worker
+	status  atomic.Int32
+	body    atomic.Value
+	calls   atomic.Int32
+	srv     *httptest.Server
+	arrived chan struct{} // signalled when a request reaches Meta (if non-nil)
+	hold    chan struct{} // the Meta mock waits for this (if non-nil)
+	delay   atomic.Int64  // nanoseconds the Meta mock waits before answering
 }
 
 func newCycleEnv(t *testing.T) *cycleEnv {
@@ -46,6 +49,18 @@ func newCycleEnv(t *testing.T) *cycleEnv {
 	e.body.Store(`{"messages":[{"id":"wamid.cycle"}]}`)
 	e.srv = httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
 		e.calls.Add(1)
+		if e.arrived != nil {
+			select {
+			case e.arrived <- struct{}{}:
+			default:
+			}
+		}
+		if e.hold != nil {
+			<-e.hold
+		}
+		if d := e.delay.Load(); d > 0 {
+			time.Sleep(time.Duration(d))
+		}
 		rw.Header().Set("Content-Type", "application/json")
 		rw.WriteHeader(int(e.status.Load()))
 		_, _ = rw.Write([]byte(e.body.Load().(string)))
@@ -63,7 +78,10 @@ func newCycleEnv(t *testing.T) *cycleEnv {
 	return e
 }
 
-func (e *cycleEnv) metaAnswers(status int, body string) { e.status.Store(int32(status)); e.body.Store(body) }
+func (e *cycleEnv) metaAnswers(status int, body string) {
+	e.status.Store(int32(status))
+	e.body.Store(body)
+}
 
 func (e *cycleEnv) recipient(t *testing.T) models.BulkMessageRecipient {
 	t.Helper()
@@ -157,7 +175,7 @@ func TestRetryCycle_UncertainThenReleasedThenRetriedAndSent(t *testing.T) {
 	assert.Equal(t, models.MessageStatusFailed, e.attempts(t)[0].Status)
 
 	op := e.adminOperator(t)
-	require.NoError(t, authmask.ReleaseUncertain(e.app.DB, authmask.ReleaseRequest{
+	require.NoError(t, authmask.ReleaseUncertain(e.app.DB, authmask.ReleaseRequest{LocalReleaseEnabled: true,
 		RecipientID: r.ID, OperatorEmail: op.Email, Reason: "Meta log shows the message was never accepted",
 	}, templateutil.OTPPolicy{}, time.Now(), false))
 	assert.Equal(t, models.MessageStatusFailed, e.attempts(t)[0].Status, "releasing changes no message")

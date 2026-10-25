@@ -269,8 +269,9 @@ func TestB3_ACallThatDoesNotFinishWithinItsTimeoutStaysUncertain(t *testing.T) {
 	e := newClaimEnv(t, meta)
 	e.w.WhatsApp.HTTPClient.Timeout = 150 * time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
-	e.w.afterClaim = func() {}
-	go func() { time.Sleep(50 * time.Millisecond); cancel() }()
+	// The cancellation is timed from the claim, not from the start of the test, so a slow
+	// database cannot make it land before the claim exists.
+	e.w.afterClaim = func() { go func() { time.Sleep(30 * time.Millisecond); cancel() }() }
 
 	require.NoError(t, e.w.HandleRecipientJob(ctx, e.job()))
 
