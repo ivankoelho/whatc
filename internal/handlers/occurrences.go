@@ -274,10 +274,40 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 		return nil
 	}
 
-	// GATE 2: opening a case is interacting with the conversation.
+	// GATE 2: who may open a case for this contact.
+	//
+	// Working the conversation and requesting something from a team are
+	// different rights. Whoever can interact with the conversation opens cases
+	// as before. Otherwise a case may still be opened when it is FORWARDED to an
+	// explicit team (the SAC asking Logistics while another agent holds the
+	// chat), provided the caller can see contacts at all. That grants no access
+	// to the conversation, its history, or its assignment, and it cannot cite
+	// the conversation as the case's origin.
+	forwarding := req.TeamID != nil && *req.TeamID != ""
 	if !a.canInteractWithConversation(userID, orgID, contact) {
-		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
-			"You do not have access to this conversation", nil, "")
+		if !forwarding || !a.HasPermission(userID, models.ResourceContacts, models.ActionRead, orgID) {
+			return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+				"You do not have access to this conversation", nil, "")
+		}
+		if req.SourceTransferID != nil && *req.SourceTransferID != "" {
+			return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+				"You do not have access to the source conversation", nil, "")
+		}
+	}
+	if req.SourceTransferID != nil && *req.SourceTransferID != "" {
+		// A cited attendance must be this contact's, in this organization.
+		if tid, perr := uuid.Parse(*req.SourceTransferID); perr == nil {
+			var n int64
+			a.DB.Model(&models.AgentTransfer{}).Where("id = ? AND organization_id = ?", tid, orgID).Count(&n)
+			if n > 0 {
+				var same int64
+				a.DB.Model(&models.AgentTransfer{}).Where("id = ? AND organization_id = ? AND contact_id = ?", tid, orgID, contactID).Count(&same)
+				if same == 0 {
+					return r.SendErrorEnvelope(fasthttp.StatusBadRequest,
+						"source_transfer_id belongs to another contact", nil, "")
+				}
+			}
+		}
 	}
 
 	// Team routing: an explicit team_id wins, else the team that attended the
@@ -416,6 +446,9 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 		}
 		if _, err := findByIDAndOrg[models.Unit](a.DB, r, id, orgID, "Unit"); err != nil {
 			return nil
+		}
+		if teamUnitID != nil && *teamUnitID != id {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "unit_id does not match the team's unit", nil, "")
 		}
 		occ.UnitID = &id
 	}
