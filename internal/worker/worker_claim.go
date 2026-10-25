@@ -339,7 +339,10 @@ func (w *Worker) finishSent(ctx context.Context, job *queue.RecipientJob, msg *m
 	err := w.DB.Transaction(func(tx *gorm.DB) error {
 		res := tx.Model(&models.BulkMessageRecipient{}).
 			Where("id = ? AND status = ? AND message_id = ?", job.RecipientID, models.MessageStatusPending, msg.ID).
-			Updates(map[string]any{"status": models.MessageStatusSent, "whats_app_message_id": wamid, "sent_at": now, "error_message": ""})
+			// The code is no longer needed: it is cleared by the same compare-and-set that
+			// records the send, so it can neither outlive a confirmed send nor be erased
+			// from a newer attempt by a separate, later statement.
+			Updates(map[string]any{"status": models.MessageStatusSent, "whats_app_message_id": wamid, "sent_at": now, "error_message": "", "template_params": models.JSONB{}})
 		if res.Error != nil {
 			return res.Error
 		}
@@ -356,7 +359,6 @@ func (w *Worker) finishSent(ctx context.Context, job *queue.RecipientJob, msg *m
 		return
 	}
 	w.Log.Info("Message sent", "recipient", job.PhoneNumber, "message_id", wamid)
-	w.scrubRecipientSecret(job.RecipientID) // sent: the code is no longer needed
 	w.incrementCampaignCount(job.CampaignID, "sent_count")
 	msg.Status, msg.WhatsAppMessageID = models.MessageStatusSent, wamid
 	w.recordCampaignUsage(ctx, msg, job.CampaignID, nil)
@@ -368,10 +370,14 @@ func (w *Worker) finishSent(ctx context.Context, job *queue.RecipientJob, msg *m
 // dropSecret deletes the stored code (it can never be sent); otherwise it is kept.
 // Like finishSent it only acts while the claim is still pending and still ours.
 func (w *Worker) releaseClaim(ctx context.Context, job *queue.RecipientJob, msg *models.Message, reason string, dropSecret bool) {
+	update := map[string]any{"status": models.MessageStatusFailed, "error_message": reason, "message_id": nil}
+	if dropSecret {
+		update["template_params"] = models.JSONB{} // same compare-and-set: never a later statement
+	}
 	err := w.DB.Transaction(func(tx *gorm.DB) error {
 		res := tx.Model(&models.BulkMessageRecipient{}).
 			Where("id = ? AND status = ? AND message_id = ?", job.RecipientID, models.MessageStatusPending, msg.ID).
-			Updates(map[string]any{"status": models.MessageStatusFailed, "error_message": reason, "message_id": nil})
+			Updates(update)
 		if res.Error != nil {
 			return res.Error
 		}
@@ -384,9 +390,6 @@ func (w *Worker) releaseClaim(ctx context.Context, job *queue.RecipientJob, msg 
 	if err != nil {
 		w.Log.Error("Failed to release the claim", "error", err, "recipient_id", job.RecipientID)
 		return
-	}
-	if dropSecret {
-		w.scrubRecipientSecret(job.RecipientID)
 	}
 	w.incrementCampaignCount(job.CampaignID, "failed_count")
 	msg.Status, msg.ErrorMessage = models.MessageStatusFailed, reason
@@ -437,14 +440,15 @@ func (w *Worker) markUncertain(ctx context.Context, job *queue.RecipientJob, msg
 // failBeforeClaim fails a recipient that could not even be claimed (no code to send).
 // It is a compare-and-set, so duplicate jobs count the failure once.
 func (w *Worker) failBeforeClaim(ctx context.Context, job *queue.RecipientJob, reason string, dropSecret bool) {
+	update := map[string]any{"status": models.MessageStatusFailed, "error_message": reason}
+	if dropSecret {
+		update["template_params"] = models.JSONB{} // same compare-and-set as the failure
+	}
 	res := w.DB.Model(&models.BulkMessageRecipient{}).
 		Where("id = ? AND status = ? AND message_id IS NULL", job.RecipientID, models.MessageStatusPending).
-		Updates(map[string]any{"status": models.MessageStatusFailed, "error_message": reason})
+		Updates(update)
 	if res.Error != nil || res.RowsAffected != 1 {
 		return
-	}
-	if dropSecret {
-		w.scrubRecipientSecret(job.RecipientID)
 	}
 	w.incrementCampaignCount(job.CampaignID, "failed_count")
 	w.checkCampaignCompletion(ctx, job.CampaignID, job.OrganizationID)

@@ -430,14 +430,6 @@ func (w *Worker) recordCampaignUsage(ctx context.Context, msg *models.Message, c
 	}
 }
 
-// scrubRecipientSecret irreversibly drops a recipient's stored params.
-func (w *Worker) scrubRecipientSecret(recipientID uuid.UUID) {
-	if err := w.DB.Model(&models.BulkMessageRecipient{}).Where("id = ?", recipientID).
-		UpdateColumn("template_params", models.JSONB{}).Error; err != nil {
-		w.Log.Error("Failed to scrub recipient secret", "error", err, "recipient_id", recipientID)
-	}
-}
-
 // ScrubExpiredSecrets drops sealed codes older than templateutil.SealedTTL,
 // whatever the recipient's state (a failed recipient keeps its code only for
 // the retry window).
