@@ -811,7 +811,7 @@ func SeedSystemRolesForOrg(db *gorm.DB, orgID uuid.UUID) error {
 	}
 
 	if roleCount > 0 {
-		return nil // Already seeded
+		return SeedTeamProfilesForOrg(db, orgID)
 	}
 
 	// Get all permissions from database
@@ -863,6 +863,47 @@ func SeedSystemRolesForOrg(db *gorm.DB, orgID uuid.UUID) error {
 		}
 	}
 
+	return SeedTeamProfilesForOrg(db, orgID)
+}
+
+// SeedTeamProfilesForOrg creates the preset team roles the organization is
+// missing. It matches by name and never touches an existing role, so edits an
+// admin made to a profile survive every restart.
+func SeedTeamProfilesForOrg(db *gorm.DB, orgID uuid.UUID) error {
+	var permissions []models.Permission
+	if err := db.Find(&permissions).Error; err != nil {
+		return fmt.Errorf("failed to fetch permissions: %w", err)
+	}
+	permMap := make(map[string]models.Permission, len(permissions))
+	for _, p := range permissions {
+		permMap[p.Resource+":"+p.Action] = p
+	}
+
+	for _, tp := range models.TeamProfiles() {
+		var n int64
+		if err := db.Model(&models.CustomRole{}).Where("organization_id = ? AND name = ?", orgID, tp.Name).Count(&n).Error; err != nil {
+			return fmt.Errorf("failed to look up role %s: %w", tp.Name, err)
+		}
+		if n > 0 {
+			continue
+		}
+		role := models.CustomRole{
+			BaseModel:      models.BaseModel{ID: uuid.New()},
+			OrganizationID: orgID,
+			Name:           tp.Name,
+			Description:    tp.Description,
+		}
+		seen := map[string]bool{}
+		for _, key := range tp.Permissions {
+			if perm, ok := permMap[key]; ok && !seen[key] {
+				seen[key] = true
+				role.Permissions = append(role.Permissions, perm)
+			}
+		}
+		if err := db.Create(&role).Error; err != nil {
+			return fmt.Errorf("failed to create %s role: %w", tp.Name, err)
+		}
+	}
 	return nil
 }
 
