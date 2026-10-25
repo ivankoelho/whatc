@@ -42,6 +42,10 @@ import {
   Copy,
   Trash2,
   MessageCircle,
+  FileText,
+  MessagesSquare,
+  History,
+  Users,
 } from 'lucide-vue-next'
 
 const route = useRoute()
@@ -55,6 +59,20 @@ const authStore = useAuthStore()
 // string as an item value, but that's exactly what the backend needs to see
 // to clear assigned_user_id (see occurrences.go's resolveAssignee).
 const UNASSIGNED = '__unassigned__'
+
+// Tabs: one concern per screen area. The tab lives in the URL (?aba=) so a link or reload keeps it.
+const caseTabs = [
+  { id: 'summary', label: 'occurrences.tabSummary', icon: FileText },
+  { id: 'customer', label: 'occurrences.tabCustomer', icon: MessageCircle },
+  { id: 'internal', label: 'occurrences.tabInternal', icon: MessagesSquare },
+  { id: 'history', label: 'occurrences.tabHistory', icon: History },
+  { id: 'people', label: 'occurrences.tabPeople', icon: Users },
+]
+const tab = ref(caseTabs.find(x => x.id === route.query.aba)?.id ?? 'summary')
+function setTab(id: string) {
+  tab.value = id
+  void router.replace({ query: { ...route.query, aba: id } })
+}
 
 const occurrenceId = computed(() => route.params.id as string)
 const occurrence = ref<Occurrence | null>(null)
@@ -330,6 +348,7 @@ onUnmounted(() => {
       icon-gradient="bg-gradient-to-br from-violet-500 to-purple-600 shadow-violet-500/20"
       back-link="/crm/occurrences"
       :breadcrumbs="breadcrumbs"
+      full-width
       :is-loading="isLoading"
       :is-not-found="isNotFound"
       :not-found-title="$t('occurrences.notFound')"
@@ -373,9 +392,22 @@ onUnmounted(() => {
       </template>
 
       <template v-if="occurrence">
-      <div class="grid items-start gap-4 xl:grid-cols-2" data-testid="unified-case">
-      <!-- Left: the case itself -->
-      <div class="min-w-0 space-y-4">
+      <div class="flex flex-col gap-4 lg:flex-row lg:items-start" data-testid="unified-case">
+      <nav class="flex gap-1 overflow-x-auto lg:sticky lg:top-0 lg:w-48 lg:shrink-0 lg:flex-col" role="tablist" :aria-label="$t('occurrences.internalChat')" data-testid="case-tabs">
+        <button
+          v-for="tb in caseTabs" :key="tb.id" type="button" role="tab"
+          :aria-selected="tab === tb.id" :data-testid="'tab-' + tb.id"
+          class="flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-muted"
+          :class="tab === tb.id ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground'"
+          @click="setTab(tb.id)"
+        >
+          <component :is="tb.icon" class="h-4 w-4" aria-hidden="true" />
+          {{ $t(tb.label) }}
+        </button>
+      </nav>
+      <div class="min-w-0 flex-1">
+      <!-- Summary: the case itself -->
+      <div v-show="tab === 'summary'" class="space-y-4">
         <!-- Details -->
         <Card>
           <CardHeader class="pb-3">
@@ -474,8 +506,10 @@ onUnmounted(() => {
         </Card>
 
         <OccurrenceDocumentsCard :occurrence-id="occurrence.id" :can-write="canWrite" />
+      </div>
 
-        <!-- Timeline -->
+      <!-- History -->
+      <div v-show="tab === 'history'" class="space-y-4">
         <Card>
           <CardHeader class="pb-3">
             <CardTitle class="text-sm font-medium">{{ $t('chat.occurrenceTimeline') }}</CardTitle>
@@ -504,15 +538,11 @@ onUnmounted(() => {
 
       </div>
 
-      <!-- Right: talking about it (internal) and with the customer (WhatsApp), kept apart -->
-      <div class="min-w-0 space-y-4">
+      <!-- Customer (WhatsApp) and team (internal chat) live in separate tabs: never side by side. -->
+      <div v-show="tab === 'customer'" class="grid items-start gap-4 xl:grid-cols-2">
         <OccurrenceWhatsAppCard :occurrence-id="occurrence.id" @configured="waConfigured = $event" />
 
         <OccurrenceCommunicationCard :occurrence-id="occurrence.id" />
-
-        <OccurrenceChatPanel :occurrence-id="occurrence.id" />
-
-        <OccurrenceParticipantsCard :occurrence-id="occurrence.id" :can-write="canWrite && (occurrence.can?.add_participant ?? true)" />
 
         <!-- Legacy reply (from the contact's own account): only when the case has no channel account -->
         <Card v-if="canWrite && (occurrence.can?.reply ?? true) && !waConfigured" class="border-primary/40">
@@ -554,6 +584,15 @@ onUnmounted(() => {
             </Button>
           </CardContent>
         </Card>
+      </div>
+
+      <div v-show="tab === 'internal'">
+        <OccurrenceChatPanel :occurrence-id="occurrence.id" />
+      </div>
+
+      <div v-show="tab === 'people'">
+        <OccurrenceParticipantsCard :occurrence-id="occurrence.id" :can-write="canWrite && (occurrence.can?.add_participant ?? true)" />
+      </div>
       </div>
       </div>
       </template>

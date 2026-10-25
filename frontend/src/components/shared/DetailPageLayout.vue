@@ -16,6 +16,8 @@ defineProps<{
   isNotFound?: boolean
   notFoundTitle?: string
   notFoundDescription?: string
+  /** Use the whole content area instead of the 2/3 + sidebar grid. */
+  fullWidth?: boolean
 }>()
 </script>
 
@@ -49,7 +51,10 @@ defineProps<{
 
     <!-- Content -->
     <ScrollArea v-else class="flex-1">
-      <div class="p-6">
+      <div v-if="fullWidth" class="p-4 lg:p-6">
+        <slot />
+      </div>
+      <div v-else class="p-6">
         <div class="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div class="lg:col-span-2 space-y-6">
             <slot />
