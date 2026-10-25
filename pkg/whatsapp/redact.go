@@ -108,7 +108,7 @@ func redactError(err error, secrets []string) error {
 		return err
 	}
 	if msg := err.Error(); redactSecrets(msg, secrets) != msg {
-		return fmt.Errorf("%s", redactSecrets(msg, secrets))
+		return &redactedError{msg: redactSecrets(msg, secrets), outcome: Classify(err)}
 	}
 	return err
 }
@@ -126,7 +126,7 @@ func parseMetaAPIErrorRedacted(statusCode int, respBody []byte, secrets []string
 		if e.ErrorUserMsg != "" {
 			errMsg += " - " + redactSecrets(e.ErrorUserMsg, secrets)
 		}
-		return fmt.Errorf("%s", errMsg)
+		return &APIError{Status: statusCode, Code: e.Code, msg: errMsg}
 	}
-	return fmt.Errorf("API returned status %d: %s", statusCode, redactSecrets(string(respBody), secrets))
+	return &APIError{Status: statusCode, msg: fmt.Sprintf("API returned status %d: %s", statusCode, redactSecrets(string(respBody), secrets))}
 }

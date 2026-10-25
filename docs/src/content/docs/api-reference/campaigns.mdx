@@ -225,6 +225,62 @@ For campaigns whose template category is `AUTHENTICATION`, each recipient may ca
 - `from-contacts` cannot be used with authentication templates (contacts carry no code);
   use `recipients/import`.
 
+### One code, one send (and what "uncertain" means)
+
+Meta offers no idempotency key, so Whatomate cannot make a send "exactly once". What it
+guarantees locally for authentication campaigns:
+
+- Before calling Meta, a worker **claims** the recipient in PostgreSQL (one short
+  transaction that creates the masked, pending message and sets the recipient's
+  `message_id`, only while it is still `pending` with no claim). Only the worker that wins
+  the claim calls Meta; duplicate jobs and a second worker leave it alone. The transaction
+  is closed before the request is made, and the call has a deadline of its own (30 seconds).
+- What a failed request proves is decided by the Meta **error code** together with a 4xx
+  status, never by the status alone (Meta's reference does not map HTTP statuses to "not
+  sent"):
+  - **Refused** (`100`, `131008`, `131009`, `131021`, `131047`, `131051`, `132000`,
+    `132001`, `132005`, `132007`, `132012`, `132015`, `132016`, `190`, `368`), a failure
+    before the request was built, or a connection that was never established: provably not
+    sent. The claim is released and `retry-failed` may try again (error prefix
+    `meta_refused`); the sealed code is kept until its validity ends.
+  - **Throttled** (`130429`, `131056`, `80007`): provably not sent and worth retrying
+    later (`meta_transient`). Same handling.
+  - **Anything else is unknown**: timeouts, connection resets, 408, 425, any 5xx, a bare
+    429 or any other 4xx without a documented rejection code, an unreadable answer, or a
+    worker that stopped after claiming. The recipient is marked failed with
+    `delivery_uncertain`, **keeps its claim**, and the code is **never resent
+    automatically**: `retry-failed` skips it (and reports `skipped_uncertain`). Meta may
+    have delivered it.
+- A claim that is never resolved (the worker died) is found **in PostgreSQL**, with no job
+  having to come back from Redis: worker housekeeping runs every five minutes and declares
+  it `delivery_uncertain` once it is older than a live send can be (twice the Meta call's
+  timeout plus the time for the writes around it: 2 × (30 s + 30 s) by default). The
+  update is atomic with that age check, so a live worker is never overridden; if one is cut
+  off and its answer arrives late, the result is refused and the recipient stays blocked.
+- A confirmed send is recorded on the message created by the claim (no duplicate messages),
+  and delivery and read receipts update it as for any message.
+
+#### Reconciling an uncertain delivery
+
+`whatomate otp-uncertain` lists these recipients (phone shown as its last four digits),
+including claims that are stuck and not yet resolved. To let one be sent again, **first
+confirm with Meta's logs or the customer that the code was not delivered**, then:
+
+```bash
+whatomate otp-uncertain -release <recipient-id> -operator admin@example.com \
+  -reason "no delivery in the Meta message log" -confirm-not-delivered -apply
+```
+
+- Without `-apply` it only checks and reports. `-confirm-not-delivered`, `-operator` and
+  `-reason` are required.
+- `-operator` must be a **real, active user of the campaign's organization** with the
+  `campaigns:write` permission (or a super admin). The reason is audited and must not
+  contain a code.
+- It refuses when the code is no longer valid (or no longer stored).
+- The release is a compare-and-set and an entry in the audit log (operator, recipient,
+  campaign, date, reason) written in the **same transaction**: no audit, no release.
+- It queues nothing. Only an explicit `retry-failed` sends it again.
+
 ### Deploying and operating (authentication campaigns)
 
 - **Server and worker must run the same version, the same `app.encryption_key` and the

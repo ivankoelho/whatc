@@ -630,9 +630,14 @@ func (a *App) RetryFailed(r *fastglue.Request) error {
 	// Reset failed recipients to pending. UPDATE ... RETURNING is the atomic claim:
 	// each failed recipient is flipped, and later enqueued, by exactly one request,
 	// so concurrent retries cannot queue (and send) the same recipient twice.
+	//
+	// A failed recipient that still holds a claim (message_id set) is a one-time code
+	// whose delivery is UNCERTAIN: Meta may have sent it. It is never retried here;
+	// it needs a person to reconcile it (see "whatomate otp-uncertain"). Ordinary
+	// campaigns never set message_id, so for them this changes nothing.
 	var flipped []models.BulkMessageRecipient
 	reset := a.DB.Model(&flipped).Clauses(clause.Returning{}).
-		Where("campaign_id = ? AND status = ?", id, models.MessageStatusFailed).
+		Where("campaign_id = ? AND status = ? AND message_id IS NULL", id, models.MessageStatusFailed).
 		Updates(map[string]any{
 			"status":        models.MessageStatusPending,
 			"error_message": "",
@@ -641,14 +646,25 @@ func (a *App) RetryFailed(r *fastglue.Request) error {
 		a.Log.Error("Failed to reset failed recipients", "error", reset.Error)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to reset failed recipients", nil, "")
 	}
+	var uncertain int64
+	a.DB.Model(&models.BulkMessageRecipient{}).
+		Where("campaign_id = ? AND status = ? AND message_id IS NOT NULL", id, models.MessageStatusFailed).
+		Count(&uncertain)
 	if len(flipped) == 0 {
+		if uncertain > 0 {
+			return r.SendErrorEnvelope(fasthttp.StatusConflict,
+				fmt.Sprintf("%d recipient(s) have an uncertain delivery (the code may already have been sent) and are not retried automatically; reconcile them first", uncertain), nil, "")
+		}
 		return r.SendErrorEnvelope(fasthttp.StatusConflict, "These failed messages are already being retried", nil, "")
 	}
 	failedRecipients = flipped
 
 	// Reset failed messages in messages table to pending
+	// (messages of recipients with an uncertain delivery keep their failed state)
 	if err := a.DB.Model(&models.Message{}).
 		Where("metadata->>'campaign_id' = ? AND status = ?", id.String(), models.MessageStatusFailed).
+		Where("id NOT IN (?)", a.DB.Model(&models.BulkMessageRecipient{}).Select("message_id").
+			Where("campaign_id = ? AND status = ? AND message_id IS NOT NULL", id, models.MessageStatusFailed)).
 		Updates(map[string]any{
 			"status":        models.MessageStatusPending,
 			"error_message": "",
@@ -689,9 +705,10 @@ func (a *App) RetryFailed(r *fastglue.Request) error {
 	a.Log.Info("Failed recipients enqueued for retry", "campaign_id", id, "count", len(jobs))
 
 	return r.SendEnvelope(map[string]any{
-		"message":     "Retrying failed messages",
-		"retry_count": len(failedRecipients),
-		"status":      models.CampaignStatusProcessing,
+		"message":           "Retrying failed messages",
+		"retry_count":       len(failedRecipients),
+		"skipped_uncertain": uncertain,
+		"status":            models.CampaignStatusProcessing,
 	})
 }
 

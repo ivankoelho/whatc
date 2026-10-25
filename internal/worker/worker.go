@@ -32,6 +32,9 @@ type Worker struct {
 	Publisher *queue.Publisher
 	// Usage records the WhatsApp consumption ledger (fail-open; nil or disabled = nothing).
 	Usage *usage.Recorder
+	// ClaimStale overrides how long a recipient claim may stay unresolved before it is
+	// declared delivery_uncertain (tests); zero = default.
+	ClaimStale time.Duration
 	// Now overrides the clock (tests); nil = time.Now.
 	Now func() time.Time
 }
@@ -64,15 +67,23 @@ func New(cfg *config.Config, db *gorm.DB, rdb *redis.Client, log logf.Logger) (*
 func (w *Worker) Run(ctx context.Context) error {
 	w.Log.Info("Worker starting")
 
-	// Retention: sealed verification codes are dropped after their TTL.
+	// Housekeeping, independent of the queue: every few minutes, claims of one-time
+	// codes that were abandoned are declared uncertain (straight from PostgreSQL, no
+	// job has to come back from Redis); once an hour, retention drops the sealed
+	// verification codes that can no longer be sent.
 	go func() {
-		t := time.NewTicker(time.Hour)
+		t := time.NewTicker(housekeepingEvery)
 		defer t.Stop()
-		for {
-			if n, err := ScrubExpiredSecrets(w.DB, w.now(), w.otpPolicy()); err != nil {
-				w.Log.Error("Failed to scrub expired verification codes", "error", err)
-			} else if n > 0 {
-				w.Log.Info("Scrubbed expired verification codes", "count", n)
+		for tick := 0; ; tick++ {
+			if _, err := w.ResolveStaleClaims(ctx); err != nil {
+				w.Log.Error("Failed to resolve stale claims", "error", err)
+			}
+			if tick%retentionEveryNthTick == 0 {
+				if n, err := ScrubExpiredSecrets(w.DB, w.now(), w.otpPolicy()); err != nil {
+					w.Log.Error("Failed to scrub expired verification codes", "error", err)
+				} else if n > 0 {
+					w.Log.Info("Scrubbed expired verification codes", "count", n)
+				}
 			}
 			select {
 			case <-ctx.Done():
@@ -133,67 +144,22 @@ func (w *Worker) HandleRecipientJob(ctx context.Context, job *queue.RecipientJob
 		return nil
 	}
 
-	// One-time codes travel sealed (queue and database). Open them only here,
-	// in memory, right before the send.
-	params := job.TemplateParams
-	isAuth := campaign.Template != nil && templateutil.IsAuthCategory(campaign.Template.Category)
-	secret := isAuth || templateutil.IsSealed(params)
-	if secret {
-		// A job redelivered after a successful send (crash before ACK) must
-		// neither resend the code nor fail the recipient.
-		var st string
-		w.DB.Model(&models.BulkMessageRecipient{}).Where("id = ?", job.RecipientID).Pluck("status", &st)
-		if st == string(models.MessageStatusSent) || st == string(models.MessageStatusDelivered) || st == string(models.MessageStatusRead) {
-			return nil
-		}
-		var key string
-		if w.Config != nil {
-			key = w.Config.App.EncryptionKey
-		}
-		sealedParams := params
-		opened, oerr := templateutil.OpenParams(params, key, w.now())
-		if oerr != nil || len(opened) == 0 {
-			// Two very different situations. A code that really expired (retention
-			// window) or that is simply gone is final: the secret is dropped. A key
-			// that is missing or wrong on this worker, or an envelope that does not
-			// open, is a configuration or data problem: the ciphertext is KEPT so it
-			// can be recovered once the key is restored (RetryFailed then works). In
-			// both cases the job is acknowledged (no endless redelivery) and the
-			// recipient is failed with a visible reason.
-			w.Log.Error("Verification code unavailable for recipient", "recipient_id", job.RecipientID, "campaign_id", job.CampaignID, "reason", otpOpenFailure(oerr))
-			switch {
-			case errors.Is(oerr, templateutil.ErrSealExpired), oerr == nil:
-				w.failOTPRecipient(job, "otp_expired: the verification code is no longer available", true)
-			default:
-				w.failOTPRecipient(job, "otp_unavailable: "+otpOpenFailure(oerr)+" (the stored code was kept; fix it and retry the failed recipients)", false)
-			}
-			return nil
-		}
-		// Validity is checked as late as possible: right before the Meta call.
-		// A retry sees the same envelope, so it can never renew the validity.
-		if cerr := w.otpPolicy().Check(sealedParams, w.now()); cerr != nil {
-			w.Log.Warn("Verification code not sent", "reason", cerr.Error(), "recipient_id", job.RecipientID, "campaign_id", job.CampaignID)
-			w.failOTPRecipient(job, cerr.Error()+": the verification code is not valid for sending", true)
-			return nil
-		}
-		params = opened
+	// One-time codes (authentication templates, or any sealed params) take a separate
+	// path: they are sent under a claim recorded in PostgreSQL (see worker_claim.go).
+	if (campaign.Template != nil && templateutil.IsAuthCategory(campaign.Template.Category)) || templateutil.IsSealed(job.TemplateParams) {
+		return w.sendSecretRecipient(ctx, job, &campaign, &account, contact)
 	}
 
 	// Build recipient for sending
 	recipient := &models.BulkMessageRecipient{
 		PhoneNumber:    job.PhoneNumber,
 		RecipientName:  job.RecipientName,
-		TemplateParams: params,
+		TemplateParams: job.TemplateParams,
 		HeaderParams:   job.HeaderParams,
 	}
 
 	// Send template message
 	waMessageID, err := w.sendTemplateMessage(ctx, &account, campaign.Template, recipient, campaign.HeaderMediaID, campaign.HeaderMediaFilename)
-	if err != nil && secret {
-		// The error text may echo request details: never let a code reach
-		// logs, the recipient row or the message row.
-		err = errors.New(templateutil.RedactValues(err.Error(), params))
-	}
 	sendErr := err // kept for the usage ledger: err is shadowed below
 
 	// Create Message record
@@ -204,7 +170,7 @@ func (w *Worker) HandleRecipientJob(ctx context.Context, job *queue.RecipientJob
 		WhatsAppMessageID: waMessageID,
 		Direction:         models.DirectionOutgoing,
 		MessageType:       models.MessageTypeTemplate,
-		TemplateParams:    storedParams(secret, job.TemplateParams),
+		TemplateParams:    job.TemplateParams,
 		Metadata: models.JSONB{
 			"campaign_id":    job.CampaignID.String(),
 			"recipient_name": job.RecipientName,
@@ -212,13 +178,7 @@ func (w *Worker) HandleRecipientJob(ctx context.Context, job *queue.RecipientJob
 	}
 	if campaign.Template != nil {
 		message.TemplateName = campaign.Template.Name
-		content := templateutil.ReplaceWithJSONBParams(campaign.Template.BodyContent, campaign.Template.BodyContent, params)
-		if secret {
-			// One-time codes are never persisted with the message history.
-			content = templateutil.MaskAllParams(campaign.Template.BodyContent)
-			message.TemplateParams = nil
-			message.Metadata["auth_code_masked"] = true
-		}
+		content := templateutil.ReplaceWithJSONBParams(campaign.Template.BodyContent, campaign.Template.BodyContent, job.TemplateParams)
 		message.Content = content
 		// Store campaign header media so it renders in the chat bubble
 		if campaign.HeaderMediaLocalPath != "" {
@@ -238,9 +198,6 @@ func (w *Worker) HandleRecipientJob(ctx context.Context, job *queue.RecipientJob
 		w.Log.Info("Message sent", "recipient", job.PhoneNumber, "message_id", waMessageID)
 		message.Status = models.MessageStatusSent
 		w.updateRecipientStatus(job.RecipientID, models.MessageStatusSent, waMessageID, "")
-		if secret {
-			w.scrubRecipientSecret(job.RecipientID) // sent: the code is no longer needed
-		}
 		w.incrementCampaignCount(job.CampaignID, "sent_count")
 	}
 
@@ -381,7 +338,7 @@ func (w *Worker) sendTemplateMessage(ctx context.Context, account *models.WhatsA
 		campaignHeaderMediaID, campaignHeaderMediaFilename,
 	)
 	if err != nil {
-		return "", fmt.Errorf("failed to build template components: %w", err)
+		return "", whatsapp.NewNotSentError(fmt.Errorf("failed to build template components: %w", err))
 	}
 	// Add auto-generated button components (Flow needs flow_token)
 	flowComponents := whatsapp.AutoButtonComponents(template.Buttons)
@@ -451,15 +408,6 @@ func (w *Worker) recordCampaignUsage(ctx context.Context, msg *models.Message, c
 	if err != nil {
 		w.Log.Error("Usage recording failed", "op", "settle", "error", err, "message_id", msg.ID)
 	}
-}
-
-// storedParams is what a message row may keep of the recipient's params:
-// nothing at all when they hold a one-time code.
-func storedParams(secret bool, params models.JSONB) models.JSONB {
-	if secret {
-		return nil
-	}
-	return params
 }
 
 // scrubRecipientSecret irreversibly drops a recipient's stored params.
@@ -538,17 +486,4 @@ func otpOpenFailure(err error) string {
 	default:
 		return "cannot be decrypted (wrong encryption key?)"
 	}
-}
-
-// failOTPRecipient ends a recipient whose code cannot be sent: it is marked
-// failed with the reason. The stored secret is dropped only when dropSecret is
-// set (the code can never be sent again); when the failure may be temporary it
-// stays so a retry can recover.
-func (w *Worker) failOTPRecipient(job *queue.RecipientJob, reason string, dropSecret bool) {
-	w.updateRecipientStatus(job.RecipientID, models.MessageStatusFailed, "", reason)
-	if dropSecret {
-		w.scrubRecipientSecret(job.RecipientID)
-	}
-	w.incrementCampaignCount(job.CampaignID, "failed_count")
-	w.checkCampaignCompletion(context.Background(), job.CampaignID, job.OrganizationID)
 }
