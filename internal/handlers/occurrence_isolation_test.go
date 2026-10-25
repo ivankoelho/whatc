@@ -53,7 +53,7 @@ func newIsoWorld(t *testing.T) *isoWorld {
 		role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, name+uuid.NewString()[:6], keys)
 		return testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
 	}
-	base := []string{"occurrences:read", "occurrences:write", "chat:read", "chat:write", "contacts:read"}
+	base := []string{"occurrences:read", "occurrences:write", "chat:read", "chat:write", "contacts:read", "team_chat:read", "team_chat:write"}
 
 	w.unitPorto, w.unitOutra = mkUnit("Porto"), mkUnit("Outra")
 	w.teamPorto, w.teamOutra, w.teamSAC = mkTeam("LogPorto", w.unitPorto), mkTeam("LogOutra", w.unitOutra), mkTeam("SAC", nil)

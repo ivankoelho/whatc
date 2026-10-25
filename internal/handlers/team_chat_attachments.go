@@ -166,6 +166,9 @@ func (a *App) UploadChatAttachment(r *fastglue.Request) error {
 		if !a.canAccessChatChannelDB(tx, userID, orgID, locked) {
 			return errChatNotFound
 		}
+		if !a.canPostChatChannelDB(tx, userID, orgID, locked) {
+			return errChatForbidden
+		}
 		if locked.ArchivedAt != nil {
 			return errChatArchived
 		}

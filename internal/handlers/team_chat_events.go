@@ -52,6 +52,18 @@ func (a *App) notifyChat(orgID uuid.UUID, ch *models.ChatChannel, eventType stri
 	if a.WSHub == nil {
 		return
 	}
+	if ch.Kind == models.ChatChannelKindOccurrence && ch.OccurrenceID != nil {
+		// A case's discussion reaches exactly the connected users who may see the
+		// case: the hub asks the case's own authorizer for each client, so there is
+		// no separate recipient list that could drift from the case's access.
+		a.broadcastOccurrence(orgID, *ch.OccurrenceID, websocket.WSMessage{
+			Type: eventType,
+			Payload: websocket.TeamChatEventPayload{
+				ChannelID: ch.ID, MessageID: messageID, UserID: actorID, At: time.Now(),
+			},
+		})
+		return
+	}
 	recipients := a.chatRecipients(orgID, ch)
 	to := recipients[:0]
 	for _, id := range recipients {
