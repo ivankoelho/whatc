@@ -173,3 +173,33 @@ func (a *App) teamFromTransfer(orgID, transferID uuid.UUID) *uuid.UUID {
 	}
 	return transfer.TeamID
 }
+
+// scopedOccurrences narrows an occurrences query to what viewerID may see.
+// uuid.Nil (no viewer) sees nothing: aggregates must never fail open.
+func (a *App) scopedOccurrences(q *gorm.DB, orgID, viewerID uuid.UUID) *gorm.DB {
+	if viewerID == uuid.Nil {
+		return q.Where("1 = 0")
+	}
+	return a.visibleOccurrences(q, viewerID, orgID)
+}
+
+// occurrenceScopeSQL is the raw-SQL twin used by the dashboard's hand-written
+// aggregations: an " AND <col> IN (visible ids)" fragment for the occurrences
+// data source, empty for every other source. It reuses visibleOccurrences, so
+// widgets, list and Kanban share one rule. The ids interpolated are UUIDs only.
+func (a *App) occurrenceScopeSQL(dataSource string, orgID, viewerID uuid.UUID, col string) string {
+	if dataSource != "occurrences" {
+		return ""
+	}
+	if viewerID == uuid.Nil {
+		return " AND 1 = 0"
+	}
+	if a.HasPermission(viewerID, models.ResourceConversations, models.ActionViewAll, orgID) {
+		return ""
+	}
+	sub := a.DB.ToSQL(func(tx *gorm.DB) *gorm.DB {
+		q := tx.Model(&models.Occurrence{}).Select("occurrences.id").Where("occurrences.organization_id = ?", orgID)
+		return a.visibleOccurrences(q, viewerID, orgID).Find(&[]models.Occurrence{})
+	})
+	return " AND " + col + " IN (" + sub + ")"
+}

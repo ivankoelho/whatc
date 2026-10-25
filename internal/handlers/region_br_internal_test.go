@@ -89,7 +89,7 @@ func TestGetGroupedData_RegionForContacts(t *testing.T) {
 	require.NoError(t, app.DB.Model(&models.Contact{}).Where("id = ?", c.ID).Update("last_message_at", now).Error)
 
 	w := models.Widget{DataSource: "contacts", GroupByField: "region", DisplayType: "chart", ChartType: "map"}
-	got := app.getGroupedData(org.ID, w, nil, now.Add(-time.Hour), now.Add(time.Hour))
+	got := app.getGroupedData(org.ID, uuid.Nil, w, nil, now.Add(-time.Hour), now.Add(time.Hour))
 	require.Len(t, got, 1)
 	assert.Equal(t, "CE", got[0].Label)
 	assert.EqualValues(t, 1, got[0].Value)

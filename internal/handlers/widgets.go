@@ -886,7 +886,7 @@ func (a *App) GetWidgetData(r *fastglue.Request) error {
 	}
 
 	// Execute the query
-	data, err := a.executeWidgetQuery(orgID, widget, fromStr, toStr)
+	data, err := a.executeWidgetQuery(orgID, userID, widget, fromStr, toStr)
 	if err != nil {
 		a.Log.Error("Failed to execute widget query", "error", err, "widget_id", id)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to get widget data", nil, "")
@@ -928,7 +928,7 @@ func (a *App) GetAllWidgetsData(r *fastglue.Request) error {
 	// Execute queries for all widgets
 	results := make(map[string]WidgetDataResponse)
 	for _, widget := range widgets {
-		data, err := a.executeWidgetQuery(orgID, widget, fromStr, toStr)
+		data, err := a.executeWidgetQuery(orgID, userID, widget, fromStr, toStr)
 		if err != nil {
 			a.Log.Error("Failed to execute widget query", "error", err, "widget_id", widget.ID)
 			continue
@@ -943,7 +943,7 @@ func (a *App) GetAllWidgetsData(r *fastglue.Request) error {
 }
 
 // executeWidgetQuery executes the query for a widget and returns the data
-func (a *App) executeWidgetQuery(orgID uuid.UUID, widget models.Widget, fromStr, toStr string) (WidgetDataResponse, error) {
+func (a *App) executeWidgetQuery(orgID, viewerID uuid.UUID, widget models.Widget, fromStr, toStr string) (WidgetDataResponse, error) {
 	now := time.Now()
 	loc := a.orgLocation(orgID)
 
@@ -993,10 +993,10 @@ func (a *App) executeWidgetQuery(orgID uuid.UUID, widget models.Widget, fromStr,
 	if widget.DisplayType == "table" {
 		if widget.GroupByField != "" {
 			// Grouped table: reuse existing getGroupedData to populate DataPoints
-			response.DataPoints = a.getGroupedData(orgID, widget, filters, periodStart, periodEnd)
+			response.DataPoints = a.getGroupedData(orgID, viewerID, widget, filters, periodStart, periodEnd)
 		} else {
 			// Table rows: query last 10 records
-			response.TableRows = a.getTableRows(orgID, widget, filters, periodStart, periodEnd)
+			response.TableRows = a.getTableRows(orgID, viewerID, widget, filters, periodStart, periodEnd)
 		}
 		return response, nil
 	}
@@ -1026,8 +1026,8 @@ func (a *App) executeWidgetQuery(orgID uuid.UUID, widget models.Widget, fromStr,
 		previousValue = a.querySessions(orgID, widget.Metric, filters, previousPeriodStart, previousPeriodEnd)
 
 	case "occurrences":
-		currentValue = a.queryOccurrences(orgID, widget.Metric, widget.Field, filters, periodStart, periodEnd)
-		previousValue = a.queryOccurrences(orgID, widget.Metric, widget.Field, filters, previousPeriodStart, previousPeriodEnd)
+		currentValue = a.queryOccurrences(orgID, viewerID, widget.Metric, widget.Field, filters, periodStart, periodEnd)
+		previousValue = a.queryOccurrences(orgID, viewerID, widget.Metric, widget.Field, filters, previousPeriodStart, previousPeriodEnd)
 
 	case "sales_opportunities":
 		currentValue = a.querySalesOpportunities(orgID, widget.Metric, widget.Field, filters, periodStart, periodEnd)
@@ -1043,14 +1043,14 @@ func (a *App) executeWidgetQuery(orgID uuid.UUID, widget models.Widget, fromStr,
 		if widget.GroupByField != "" {
 			if widget.ChartType == "line" {
 				// Line chart with group by → grouped time-series
-				groupedSeries := a.getGroupedTimeSeriesData(orgID, widget, filters, periodStart, periodEnd)
+				groupedSeries := a.getGroupedTimeSeriesData(orgID, viewerID, widget, filters, periodStart, periodEnd)
 				response.GroupedSeries = &groupedSeries
 			} else {
 				// Bar/Pie chart with group by → data points (group → count)
-				response.DataPoints = a.getGroupedData(orgID, widget, filters, periodStart, periodEnd)
+				response.DataPoints = a.getGroupedData(orgID, viewerID, widget, filters, periodStart, periodEnd)
 			}
 		} else {
-			response.ChartData = a.getChartData(orgID, widget, filters, periodStart, periodEnd)
+			response.ChartData = a.getChartData(orgID, viewerID, widget, filters, periodStart, periodEnd)
 		}
 	}
 
@@ -1158,9 +1158,9 @@ func (a *App) querySessions(orgID uuid.UUID, _ string, filters []FilterInput, st
 // the dashboard's date filter is set to "last 7 days". "resolved" and
 // "response_time" are period-scoped like every other widget, over closed_at
 // and opened_at respectively.
-func (a *App) queryOccurrences(orgID uuid.UUID, metric, field string, filters []FilterInput, start, end time.Time) float64 {
+func (a *App) queryOccurrences(orgID, viewerID uuid.UUID, metric, field string, filters []FilterInput, start, end time.Time) float64 {
 	base := func() *gorm.DB {
-		q := a.DB.Model(&models.Occurrence{}).Where("organization_id = ?", orgID)
+		q := a.scopedOccurrences(a.DB.Model(&models.Occurrence{}).Where("occurrences.organization_id = ?", orgID), orgID, viewerID)
 		for _, f := range filters {
 			q = applyFilter("occurrences", q, f)
 		}
@@ -1281,7 +1281,7 @@ func (a *App) salesConversionRate(orgID uuid.UUID, start, end time.Time) float64
 	return float64(converted) / float64(converted+lost) * 100
 }
 
-func (a *App) getChartData(orgID uuid.UUID, widget models.Widget, filters []FilterInput, start, end time.Time) []ChartPoint {
+func (a *App) getChartData(orgID, viewerID uuid.UUID, widget models.Widget, filters []FilterInput, start, end time.Time) []ChartPoint {
 	chartData := make([]ChartPoint, 0)
 
 	tableName, dateField, ok := resolveDataSourceTable(widget.DataSource)
@@ -1297,6 +1297,7 @@ func (a *App) getChartData(orgID uuid.UUID, widget models.Widget, filters []Filt
 	`, dateField, tableName, dateField, dateField)
 
 	args := []any{orgID, start, end}
+	query += a.occurrenceScopeSQL(widget.DataSource, orgID, viewerID, "id")
 	query, args = appendFilterSQL(widget.DataSource, query, args, filters)
 
 	query += fmt.Sprintf(" GROUP BY DATE_TRUNC('day', %s) ORDER BY date ASC", dateField)
@@ -1430,7 +1431,7 @@ func appendFilterSQL(dataSource string, query string, args []any, filters []Filt
 }
 
 // getGroupedData returns aggregated counts grouped by a field (for bar/pie charts)
-func (a *App) getGroupedData(orgID uuid.UUID, widget models.Widget, filters []FilterInput, start, end time.Time) []DataPoint {
+func (a *App) getGroupedData(orgID, viewerID uuid.UUID, widget models.Widget, filters []FilterInput, start, end time.Time) []DataPoint {
 	dataPoints := make([]DataPoint, 0)
 
 	// Special case: campaigns grouped by message_status uses pre-aggregated counters
@@ -1473,6 +1474,7 @@ func (a *App) getGroupedData(orgID uuid.UUID, widget models.Widget, filters []Fi
 	`, widget.GroupByField, tableName, dateField, dateField)
 
 	args := []any{orgID, start, end}
+	query += a.occurrenceScopeSQL(widget.DataSource, orgID, viewerID, "id")
 	query, args = appendFilterSQL(widget.DataSource, query, args, filters)
 
 	query += fmt.Sprintf(" GROUP BY %s ORDER BY value DESC", widget.GroupByField)
@@ -1584,7 +1586,7 @@ func (a *App) getCampaignMessageStatusData(orgID uuid.UUID, filters []FilterInpu
 }
 
 // getGroupedTimeSeriesData returns time-series data grouped by a field (for line charts with group_by)
-func (a *App) getGroupedTimeSeriesData(orgID uuid.UUID, widget models.Widget, filters []FilterInput, start, end time.Time) GroupedSeriesData {
+func (a *App) getGroupedTimeSeriesData(orgID, viewerID uuid.UUID, widget models.Widget, filters []FilterInput, start, end time.Time) GroupedSeriesData {
 	result := GroupedSeriesData{
 		Labels:   make([]string, 0),
 		Datasets: make([]GroupedSeriesDataset, 0),
@@ -1607,6 +1609,7 @@ func (a *App) getGroupedTimeSeriesData(orgID uuid.UUID, widget models.Widget, fi
 	`, dateField, widget.GroupByField, tableName, dateField, dateField)
 
 	args := []any{orgID, start, end}
+	query += a.occurrenceScopeSQL(widget.DataSource, orgID, viewerID, "id")
 	query, args = appendFilterSQL(widget.DataSource, query, args, filters)
 
 	query += fmt.Sprintf(" GROUP BY DATE_TRUNC('day', %s), %s ORDER BY date ASC", dateField, widget.GroupByField)
@@ -1840,7 +1843,7 @@ var tableQuerySQL = map[string]struct{ base, orderBy string }{
 }
 
 // getTableRows returns the last 10 rows for a table widget based on the data source.
-func (a *App) getTableRows(orgID uuid.UUID, widget models.Widget, filters []FilterInput, periodStart, periodEnd time.Time) []TableRow {
+func (a *App) getTableRows(orgID, viewerID uuid.UUID, widget models.Widget, filters []FilterInput, periodStart, periodEnd time.Time) []TableRow {
 	sql, ok := tableQuerySQL[widget.DataSource]
 	if !ok {
 		return nil
@@ -1848,6 +1851,7 @@ func (a *App) getTableRows(orgID uuid.UUID, widget models.Widget, filters []Filt
 
 	query := sql.base
 	args := []any{orgID, periodStart, periodEnd}
+	query += a.occurrenceScopeSQL(widget.DataSource, orgID, viewerID, "o.id")
 	query, args = appendFilterSQL(widget.DataSource, query, args, filters)
 	query += sql.orderBy
 

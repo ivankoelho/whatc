@@ -23,7 +23,7 @@ func (a *App) SalesConversionRateForTest(orgID uuid.UUID, start, end time.Time) 
 // GetTableRowsForTest exports getTableRows for tests in the handlers_test
 // package.
 func (a *App) GetTableRowsForTest(orgID uuid.UUID, widget models.Widget, filters []FilterInput, periodStart, periodEnd time.Time) []TableRow {
-	return a.getTableRows(orgID, widget, filters, periodStart, periodEnd)
+	return a.getTableRows(orgID, uuid.Nil, widget, filters, periodStart, periodEnd)
 }
 
 // IsFilterFieldAllowedForTest exports the allowedFilterFields whitelist
@@ -43,7 +43,7 @@ func IsGroupByFieldAllowedForTest(dataSource, field string) bool {
 // handlers_test package, so group-by behavior can be verified against the
 // real query path instead of just the whitelist lookups above.
 func (a *App) GetGroupedDataForTest(orgID uuid.UUID, widget models.Widget, filters []FilterInput, start, end time.Time) []DataPoint {
-	return a.getGroupedData(orgID, widget, filters, start, end)
+	return a.getGroupedData(orgID, uuid.Nil, widget, filters, start, end)
 }
 
 // EnsureDefaultSalesOpportunityWidgetsForTest exports
@@ -51,4 +51,9 @@ func (a *App) GetGroupedDataForTest(orgID uuid.UUID, widget models.Widget, filte
 // package.
 func (a *App) EnsureDefaultSalesOpportunityWidgetsForTest(orgID uuid.UUID) error {
 	return a.ensureDefaultSalesOpportunityWidgets(orgID)
+}
+
+// ExecuteWidgetQueryForTest runs a widget as viewerID would see it.
+func (a *App) ExecuteWidgetQueryForTest(orgID, viewerID uuid.UUID, widget models.Widget, from, to string) (WidgetDataResponse, error) {
+	return a.executeWidgetQuery(orgID, viewerID, widget, from, to)
 }
