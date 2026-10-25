@@ -416,6 +416,9 @@ func (a *App) updateMessageStatus(whatsappMsgID, statusValue string, errors []We
 		a.Log.Debug("No message found for status update", "whats_app_message_id", whatsappMsgID)
 		return
 	}
+	// A message sent for a case's customer communication also advances that
+	// notification, with its own monotonic rules (duplicates are harmless).
+	a.syncNotificationFromStatus(&message, whatsappMsgID, statusValue, errors)
 
 	newStatus := models.MessageStatus(statusValue)
 	currentPriority := statusPriority(message.Status)
