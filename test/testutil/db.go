@@ -139,6 +139,7 @@ func runMigrations(db *gorm.DB) error {
 		&models.CallPermission{},
 		// CRM de ocorrências
 		&models.OccurrenceStage{},
+		&models.OccurrenceParticipant{},
 		&models.OccurrenceCategory{},
 		&models.OccurrenceSLAPolicy{},
 		&models.Occurrence{},

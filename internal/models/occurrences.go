@@ -34,16 +34,27 @@ const (
 // OccurrenceStage is one configurable column of the org's pipeline.
 type OccurrenceStage struct {
 	BaseModel
-	OrganizationID uuid.UUID `gorm:"type:uuid;index;not null;uniqueIndex:idx_occ_stage_org_name,where:deleted_at IS NULL" json:"organization_id"`
+	OrganizationID uuid.UUID `gorm:"type:uuid;index;not null" json:"organization_id"`
 
 	// Partial unique index, deliberately NOT total: this is config, not a
 	// customer-facing number. Deleting a stage must free its name for reuse —
 	// unlike ProtocolNumber below, nobody has a stage name written down.
-	Name      string `gorm:"size:100;not null;uniqueIndex:idx_occ_stage_org_name,where:deleted_at IS NULL" json:"name"`
+	Name      string `gorm:"size:100;not null" json:"name"`
 	Color     string `gorm:"size:20;default:'#6b7280'" json:"color"`
 	Position  int    `gorm:"not null;default:0" json:"position"`
 	IsInitial bool   `gorm:"default:false" json:"is_initial"`
 	IsClosing bool   `gorm:"default:false" json:"is_closing"`
+
+	// TeamID scopes the stage to one team; nil means the organization-wide
+	// pipeline every team shares. Name uniqueness is enforced by two partial
+	// indexes (see coreIndexes), one per scope.
+	TeamID *uuid.UUID `gorm:"type:uuid;index" json:"team_id,omitempty"`
+	// GeneralState ties the stage to one of the four general states, so the
+	// sidebar/board/dashboard stay consistent whatever a team names its steps.
+	GeneralState string `gorm:"size:20;default:'';index" json:"general_state"`
+	// AllowedFrom, when non-empty, lists the stage IDs a case may come from to
+	// enter this one. Empty means any stage of the same pipeline.
+	AllowedFrom []string `gorm:"serializer:json;type:jsonb" json:"allowed_from"`
 }
 
 func (OccurrenceStage) TableName() string { return "occurrence_stages" }
@@ -122,6 +133,12 @@ type Occurrence struct {
 	SLA               SLATracking `gorm:"embedded"`
 	FirstResponseByID *uuid.UUID  `gorm:"type:uuid" json:"first_response_by_id,omitempty"`
 
+	// GeneralState mirrors the current stage's general state (denormalized so
+	// counters and boards filter without a join). Kept in sync wherever StageID
+	// changes. ReopenedCount counts resolved -> open transitions.
+	GeneralState  string `gorm:"size:20;default:'';index" json:"general_state"`
+	ReopenedCount int    `gorm:"not null;default:0" json:"reopened_count"`
+
 	FirstResponseBy *User `gorm:"foreignKey:FirstResponseByID" json:"first_response_by,omitempty"`
 
 	// Relations
@@ -164,3 +181,32 @@ type OccurrenceCounter struct {
 }
 
 func (OccurrenceCounter) TableName() string { return "occurrence_counters" }
+
+// General states: the four categories every pipeline stage maps into.
+const (
+	GeneralStateNew             = "new"
+	GeneralStateInProgress      = "in_progress"
+	GeneralStateWaitingCustomer = "waiting_customer"
+	GeneralStateResolved        = "resolved"
+)
+
+// IsValidGeneralState reports whether s is one of the four general states.
+func IsValidGeneralState(s string) bool {
+	switch s {
+	case GeneralStateNew, GeneralStateInProgress, GeneralStateWaitingCustomer, GeneralStateResolved:
+		return true
+	}
+	return false
+}
+
+// OccurrenceParticipant grants one user read access to a case outside their
+// own team/unit scope (e.g. SAC following a case forwarded to Logistics).
+type OccurrenceParticipant struct {
+	BaseModel
+	OrganizationID uuid.UUID  `gorm:"type:uuid;index;not null" json:"organization_id"`
+	OccurrenceID   uuid.UUID  `gorm:"type:uuid;not null;uniqueIndex:idx_occ_participant" json:"occurrence_id"`
+	UserID         uuid.UUID  `gorm:"type:uuid;not null;uniqueIndex:idx_occ_participant;index" json:"user_id"`
+	AddedByID      *uuid.UUID `gorm:"type:uuid" json:"added_by_id,omitempty"`
+}
+
+func (OccurrenceParticipant) TableName() string { return "occurrence_participants" }

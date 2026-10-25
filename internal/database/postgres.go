@@ -134,6 +134,7 @@ func GetMigrationModels() []MigrationModel {
 
 		// CRM de ocorrências
 		{"OccurrenceStage", &models.OccurrenceStage{}},
+		{"OccurrenceParticipant", &models.OccurrenceParticipant{}},
 		{"OccurrenceCategory", &models.OccurrenceCategory{}},
 		{"OccurrenceWhatHappened", &models.OccurrenceWhatHappened{}},
 		{"OccurrenceSLAPolicy", &models.OccurrenceSLAPolicy{}},
@@ -312,6 +313,14 @@ func coreIndexes() []string {
 		`ALTER TABLE chatbot_sessions ALTER COLUMN phone_number TYPE varchar(50)`,
 		`ALTER TABLE agent_transfers ALTER COLUMN phone_number TYPE varchar(50)`,
 		`ALTER TABLE bulk_message_recipients ALTER COLUMN phone_number TYPE varchar(50)`,
+		// Occurrence stages: name uniqueness per scope (organization-wide vs team) and
+		// general-state backfill. Additive and idempotent; rows already classified are
+		// left alone, so admin edits survive a re-run.
+		`DROP INDEX IF EXISTS idx_occ_stage_org_name`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_occ_stage_org_name_org ON occurrence_stages(organization_id, name) WHERE team_id IS NULL AND deleted_at IS NULL`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_occ_stage_team_name ON occurrence_stages(organization_id, team_id, name) WHERE team_id IS NOT NULL AND deleted_at IS NULL`,
+		`UPDATE occurrence_stages SET general_state = CASE WHEN is_closing THEN 'resolved' WHEN is_initial THEN 'new' WHEN lower(name) = 'aguardando cliente' THEN 'waiting_customer' ELSE 'in_progress' END WHERE general_state = '' OR general_state IS NULL`,
+		`UPDATE occurrences o SET general_state = s.general_state FROM occurrence_stages s WHERE s.id = o.stage_id AND (o.general_state = '' OR o.general_state IS NULL)`,
 		// Indexes
 		`CREATE INDEX IF NOT EXISTS idx_messages_contact_created ON messages(contact_id, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id)`,
