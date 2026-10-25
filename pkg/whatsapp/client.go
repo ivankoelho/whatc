@@ -88,13 +88,13 @@ func (c *Client) doRequest(ctx context.Context, method, url string, body any, ac
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
+		return nil, &TransportError{Op: "request failed", Err: err}
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
+		return nil, &TransportError{Op: "failed to read response body", Err: err}
 	}
 
 	if resp.StatusCode != http.StatusOK {

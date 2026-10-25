@@ -427,6 +427,10 @@ func runServer(args []string) {
 	chatFilesCtx, chatFilesCancel := context.WithCancel(context.Background())
 	go app.RunChatAttachmentCleanup(chatFilesCtx, time.Hour)
 
+	// Customer communications of forwarded cases (templates via the case's logistics account)
+	notifierCtx, notifierCancel := context.WithCancel(context.Background())
+	go app.StartOccurrenceNotifier(notifierCtx)
+
 	// Start presence reaper (sweeps every 10s; grace is 60s)
 	presenceCtx, presenceCancel := context.WithCancel(context.Background())
 	go presenceReaper.Start(presenceCtx)
@@ -490,6 +494,7 @@ func runServer(args []string) {
 	lo.Info("Stopping SLA processor...")
 	slaCancel()
 	chatFilesCancel()
+	notifierCancel()
 	slaProcessor.Stop()
 	presenceCancel()
 	presenceReaper.Stop()
@@ -902,6 +907,8 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/occurrences/scope-audit/apply", app.ApplyOccurrenceScopeSuggestions)
 	g.PUT("/api/occurrences/{id}/scope", app.SetOccurrenceScope)
 	g.POST("/api/occurrences/{id}/reassign", app.ReassignOccurrence)
+	g.GET("/api/occurrences/{id}/notifications", app.ListOccurrenceNotifications)
+	g.POST("/api/occurrences/{id}/notifications/{nid}/resolve", app.ResolveOccurrenceNotification)
 	g.GET("/api/occurrences/{id}/participants", app.ListOccurrenceParticipants)
 	g.POST("/api/occurrences/{id}/participants", app.AddOccurrenceParticipant)
 	g.DELETE("/api/occurrences/{id}/participants/{userId}", app.RemoveOccurrenceParticipant)

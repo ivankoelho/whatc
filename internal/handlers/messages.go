@@ -80,6 +80,11 @@ type OutgoingMessageRequest struct {
 	// Reply context
 	ReplyToMessage *models.Message
 
+	// ExtraMetadata is merged into the stored message metadata (template sends).
+	// The automation worker uses it to tie the message to its notification, so a
+	// status webhook can find the notification even before the provider id is saved.
+	ExtraMetadata models.JSONB
+
 	// Origin says who produced the message, for the consumption ledger. Optional:
 	// when empty it is taken from ctx (usage.WithOrigin) or inferred from SentByUserID.
 	Origin usage.Origin
@@ -112,6 +117,11 @@ type MessageSendOptions struct {
 	// successful send. Used for chatbot replies so a bot-handled exchange
 	// doesn't leave an "unread" badge in the agent's contact list.
 	MarkIncomingRead bool
+
+	// OnResult, when set, is called once per send with the provider message id or
+	// the error, after the message row was updated. Lets a caller that needs the
+	// outcome (not only the stored status) reuse this sender instead of a copy.
+	OnResult func(wamid string, err error)
 }
 
 // DefaultSendOptions returns options suitable for agent UI sends
@@ -396,6 +406,9 @@ func (a *App) createOutgoingMessage(req OutgoingMessageRequest, opts MessageSend
 				"template_name": req.Template.Name,
 				"template_id":   req.Template.ID.String(),
 			}
+			for k, v := range req.ExtraMetadata {
+				msg.Metadata[k] = v
+			}
 			// Store header media so it renders in the chat bubble
 			if req.MediaURL != "" {
 				msg.MediaURL = req.MediaURL
@@ -498,6 +511,9 @@ func (a *App) buildInteractiveData(req OutgoingMessageRequest) models.JSONB {
 
 // finalizeMessageSend updates message status and triggers post-send actions
 func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageRequest, opts MessageSendOptions, wamid string, err error) {
+	if opts.OnResult != nil {
+		defer opts.OnResult(wamid, err)
+	}
 	// Use Where instead of Model(msg) to avoid mutating the shared msg struct,
 	// which may be read concurrently by the caller when sending is async.
 	if err != nil {

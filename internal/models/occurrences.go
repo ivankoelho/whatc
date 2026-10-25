@@ -24,6 +24,8 @@ const (
 	OccurrenceEventParticipantRemoved OccurrenceEventType = "participant_removed"
 	OccurrenceEventReopened           OccurrenceEventType = "reopened"
 	OccurrenceEventScopeRegularized   OccurrenceEventType = "scope_regularized"
+	// A customer communication milestone: Content is the notification status.
+	OccurrenceEventCustomerNotice OccurrenceEventType = "customer_notification"
 
 	OccurrenceEventProcessMessageUsed OccurrenceEventType = "process_message_used"
 )
@@ -341,6 +343,9 @@ type OccurrenceNotification struct {
 	NextAttemptAt *time.Time `gorm:"index" json:"next_attempt_at,omitempty"`
 	LockedAt      *time.Time `json:"locked_at,omitempty"`
 	LockedBy      string     `gorm:"size:80" json:"-"`
+	// RetryRequestedByID is set when a person asked for the next attempt; the
+	// attempt records it and clears it.
+	RetryRequestedByID *uuid.UUID `gorm:"type:uuid" json:"-"`
 
 	ProviderMessageID string     `gorm:"size:200;index" json:"provider_message_id,omitempty"`
 	MessageID         *uuid.UUID `gorm:"type:uuid" json:"message_id,omitempty"`

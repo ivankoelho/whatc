@@ -48,6 +48,27 @@ type MetaAPIError struct {
 // ParseError attempts to parse respBody as a Meta API error. If successful,
 // it returns a formatted error including code, message, details, and user message.
 // If parsing fails, it returns a generic error with the status code and raw body.
+// APIError is an error answer from the provider. Its text is the one
+// ParseMetaAPIError always produced; the type only adds the HTTP status so
+// callers can tell a refusal (4xx: nothing was sent) from a server fault (5xx:
+// the outcome is unknown).
+type APIError struct {
+	StatusCode int
+	Msg        string
+}
+
+func (e *APIError) Error() string { return e.Msg }
+
+// TransportError means the request may or may not have reached the provider:
+// the connection broke, timed out or the answer could not be read.
+type TransportError struct {
+	Op  string
+	Err error
+}
+
+func (e *TransportError) Error() string { return e.Op + ": " + e.Err.Error() }
+func (e *TransportError) Unwrap() error { return e.Err }
+
 func ParseMetaAPIError(statusCode int, respBody []byte) error {
 	var apiErr MetaAPIError
 	if err := json.Unmarshal(respBody, &apiErr); err == nil && apiErr.Error.Message != "" {
@@ -58,9 +79,9 @@ func ParseMetaAPIError(statusCode int, respBody []byte) error {
 		if apiErr.Error.ErrorUserMsg != "" {
 			errMsg += " - " + apiErr.Error.ErrorUserMsg
 		}
-		return fmt.Errorf("%s", errMsg)
+		return &APIError{StatusCode: statusCode, Msg: errMsg}
 	}
-	return fmt.Errorf("API returned status %d: %s", statusCode, string(respBody))
+	return &APIError{StatusCode: statusCode, Msg: fmt.Sprintf("API returned status %d: %s", statusCode, string(respBody))}
 }
 
 // TemplateResponse represents response from template submission

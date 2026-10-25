@@ -62,3 +62,9 @@ func FormatProcessDeadlineForTest(remaining time.Duration) string {
 func (a *App) NewForwardNotificationForTest(occ *models.Occurrence, contact *models.Contact) error {
 	return a.newForwardNotification(a.DB, occ, contact)
 }
+
+// UpdateMessageStatusForTest feeds one provider status through the same path the
+// status webhook uses.
+func (a *App) UpdateMessageStatusForTest(wamid, status string) {
+	a.updateMessageStatus(wamid, status, nil)
+}
