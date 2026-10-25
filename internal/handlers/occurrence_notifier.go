@@ -309,11 +309,20 @@ func clip(s string, n int) string {
 
 // notificationEvent writes the communication milestone on the case timeline.
 func (a *App) notificationEvent(n *models.OccurrenceNotification, status, reason string) {
-	a.DB.Create(&models.OccurrenceEvent{
+	ev := models.OccurrenceEvent{
 		OrganizationID: n.OrganizationID, OccurrenceID: n.OccurrenceID, Type: models.OccurrenceEventCustomerNotice,
 		Content: status,
 		Metadata: models.JSONB{"notification_id": n.ID.String(), "status": status, "reason": reason,
 			"account": n.WhatsAppAccount, "template": n.TemplateName},
+	}
+	if err := a.DB.Create(&ev).Error; err != nil {
+		return
+	}
+	// Live on the timeline for whoever may see the case.
+	a.broadcastOccurrence(n.OrganizationID, n.OccurrenceID, websocket.WSMessage{
+		Type: websocket.TypeOccurrenceEventCreated,
+		Payload: OccurrenceEventResponse{ID: ev.ID, OccurrenceID: ev.OccurrenceID, Type: string(ev.Type),
+			Content: ev.Content, Metadata: ev.Metadata, CreatedAt: ev.CreatedAt},
 	})
 }
 

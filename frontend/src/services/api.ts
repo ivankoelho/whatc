@@ -1596,7 +1596,7 @@ export interface OccurrenceCategory {
 export interface OccurrenceEvent {
   id: string
   occurrence_id: string
-  type: 'opened' | 'note' | 'stage_change' | 'assignment' | 'protocol_sent' | 'closed' | 'reply' | 'process_message_used'
+  type: 'opened' | 'note' | 'stage_change' | 'assignment' | 'protocol_sent' | 'closed' | 'reply' | 'process_message_used' | 'forwarded' | 'participant_added' | 'participant_removed' | 'reopened' | 'scope_regularized' | 'customer_notification'
   content: string
   metadata: Record<string, unknown> | null
   created_by_id?: string
@@ -2275,4 +2275,91 @@ export const whatsappRatesService = {
   create: (data: WhatsAppRateInput) => api.post<ApiEnvelope<WhatsAppRate>>('/whatsapp-rates', data),
   update: (id: string, data: WhatsAppRateInput) => api.put<ApiEnvelope<WhatsAppRate>>(`/whatsapp-rates/${id}`, data),
   delete: (id: string) => api.delete<ApiEnvelope<{ deleted: boolean }>>(`/whatsapp-rates/${id}`),
+}
+
+// --- Customer communication of a case (WhatsApp template sent by the case's account) ---
+
+export interface OccurrenceNotificationAttempt {
+  number: number
+  whatsapp_account: string
+  template_name: string
+  started_at: string
+  finished_at?: string
+  outcome: string
+  provider_message_id?: string
+  error?: string
+}
+
+export interface OccurrenceNotification {
+  id: string
+  status: 'prepared' | 'pending' | 'processing' | 'accepted' | 'delivered' | 'read' | 'failed' | 'uncertain' | 'cancelled' | 'skipped'
+  reason?: string
+  whatsapp_account: string
+  template_name: string
+  template_language: string
+  template_category?: string
+  attempts: number
+  max_attempts: number
+  provider_message_id?: string
+  last_error?: string
+  accepted_at?: string
+  delivered_at?: string
+  read_at?: string
+  next_attempt_at?: string
+  attempt_history: OccurrenceNotificationAttempt[]
+  can_retry: boolean
+  can_cancel: boolean
+}
+
+export interface OccurrenceAutomation {
+  id: string
+  unit_id?: string
+  unit_name?: string
+  team_id?: string
+  team_name?: string
+  event: string
+  whatsapp_account: string
+  template_name: string
+  template_language: string
+  fallback_template_name: string
+  is_active: boolean
+  max_attempts: number
+  retry_backoff_secs: number
+  on_failure: 'manual_retry' | 'cancel'
+  last_run_at?: string
+  last_status?: string
+  recent_failures: number
+}
+
+export const occurrenceNotificationsService = {
+  list: (occurrenceId: string) =>
+    api.get<ApiEnvelope<{ notifications: OccurrenceNotification[] }>>(`/occurrences/${occurrenceId}/notifications`),
+  resolve: (occurrenceId: string, notificationId: string, action: 'retry' | 'cancel', confirmDuplicateRisk = false) =>
+    api.post(`/occurrences/${occurrenceId}/notifications/${notificationId}/resolve`, {
+      action,
+      confirm_duplicate_risk: confirmDuplicateRisk,
+    }),
+}
+
+export const occurrenceAutomationsService = {
+  list: () => api.get<ApiEnvelope<{ configs: OccurrenceAutomation[] }>>('/occurrence-channel-config'),
+  save: (data: {
+    unit_id?: string
+    team_id?: string
+    whatsapp_account: string
+    template_name?: string
+    template_language?: string
+    fallback_template_name?: string
+    is_active?: boolean
+    max_attempts?: number
+    retry_backoff_secs?: number
+    on_failure?: 'manual_retry' | 'cancel'
+  }) => api.put<ApiEnvelope<OccurrenceAutomation>>('/occurrence-channel-config', data),
+  remove: (id: string) => api.delete(`/occurrence-channel-config/${id}`),
+}
+
+export const contactFinderService = {
+  // Locates a contact of the organization by phone or name; returns only id, number and name.
+  find: (q: string) =>
+    api.get<ApiEnvelope<{ contacts: { id: string; phone_number: string; profile_name: string; can_open_conversation: boolean }[] }>>('/contacts/find', { params: { q } }),
 }

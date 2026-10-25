@@ -7,6 +7,7 @@ import DetailPageLayout from '@/components/shared/DetailPageLayout.vue'
 import { IconButton, DeleteConfirmDialog } from '@/components/shared'
 import OccurrenceDocumentsCard from '@/components/crm/OccurrenceDocumentsCard.vue'
 import OccurrenceParticipantsCard from '@/components/crm/OccurrenceParticipantsCard.vue'
+import OccurrenceCommunicationCard from '@/components/crm/OccurrenceCommunicationCard.vue'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -89,6 +90,7 @@ const eventIcons: Record<string, any> = {
   participant_removed: UserPlus,
   reopened: ArrowRightLeft,
   scope_regularized: ClipboardList,
+  customer_notification: Send,
 }
 
 const priorityLabels: Record<string, string> = {
@@ -112,6 +114,7 @@ const eventLabels: Record<string, string> = {
   participant_removed: 'occurrences.eventParticipantRemoved',
   reopened: 'occurrences.eventReopened',
   scope_regularized: 'occurrences.eventScopeRegularized',
+  customer_notification: 'occurrences.eventCustomerNotice',
 }
 
 const breadcrumbs = computed(() => [
@@ -447,6 +450,8 @@ onUnmounted(() => {
 
         <OccurrenceParticipantsCard :occurrence-id="occurrence.id" :can-write="canWrite && (occurrence.can?.add_participant ?? true)" />
 
+        <OccurrenceCommunicationCard :occurrence-id="occurrence.id" />
+
         <!-- Timeline -->
         <Card>
           <CardHeader class="pb-3">
@@ -466,7 +471,8 @@ onUnmounted(() => {
                   <span v-if="event.created_by_name" class="text-xs text-muted-foreground">{{ event.created_by_name }}</span>
                   <span class="text-xs text-muted-foreground">{{ formatDateTime(event.created_at) }}</span>
                 </div>
-                <p v-if="event.content" class="text-sm mt-1 whitespace-pre-wrap">{{ event.content }}</p>
+                <p v-if="event.type === 'customer_notification'" class="text-sm mt-1">{{ $t('occurrences.notice.' + event.content) }}</p>
+                <p v-else-if="event.content" class="text-sm mt-1 whitespace-pre-wrap">{{ event.content }}</p>
               </div>
             </div>
 

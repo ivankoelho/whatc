@@ -14,6 +14,7 @@ import OccurrenceDocumentsEditor from '@/components/crm/OccurrenceDocumentsEdito
 import { type DocumentDraft, newDocumentDraft, isBlankDraft, draftToInput, documentsSummary } from '@/lib/occurrence-documents'
 import {
   contactsService,
+  contactFinderService,
   occurrenceDocumentsService,
   occurrencesService,
   unitsService,
@@ -69,9 +70,22 @@ async function searchContact(value: string) {
   if (value.trim().length < 8) return
   searching.value = true
   try {
-    const res = await contactsService.list({ search: value.trim(), limit: 1 })
-    const data = (res.data as any).data || res.data
-    const contacts: Contact[] = data.contacts || []
+    // The finder returns only id, number and name for any contact of the
+    // organization, even when another agent holds the chat. Roles that cannot use
+    // it fall back to the regular (conversation-scoped) list.
+    let contacts: Contact[] = []
+    try {
+      const res = await contactFinderService.find(value.trim())
+      const data = (res.data as any).data || res.data
+      const all = (data.contacts || []) as Contact[]
+      const typed = value.replace(/\D/g, '')
+      // Prefer the exact number over a partial match.
+      contacts = [all.find(c => (c.phone_number || '').replace(/\D/g, '') === typed) || all[0]].filter(Boolean) as Contact[]
+    } catch {
+      const res = await contactsService.list({ search: value.trim(), limit: 1 })
+      const data = (res.data as any).data || res.data
+      contacts = data.contacts || []
+    }
     foundContact.value = contacts[0] || null
   } catch {
     // Busca é uma conveniência; falha nela não deve travar o formulário.
