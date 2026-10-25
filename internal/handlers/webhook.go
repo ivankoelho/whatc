@@ -31,7 +31,7 @@ func (a *App) WebhookVerify(r *fastglue.Request) error {
 	}
 
 	// First check against global config token
-	if token == a.Config.WhatsApp.WebhookVerifyToken && token != "" {
+	if token != "" && equalConstTime(token, a.Config.WhatsApp.WebhookVerifyToken) {
 		a.Log.Info("Webhook verified successfully (global token)")
 		r.RequestCtx.SetStatusCode(fasthttp.StatusOK)
 		r.RequestCtx.SetBodyString(challenge)
@@ -41,14 +41,14 @@ func (a *App) WebhookVerify(r *fastglue.Request) error {
 	// Then check against tokens stored in WhatsApp accounts
 	var account models.WhatsAppAccount
 	result := a.DB.Where("webhook_verify_token = ?", token).First(&account)
-	if result.Error == nil {
+	if token != "" && result.Error == nil && equalConstTime(token, account.WebhookVerifyToken) {
 		a.Log.Info("Webhook verified successfully (account token)", "account", account.Name)
 		r.RequestCtx.SetStatusCode(fasthttp.StatusOK)
 		r.RequestCtx.SetBodyString(challenge)
 		return nil
 	}
 
-	a.Log.Warn("Webhook verification failed - token not found", "token", token)
+	a.Log.Warn("Webhook verification failed - token not found")
 	return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Verification failed", nil, "")
 }
 
@@ -174,27 +174,11 @@ func (a *App) WebhookHandler(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid payload", nil, "")
 	}
 
-	// Verify webhook signature before processing any fields.
-	// Find a phoneNumberID from any change to look up the account's AppSecret.
-	if len(signature) > 0 {
-		for _, entry := range payload.Entry {
-			for _, change := range entry.Changes {
-				phoneNumberID := change.Value.Metadata.PhoneNumberID
-				if phoneNumberID == "" {
-					continue
-				}
-				account, err := a.getWhatsAppAccountCached(phoneNumberID)
-				if err != nil || account.AppSecret == "" {
-					continue
-				}
-				if !verifyWebhookSignature(body, signature, []byte(account.AppSecret)) {
-					a.Log.Warn("Invalid webhook signature", "phone_id", phoneNumberID)
-					return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Invalid signature", nil, "")
-				}
-				a.Log.Debug("Webhook signature verified successfully")
-				break
-			}
-		}
+	// Nothing below runs, and no state changes, unless the body was signed by the
+	// Meta app that owns every account it refers to (see authenticateWebhook).
+	if reason := a.authenticateWebhook(body, signature, &payload); reason != "" {
+		a.Log.Warn("Webhook rejected", "reason", reason, "bytes", len(body))
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Invalid signature", nil, "")
 	}
 
 	// Process each entry

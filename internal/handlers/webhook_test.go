@@ -197,6 +197,7 @@ func webhookTestData(t *testing.T, app *App, msgStatus models.MessageStatus) (mo
 		PhoneID:        "phone-" + uid,
 		BusinessID:     "biz-" + uid,
 		AccessToken:    "token",
+		AppSecret:      testWebhookSecret,
 	}
 	require.NoError(t, app.DB.Create(&waAccount).Error)
 
@@ -556,6 +557,7 @@ func TestWebhookHandler_smb_message_echoes(t *testing.T) {
 		PhoneID:        "phone-echo-" + uid,
 		BusinessID:     "biz-echo-" + uid,
 		AccessToken:    "token",
+		AppSecret:      testWebhookSecret,
 	}
 	require.NoError(t, app.DB.Create(&waAccount).Error)
 
@@ -590,6 +592,7 @@ func TestWebhookHandler_smb_message_echoes(t *testing.T) {
 	req.RequestCtx.Request.Header.SetMethod("POST")
 	req.RequestCtx.Request.Header.SetContentType("application/json")
 	req.RequestCtx.Request.SetBody(body)
+	req.RequestCtx.Request.Header.Set("X-Hub-Signature-256", signTestWebhook(body))
 
 	// Execute WebhookHandler
 	require.NoError(t, app.WebhookHandler(req))
@@ -629,6 +632,7 @@ func TestWebhookHandler_smb_app_state_sync(t *testing.T) {
 		PhoneID:        "phone-sync-" + uid,
 		BusinessID:     "biz-sync-" + uid,
 		AccessToken:    "token",
+		AppSecret:      testWebhookSecret,
 	}
 	require.NoError(t, app.DB.Create(&waAccount).Error)
 
@@ -657,6 +661,7 @@ func TestWebhookHandler_smb_app_state_sync(t *testing.T) {
 	req.RequestCtx.Request.Header.SetMethod("POST")
 	req.RequestCtx.Request.Header.SetContentType("application/json")
 	req.RequestCtx.Request.SetBody(bodyAdd)
+	req.RequestCtx.Request.Header.Set("X-Hub-Signature-256", signTestWebhook(bodyAdd))
 
 	require.NoError(t, app.WebhookHandler(req))
 
@@ -691,6 +696,7 @@ func TestWebhookHandler_smb_app_state_sync(t *testing.T) {
 	reqRemove.RequestCtx.Request.Header.SetMethod("POST")
 	reqRemove.RequestCtx.Request.Header.SetContentType("application/json")
 	reqRemove.RequestCtx.Request.SetBody(bodyRemove)
+	reqRemove.RequestCtx.Request.Header.Set("X-Hub-Signature-256", signTestWebhook(bodyRemove))
 
 	require.NoError(t, app.WebhookHandler(reqRemove))
 
@@ -704,4 +710,14 @@ func TestWebhookHandler_smb_app_state_sync(t *testing.T) {
 	err := app.DB.Where("organization_id = ? AND phone_number = ?", org.ID, "559199997777").First(&checkDeleted).Error
 	assert.Error(t, err, "contact should have been soft-deleted and not found by standard query")
 	assert.True(t, checkUnscoped.DeletedAt.Valid, "DeletedAt should be populated")
+}
+
+// The webhook endpoint only accepts signed bodies, so these tests sign theirs
+// with the App Secret of the account they create.
+const testWebhookSecret = "test-app-secret-for-webhook-tests"
+
+func signTestWebhook(body []byte) string {
+	mac := hmac.New(sha256.New, []byte(testWebhookSecret))
+	mac.Write(body)
+	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
 }
