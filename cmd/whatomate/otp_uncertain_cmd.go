@@ -29,7 +29,7 @@ func runOTPUncertain(args []string) {
 	release := fs.String("release", "", "Recipient id to release after reconciliation")
 	apply := fs.Bool("apply", false, "Write the release (default: check and report only)")
 	confirm := fs.Bool("confirm-not-delivered", false, "Declare that you verified the code was NOT delivered to the customer")
-	operator := fs.String("operator", "", "E-mail of the administrator releasing it (a real user of the campaign's organization)")
+	operator := fs.String("operator", "", "E-mail of the administrator declared as releasing it (a real user of the campaign's organization; NOT authenticated: the audit records a declared operator)")
 	reason := fs.String("reason", "", "Why the code is known not to have been delivered (audited; never write a code here)")
 	_ = fs.Parse(args)
 
@@ -78,5 +78,5 @@ func runOTPUncertain(args []string) {
 		fmt.Printf("Dry run: every check passed; would release recipient %s (nothing written). Add -apply to do it.\n", id)
 		return
 	}
-	fmt.Printf("Released recipient %s and audited it. retry-failed may now send it again; nothing was queued.\n", id)
+	fmt.Printf("Released recipient %s and audited it under the DECLARED operator %s (the identity is not authenticated). retry-failed may now send it again; nothing was queued.\n", id, *operator)
 }

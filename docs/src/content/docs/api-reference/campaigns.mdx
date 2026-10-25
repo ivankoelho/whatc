@@ -268,7 +268,15 @@ guarantees locally for authentication campaigns:
   process is killed before the answer arrives, the claim stays and is resolved as
   `delivery_uncertain`.
 - A confirmed send is recorded on the message created by the claim (no duplicate messages),
-  and delivery and read receipts update it as for any message.
+  and delivery and read receipts update it as for any message. The stored code is cleared
+  by the **same write** that records the send, so a code is never kept after a confirmed
+  send and a separate, later statement can never erase the code of a newer attempt. If
+  that write fails, nothing is committed and the code stays (the claim is resolved as
+  uncertain, never resent). Uncertain, refused and `otp_unavailable` states keep the code.
+- Each send attempt is its own message record, and finished attempts stay in the history
+  as `failed`. `retry-failed` never turns them back into `pending`; a new attempt creates
+  a new record, and the campaign's failed counter counts only what is still failed
+  (recipients with an uncertain delivery).
 
 #### Reconciling an uncertain delivery
 
@@ -286,6 +294,18 @@ whatomate otp-uncertain -release <recipient-id> -operator admin@example.com \
 - `-operator` must be a **real, active user of the campaign's organization** with the
   `campaigns:write` permission (or a super admin). The reason is audited and must not
   contain a code.
+- **`-operator` does not authenticate anyone.** It is an e-mail typed on a command line:
+  the tool checks that it names a user who is allowed to edit campaigns, but it cannot
+  know who is actually at the keyboard. The audit entry therefore records a **declared**
+  operator, not necessarily the person who ran the command, and must not be treated as
+  proof of who authorized a resend.
+- The local release needs administrative access to the server and to the database (the
+  command reads the application's configuration and writes to PostgreSQL directly). That
+  reduces who can run it; it does not give a trustworthy record of who did. A release
+  that is authenticated and attributed to the signed-in user through the API **is not
+  implemented yet**. Until it is, treat releasing as a controlled operational action
+  (restricted accounts on the server, a ticket or second approver outside the tool), and
+  decide deliberately whether to allow it at all in production.
 - It refuses when the code is no longer valid (or no longer stored).
 - The release is a compare-and-set and an entry in the audit log (operator, recipient,
   campaign, date, reason) written in the **same transaction**: no audit, no release.
