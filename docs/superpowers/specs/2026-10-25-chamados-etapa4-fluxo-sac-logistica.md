@@ -61,3 +61,21 @@ Contadores, gráficos, agrupamentos e tabela dos widgets da fonte `occurrences` 
 ## Fora desta entrega
 
 Envio automático de template, integração SULTS/GLPI, `ContactStatus` "Aguardando cliente" no chat, vínculo do chat interno ao chamado, tela de fila de regularização (a API existe), busca de contato entre conversas de outros agentes.
+
+## Testes intermitentes — investigação (A4)
+
+**Causa confirmada para a maior parte: duas execuções de teste na mesma base.** `TEST_DATABASE_URL` aponta por padrão para `whatomate_test` e `TEST_REDIS_URL` para o Redis `/0`. Outra sessão de trabalho roda `go test ./... -p 1` e `go test -race ./internal/handlers/...` em um contêiner (`golang:1.26`, `run.sh`) contra **a mesma base e o mesmo Redis** (`host.docker.internal:5432/whatomate_test`, `redis://…/0`).
+
+Evidências:
+- Com minha suíte parada, `pg_stat_activity` mostrava conexões **ativas** (`commit`) em `whatomate_test` vindas de outro processo, e `docker exec … ps` mostrava o `handlers.test` do outro contêiner.
+- Suíte completa em `whatomate_test` durante a execução concorrente: **283 falhas**, com `deadlock detected (SQLSTATE 40P01)` e violações de FK `fk_contacts_messages` (linhas apagadas por outro processo no meio do teste) e estouro do timeout de 10 min.
+- A mesma suíte em base e Redis privados (`whatomate_test_profiles`, `redis://…/5`): **0 deadlocks e só 4 falhas** (abaixo). O pacote `internal/usage` passou (45 s). `Sweep` varre mensagens de **todas** as organizações, então linhas de outra execução entram na conta; `TestSweep_ConcurrentPassesNeverDuplicate` e `TestRecord_UnitAttribution…` não reproduziram em 15 execuções isoladas nem com 24 laços de CPU: coincidem com execuções concorrentes na base compartilhada (correlação forte, sem reprodução controlada do defeito).
+
+**Falha que persiste sob carga, por desenho do teste:** `TestPhaseA_Concurrency_NoDeadlockUnderMixedWrites` exige mais de 100 operações numa janela fixa ("the storm actually ran"); com o contêiner a 100 % de CPU houve 92. É um limite de vazão dependente da máquina, não um deadlock (nenhum foi detectado). Passa isolada e com a máquina livre. Recomendação: trocar o piso fixo por um mínimo pequeno ou por contagem de operações, em outra mudança.
+
+**Falhas identificadas separadamente, sem relação com esta entrega:**
+- `TestServeLoginBackground_RejectsSymlink` e `TestApp_ServeMedia_RejectsSymlink`: criação de symlink exige privilégio no Windows (falham também no commit base `8ea43948`).
+- `TestUpdateContactChatbotMessage_SetsTimestampAndResetsReminder`: falha em `development` limpo neste ambiente (registrada antes).
+
+**Como evitar:** cada sessão usa a sua base e o seu Redis, por exemplo
+`TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5432/whatomate_test_<sessao>?sslmode=disable` e `TEST_REDIS_URL=redis://localhost:6379/<n>` (o contêiner `whatomate_test_pg` aceita `CREATE DATABASE`). O servidor de desenvolvimento usa o Redis `/0`: não compartilhe com os testes.
