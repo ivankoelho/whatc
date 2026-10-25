@@ -18,6 +18,13 @@ const (
 	OccurrenceEventProtocolSent OccurrenceEventType = "protocol_sent"
 	OccurrenceEventClosed       OccurrenceEventType = "closed"
 
+	// Forwarding and collaboration trail (SAC to team hand-off).
+	OccurrenceEventForwarded          OccurrenceEventType = "forwarded"
+	OccurrenceEventParticipantAdded   OccurrenceEventType = "participant_added"
+	OccurrenceEventParticipantRemoved OccurrenceEventType = "participant_removed"
+	OccurrenceEventReopened           OccurrenceEventType = "reopened"
+	OccurrenceEventScopeRegularized   OccurrenceEventType = "scope_regularized"
+
 	OccurrenceEventProcessMessageUsed OccurrenceEventType = "process_message_used"
 )
 

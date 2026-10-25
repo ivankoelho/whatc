@@ -324,6 +324,7 @@ func coreIndexes() []string {
 		// Cases attended by a team keep that team as their scope: a fact recorded on the
 		// source transfer, filled only where still empty. Cases without one stay restricted.
 		`UPDATE occurrences o SET team_id = t.team_id FROM agent_transfers t WHERE o.source_transfer_id = t.id AND o.team_id IS NULL AND t.team_id IS NOT NULL`,
+		`UPDATE occurrences o SET unit_id = t.unit_id FROM teams t WHERE o.team_id = t.id AND o.unit_id IS NULL AND t.unit_id IS NOT NULL`,
 		// Indexes
 		`CREATE INDEX IF NOT EXISTS idx_messages_contact_created ON messages(contact_id, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id)`,

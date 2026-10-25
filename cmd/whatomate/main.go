@@ -897,6 +897,9 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	// CRM — ocorrências
 	g.GET("/api/occurrences", app.ListOccurrences)
 	g.GET("/api/occurrences/summary", app.GetOccurrencesSummary)
+	g.GET("/api/occurrences/scope-audit", app.GetOccurrenceScopeAudit)
+	g.POST("/api/occurrences/scope-audit/apply", app.ApplyOccurrenceScopeSuggestions)
+	g.PUT("/api/occurrences/{id}/scope", app.SetOccurrenceScope)
 	g.POST("/api/occurrences", app.CreateOccurrence)
 	g.GET("/api/contacts/{id}/occurrences", app.ListContactOccurrences)
 	g.GET("/api/occurrences/{id}", app.GetOccurrence)
