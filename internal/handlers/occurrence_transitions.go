@@ -46,7 +46,7 @@ func (a *App) ChangeOccurrenceStage(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
-	occ, acc, err := a.loadOccurrenceWithAccess(r, orgID, userID, true)
+	occ, acc, err := a.loadOccurrenceWithAccess(r, orgID, userID, false)
 	if err != nil {
 		return nil
 	}
@@ -73,13 +73,19 @@ func (a *App) ChangeOccurrenceStage(r *fastglue.Request) error {
 
 	isAssignee := occ.AssignedUserID != nil && *occ.AssignedUserID == userID
 	ownCase := occ.AssignedUserID == nil && occ.TeamID == nil && occ.OpenedByUserID == userID
-	if !acc.supervisor && !isAssignee && !ownCase {
-		if occ.AssignedUserID == nil {
+	privileged := acc.supervisor || isAssignee || ownCase
+	if !privileged {
+		switch {
+		case acc.interact && occ.AssignedUserID == nil:
 			return r.SendErrorEnvelope(fasthttp.StatusConflict,
 				"Claim the occurrence before changing its stage", nil, "")
+		case acc.interact:
+			return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+				"Only the assignee or a supervisor can change this occurrence's stage", nil, "")
+		case !acc.caps[models.OccurrenceCapChangeStatus] && !acc.caps[models.OccurrenceCapResolve]:
+			return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+				"You cannot change this occurrence's stage", nil, "")
 		}
-		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
-			"Only the assignee or a supervisor can change this occurrence's stage", nil, "")
 	}
 
 	if !stageApplies(target, occ.TeamID) {
@@ -99,6 +105,17 @@ func (a *App) ChangeOccurrenceStage(r *fastglue.Request) error {
 
 	toState, fromState := target.EffectiveState(), from.EffectiveState()
 	reopened := fromState == models.GeneralStateResolved && toState != models.GeneralStateResolved
+
+	// A participant moves the case only as far as it was granted: concluding or
+	// reopening is "resolve"; every other move is "change_status".
+	if !privileged && !acc.interact {
+		touchesResolved := toState == models.GeneralStateResolved || fromState == models.GeneralStateResolved
+		if (touchesResolved && !acc.caps[models.OccurrenceCapResolve]) ||
+			(!touchesResolved && !acc.caps[models.OccurrenceCapChangeStatus]) {
+			return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+				"You are not allowed to make this stage change", nil, "")
+		}
+	}
 
 	updates := map[string]any{"stage_id": target.ID, "general_state": toState}
 	if toState == models.GeneralStateResolved {
@@ -158,6 +175,14 @@ func (a *App) ChangeOccurrenceStage(r *fastglue.Request) error {
 		})
 	} else {
 		a.Log.Error("Failed to create stage-change event", "error", err)
+	}
+
+	if reopened {
+		a.DB.Create(&models.OccurrenceEvent{
+			OrganizationID: orgID, OccurrenceID: occ.ID, Type: models.OccurrenceEventReopened,
+			Content: from.Name + " → " + target.Name, CreatedByID: &userID,
+			Metadata: models.JSONB{"reopened_count": occ.ReopenedCount},
+		})
 	}
 
 	if toState == models.GeneralStateResolved {

@@ -19,9 +19,13 @@ func (a *App) ClaimOccurrence(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
-	occ, err := a.loadAuthorizedOccurrence(r, orgID, userID, true)
+	occ, acc, err := a.loadOccurrenceWithAccess(r, orgID, userID, false)
 	if err != nil {
 		return nil
+	}
+
+	if !acc.can(models.OccurrenceCapClaim) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You cannot claim this occurrence", nil, "")
 	}
 
 	res := a.DB.Model(&models.Occurrence{}).
