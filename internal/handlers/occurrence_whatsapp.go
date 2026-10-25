@@ -93,7 +93,10 @@ func (a *App) GetOccurrenceWhatsApp(r *fastglue.Request) error {
 	}
 
 	var rows []models.Message
-	a.DB.Where("organization_id = ? AND contact_id = ? AND whats_app_account = ?", orgID, occ.ContactID, account.Name).
+	// Only what happened since THIS case was opened: the customer's earlier
+	// exchanges on the channel (other cases, other subjects) are not part of it.
+	a.DB.Where("organization_id = ? AND contact_id = ? AND whats_app_account = ? AND created_at >= ?",
+		orgID, occ.ContactID, account.Name, occ.OpenedAt.Add(-time.Minute)).
 		Order("created_at DESC").Limit(50).Find(&rows)
 	msgs := make([]caseWhatsAppMessage, len(rows))
 	for i := range rows {

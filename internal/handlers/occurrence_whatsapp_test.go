@@ -35,6 +35,14 @@ func TestCaseWhatsApp_ConversationIsForThoseWhoWorkTheCase(t *testing.T) {
 	assert.Contains(t, body, `"restricted":true`)
 	assert.NotContains(t, body, "messages")
 	assert.NotContains(t, body, "Olá")
+	// What the customer exchanged on this channel BEFORE the case existed is not part of it.
+	old := &models.Message{BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: w.org.ID,
+		WhatsAppAccount: w.account.Name, ContactID: w.contactOf(t), Direction: models.DirectionOutgoing, MessageType: models.MessageTypeText,
+		Content: "ASSUNTO-ANTIGO-OUTRO-CHAMADO", Status: models.MessageStatusRead}
+	require.NoError(t, w.app.DB.Create(old).Error)
+	require.NoError(t, w.app.DB.Model(old).Update("created_at", time.Now().Add(-48*time.Hour)).Error)
+	_, oldBody := get(w.logPorto.ID)
+	assert.NotContains(t, oldBody, "ASSUNTO-ANTIGO-OUTRO-CHAMADO")
 	// Another store cannot even ask.
 	code, _ = get(w.logOutra.ID)
 	assert.Equal(t, fasthttp.StatusForbidden, code)
