@@ -15,8 +15,8 @@ import { type DocumentDraft, newDocumentDraft, isBlankDraft, draftToInput, docum
 import {
   contactsService,
   occurrenceDocumentsService,
+  occurrencesService,
   unitsService,
-  teamsService,
   occurrenceCategoriesService,
   occurrenceWhatHappenedService,
   occurrenceProcessesService,
@@ -99,14 +99,14 @@ const saleChannel = ref('')
 const unitId = ref('')
 const units = ref<Unit[]>([])
 // Forwarding: the case goes to a team's queue without an owner (see the
-// backend's forwarding rules). Teams are listed only for roles that may read them.
+// backend's forwarding rules). The picker comes from /occurrences/forward-targets.
 const teamId = ref('')
 const orderRef = ref('')
-const teams = ref<{ id: string; name: string }[]>([])
+const teams = ref<{ id: string; name: string; unit_name?: string }[]>([])
 async function fetchTeams() {
   try {
-    const res = await teamsService.list({ limit: 500 })
-    teams.value = (((res.data as any).data || res.data).teams || []).filter((tm: any) => tm.is_active !== false)
+    const res = await occurrencesService.forwardTargets()
+    teams.value = ((res.data as any).data || res.data).targets || []
   } catch { /* no access: the picker stays hidden */ }
 }
 onMounted(fetchTeams)
@@ -482,7 +482,7 @@ function goToProtocol() {
             <Label>{{ t('occurrences.forwardTeam') }}</Label>
             <select v-model="teamId" class="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="forward-team">
               <option value="">{{ t('occurrences.forwardTeamNone') }}</option>
-              <option v-for="tm in teams" :key="tm.id" :value="tm.id">{{ tm.name }}</option>
+              <option v-for="tm in teams" :key="tm.id" :value="tm.id">{{ tm.unit_name ? `${tm.name} — ${tm.unit_name}` : tm.name }}</option>
             </select>
             <p v-if="teamId" class="text-xs text-muted-foreground">{{ t('occurrences.forwardTeamHint') }}</p>
           </div>

@@ -344,7 +344,7 @@ onUnmounted(() => {
     >
       <template #actions>
         <div v-if="occurrence" class="flex items-center gap-2">
-          <Select :model-value="occurrence.stage_id" @update:model-value="handleStageChange($event as string)">
+          <Select :model-value="occurrence.stage_id" :disabled="!!occurrence.can && !occurrence.can.change_status && !occurrence.can.resolve" @update:model-value="handleStageChange($event as string)">
             <SelectTrigger class="w-48">
               <SelectValue :placeholder="$t('occurrences.selectStage')" />
             </SelectTrigger>
@@ -360,7 +360,7 @@ onUnmounted(() => {
               {{ $t('chat.openConversation') }}
             </RouterLink>
           </Button>
-          <Button v-if="canWrite && !occurrence.assigned_user_id" size="sm" data-testid="claim-occurrence" :disabled="isClaiming" @click="claimOccurrence">
+          <Button v-if="canWrite && !occurrence.assigned_user_id && (occurrence.can?.claim ?? true)" size="sm" data-testid="claim-occurrence" :disabled="isClaiming" @click="claimOccurrence">
             <Loader2 v-if="isClaiming" class="h-4 w-4 mr-2 animate-spin" />
             <UserPlus v-else class="h-4 w-4 mr-2" />
             {{ $t('occurrences.claim') }}
@@ -417,7 +417,7 @@ onUnmounted(() => {
                 <span class="text-muted-foreground text-xs">{{ $t('occurrences.assigneeLabel') }}</span>
                 <Select
                   :model-value="assigneeSelectValue"
-                  :disabled="isUpdatingAssignee"
+                  :disabled="isUpdatingAssignee || (!!occurrence.can && !occurrence.can.reassign && !occurrence.can.claim)"
                   @update:model-value="handleAssigneeChange($event as string)"
                 >
                   <SelectTrigger class="h-8 mt-1 -ml-2.5 border-none shadow-none px-2.5">
@@ -428,6 +428,10 @@ onUnmounted(() => {
                     <SelectItem v-for="u in activeUsers" :key="u.id" :value="u.id">
                       {{ u.full_name }}
                     </SelectItem>
+                    <!-- Roles without users:read have no user list: still show who owns the case. -->
+					<SelectItem v-if="occurrence.assigned_user_id && !activeUsers.some(u => u.id === occurrence!.assigned_user_id)" :value="occurrence.assigned_user_id">
+					  {{ occurrence.assigned_user_name }}
+					</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -441,7 +445,7 @@ onUnmounted(() => {
 
         <OccurrenceDocumentsCard :occurrence-id="occurrence.id" :can-write="canWrite" />
 
-        <OccurrenceParticipantsCard :occurrence-id="occurrence.id" :can-write="canWrite" />
+        <OccurrenceParticipantsCard :occurrence-id="occurrence.id" :can-write="canWrite && (occurrence.can?.add_participant ?? true)" />
 
         <!-- Timeline -->
         <Card>
@@ -467,7 +471,7 @@ onUnmounted(() => {
             </div>
 
             <!-- Add note (internal) -->
-            <div class="mt-6 space-y-2">
+            <div v-if="occurrence.can?.comment ?? true" class="mt-6 space-y-2">
               <div>
                 <p class="text-sm font-medium">{{ $t('occurrences.internalNoteTitle') }}</p>
                 <p class="text-xs text-muted-foreground">{{ $t('occurrences.internalNoteHint') }}</p>
@@ -486,7 +490,7 @@ onUnmounted(() => {
         </Card>
 
         <!-- Reply to customer (sent via WhatsApp) -->
-        <Card v-if="canWrite" class="border-primary/40">
+        <Card v-if="canWrite && (occurrence.can?.reply ?? true)" class="border-primary/40">
           <CardHeader class="pb-3">
             <CardTitle class="text-sm font-medium">{{ $t('occurrences.replyTitle') }}</CardTitle>
             <p class="text-xs text-muted-foreground">{{ $t('occurrences.replyHint') }}</p>

@@ -151,3 +151,25 @@ func (w *isoWorld) listContainsState(t *testing.T, userID uuid.UUID, state strin
 	}
 	return false
 }
+
+func TestForwardTargets_ListOrgTeamsOnlyAndNeedsWritePermission(t *testing.T) {
+	w := newIsoWorld(t)
+	other := newIsoWorld(t)
+	get := func(user uuid.UUID) (int, string) {
+		req := testutil.NewGETRequest(t)
+		testutil.SetAuthContext(req, w.org.ID, user)
+		require.NoError(t, w.app.ListForwardTargets(req))
+		return testutil.GetResponseStatusCode(req), string(testutil.GetResponseBody(req))
+	}
+	code, body := get(w.sac.ID)
+	require.Equal(t, fasthttp.StatusOK, code)
+	assert.Contains(t, body, w.teamPorto.ID.String(), "the SAC can pick another store's team")
+	assert.Contains(t, body, w.unitPorto.Name)
+	assert.NotContains(t, body, other.teamPorto.ID.String(), "teams of another organization never show")
+	assert.NotContains(t, body, "members")
+
+	reader := testutil.CreateTestRoleWithKeys(t, w.app.DB, w.org.ID, "leitor"+uuid.NewString()[:4], []string{"occurrences:read"})
+	u := testutil.CreateTestUser(t, w.app.DB, w.org.ID, testutil.WithRoleID(&reader.ID))
+	code, _ = get(u.ID)
+	assert.Equal(t, fasthttp.StatusForbidden, code)
+}

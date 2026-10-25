@@ -1541,6 +1541,7 @@ export interface Occurrence {
   general_state?: string
   team_id?: string
   reopened_count?: number
+  can?: Record<string, boolean>
   priority: 'low' | 'normal' | 'high' | 'urgent'
   assigned_user_id?: string
   assigned_user_name?: string
@@ -1693,6 +1694,8 @@ export const occurrencesService = {
     api.post<ApiEnvelope<OccurrenceParticipant>>(`/occurrences/${id}/participants`, { user_id: userId, capabilities }),
   removeParticipant: (id: string, userId: string) =>
     api.delete<ApiEnvelope<{ removed: boolean }>>(`/occurrences/${id}/participants/${userId}`),
+  forwardTargets: () =>
+    api.get<ApiEnvelope<{ targets: { id: string; name: string; unit_id?: string; unit_name?: string }[] }>>('/occurrences/forward-targets'),
   summary: (params?: Record<string, string>) =>
     api.get<ApiEnvelope<{ counts: Record<string, number>; total: number }>>('/occurrences/summary', { params }),
   // The ONLY way to send a public message from an occurrence: also stamps the first-response SLA.
@@ -1798,6 +1801,8 @@ export const salesOpportunitiesService = {
   list: (params?: Record<string, string>) =>
     api.get<ApiEnvelope<{ opportunities: SalesOpportunity[]; total: number; has_more: boolean }>>('/sales-opportunities', { params }),
   /** Indicators, scoped like the list; params: assigned_user_id, unit_id, from, to. */
+  forwardTargets: () =>
+    api.get<ApiEnvelope<{ targets: { id: string; name: string; unit_id?: string; unit_name?: string }[] }>>('/occurrences/forward-targets'),
   summary: (params?: Record<string, string>) =>
     api.get<ApiEnvelope<SalesSummary>>('/sales-opportunities/summary', { params }),
   scope: () => api.get<ApiEnvelope<SalesScopeInfo>>('/sales-opportunities/scope'),

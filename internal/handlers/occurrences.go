@@ -68,6 +68,8 @@ type OccurrenceResponse struct {
 	GeneralState     string     `json:"general_state"`
 	TeamID           *uuid.UUID `json:"team_id,omitempty"`
 	ReopenedCount    int        `json:"reopened_count"`
+	// Can is filled only by GetOccurrence: what the viewer may do on this case.
+	Can map[string]bool `json:"can,omitempty"`
 	Priority         string     `json:"priority"`
 	AssignedUserID   *uuid.UUID `json:"assigned_user_id,omitempty"`
 	AssignedUserName string     `json:"assigned_user_name,omitempty"`
@@ -758,12 +760,14 @@ func (a *App) GetOccurrence(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
-	occ, err := a.loadAuthorizedOccurrence(r, orgID, userID, false)
+	occ, acc, err := a.loadOccurrenceWithAccess(r, orgID, userID, false)
 	if err != nil {
 		return nil
 	}
 	a.DB.Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").Preload("WhatHappened").Preload("Process").First(occ, occ.ID)
-	return r.SendEnvelope(occurrenceToResponse(*occ))
+	resp := occurrenceToResponse(*occ)
+	resp.Can = viewerCapabilities(acc, occ, userID)
+	return r.SendEnvelope(resp)
 }
 
 // UpdateOccurrence edits title, description, priority and assignee.

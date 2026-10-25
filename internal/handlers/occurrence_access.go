@@ -24,7 +24,7 @@ import (
 type occurrenceAccess struct {
 	view       bool
 	interact   bool
-	supervisor bool // may reassign / override a case that is not theirs
+	supervisor bool            // may reassign / override a case that is not theirs
 	caps       map[string]bool // participant capabilities (nil for everyone else)
 }
 
@@ -222,4 +222,22 @@ func (acc occurrenceAccess) can(cap string) bool {
 		return true
 	}
 	return acc.caps[cap]
+}
+
+// viewerCapabilities tells the UI what the caller may do on this case, so it
+// can hide controls instead of offering buttons that answer 403. It is a hint:
+// every endpoint still enforces its own rule.
+func viewerCapabilities(acc occurrenceAccess, occ *models.Occurrence, userID uuid.UUID) map[string]bool {
+	isAssignee := occ.AssignedUserID != nil && *occ.AssignedUserID == userID
+	ownCase := occ.AssignedUserID == nil && occ.TeamID == nil && occ.OpenedByUserID == userID
+	privileged := acc.supervisor || isAssignee || ownCase
+	return map[string]bool{
+		"comment":         acc.can(models.OccurrenceCapComment),
+		"claim":           occ.AssignedUserID == nil && acc.can(models.OccurrenceCapClaim),
+		"change_status":   privileged || acc.caps[models.OccurrenceCapChangeStatus],
+		"resolve":         privileged || acc.caps[models.OccurrenceCapResolve],
+		"reassign":        acc.supervisor || isAssignee || acc.caps[models.OccurrenceCapReassign],
+		"reply":           acc.interact || acc.supervisor,
+		"add_participant": acc.interact || acc.supervisor,
+	}
 }

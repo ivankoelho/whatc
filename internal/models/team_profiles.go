@@ -30,12 +30,12 @@ func TeamProfiles() []TeamProfile {
 		{
 			Name:        "SAC",
 			Description: "Atendimento ao cliente: recebe a conversa após o fluxo e a transfere para Vendas ou Logística",
-			Permissions: with("contacts:read", "tags:read", "templates:read", "teams:read"),
+			Permissions: with("contacts:read", "tags:read", "templates:read"),
 		},
 		{
 			Name:        "Vendas",
 			Description: "Vendedor da loja: atende o fluxo de vendas e abre oportunidades no CRM",
-			Permissions: with("contacts:read", "contacts:write", "tags:read", "templates:read", "teams:read", "sales_opportunities:read", "sales_opportunities:write"),
+			Permissions: with("contacts:read", "contacts:write", "tags:read", "templates:read", "sales_opportunities:read", "sales_opportunities:write"),
 		},
 		{
 			Name:        "Logística",
@@ -48,7 +48,7 @@ func TeamProfiles() []TeamProfile {
 			Name:        "Supervisor de Loja",
 			Description: "Acompanha Vendas e Logística da sua loja, intervém nas conversas e fala com o backoffice no chat interno",
 			Permissions: with(
-				"contacts:read", "contacts:write", "tags:read", "templates:read", "teams:read",
+				"contacts:read", "contacts:write", "tags:read", "templates:read",
 				"conversations:view_team", "chat.assign:write",
 				"sales_opportunities:read", "sales_opportunities:write", "sales_opportunities:view_team",
 				"analytics:read", "analytics.agents:read", "analytics.agents:view_team",
