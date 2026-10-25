@@ -142,6 +142,7 @@ func runMigrations(db *gorm.DB) error {
 		&models.OccurrenceParticipant{},
 		&models.OccurrenceChannelConfig{},
 		&models.OccurrenceNotification{},
+		&models.OccurrenceNotificationAttempt{},
 		&models.OccurrenceCategory{},
 		&models.OccurrenceSLAPolicy{},
 		&models.Occurrence{},

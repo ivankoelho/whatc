@@ -267,24 +267,107 @@ type OccurrenceChannelConfig struct {
 	UnitID          *uuid.UUID `gorm:"type:uuid;index" json:"unit_id,omitempty"`
 	Purpose         string     `gorm:"size:30;not null;default:'logistics'" json:"purpose"`
 	WhatsAppAccount string     `gorm:"size:100;not null" json:"whatsapp_account"`
+
+	// Automation. A configuration applies to the most specific scope that has
+	// one: team, then unit, then the organization (see resolveAutomation). A
+	// more specific row prevails even when it is inactive, so a unit can switch
+	// the automation off without falling back to the organization's.
+	TeamID *uuid.UUID `gorm:"type:uuid;index" json:"team_id,omitempty"`
+	// Event is the business event that triggers it ("forwarded").
+	Event string `gorm:"size:30;not null;default:'forwarded'" json:"event"`
+	// TemplateName/Language is the approved template sent for the event;
+	// FallbackTemplateName is used instead when the case has no order number.
+	TemplateName         string `gorm:"size:255" json:"template_name"`
+	TemplateLanguage     string `gorm:"size:10" json:"template_language"`
+	FallbackTemplateName string `gorm:"size:255" json:"fallback_template_name"`
+	IsActive             bool   `gorm:"not null;default:true" json:"is_active"`
+	// Retry policy: attempts include the first one; backoff doubles each time.
+	MaxAttempts      int `gorm:"not null;default:3" json:"max_attempts"`
+	RetryBackoffSecs int `gorm:"not null;default:60" json:"retry_backoff_secs"`
+	// OnFailure: "manual_retry" keeps a failed send visible for an operator to
+	// reprocess; "cancel" closes it as cancelled once attempts are exhausted.
+	OnFailure string `gorm:"size:20;not null;default:'manual_retry'" json:"on_failure"`
 }
+
+// Notification (customer communication) states. Acceptance by the provider is
+// NOT delivery: accepted -> delivered -> read only advance on provider
+// evidence (status webhooks).
+const (
+	NotificationPrepared   = "prepared"   // intent recorded, automation not active (yet)
+	NotificationPending    = "pending"    // ready; waiting for a worker
+	NotificationProcessing = "processing" // claimed by a worker, request possibly in flight
+	NotificationAccepted   = "accepted"   // the provider accepted the request (has a message id)
+	NotificationDelivered  = "delivered"
+	NotificationRead       = "read"
+	NotificationFailed     = "failed"    // definitively not sent
+	NotificationUncertain  = "uncertain" // may or may not have been accepted: never resent blindly
+	NotificationCancelled  = "cancelled"
+	NotificationSkipped    = "skipped" // not eligible; Reason says why
+)
 
 func (OccurrenceChannelConfig) TableName() string { return "occurrence_channel_configs" }
 
-// OccurrenceNotification records a customer notification PREPARED for a case.
-// Nothing sends from it yet: it fixes the account, the eligibility verdict and
-// an idempotency key now, so the dispatcher that comes later cannot duplicate
-// or guess. Status: "prepared" (account resolved) or "skipped" (with Reason).
+
+// OccurrenceNotification is one customer communication triggered by a case
+// event. The row is the durable INTENT: it is written in the same transaction
+// as the case, survives a dead worker, and carries a stable idempotency key
+// ("occ:<id>:<kind>") so a repeated event cannot create a second one.
+//
+// Account, template and retry policy are SNAPSHOT at creation, so editing the
+// configuration while a send is in flight cannot change what that send does.
+// ProviderMessageID is the id the provider returned; it links the row to the
+// webhooks that later say delivered/read.
 type OccurrenceNotification struct {
 	BaseModel
-	OrganizationID  uuid.UUID `gorm:"type:uuid;index;not null" json:"organization_id"`
-	OccurrenceID    uuid.UUID `gorm:"type:uuid;index;not null" json:"occurrence_id"`
-	Kind            string    `gorm:"size:30;not null" json:"kind"`
-	WhatsAppAccount string    `gorm:"size:100" json:"whatsapp_account"`
-	IdempotencyKey  string    `gorm:"size:120;not null;uniqueIndex" json:"idempotency_key"`
-	Status          string    `gorm:"size:20;not null" json:"status"`
-	Reason          string    `gorm:"size:200" json:"reason"`
-	Eligible        bool      `gorm:"not null;default:false" json:"eligible"`
+	OrganizationID uuid.UUID  `gorm:"type:uuid;index;not null" json:"organization_id"`
+	OccurrenceID   uuid.UUID  `gorm:"type:uuid;index;not null" json:"occurrence_id"`
+	ConfigID       *uuid.UUID `gorm:"type:uuid" json:"config_id,omitempty"`
+	Kind           string     `gorm:"size:30;not null" json:"kind"`
+	IdempotencyKey string     `gorm:"size:120;not null;uniqueIndex" json:"idempotency_key"`
+
+	Status   string `gorm:"size:20;not null;index" json:"status"`
+	Reason   string `gorm:"size:200" json:"reason"`
+	Eligible bool   `gorm:"not null;default:false" json:"eligible"`
+
+	WhatsAppAccount      string `gorm:"size:100" json:"whatsapp_account"`
+	TemplateName         string `gorm:"size:255" json:"template_name"`
+	TemplateLanguage     string `gorm:"size:10" json:"template_language"`
+	FallbackTemplateName string `gorm:"size:255" json:"fallback_template_name,omitempty"`
+	MaxAttempts          int    `gorm:"not null;default:3" json:"max_attempts"`
+	RetryBackoffSecs     int    `gorm:"not null;default:60" json:"retry_backoff_secs"`
+	OnFailure            string `gorm:"size:20;not null;default:'manual_retry'" json:"on_failure"`
+
+	Attempts      int        `gorm:"not null;default:0" json:"attempts"`
+	NextAttemptAt *time.Time `gorm:"index" json:"next_attempt_at,omitempty"`
+	LockedAt      *time.Time `json:"locked_at,omitempty"`
+	LockedBy      string     `gorm:"size:80" json:"-"`
+
+	ProviderMessageID string     `gorm:"size:200;index" json:"provider_message_id,omitempty"`
+	MessageID         *uuid.UUID `gorm:"type:uuid" json:"message_id,omitempty"`
+	TemplateCategory  string     `gorm:"size:50" json:"template_category,omitempty"`
+	LastError         string     `gorm:"size:500" json:"last_error,omitempty"`
+	AcceptedAt        *time.Time `json:"accepted_at,omitempty"`
+	DeliveredAt       *time.Time `json:"delivered_at,omitempty"`
+	ReadAt            *time.Time `json:"read_at,omitempty"`
 }
 
 func (OccurrenceNotification) TableName() string { return "occurrence_notifications" }
+
+// OccurrenceNotificationAttempt is one try at sending, kept for the history
+// shown on the case and for reconciling an ambiguous result.
+type OccurrenceNotificationAttempt struct {
+	BaseModel
+	OrganizationID    uuid.UUID  `gorm:"type:uuid;index;not null" json:"organization_id"`
+	NotificationID    uuid.UUID  `gorm:"type:uuid;index;not null" json:"notification_id"`
+	Number            int        `gorm:"not null" json:"number"`
+	WhatsAppAccount   string     `gorm:"size:100" json:"whatsapp_account"`
+	TemplateName      string     `gorm:"size:255" json:"template_name"`
+	StartedAt         time.Time  `json:"started_at"`
+	FinishedAt        *time.Time `json:"finished_at,omitempty"`
+	Outcome           string     `gorm:"size:20" json:"outcome"` // accepted | failed | uncertain | skipped
+	ProviderMessageID string     `gorm:"size:200" json:"provider_message_id,omitempty"`
+	Error             string     `gorm:"size:500" json:"error,omitempty"`
+	TriggeredByID     *uuid.UUID `gorm:"type:uuid" json:"triggered_by_id,omitempty"` // set for manual reprocessing
+}
+
+func (OccurrenceNotificationAttempt) TableName() string { return "occurrence_notification_attempts" }

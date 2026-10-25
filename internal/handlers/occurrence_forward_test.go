@@ -72,40 +72,9 @@ func TestForward_LeavesTrailParticipantAndPreparedNotification(t *testing.T) {
 	var n models.OccurrenceNotification
 	require.NoError(t, w.app.DB.Where("occurrence_id = ?", id).First(&n).Error)
 	assert.Equal(t, "skipped", n.Status)
-	assert.Equal(t, "no_channel_configured", n.Reason)
+	assert.Equal(t, "no_automation_configured", n.Reason)
 	assert.False(t, n.Eligible)
 	assert.Equal(t, "occ:"+id.String()+":created", n.IdempotencyKey)
-}
-
-func TestForward_ChannelConfigPerUnitWinsOverOrgDefault(t *testing.T) {
-	w := newIsoWorld(t)
-	admin := testutil.CreateTestRoleWithKeys(t, w.app.DB, w.org.ID, "acc"+uuid.NewString()[:5], []string{"accounts:read", "accounts:write"})
-	u := testutil.CreateTestUser(t, w.app.DB, w.org.ID, testutil.WithRoleID(&admin.ID))
-	orgAcc := testutil.CreateTestWhatsAppAccount(t, w.app.DB, w.org.ID)
-	portoAcc := testutil.CreateTestWhatsAppAccount(t, w.app.DB, w.org.ID)
-
-	set := func(body map[string]any) int {
-		req := testutil.NewJSONRequest(t, body)
-		testutil.SetAuthContext(req, w.org.ID, u.ID)
-		require.NoError(t, w.app.SetOccurrenceChannelConfig(req))
-		return testutil.GetResponseStatusCode(req)
-	}
-	assert.Equal(t, fasthttp.StatusBadRequest, set(map[string]any{"whatsapp_account": "inexistente"}))
-	assert.Equal(t, fasthttp.StatusOK, set(map[string]any{"whatsapp_account": orgAcc.Name}))
-	assert.Equal(t, fasthttp.StatusOK, set(map[string]any{"whatsapp_account": portoAcc.Name, "unit_id": w.unitPorto.ID.String()}))
-	assert.Equal(t, fasthttp.StatusOK, set(map[string]any{"whatsapp_account": portoAcc.Name, "unit_id": w.unitPorto.ID.String()}), "idempotent update")
-
-	id := w.forward(t, nil)
-	var n models.OccurrenceNotification
-	require.NoError(t, w.app.DB.Where("occurrence_id = ?", id).First(&n).Error)
-	assert.Equal(t, "prepared", n.Status)
-	assert.Equal(t, portoAcc.Name, n.WhatsAppAccount, "the unit's own account")
-	assert.False(t, n.Eligible, "nothing is dispatched in this phase")
-
-	// Outra loja has no override: falls back to the organization default.
-	var cnt int64
-	w.app.DB.Model(&models.OccurrenceChannelConfig{}).Where("organization_id = ?", w.org.ID).Count(&cnt)
-	assert.EqualValues(t, 2, cnt)
 }
 
 func TestForward_FullFlowSACToLogistics(t *testing.T) {

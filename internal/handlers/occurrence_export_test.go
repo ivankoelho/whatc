@@ -57,3 +57,8 @@ func ResolveProcessMessageVariablesForTest(content string, occ *models.Occurrenc
 func FormatProcessDeadlineForTest(remaining time.Duration) string {
 	return formatProcessDeadline(remaining)
 }
+
+// NewForwardNotificationForTest replays the forwarded event's intent creation.
+func (a *App) NewForwardNotificationForTest(occ *models.Occurrence, contact *models.Contact) error {
+	return a.newForwardNotification(a.DB, occ, contact)
+}

@@ -137,6 +137,7 @@ func GetMigrationModels() []MigrationModel {
 		{"OccurrenceParticipant", &models.OccurrenceParticipant{}},
 		{"OccurrenceChannelConfig", &models.OccurrenceChannelConfig{}},
 		{"OccurrenceNotification", &models.OccurrenceNotification{}},
+		{"OccurrenceNotificationAttempt", &models.OccurrenceNotificationAttempt{}},
 		{"OccurrenceCategory", &models.OccurrenceCategory{}},
 		{"OccurrenceWhatHappened", &models.OccurrenceWhatHappened{}},
 		{"OccurrenceSLAPolicy", &models.OccurrenceSLAPolicy{}},
@@ -323,6 +324,14 @@ func coreIndexes() []string {
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_occ_stage_team_name ON occurrence_stages(organization_id, team_id, name) WHERE team_id IS NOT NULL AND deleted_at IS NULL`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_occ_channel_org ON occurrence_channel_configs(organization_id, purpose) WHERE unit_id IS NULL AND deleted_at IS NULL`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_occ_channel_unit ON occurrence_channel_configs(organization_id, unit_id, purpose) WHERE unit_id IS NOT NULL AND deleted_at IS NULL`,
+		// Automations: one configuration per scope and event (team, unit, organization).
+		`DROP INDEX IF EXISTS idx_occ_channel_org`,
+		`DROP INDEX IF EXISTS idx_occ_channel_unit`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_occ_auto_org ON occurrence_channel_configs(organization_id, purpose, event) WHERE unit_id IS NULL AND team_id IS NULL AND deleted_at IS NULL`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_occ_auto_unit ON occurrence_channel_configs(organization_id, unit_id, purpose, event) WHERE unit_id IS NOT NULL AND team_id IS NULL AND deleted_at IS NULL`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_occ_auto_team ON occurrence_channel_configs(organization_id, team_id, purpose, event) WHERE team_id IS NOT NULL AND deleted_at IS NULL`,
+		// Intents written before the send pipeline existed were only "prepared": keep them visible and inert.
+		`UPDATE occurrence_notifications SET status = 'prepared' WHERE status = 'prepared'`,
 		`UPDATE occurrence_stages SET general_state = CASE WHEN is_closing THEN 'resolved' WHEN is_initial THEN 'new' WHEN lower(name) = 'aguardando cliente' THEN 'waiting_customer' ELSE 'in_progress' END WHERE general_state = '' OR general_state IS NULL`,
 		`UPDATE occurrences o SET general_state = s.general_state FROM occurrence_stages s WHERE s.id = o.stage_id AND (o.general_state = '' OR o.general_state IS NULL)`,
 		// Cases attended by a team keep that team as their scope: a fact recorded on the

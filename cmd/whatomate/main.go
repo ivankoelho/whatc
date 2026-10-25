@@ -907,6 +907,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.DELETE("/api/occurrences/{id}/participants/{userId}", app.RemoveOccurrenceParticipant)
 	g.GET("/api/occurrence-channel-config", app.ListOccurrenceChannelConfigs)
 	g.PUT("/api/occurrence-channel-config", app.SetOccurrenceChannelConfig)
+	g.DELETE("/api/occurrence-channel-config/{id}", app.DeleteOccurrenceChannelConfig)
 	g.POST("/api/occurrences", app.CreateOccurrence)
 	g.GET("/api/contacts/{id}/occurrences", app.ListContactOccurrences)
 	g.GET("/api/occurrences/{id}", app.GetOccurrence)
