@@ -54,7 +54,8 @@ async function onReadFile(index: number, event: Event) {
       filled = r.filled
       docs[index] = r.draft
       // The original file is kept as the document's attachment when it is a kind the attachment accepts.
-      if (!file.name.toLowerCase().endsWith('.xml')) docs[index].file = file
+      if (file.name.toLowerCase().endsWith('.xml')) docs[index].original = res.method === 'none' ? null : file
+      else docs[index].file = file
       if (res.method !== 'none') {
         docs[index].source = res.method
         docs[index].access_key = res.access_key

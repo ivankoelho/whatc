@@ -9,6 +9,9 @@ export interface DocumentDraft {
   purchase_date: string
   items: OccurrenceDocumentItem[]
   file: File | null
+  // The XML the values were read from: the attachment slot takes PDFs and photos only, so the XML is
+  // kept as a general case file when the document is saved (the original is never thrown away).
+  original?: File | null
   // Filled when the values were read from the file; cleared if the file is removed.
   source?: 'xml' | 'pdf_text'
   access_key?: string

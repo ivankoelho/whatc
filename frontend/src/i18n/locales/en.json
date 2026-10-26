@@ -4385,6 +4385,7 @@
   },
   "occurrenceDocuments": {
     "read": {
+      "originalFailed": "The document was saved, but the original XML could not be stored as a case file.",
       "button": "Attach and read invoice",
       "failed": "The file could not be read. Fill the form by hand.",
       "nothing": "No data could be read from this file.",

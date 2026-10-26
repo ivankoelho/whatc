@@ -40,7 +40,9 @@ const searching = ref(false)
 let timer: ReturnType<typeof setTimeout> | undefined
 let seq = 0
 const term = computed(() => search.value.trim().toLowerCase())
-const matches = (c: TeamChatChannel) => !term.value || (c.name || '').toLowerCase().includes(term.value)
+// A discussion also matches when the server found it by something the sidebar does not show (the customer).
+const hitIds = computed(() => new Set(hits.value.map(h => h.id)))
+const matches = (c: TeamChatChannel) => !term.value || (c.name || '').toLowerCase().includes(term.value) || hitIds.value.has(c.id)
 watch(term, q => {
   clearTimeout(timer)
   hits.value = []

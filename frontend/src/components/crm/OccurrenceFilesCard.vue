@@ -55,6 +55,7 @@ defineExpose({
   canUpload: computed(() => canUpload.value),
   pickComputer: () => input.value?.click(),
   openNextcloud: () => { ncOpen.value = true },
+  reload: load,
 })
 watch(() => props.occurrenceId, () => { loading.value = true; void load() })
 

@@ -60,7 +60,7 @@ function choose(what: 'nf' | 'cupom' | 'computer' | 'nextcloud') {
       </div>
     </CardHeader>
     <CardContent class="space-y-4 text-sm">
-      <OccurrenceDocumentsCard ref="docs" embedded :occurrence-id="occurrenceId" :can-write="canWrite" />
+      <OccurrenceDocumentsCard ref="docs" embedded :occurrence-id="occurrenceId" :can-write="canWrite" @saved="files?.reload()" />
       <OccurrenceFilesCard ref="files" v-model:restricted="restricted" embedded :occurrence-id="occurrenceId" />
     </CardContent>
   </Card>

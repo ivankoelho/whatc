@@ -4374,6 +4374,7 @@
   },
   "occurrenceDocuments": {
     "read": {
+      "originalFailed": "O documento foi salvo, mas o XML original não pôde ser guardado como arquivo do chamado.",
       "button": "Anexar e ler nota fiscal",
       "failed": "Não foi possível ler o arquivo. Preencha manualmente.",
       "nothing": "Não foi possível ler os dados deste arquivo.",

@@ -7,13 +7,14 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { IconButton, DeleteConfirmDialog } from '@/components/shared'
 import OccurrenceDocumentsEditor from '@/components/crm/OccurrenceDocumentsEditor.vue'
-import { occurrenceDocumentsService, type OccurrenceDocument } from '@/services/api'
+import { occurrenceDocumentsService, occurrenceFilesService, type OccurrenceDocument } from '@/services/api'
 import { type DocumentDraft, newDocumentDraft, draftToInput, isBlankDraft, MAX_ATTACHMENT_BYTES, ATTACHMENT_ACCEPT } from '@/lib/occurrence-documents'
 import { getErrorMessage } from '@/lib/api-utils'
 import { FileText, Paperclip, Plus, Trash2, Loader2 } from 'lucide-vue-next'
 
 // embedded: shown inside the single Attachments card (no frame, no title, no own add button).
 const props = defineProps<{ occurrenceId: string; canWrite: boolean; embedded?: boolean }>()
+const emit = defineEmits<{ saved: [] }>()
 const { t } = useI18n()
 
 const documents = ref<OccurrenceDocument[]>([])
@@ -57,8 +58,12 @@ async function saveDraft() {
   try {
     const res = await occurrenceDocumentsService.create(props.occurrenceId, draftToInput(d))
     if (d.file) await occurrenceDocumentsService.uploadAttachment(props.occurrenceId, res.data.data.id, d.file)
+    if (d.original) {
+      try { await occurrenceFilesService.upload(props.occurrenceId, d.original, true) } catch { toast.error(t('occurrenceDocuments.read.originalFailed')) }
+    }
     toast.success(t('occurrenceDocuments.added'))
     draft.value = null
+    emit('saved')
     await load()
   } catch (e) {
     toast.error(getErrorMessage(e, t('occurrenceDocuments.saveFailed')))

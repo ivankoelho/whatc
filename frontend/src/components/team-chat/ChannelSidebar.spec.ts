@@ -151,3 +151,22 @@ describe('ChannelSidebar (case discussions)', () => {
     }
   })
 })
+
+describe('ChannelSidebar (search by something the name does not show)', () => {
+  it('keeps a listed discussion the server found by the customer name', async () => {
+    vi.useFakeTimers()
+    try {
+      const listed = { id: 'c1', kind: 'occurrence', name: '2026-000222 · Pedido 55501', occurrence_id: 'o1', unread_count: 0, created_at: '2026-10-26T00:00:00Z' }
+      const { store, wrapper } = render([listed])
+      api.searchOccurrences.mockReset().mockReturnValue(ok({ channels: [listed] }))
+      await store.fetchChannels()
+      await flushPromises()
+      await wrapper.get('[data-testid="channel-search"]').setValue('Cliente Teste')
+      await vi.advanceTimersByTimeAsync(400)
+      await flushPromises()
+      expect(wrapper.find('[data-testid="channel-c1"]').exists()).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
