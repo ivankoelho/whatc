@@ -164,6 +164,11 @@ func GetMigrationModels() []MigrationModel {
 		{"ChatAttachment", &models.ChatAttachment{}},
 		{"FileScan", &models.FileScan{}},
 		{"MetaMedia", &models.MetaMedia{}},
+		{"RetentionPolicy", &models.RetentionPolicy{}},
+		{"RetentionHold", &models.RetentionHold{}},
+		{"RetentionHoldEvent", &models.RetentionHoldEvent{}},
+		{"RetentionRun", &models.RetentionRun{}},
+		{"RetentionItem", &models.RetentionItem{}},
 
 		// Help Desk — unidade e departamento
 		{"Unit", &models.Unit{}},

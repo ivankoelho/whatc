@@ -171,6 +171,11 @@ func runMigrations(db *gorm.DB) error {
 		&models.ChatAttachment{},
 		&models.FileScan{},
 		&models.MetaMedia{},
+		&models.RetentionPolicy{},
+		&models.RetentionHold{},
+		&models.RetentionHoldEvent{},
+		&models.RetentionRun{},
+		&models.RetentionItem{},
 		// Help Desk — unidade e departamento
 		&models.Unit{},
 		&models.Department{},
@@ -203,6 +208,11 @@ func cleanupTables(db *gorm.DB) {
 		// Antimalware verdicts
 		"file_scans",
 		"meta_media_uploads",
+		"retention_items",
+		"retention_runs",
+		"retention_hold_events",
+		"retention_holds",
+		"retention_policies",
 		"occurrence_files",
 		"chat_attachments",
 		"occurrence_documents",
