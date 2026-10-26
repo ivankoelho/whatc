@@ -226,7 +226,7 @@ func pdfText(data []byte) (text string, available bool) {
 	defer func() { _ = os.Remove(tmp.Name()) }()
 	_, _ = tmp.Write(data)
 	_ = tmp.Close()
-	cmd := exec.CommandContext(ctx, bin, "-q", "-layout", "-l", "3", tmp.Name(), "-")
+	cmd := exec.CommandContext(ctx, bin, "-q", "-enc", "UTF-8", "-layout", "-l", "3", tmp.Name(), "-")
 	out, err := cmd.Output()
 	if err != nil {
 		return "", true
