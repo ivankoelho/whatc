@@ -19,6 +19,8 @@ var unscannedSources = []struct{ source, selectSQL string }{
 		FROM occurrence_documents t WHERE t.deleted_at IS NULL AND COALESCE(t.attachment_path,'') <> ''`},
 	{models.ScanSourceMessageMedia, `SELECT t.id, t.organization_id, t.media_url, '', 0
 		FROM messages t WHERE t.deleted_at IS NULL AND COALESCE(t.media_url,'') <> ''`},
+	{models.ScanSourceCampaignMedia, `SELECT t.id, t.organization_id, t.header_media_local_path, '', 0
+		FROM bulk_message_campaigns t WHERE t.deleted_at IS NULL AND COALESCE(t.header_media_local_path,'') <> ''`},
 }
 
 // RegisterUnscannedFiles gives every stored file that lacks one a pending scan row, up to limit per

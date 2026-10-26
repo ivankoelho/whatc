@@ -1043,8 +1043,11 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 			headerMimeType = headerFileMimeType
 		}
 
-		// Upload to WhatsApp if we have raw data (options 2 & 3)
+		// Upload to WhatsApp if we have raw data (options 2 & 3): only after a clean verdict
 		if len(headerMediaData) > 0 {
+			if !a.scanIngress(r, orgID, "template_header_media", headerMediaData) {
+				return nil
+			}
 			waAcct := a.toWhatsAppAccount(account)
 			mediaID, err := a.WhatsApp.UploadMedia(context.Background(), waAcct, headerMediaData, headerMimeType, "header")
 			if err != nil {

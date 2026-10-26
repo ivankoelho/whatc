@@ -22,6 +22,9 @@ const (
 	ScanSourceChatAttachment     = "chat_attachment"
 	ScanSourceOccurrenceDocument = "occurrence_document"
 	ScanSourceMessageMedia       = "message_media"
+	ScanSourceCampaignMedia      = "campaign_media" // header media of a bulk campaign (local preview copy)
+	ScanSourceBranding           = "branding"       // system logo / login background (public, system-owned: org uuid.Nil)
+	ScanSourceIVRAudio           = "ivr_audio"      // IVR / hold-music audio (transcoded by us from a scanned upload)
 )
 
 // FileScan is the antimalware state of one stored file. There is exactly one row per

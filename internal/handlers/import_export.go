@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -422,10 +423,20 @@ func (a *App) ImportData(r *fastglue.Request) error {
 
 	// Limit CSV file size to 10MB
 	const maxCSVSize = 10 << 20
-	limitedReader := io.LimitReader(file, maxCSVSize+1)
+	csvData, rerr := io.ReadAll(io.LimitReader(file, maxCSVSize+1))
+	if rerr != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Failed to read file", nil, "")
+	}
+	if len(csvData) > maxCSVSize {
+		return r.SendErrorEnvelope(fasthttp.StatusRequestEntityTooLarge, "The file is larger than 10 MB", nil, "")
+	}
+	// The importer only parses bytes that were scanned clean.
+	if !a.scanIngress(r, orgID, "csv_import", csvData) {
+		return nil
+	}
 
 	// Parse CSV
-	reader := csv.NewReader(limitedReader)
+	reader := csv.NewReader(bytes.NewReader(csvData))
 
 	// Read header
 	header, err := reader.Read()

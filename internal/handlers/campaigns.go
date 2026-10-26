@@ -1082,6 +1082,11 @@ func (a *App) UploadCampaignMedia(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Unsupported file type: "+mimeType, nil, "")
 	}
 
+	// Nothing is forwarded to Meta (or stored) without a clean verdict.
+	if !a.scanIngress(r, orgID, "campaign_media", data) {
+		return nil
+	}
+
 	// Upload to WhatsApp
 	waAccount := a.toWhatsAppAccount(account)
 
@@ -1097,6 +1102,8 @@ func (a *App) UploadCampaignMedia(r *fastglue.Request) error {
 	if err != nil {
 		a.Log.Error("Failed to save media locally", "error", err)
 		// Don't fail the request, just log the error - preview won't work
+	} else {
+		a.recordIngressClean(orgID, models.ScanSourceCampaignMedia, campaignUUID, localPath, data)
 	}
 
 	// Update campaign with media ID, filename, mime type, and local path
@@ -1178,6 +1185,11 @@ func (a *App) ServeCampaignMedia(r *fastglue.Request) error {
 	// Check if campaign has media
 	if campaign.HeaderMediaLocalPath == "" {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "No media found", nil, "")
+	}
+
+	// The preview copy is served only with a clean verdict (a copy that predates the policy is queued).
+	if !a.requireCleanFile(r, orgID, models.ScanSourceCampaignMedia, campaign.ID, campaign.HeaderMediaLocalPath) {
+		return nil
 	}
 
 	// Security: prevent directory traversal and symlink attacks

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/audit"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
@@ -185,6 +186,14 @@ func (a *App) serveBrandingImage(r *fastglue.Request, slot brandingImageSlot) er
 	}
 
 	fullPath, err := a.resolveSafeStoragePath(slot.getPath(&row))
+	// The login page is public and system-owned (org uuid.Nil): the verdict is the same rule as elsewhere.
+	// A path that is malformed (traversal, symlink) is refused first; a file that is merely not there (for
+	// instance one moved to quarantine) still answers with its verdict.
+	if err == nil || errors.Is(err, errStorageFileNotFound) {
+		if !a.requireCleanFile(r, uuid.Nil, models.ScanSourceBranding, fixedScanID("branding", slot.key), slot.getPath(&row)) {
+			return nil
+		}
+	}
 	if err != nil {
 		switch {
 		case errors.Is(err, errStorageConfig):
@@ -293,6 +302,11 @@ func (a *App) uploadBrandingImage(r *fastglue.Request, slot brandingImageSlot) e
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Unsupported file type: "+sniffed, nil, "")
 	}
 
+	// Public images are published to every visitor: scanned before they are written.
+	if !a.scanIngress(r, orgID, "branding", data) {
+		return nil
+	}
+
 	if err := a.ensureMediaDir("branding"); err != nil {
 		a.Log.Error("Failed to create branding directory", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Storage configuration error", nil, "")
@@ -350,6 +364,8 @@ func (a *App) uploadBrandingImage(r *fastglue.Request, slot brandingImageSlot) e
 		a.Log.Error("Failed to commit branding settings update", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save branding settings", nil, "")
 	}
+
+	a.recordIngressClean(uuid.Nil, models.ScanSourceBranding, fixedScanID("branding", slot.key), newRelPath, data)
 
 	// Only after commit: the database now points at the new file, so the
 	// previous one (possibly a different extension) is safe to remove.

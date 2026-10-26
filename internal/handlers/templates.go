@@ -706,6 +706,10 @@ func (a *App) UploadTemplateMedia(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to read file data", nil, "")
 	}
 
+	if !a.scanIngress(r, orgID, "template_media", fileData) {
+		return nil
+	}
+
 	// Determine mime type from Content-Type header or filename
 	mimeType := fileHeader.Header.Get("Content-Type")
 	if mimeType == "" || mimeType == "application/octet-stream" {

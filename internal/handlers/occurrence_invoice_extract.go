@@ -275,7 +275,7 @@ func (a *App) ExtractOccurrenceInvoice(r *fastglue.Request) error {
 	// pdftotext is the largest attack surface of the server: the bytes are scanned first, and with no
 	// verdict (engine off or down) the file is simply not read. Nothing is stored here either way.
 	if info.Mime == "application/pdf" || info.Mime == "application/xml" {
-		res, serr := a.scanBuffer(r.RequestCtx, data)
+		res, serr := a.scanBuffer(context.Background(), data)
 		if serr != nil {
 			out := InvoiceExtraction{Method: "none", Items: []invoiceItem{}, Uncertain: []string{}, Warnings: []string{"antimalware_unavailable"}}
 			return r.SendEnvelope(out)

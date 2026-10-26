@@ -131,6 +131,10 @@ func (a *App) UpdateProfilePicture(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to read file", nil, "")
 	}
 
+	if !a.scanIngress(r, orgID, "profile_picture", fileContent) {
+		return nil
+	}
+
 	// Use a longer timeout for upload — profile pictures can be a few MB.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*businessProfileHTTPTimeout)
 	defer cancel()

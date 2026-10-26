@@ -857,6 +857,11 @@ func (a *App) SendMediaMessage(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to read file data", nil, "")
 	}
 
+	// Nothing is stored or forwarded to the customer without a clean verdict.
+	if !a.scanIngress(r, orgID, "conversation_media", fileData) {
+		return nil
+	}
+
 	// Get MIME type
 	mimeType := fileHeader.Header.Get("Content-Type")
 	if mimeType == "" {

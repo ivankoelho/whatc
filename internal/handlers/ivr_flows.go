@@ -457,7 +457,7 @@ func (a *App) getAudioDir() string {
 
 // UploadIVRAudio handles multipart audio file uploads for IVR greetings.
 func (a *App) UploadIVRAudio(r *fastglue.Request) error {
-	_, _, err := a.requireAuth(r, models.ResourceIVRFlows, models.ActionWrite)
+	orgID, _, err := a.requireAuth(r, models.ResourceIVRFlows, models.ActionWrite)
 	if err != nil {
 		return nil
 	}
@@ -522,6 +522,11 @@ func (a *App) UploadIVRAudio(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Unsupported audio type: "+mimeType, nil, "")
 	}
 
+	// ffmpeg is a large attack surface: it only ever sees bytes that were scanned clean.
+	if !a.scanIngress(r, orgID, "ivr_audio", data) {
+		return nil
+	}
+
 	// Ensure audio directory exists
 	audioDir := a.getAudioDir()
 	if err := os.MkdirAll(audioDir, 0755); err != nil {
@@ -553,6 +558,7 @@ func (a *App) UploadIVRAudio(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to transcode audio to Opus format", nil, "")
 	}
 
+	a.recordIngressClean(orgID, models.ScanSourceIVRAudio, fixedScanID("ivr", filename), filename, data)
 	a.Log.Info("IVR audio uploaded", "filename", filename, "original_mime", mimeType, "size", len(data))
 
 	return r.SendEnvelope(map[string]any{
@@ -564,13 +570,17 @@ func (a *App) UploadIVRAudio(r *fastglue.Request) error {
 
 // ServeIVRAudio serves audio files from the IVR audio directory.
 func (a *App) ServeIVRAudio(r *fastglue.Request) error {
-	_, _, err := a.requireAuth(r, models.ResourceIVRFlows, models.ActionRead)
+	orgID, _, err := a.requireAuth(r, models.ResourceIVRFlows, models.ActionRead)
 	if err != nil {
 		return nil
 	}
 
 	filename := r.RequestCtx.UserValue("filename").(string)
 	filename = sanitizeFilename(filename)
+	// The verdict belongs to the organization that uploaded the file: another one cannot open it by name.
+	if !a.requireCleanFile(r, orgID, models.ScanSourceIVRAudio, fixedScanID("ivr", filename), filename) {
+		return nil
+	}
 
 	// Security: prevent directory traversal and symlink attacks
 	audioDir := a.getAudioDir()
@@ -666,6 +676,10 @@ func (a *App) UploadOrgAudio(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Unsupported audio type: "+mimeType, nil, "")
 	}
 
+	if !a.scanIngress(r, orgID, "org_audio", data) {
+		return nil
+	}
+
 	// Ensure audio directory exists
 	audioDir := a.getAudioDir()
 	if err := os.MkdirAll(audioDir, 0755); err != nil {
@@ -696,6 +710,8 @@ func (a *App) UploadOrgAudio(r *fastglue.Request) error {
 		a.Log.Error("Audio transcoding failed", "error", err, "org_id", orgID, "type", audioType)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to transcode audio to Opus format", nil, "")
 	}
+
+	a.recordIngressClean(orgID, models.ScanSourceIVRAudio, fixedScanID("ivr", filename), filename, data)
 
 	// Update org settings with the new filename
 	var org models.Organization

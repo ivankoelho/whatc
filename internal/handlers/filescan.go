@@ -151,6 +151,78 @@ func registerScanTx(tx *gorm.DB, orgID uuid.UUID, source string, id uuid.UUID, s
 	}).Create(&row).Error
 }
 
+// --- scanning of bytes that are about to be used ---------------------------------------------------
+
+// Two kinds of untrusted content reach the server.
+//
+//  1. Files that are STORED and later served as they are (case documents, chat attachments, media):
+//     a file_scans row decides, as above.
+//  2. Bytes that are only PROCESSED or FORWARDED (sent on to Meta, fed to ffmpeg or the CSV importer,
+//     published as branding): they are scanned in memory BEFORE anything is done with them. No verdict,
+//     no use (scanIngress). When the bytes are then stored for serving, recordIngressClean files the
+//     verdict so the serving gate sees the same rule.
+
+var errScanUnavailable = errors.New("file scanning is unavailable")
+
+// scanIngress answers the request and returns false unless the bytes got a clean verdict now.
+func (a *App) scanIngress(r *fastglue.Request, orgID uuid.UUID, what string, data []byte) bool {
+	res, err := a.scanBuffer(context.Background(), data)
+	switch {
+	case err != nil:
+		a.Log.Error("Antimalware could not scan an upload; refusing it", "what", what, "error", err)
+		_ = r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "The file could not be checked for malware right now; try again shortly", nil, "")
+		return false
+	case res.Infected:
+		id := uuid.New()
+		a.logAudit(orgID, uuid.Nil, "file_scan_ingress", id, models.AuditActionCreated, nil,
+			map[string]any{"what": what, "signature": res.Signature, "status": models.ScanInfected, "size": len(data)})
+		a.alertOrg(orgID, "infected", what, id, res.Signature)
+		_ = r.SendErrorEnvelope(fasthttp.StatusUnprocessableEntity, "This file was blocked: malware was detected", nil, "")
+		return false
+	}
+	return true
+}
+
+// verifyBytes is scanIngress for code that is not answering a request (nil only on a clean verdict).
+func (a *App) verifyBytes(ctx context.Context, data []byte) error {
+	res, err := a.scanBuffer(ctx, data)
+	if err != nil {
+		return errScanUnavailable
+	}
+	if res.Infected {
+		return fmt.Errorf("malware detected: %s", res.Signature)
+	}
+	return nil
+}
+
+// recordIngressClean files the clean verdict of bytes that were just scanned and stored, replacing any
+// older verdict for the same resource.
+func (a *App) recordIngressClean(orgID uuid.UUID, source string, id uuid.UUID, storagePath string, data []byte) {
+	sum := sha256.Sum256(data)
+	now := time.Now()
+	row := models.FileScan{
+		ID: uuid.New(), OrganizationID: orgID, Source: source, ResourceID: id, StoragePath: storagePath,
+		SHA256: hex.EncodeToString(sum[:]), SizeBytes: int64(len(data)), Status: models.ScanClean,
+		ScannerVersion: a.scannerVersion(context.Background()), ScannedAt: &now,
+	}
+	err := a.DB.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "source"}, {Name: "resource_id"}},
+		DoUpdates: clause.Assignments(map[string]any{
+			"organization_id": orgID, "storage_path": storagePath, "sha256": row.SHA256, "size_bytes": row.SizeBytes,
+			"status": models.ScanClean, "signature": "", "scanner_version": row.ScannerVersion, "attempts": 0,
+			"next_attempt_at": nil, "last_error": "", "scanned_at": now, "quarantined_at": nil, "alerted_at": nil, "updated_at": now,
+		}),
+	}).Create(&row).Error
+	if err != nil {
+		a.Log.Error("Could not record a scan verdict", "source", source, "error", err)
+	}
+}
+
+// fixedScanID gives a resource that has no uuid of its own (a branding slot, an audio file name) a stable one.
+func fixedScanID(kind, name string) uuid.UUID {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("whatc-scan:"+kind+":"+name))
+}
+
 // --- scanning ----------------------------------------------------------------------------------
 
 // scanVersionCache remembers the engine's version line briefly, so a batch of scans asks once.
@@ -201,7 +273,29 @@ func (a *App) ScanNow(source string, id uuid.UUID) {
 	a.runScan(context.Background(), row, false)
 }
 
+// scanFilePath resolves where a row's file lives: the media root for almost everything, the audio
+// directory for IVR audio (a bare file name, never a path).
+func (a *App) scanFilePath(row models.FileScan) (string, error) {
+	if row.Source == models.ScanSourceIVRAudio {
+		name := filepath.Base(row.StoragePath)
+		full := filepath.Join(a.getAudioDir(), name)
+		if st, err := os.Lstat(full); err != nil || !st.Mode().IsRegular() {
+			return "", errStorageFileNotFound
+		}
+		return full, nil
+	}
+	return a.resolveSafeStoragePath(row.StoragePath)
+}
+
 func (a *App) scanTarget(row models.FileScan) bool {
+	switch row.Source {
+	case models.ScanSourceIVRAudio:
+		return true // no table: the file itself is the resource (scanFilePath checks it exists)
+	case models.ScanSourceBranding:
+		var n int64
+		a.DB.Table("branding_settings").Where("logo_path = ? OR login_background_path = ?", row.StoragePath, row.StoragePath).Count(&n)
+		return n > 0
+	}
 	var table, where string
 	switch row.Source {
 	case models.ScanSourceOccurrenceFile:
@@ -212,6 +306,8 @@ func (a *App) scanTarget(row models.FileScan) bool {
 		table, where = "occurrence_documents", "deleted_at IS NULL AND COALESCE(attachment_path,'') <> ''"
 	case models.ScanSourceMessageMedia:
 		table, where = "messages", "deleted_at IS NULL AND COALESCE(media_url,'') <> ''"
+	case models.ScanSourceCampaignMedia:
+		table, where = "bulk_message_campaigns", "deleted_at IS NULL AND COALESCE(header_media_local_path,'') <> ''"
 	default:
 		return false
 	}
@@ -235,7 +331,7 @@ func (a *App) runScan(ctx context.Context, row models.FileScan, rescan bool) {
 		}
 		a.recordScanFailure(row, status, why)
 	}
-	full, perr := a.resolveSafeStoragePath(row.StoragePath)
+	full, perr := a.scanFilePath(row)
 	if perr != nil {
 		fail(models.ScanError, "file not found in storage")
 		return
@@ -392,21 +488,26 @@ func (a *App) auditScan(row models.FileScan, status, detail string) {
 // alertScan tells the organization's administrators (never another organization's). The audit entry
 // is the durable record; the WebSocket event reaches whoever is online.
 func (a *App) alertScan(row models.FileScan, kind, detail string) {
-	a.Log.Error("Antimalware alert", "kind", kind, "source", row.Source, "file_scan", row.ID, "org", row.OrganizationID, "detail", detail)
-	if a.WSHub == nil {
+	a.alertOrg(row.OrganizationID, kind, row.Source, row.ResourceID, detail)
+}
+
+// alertOrg tells the administrators of ONE organization (the system-owned uuid.Nil has none).
+func (a *App) alertOrg(orgID uuid.UUID, kind, source string, resourceID uuid.UUID, detail string) {
+	a.Log.Error("Antimalware alert", "kind", kind, "source", source, "resource", resourceID, "org", orgID, "detail", detail)
+	if a.WSHub == nil || orgID == uuid.Nil {
 		return
 	}
 	var members []uuid.UUID
-	a.DB.Table("user_organizations").Where("organization_id = ? AND deleted_at IS NULL", row.OrganizationID).Pluck("user_id", &members)
+	a.DB.Table("user_organizations").Where("organization_id = ? AND deleted_at IS NULL", orgID).Pluck("user_id", &members)
 	admins := make([]uuid.UUID, 0, len(members))
 	for _, u := range members {
-		if a.HasPermission(u, models.ResourceAuditLogs, models.ActionRead, row.OrganizationID) {
+		if a.HasPermission(u, models.ResourceAuditLogs, models.ActionRead, orgID) {
 			admins = append(admins, u)
 		}
 	}
-	a.WSHub.BroadcastToUsers(row.OrganizationID, admins, websocket.WSMessage{
+	a.WSHub.BroadcastToUsers(orgID, admins, websocket.WSMessage{
 		Type:    "file_scan_alert",
-		Payload: map[string]any{"kind": kind, "source": row.Source, "id": row.ResourceID, "detail": detail},
+		Payload: map[string]any{"kind": kind, "source": source, "id": resourceID, "detail": detail},
 	})
 }
 

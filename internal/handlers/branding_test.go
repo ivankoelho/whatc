@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"github.com/google/uuid"
 	"bytes"
 	"fmt"
 	"mime/multipart"
@@ -151,6 +152,8 @@ func TestUpdateBrandingFooter_PartialUpdateLeavesOtherFieldUntouched(t *testing.
 func TestServeLoginBackground_404WhenNotConfigured(t *testing.T) {
 	app := newTestApp(t)
 	require.NoError(t, database.EnsureBrandingSettingsRow(app.DB))
+	require.NoError(t, app.DB.Model(&models.BrandingSettings{}).Where("id = ?", models.BrandingSettingsSingletonID).
+		Update("login_background_path", "").Error) // the singleton is shared with other tests
 
 	req := testutil.NewGETRequest(t)
 	require.NoError(t, app.ServeLoginBackground(req))
@@ -172,7 +175,12 @@ func TestServeLoginBackground_ServesConfiguredFile(t *testing.T) {
 			"login_background_content_type": "image/jpeg",
 		}).Error)
 
+	// A background that predates the antimalware policy has no verdict: closed until the worker scans it.
 	req := testutil.NewGETRequest(t)
+	require.NoError(t, app.ServeLoginBackground(req))
+	assert.Equal(t, fasthttp.StatusLocked, testutil.GetResponseStatusCode(req))
+	tick(t, app, uuid.Nil)
+	req = testutil.NewGETRequest(t)
 	require.NoError(t, app.ServeLoginBackground(req))
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
 	assert.Equal(t, []byte("fake-jpeg-bytes"), testutil.GetResponseBody(req))
