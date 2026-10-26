@@ -950,6 +950,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.PUT("/api/occurrences/{id}/stage", app.ChangeOccurrenceStage)
 	g.POST("/api/occurrences/{id}/claim", app.ClaimOccurrence)
 	g.GET("/api/occurrences/{id}/events", app.ListOccurrenceEvents)
+	g.GET("/api/occurrences/{id}/history", app.ListOccurrenceHistory)
 	g.POST("/api/occurrences/{id}/events", app.CreateOccurrenceEvent)
 	g.POST("/api/occurrences/{id}/send-protocol", app.SendOccurrenceProtocol)
 	g.POST("/api/occurrences/{id}/reply", app.ReplyToOccurrence)

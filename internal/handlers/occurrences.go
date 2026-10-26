@@ -757,6 +757,8 @@ type OccurrenceEventResponse struct {
 	CreatedByID   *uuid.UUID `json:"created_by_id,omitempty"`
 	CreatedByName string     `json:"created_by_name,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
+	// Redacted: the text of a message to the customer, withheld from someone who may not read that conversation.
+	Redacted bool `json:"redacted,omitempty"`
 }
 
 // GetOccurrence returns one case.
@@ -1012,10 +1014,11 @@ func (a *App) ListOccurrenceEvents(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
-	occ, err := a.loadAuthorizedOccurrence(r, orgID, userID, false)
+	occ, acc, err := a.loadOccurrenceWithAccess(r, orgID, userID, false)
 	if err != nil {
 		return nil
 	}
+	readsChannel := a.canUseCaseChannel(orgID, userID, occ, acc, a.caseChannelAccount(orgID, occ), false)
 
 	var events []models.OccurrenceEvent
 	if err := a.DB.Where("organization_id = ? AND occurrence_id = ?", orgID, occ.ID).
@@ -1037,6 +1040,9 @@ func (a *App) ListOccurrenceEvents(r *fastglue.Request) error {
 		}
 		if e.CreatedBy != nil {
 			result[i].CreatedByName = e.CreatedBy.FullName
+		}
+		if !readsChannel && (e.Type == models.OccurrenceEventReply || e.Type == models.OccurrenceEventProcessMessageUsed) {
+			result[i].Content, result[i].Metadata, result[i].Redacted = "", nil, true
 		}
 	}
 
