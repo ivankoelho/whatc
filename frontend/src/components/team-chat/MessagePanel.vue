@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowLeft, Check, CornerUpLeft, FileText, Hash, Loader2, Lock, MessageSquare, Pencil, Settings2, SmilePlus, Trash2, Users, X } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, Check, CornerUpLeft, FileText, Hash, Loader2, Lock, MessageSquare, Pencil, Settings2, SmilePlus, Trash2, Users, X } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
@@ -113,8 +113,20 @@ function goToMessage(id: string) {
 const reactionTitle = (r: { names: string[]; count: number }) =>
   r.names.join(', ') + (r.count > r.names.length ? ` +${r.count - r.names.length}` : '')
 
+// Reading old history must not be yanked to the bottom by a new message: follow only when already
+// near the end (or when the message is mine); otherwise count what arrived and offer a jump.
+const atBottom = ref(true)
+const unseen = ref(0)
+const NEAR_BOTTOM_PX = 80
+function trackBottom(e: Event) {
+  const el = e.target as HTMLElement
+  atBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX
+  if (atBottom.value) unseen.value = 0
+}
+
 const scroll = useInfiniteScroll({
   direction: 'top',
+  onScroll: trackBottom,
   onLoadMore: async () => {
     await scroll.preserveScrollPosition(async () => {
       await store.loadOlder(props.channelId)
@@ -126,11 +138,14 @@ const scroll = useInfiniteScroll({
 })
 
 function scrollToBottom(instant = false) {
+  unseen.value = 0
+  atBottom.value = true
   void nextTick(() => endRef.value?.scrollIntoView({ behavior: instant ? 'instant' : 'smooth', block: 'end' }))
 }
 
 function arm() {
   scroll.cleanup()
+  unseen.value = 0
   void nextTick(() => setTimeout(() => {
     scrollToBottom(true)
     scroll.setup()
@@ -165,7 +180,10 @@ watch(() => props.channelId, () => {
 watch(() => panel.value.loading, (now, was) => { if (was && !now) arm() })
 // New message at the bottom: follow it.
 watch(() => panel.value.messages[panel.value.messages.length - 1]?.id, (now, was) => {
-  if (was && now && now !== was) scrollToBottom()
+  if (!was || !now || now === was) return
+  const last = panel.value.messages[panel.value.messages.length - 1]
+  if (atBottom.value || isOwnMessage(last, myId.value)) scrollToBottom()
+  else unseen.value++
 })
 
 function formatTime(iso: string) {
@@ -255,6 +273,7 @@ async function removeMessage(m: TeamChatMessage) {
 
     <template v-else>
       <!-- the viewport wrapper is min-width: fit-content, which lets a long line stretch the whole list past the pane: undo that so text wraps -->
+      <div class="relative flex min-h-0 flex-1 flex-col">
       <ScrollArea :ref="(el: any) => scroll.scrollAreaRef.value = el" class="flex-1 [&_[data-reka-scroll-area-viewport]>div]:!min-w-0">
         <div class="space-y-1 p-4" aria-live="polite">
           <div v-if="panel.loadingOlder" class="flex justify-center py-2">
@@ -382,6 +401,14 @@ async function removeMessage(m: TeamChatMessage) {
           <div ref="endRef" />
         </div>
       </ScrollArea>
+      <button
+        v-if="unseen > 0" type="button" data-testid="new-messages"
+        class="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground shadow-lg"
+        @click="scrollToBottom()"
+      >
+        <ArrowDown class="h-3.5 w-3.5" aria-hidden="true" />{{ t('teamChat.newMessages', { n: unseen }, unseen) }}
+      </button>
+      </div>
 
       <MessageComposer
         ref="composer" :channel-id="channelId" :can-write="canWrite" :archived="isArchived"

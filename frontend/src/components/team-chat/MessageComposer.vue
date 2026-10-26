@@ -227,7 +227,7 @@ function onInput() {
       @retry="store.retryUpload(channelId, $event)" @cancel="store.cancelUpload(channelId, $event)"
     />
     <AudioRecorder v-if="canInteract" ref="recorder" @update:active="recActive = $event" @send="sendVoice" />
-    <form v-if="canInteract && !recActive" class="flex items-end gap-2" @submit.prevent="submit">
+    <form v-if="canInteract && !recActive" class="flex items-end gap-1 sm:gap-2" @submit.prevent="submit">
       <input
         ref="fileInput" type="file" multiple class="hidden" :accept="TEAM_CHAT_ACCEPT"
         data-testid="file-input" @change="onFiles(($event.target as HTMLInputElement).files)"
@@ -257,7 +257,7 @@ function onInput() {
         id="team-chat-composer"
         ref="box"
         v-model="draft"
-        class="max-h-40 min-h-[40px] flex-1 resize-none text-sm"
+        class="max-h-40 min-h-[40px] min-w-0 flex-1 resize-none text-sm"
         :rows="1"
         :placeholder="t('teamChat.composerPlaceholder')"
         :aria-label="t('teamChat.composerPlaceholder')"

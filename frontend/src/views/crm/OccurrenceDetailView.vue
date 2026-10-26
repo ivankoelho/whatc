@@ -460,7 +460,7 @@ onUnmounted(() => {
               @click="convTab = 'internal'"
             ><MessagesSquare class="h-4 w-4 text-sky-600" aria-hidden="true" />{{ $t('occurrences.internalChat') }}</button>
           </div>
-          <div class="p-5 [&_[data-testid=occurrence-chat]]:min-h-[26rem] [&_[data-testid=case-whatsapp]]:border-0 [&_[data-testid=case-whatsapp]]:shadow-none [&_[data-testid=occurrence-chat]]:border-0 [&_[data-testid=occurrence-chat]]:shadow-none">
+          <div class="p-5 max-sm:p-2 [&_[data-testid=occurrence-chat]]:min-h-[26rem] max-sm:[&_[data-testid=occurrence-chat]]:min-h-[34rem] [&_[data-testid=case-whatsapp]]:border-0 [&_[data-testid=case-whatsapp]]:shadow-none [&_[data-testid=occurrence-chat]]:border-0 [&_[data-testid=occurrence-chat]]:shadow-none">
         <div v-show="convTab === 'customer'" id="case-customer" class="scroll-mt-4 space-y-4">
           <OccurrenceWhatsAppCard :occurrence-id="occurrence.id" @configured="waConfigured = $event" />
           <OccurrenceCommunicationCard :occurrence-id="occurrence.id" />

@@ -9,7 +9,7 @@ import MessageComposer from '@/components/team-chat/MessageComposer.vue'
 import MessageAttachments from '@/components/team-chat/MessageAttachments.vue'
 import { bubbleClass, bubbleMeta, dayLabel, isOwnMessage } from '@/lib/chat-bubbles'
 import { useI18n } from 'vue-i18n'
-import { MessagesSquare, Lock } from 'lucide-vue-next'
+import { ArrowDown, MessagesSquare, Lock } from 'lucide-vue-next'
 
 // The case's INTERNAL discussion: colleagues only. It reuses the internal chat
 // (store, composer, attachments, realtime); the server decides who may read and
@@ -48,16 +48,33 @@ async function open() {
 }
 
 watch(() => props.occurrenceId, open, { immediate: true })
-watch(() => messages.value.length, async () => {
-  await nextTick()
-  endRef.value?.scrollIntoView?.({ block: 'nearest' })
+// Follow new messages only when already near the end (or when it is mine); never pull a reader of old
+// history to the bottom. Otherwise count them and offer a jump.
+const listRef = ref<HTMLElement | null>(null)
+const atBottom = ref(true)
+const unseen = ref(0)
+function trackBottom() {
+  const el = listRef.value
+  if (!el) return
+  atBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+  if (atBottom.value) unseen.value = 0
+}
+function toBottom() {
+  unseen.value = 0
+  atBottom.value = true
+  void nextTick(() => endRef.value?.scrollIntoView?.({ block: 'nearest' }))
+}
+watch(() => messages.value.length, async (now, was) => {
+  const last = messages.value[now - 1]
+  if (!was || atBottom.value || (last && isOwnMessage(last, myId.value))) toBottom()
+  else unseen.value += now - was
 })
 onBeforeUnmount(() => { if (store.activeChannelId === channelId.value) void store.selectChannel(null) })
 </script>
 
 <template>
   <Card data-testid="occurrence-chat" class="flex flex-col border-sky-500/30" :class="messages.length > 0 ? 'flex-1' : ''">
-    <CardHeader class="pb-3">
+    <CardHeader class="pb-3 max-sm:px-2">
       <CardTitle class="text-sm font-medium flex items-center gap-2">
         <MessagesSquare class="h-4 w-4" aria-hidden="true" />
         {{ $t('occurrences.internalChat') }}
@@ -66,14 +83,15 @@ onBeforeUnmount(() => { if (store.activeChannelId === channelId.value) void stor
           {{ $t('occurrences.openInChat') }}
         </RouterLink>
       </CardTitle>
-      <p class="text-xs text-muted-foreground">{{ $t('occurrences.internalChatHint') }}</p>
+      <p class="text-xs text-muted-foreground max-sm:hidden">{{ $t('occurrences.internalChatHint') }}</p>
     </CardHeader>
-    <CardContent class="flex flex-1 flex-col gap-3">
+    <CardContent class="flex flex-1 flex-col gap-3 max-sm:px-2">
       <p v-if="failed" class="text-sm text-destructive">{{ $t('occurrences.internalChatFailed') }}</p>
       <template v-else-if="channelId">
         <p v-if="panel?.loading && messages.length === 0" class="text-sm text-muted-foreground">…</p>
         <p v-else-if="messages.length === 0" class="text-sm text-muted-foreground">{{ $t('occurrences.internalChatEmpty') }}</p>
-        <ul v-else class="min-h-48 flex-1 basis-0 space-y-2 overflow-y-auto pr-1" data-testid="internal-messages">
+        <div v-else class="relative flex min-h-48 flex-1 basis-0 flex-col">
+        <ul ref="listRef" class="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1" data-testid="internal-messages" @scroll="trackBottom">
           <template v-for="(m, i) in messages" :key="m.id">
             <li v-if="bubbleMeta(messages, i).newDay" class="flex justify-center py-1">
               <span class="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">{{ dayText(m.created_at) }}</span>
@@ -89,6 +107,14 @@ onBeforeUnmount(() => { if (store.activeChannelId === channelId.value) void stor
           </template>
           <li ref="endRef" aria-hidden="true" />
         </ul>
+        <button
+          v-if="unseen > 0" type="button" data-testid="new-messages"
+          class="absolute bottom-2 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground shadow-lg"
+          @click="toBottom"
+        >
+          <ArrowDown class="h-3.5 w-3.5" aria-hidden="true" />{{ t('teamChat.newMessages', { n: unseen }, unseen) }}
+        </button>
+        </div>
         <MessageComposer v-if="canPost" :channel-id="channelId" :can-write="canPost" :archived="false" />
         <p v-else class="text-xs text-muted-foreground">{{ $t('occurrences.internalChatReadOnly') }}</p>
       </template>

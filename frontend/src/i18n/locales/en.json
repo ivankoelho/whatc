@@ -400,6 +400,7 @@
     }
   },
   "teamChat": {
+    "newMessages": "{n} new message | {n} new messages",
     "today": "Today",
     "yesterday": "Yesterday",
     "sectionOccurrences": "Cases",

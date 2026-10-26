@@ -400,6 +400,7 @@
     }
   },
   "teamChat": {
+    "newMessages": "{n} nova mensagem | {n} novas mensagens",
     "today": "Hoje",
     "yesterday": "Ontem",
     "sectionOccurrences": "Chamados",
