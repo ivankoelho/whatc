@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"encoding/json"
 	"strings"
 	"sync"
 	"testing"
@@ -363,4 +364,18 @@ func TestHomologation_ConcurrentWritesDoNotExhaustTheConnectionPool(t *testing.T
 	code, msgs := w.read(t, sup.ID)
 	require.Equal(t, fasthttp.StatusOK, code)
 	assert.Len(t, msgs, 24, "every message landed exactly once")
+}
+
+// Regression (found in the browser): a pushed occurrence update carried no team name, so an open screen lost
+// "Equipe" / "Departamento atual" after any stage change by someone else.
+func TestHomologation_PushedUpdateCarriesTheTeamName(t *testing.T) {
+	w := newXDWorld(t)
+	sac, log, sup := w.u["SAC"], w.u["Log"], w.u["SupLoja"]
+	occ := w.open(t, sac, w.team["Log"], "Pedido 45872 - push")
+	socks := w.hubFor(t, log)
+	code, _ := chatDo(t, w.app.ChangeOccurrenceStage, sup.OrganizationID, sup.ID, map[string]any{"stage_id": w.stage(t, "waiting_customer").String()}, map[string]string{"id": occ.String()}, nil)
+	require.Equal(t, fasthttp.StatusOK, code)
+	msg := readBroadcast(t, socks[log.ID], "occurrence_changed")
+	b, _ := json.Marshal(msg.Payload)
+	assert.Contains(t, string(b), `"team_name":"`+w.team["Log"].Name+`"`)
 }

@@ -137,6 +137,12 @@ func (a *App) broadcastOccurrence(orgID, occurrenceID uuid.UUID, msg websocket.W
 	if a.WSHub == nil {
 		return
 	}
+	// Most senders build the payload with occurrenceToResponse, which has no team NAME (only GetOccurrence adds it):
+	// a screen that merges the pushed case would lose "Equipe" and "Departamento atual" until the next reload.
+	if resp, ok := msg.Payload.(OccurrenceResponse); ok && resp.TeamID != nil && resp.TeamName == "" {
+		a.DB.Model(&models.Team{}).Where("id = ? AND organization_id = ?", *resp.TeamID, orgID).Select("name").Scan(&resp.TeamName)
+		msg.Payload = resp
+	}
 	a.WSHub.Broadcast(websocket.BroadcastMessage{OrgID: orgID, OccurrenceID: occurrenceID, Message: msg})
 }
 
