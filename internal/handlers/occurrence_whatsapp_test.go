@@ -131,3 +131,22 @@ func TestCaseWhatsApp_ProviderFailureIsReportedNotHidden(t *testing.T) {
 	_, body := w.call(t, w.app.GetOccurrenceWhatsApp, w.logPorto.ID, w.occID, nil, nil)
 	assert.Contains(t, string(body), `"status":"failed"`, "the failed attempt shows in the conversation")
 }
+
+// Supervising a case never opens the customer's conversation by itself: the
+// explicit chat permission is required on top of it.
+func TestCaseWhatsApp_NeedsExplicitChatPermission(t *testing.T) {
+	w := newChatWorld(t)
+	w.run()
+	perms := []string{"occurrences:read", "occurrences:write", "conversations:view_all"}
+	noChat := chatUser(t, w.app, w.org.ID, perms)
+	withChat := chatUser(t, w.app, w.org.ID, append([]string{"chat:read", "chat:write"}, perms...))
+
+	_, body := w.call(t, w.app.GetOccurrenceWhatsApp, noChat.ID, w.occID, nil, nil)
+	assert.Contains(t, string(body), `"restricted":true`)
+	assert.NotContains(t, string(body), `"messages"`)
+	code, _ := w.call(t, w.app.SendOccurrenceWhatsApp, noChat.ID, w.occID, map[string]any{"content": "oi"}, nil)
+	assert.Equal(t, fasthttp.StatusForbidden, code)
+
+	_, body = w.call(t, w.app.GetOccurrenceWhatsApp, withChat.ID, w.occID, nil, nil)
+	assert.Contains(t, string(body), `"restricted":false`)
+}
