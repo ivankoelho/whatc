@@ -117,6 +117,10 @@ type AppConfig struct {
 	Environment   string `koanf:"environment"` // development, staging, production
 	Debug         bool   `koanf:"debug"`
 	EncryptionKey string `koanf:"encryption_key"` // AES-256 key for encrypting secrets at rest
+	// AllowPrivateNextcloud lets the organization's Nextcloud address be plain http or on a
+	// private network. For local development only: otherwise an admin could aim the server
+	// at the internal network.
+	AllowPrivateNextcloud bool `koanf:"allow_private_nextcloud"`
 }
 
 type ServerConfig struct {

@@ -125,7 +125,18 @@ func (a *App) UploadChatAttachment(r *fastglue.Request) error {
 	}
 
 	wantAudio := len(form.Value["kind"]) > 0 && form.Value["kind"][0] == "audio"
-	info, ierr := inspectChatFile(data, fh.Filename, wantAudio)
+	durationRaw := ""
+	if len(form.Value["duration_ms"]) > 0 {
+		durationRaw = form.Value["duration_ms"][0]
+	}
+	return a.finishChatUpload(r, orgID, userID, ch, data, fh.Filename, wantAudio, durationRaw)
+}
+
+// finishChatUpload inspects the bytes, stores the file and records it as a pending
+// attachment of the channel. Both the upload from the computer and the import from
+// Nextcloud end here, so they obey the same type, size and access rules.
+func (a *App) finishChatUpload(r *fastglue.Request, orgID, userID uuid.UUID, ch *models.ChatChannel, data []byte, filename string, wantAudio bool, durationRaw string) error {
+	info, ierr := inspectChatFile(data, filename, wantAudio)
 	switch ierr {
 	case nil:
 	case errFileType:
@@ -140,15 +151,15 @@ func (a *App) UploadChatAttachment(r *fastglue.Request) error {
 	sum := sha256.Sum256(data)
 	att := models.ChatAttachment{
 		ID: uuid.New(), OrganizationID: orgID, ChannelID: ch.ID, UploaderID: userID,
-		Kind: info.Kind, Name: sanitizeChatFileName(fh.Filename, info.Ext), Mime: info.Mime,
+		Kind: info.Kind, Name: sanitizeChatFileName(filename, info.Ext), Mime: info.Mime,
 		SizeBytes: int64(len(data)), SHA256: hex.EncodeToString(sum[:]),
 	}
 	att.StoragePath = filepath.Join(chatAttachmentsRoot, orgID.String(), ch.ID.String(), att.ID.String()+info.Ext)
 	if info.Width > 0 {
 		att.Width, att.Height = &info.Width, &info.Height
 	}
-	if info.Kind == "audio" && len(form.Value["duration_ms"]) > 0 {
-		if ms, e := strconv.Atoi(form.Value["duration_ms"][0]); e == nil && ms >= 0 {
+	if info.Kind == "audio" && durationRaw != "" {
+		if ms, e := strconv.Atoi(durationRaw); e == nil && ms >= 0 {
 			if ms > chatMaxAudioMillis {
 				ms = chatMaxAudioMillis
 			}

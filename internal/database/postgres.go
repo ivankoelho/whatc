@@ -158,6 +158,8 @@ func GetMigrationModels() []MigrationModel {
 		{"ChatRead", &models.ChatRead{}},
 		{"ChatMessageReaction", &models.ChatMessageReaction{}},
 		{"ChatPollVote", &models.ChatPollVote{}},
+		{"NextcloudSettings", &models.NextcloudSettings{}},
+		{"NextcloudCredential", &models.NextcloudCredential{}},
 		{"ChatAttachment", &models.ChatAttachment{}},
 
 		// Help Desk — unidade e departamento

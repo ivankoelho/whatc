@@ -195,3 +195,29 @@ type ChatPollVote struct {
 }
 
 func (ChatPollVote) TableName() string { return "chat_poll_votes" }
+
+// NextcloudSettings is the organization's Nextcloud server (one per organization).
+type NextcloudSettings struct {
+	ID             uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
+	OrganizationID uuid.UUID  `gorm:"type:uuid;not null;uniqueIndex" json:"organization_id"`
+	BaseURL        string     `gorm:"size:300;not null" json:"base_url"`
+	UpdatedByID    *uuid.UUID `gorm:"type:uuid" json:"updated_by_id,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+}
+
+func (NextcloudSettings) TableName() string { return "nextcloud_settings" }
+
+// NextcloudCredential is one person's Nextcloud login: the user name and an APP
+// PASSWORD (revocable in Nextcloud), stored encrypted and never sent to the browser.
+type NextcloudCredential struct {
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
+	OrganizationID uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_nextcloud_cred_user,priority:1" json:"organization_id"`
+	UserID         uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_nextcloud_cred_user,priority:2" json:"user_id"`
+	Username       string    `gorm:"size:200;not null" json:"username"`
+	AppPassword    string    `gorm:"type:text;not null" json:"-"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+func (NextcloudCredential) TableName() string { return "nextcloud_credentials" }
