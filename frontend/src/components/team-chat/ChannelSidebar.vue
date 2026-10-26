@@ -1,14 +1,15 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Hash, Users, Plus, MessageCircle, Archive, ShieldCheck } from 'lucide-vue-next'
+import { Hash, Users, Plus, MessageCircle, Archive, ShieldCheck, FileText, Search } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { ErrorState } from '@/components/shared'
 import { useTeamChatStore } from '@/stores/teamChat'
 import { useAuthStore } from '@/stores/auth'
-import type { TeamChatChannel } from '@/services/api'
+import { teamChatService, type TeamChatChannel } from '@/services/api'
 
 const props = defineProps<{ activeId: string | null }>()
 const emit = defineEmits<{
@@ -31,10 +32,46 @@ const canWrite = computed(() => auth.hasPermission('team_chat', 'write'))
 const nothingToShow = computed(() =>
   store.channels.length === 0 && !(store.showArchived && store.archived.length > 0))
 
+// Search: what is already in the list is filtered here; case discussions the person is not in yet
+// are looked up on the server (it applies the same scope as the case list).
+const search = ref('')
+const hits = ref<TeamChatChannel[]>([])
+const searching = ref(false)
+let timer: ReturnType<typeof setTimeout> | undefined
+let seq = 0
+const term = computed(() => search.value.trim().toLowerCase())
+const matches = (c: TeamChatChannel) => !term.value || (c.name || '').toLowerCase().includes(term.value)
+watch(term, q => {
+  clearTimeout(timer)
+  hits.value = []
+  if (q.length < 2) { searching.value = false; return }
+  searching.value = true
+  const mine = ++seq
+  timer = setTimeout(async () => {
+    try {
+      const res = await teamChatService.searchOccurrences(q)
+      const data = ((res.data as { data?: unknown }).data ?? res.data) as { channels: TeamChatChannel[] }
+      if (mine === seq) hits.value = data.channels ?? []
+    } catch {
+      if (mine === seq) hits.value = []
+    } finally {
+      if (mine === seq) searching.value = false
+    }
+  }, 300)
+})
+onBeforeUnmount(() => clearTimeout(timer))
+function pick(c: TeamChatChannel) {
+  store.adoptChannel(c)
+  emit('select', c.id)
+}
+
 const sections = computed(() => [
-  { key: 'team', label: t('teamChat.sectionTeams'), items: store.channels.filter(c => c.kind === 'team') },
-  { key: 'channel', label: t('teamChat.sectionChannels'), items: store.channels.filter(c => c.kind === 'channel') },
-  { key: 'dm', label: t('teamChat.sectionDirect'), items: store.channels.filter(c => c.kind === 'dm') },
+  { key: 'team', label: t('teamChat.sectionTeams'), items: store.channels.filter(c => c.kind === 'team' && matches(c)) },
+  { key: 'channel', label: t('teamChat.sectionChannels'), items: store.channels.filter(c => c.kind === 'channel' && matches(c)) },
+  { key: 'occurrence', label: t('teamChat.sectionOccurrences'), items: store.channels.filter(c => c.kind === 'occurrence' && matches(c)) },
+  { key: 'dm', label: t('teamChat.sectionDirect'), items: store.channels.filter(c => c.kind === 'dm' && matches(c)) },
+  // Case discussions found by the server that are not in the list yet.
+  { key: 'hits', label: t('teamChat.sectionOccurrenceHits'), items: hits.value.filter(h => !store.channels.some(c => c.id === h.id)) },
   // Archived channels only show when asked for; they stay readable by their members.
   ...(store.showArchived ? [{ key: 'archived', label: t('teamChat.sectionArchived'), items: store.archived }] : [])
 ])
@@ -101,6 +138,13 @@ function badge(n: number): string {
       </div>
     </div>
 
+    <div class="border-b p-2">
+      <div class="relative">
+        <Search class="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden="true" />
+        <Input v-model="search" class="h-9 pl-8 text-sm" :placeholder="t('teamChat.searchPlaceholder')" :aria-label="t('teamChat.searchPlaceholder')" data-testid="channel-search" />
+      </div>
+    </div>
+
     <ErrorState
       v-if="store.channelsError && store.channels.length === 0"
       :title="t('teamChat.loadFailedTitle')"
@@ -114,7 +158,10 @@ function badge(n: number): string {
     </div>
 
     <ScrollArea v-else class="flex-1">
-      <p v-if="nothingToShow" class="px-4 py-8 text-center text-sm text-muted-foreground">
+      <p v-if="term && sections.every(s => s.items.length === 0)" class="px-4 py-8 text-center text-sm text-muted-foreground" data-testid="search-empty">
+        {{ searching ? t('teamChat.searching') : t('teamChat.searchNothing') }}
+      </p>
+      <p v-else-if="nothingToShow" class="px-4 py-8 text-center text-sm text-muted-foreground">
         {{ t('teamChat.noChannels') }}
       </p>
       <nav v-else class="space-y-4 p-2">
@@ -129,10 +176,11 @@ function badge(n: number): string {
                   'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted',
                   props.activeId === c.id ? 'bg-muted font-medium' : ''
                 ]"
-                @click="emit('select', c.id)"
+                @click="pick(c)"
               >
                 <Users v-if="c.kind === 'team'" class="h-4 w-4 shrink-0 text-muted-foreground" />
                 <Hash v-else-if="c.kind === 'channel'" class="h-4 w-4 shrink-0 text-muted-foreground" />
+                <FileText v-else-if="c.kind === 'occurrence'" class="h-4 w-4 shrink-0 text-muted-foreground" />
                 <span
                   v-else
                   :class="['h-2.5 w-2.5 shrink-0 rounded-full', isOnline(c) ? 'bg-emerald-500' : 'bg-muted-foreground/40']"

@@ -58,6 +58,9 @@ onBeforeUnmount(() => { if (store.activeChannelId === channelId.value) void stor
         <MessagesSquare class="h-4 w-4" aria-hidden="true" />
         {{ $t('occurrences.internalChat') }}
         <Badge variant="secondary" class="gap-1"><Lock class="h-3 w-3" aria-hidden="true" />{{ $t('occurrences.internalOnly') }}</Badge>
+        <RouterLink v-if="channelId" :to="`/team-chat/${channelId}`" class="ml-auto text-xs font-normal text-primary hover:underline" data-testid="open-in-chat">
+          {{ $t('occurrences.openInChat') }}
+        </RouterLink>
       </CardTitle>
       <p class="text-xs text-muted-foreground">{{ $t('occurrences.internalChatHint') }}</p>
     </CardHeader>

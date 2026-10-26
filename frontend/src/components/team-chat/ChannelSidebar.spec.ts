@@ -6,7 +6,7 @@ import { createI18n } from 'vue-i18n'
 import en from '@/i18n/locales/en.json'
 
 const api = vi.hoisted(() => ({
-  channels: vi.fn(), archivedChannels: vi.fn(), users: vi.fn(), messages: vi.fn(), members: vi.fn(), adminChannels: vi.fn()
+  channels: vi.fn(), archivedChannels: vi.fn(), users: vi.fn(), messages: vi.fn(), members: vi.fn(), adminChannels: vi.fn(), searchOccurrences: vi.fn()
 }))
 vi.mock('@/services/api', () => ({ teamChatService: api }))
 const perms = vi.hoisted(() => ({ granted: new Set<string>() }))
@@ -99,5 +99,55 @@ describe('ChannelSidebar (phase A)', () => {
     expect(manager.wrapper.find('[aria-label="New channel"]').exists()).toBe(true)
     await manager.wrapper.get('[data-testid="open-admin"]').trigger('click')
     expect(manager.wrapper.emitted('admin')).toHaveLength(1)
+  })
+})
+
+describe('ChannelSidebar (case discussions)', () => {
+  const occ = (id: string, name: string, extra: Record<string, unknown> = {}) => ({
+    id, kind: 'occurrence', name, occurrence_id: `o-${id}`, unread_count: 2, created_at: '2026-10-26T00:00:00Z', ...extra
+  })
+
+  it('lists the case discussions the person is in, with their unread count, in their own section', async () => {
+    const { store, wrapper } = render([free('a', 'Sales'), occ('c1', '2026-000222 · Pedido 55501')])
+    await store.fetchChannels()
+    await flushPromises()
+    expect(wrapper.text()).toContain('Cases')
+    expect(wrapper.get('[data-testid="channel-c1"]').text()).toContain('2026-000222')
+    expect(wrapper.get('[data-testid="channel-c1"]').text()).toContain('2')
+  })
+
+  it('typing filters the list and looks the rest of the cases up on the server; picking a result adopts it', async () => {
+    vi.useFakeTimers()
+    try {
+      const { store, wrapper } = render([free('a', 'Sales')])
+      api.searchOccurrences.mockReturnValue(ok({ channels: [occ('c9', '2026-000219 · Pedido 90001', { unread_count: 0 })] }))
+      await store.fetchChannels()
+      await flushPromises()
+      await wrapper.get('[data-testid="channel-search"]').setValue('000219')
+      await vi.advanceTimersByTimeAsync(400)
+      await flushPromises()
+      expect(api.searchOccurrences).toHaveBeenCalledWith('000219')
+      expect(wrapper.find('[data-testid="channel-a"]').exists()).toBe(false) // the list is filtered
+      await wrapper.get('[data-testid="channel-c9"]').trigger('click')
+      expect(wrapper.emitted('select')?.[0]).toEqual(['c9'])
+      expect(store.channels.some(c => c.id === 'c9')).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not ask the server for fewer than two characters', async () => {
+    vi.useFakeTimers()
+    try {
+      const { store, wrapper } = render([free('a', 'Sales')])
+      api.searchOccurrences.mockReset()
+      await store.fetchChannels()
+      await flushPromises()
+      await wrapper.get('[data-testid="channel-search"]').setValue('s')
+      await vi.advanceTimersByTimeAsync(400)
+      expect(api.searchOccurrences).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowLeft, Check, CornerUpLeft, Hash, Loader2, Lock, MessageSquare, Pencil, Settings2, SmilePlus, Trash2, Users, X } from 'lucide-vue-next'
+import { ArrowLeft, Check, CornerUpLeft, FileText, Hash, Loader2, Lock, MessageSquare, Pencil, Settings2, SmilePlus, Trash2, Users, X } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
@@ -215,9 +215,13 @@ async function removeMessage(m: TeamChatMessage) {
       </Button>
       <Users v-if="channel?.kind === 'team'" class="h-4 w-4 text-muted-foreground" />
       <Hash v-else-if="channel?.kind === 'channel'" class="h-4 w-4 text-muted-foreground" />
+      <FileText v-else-if="channel?.kind === 'occurrence'" class="h-4 w-4 text-muted-foreground" />
       <Lock v-else class="h-4 w-4 text-muted-foreground" />
       <h2 class="truncate text-sm font-semibold">{{ channel?.name || t('teamChat.unnamed') }}</h2>
       <Badge v-if="isArchived" variant="secondary">{{ t('teamChat.manage.archivedBadge') }}</Badge>
+      <Button v-if="channel?.kind === 'occurrence' && channel.occurrence_id" as-child variant="outline" size="sm" class="ml-auto" data-testid="open-occurrence">
+        <RouterLink :to="`/crm/occurrences/${channel.occurrence_id}`"><FileText class="mr-1.5 h-4 w-4" aria-hidden="true" />{{ t('teamChat.openOccurrence') }}</RouterLink>
+      </Button>
       <Button
         v-if="channel?.kind === 'channel'"
         variant="ghost" size="icon" class="ml-auto h-9 w-9"

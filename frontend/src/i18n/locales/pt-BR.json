@@ -358,6 +358,12 @@
     "ariaToggleAvailability": "Alternar status de disponibilidade"
   },
   "teamChat": {
+    "sectionOccurrences": "Chamados",
+    "sectionOccurrenceHits": "Chamados encontrados",
+    "searchPlaceholder": "Buscar conversas e chamados",
+    "searching": "Buscando…",
+    "searchNothing": "Nada encontrado.",
+    "openOccurrence": "Abrir chamado",
     "attachMenu": {
       "computer": "Arquivo neste computador",
       "nextcloud": "Arquivo no Nextcloud",
@@ -2729,6 +2735,7 @@
     "stageTeam": "Equipe",
     "stageTeamHint": "Deixe vazio para uma etapa compartilhada por todas as equipes. Não pode ser alterada depois.",
     "stageTeamAll": "Todas as equipes",
+    "openInChat": "Abrir no Chat Interno",
     "internalChat": "Discussão interna",
     "secRequest": "Solicitação",
     "secProcess": "Processo",

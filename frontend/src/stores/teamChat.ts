@@ -286,6 +286,11 @@ export const useTeamChatStore = defineStore('teamChat', () => {
     }
   }
 
+  /** Puts a discussion found by search (not in the person's list yet) among the channels. */
+  function adoptChannel(ch: TeamChatChannel) {
+    if (!channels.value.some(c => c.id === ch.id)) channels.value = [...channels.value, ch]
+  }
+
   /** A file that is already on the server (picked from Nextcloud): goes straight to the queue as ready. */
   function addReadyAttachment(channelId: string, att: TeamChatAttachment) {
     uploads.value[channelId] = [...uploadsFor(channelId), {
@@ -650,7 +655,7 @@ export const useTeamChatStore = defineStore('teamChat', () => {
     archived, showArchived, members, adminChannels, adminLoading, adminError,
     activeChannel, activePanel, totalUnread, userNames, channelById,
     panel, fetchChannels, fetchUsers, selectChannel, loadMessages, loadOlder, refreshLatest,
-    markRead, send, sendVoice, uploads, uploadsFor, uploadsReady, expireStaleUploads, addFiles, addReadyAttachment, attachNextcloud, createPoll, votePoll, retryUpload, cancelUpload, edit, remove, replyTarget, startReply, cancelReply, react, createChannel, openDM, notifyTyping, typingUserIds,
+    markRead, send, sendVoice, uploads, uploadsFor, uploadsReady, expireStaleUploads, adoptChannel, addFiles, addReadyAttachment, attachNextcloud, createPoll, votePoll, retryUpload, cancelUpload, edit, remove, replyTarget, startReply, cancelReply, react, createChannel, openDM, notifyTyping, typingUserIds,
     fetchArchived, setShowArchived, fetchMembers, fetchAdminChannels,
     addMember, removeMember, leaveChannel, setRole, renameChannel, archiveChannel, reopenChannel, joinChannel,
     applyPresence, applyEvent, resync

@@ -1109,7 +1109,7 @@ export const notesService = {
 
 // Internal chat (team_chat). The server decides who can see what: every id sent
 // here is checked again there, and an inaccessible channel answers 404.
-export type TeamChatChannelKind = 'team' | 'channel' | 'dm'
+export type TeamChatChannelKind = 'team' | 'channel' | 'dm' | 'occurrence'
 
 export interface TeamChatChannel {
   id: string
@@ -1117,6 +1117,8 @@ export interface TeamChatChannel {
   name: string
   team_id?: string
   dm_user_id?: string
+  // The case a discussion belongs to (kind "occurrence"): the chat links back to it.
+  occurrence_id?: string
   unread_count: number
   last_message_at?: string
   created_at: string
@@ -1248,6 +1250,7 @@ export interface TeamChatUser {
 export const teamChatService = {
   channels: () => api.get<{ channels: TeamChatChannel[] }>('/team-chat/channels'),
   users: (q?: string) => api.get<{ users: TeamChatUser[] }>('/team-chat/users', { params: q ? { q } : undefined }),
+  searchOccurrences: (q: string) => api.get<{ channels: TeamChatChannel[] }>('/team-chat/occurrence-search', { params: { q } }),
   createChannel: (data: { name: string; member_ids?: string[] }) =>
     api.post<TeamChatChannel>('/team-chat/channels', data),
   openDM: (userId: string) => api.post<TeamChatChannel>('/team-chat/dm', { user_id: userId }),

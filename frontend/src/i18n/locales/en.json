@@ -358,6 +358,12 @@
     "ariaToggleAvailability": "Toggle availability status"
   },
   "teamChat": {
+    "sectionOccurrences": "Cases",
+    "sectionOccurrenceHits": "Cases found",
+    "searchPlaceholder": "Search chats and cases",
+    "searching": "Searching…",
+    "searchNothing": "Nothing found.",
+    "openOccurrence": "Open case",
     "attachMenu": {
       "computer": "File on this computer",
       "nextcloud": "File in Nextcloud",
@@ -2740,6 +2746,7 @@
     "stageTeam": "Team",
     "stageTeamHint": "Leave empty for a stage every team shares. Cannot be changed later.",
     "stageTeamAll": "All teams",
+    "openInChat": "Open in Internal Chat",
     "internalChat": "Internal discussion",
     "secRequest": "Request",
     "secProcess": "Process",
