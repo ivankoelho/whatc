@@ -424,7 +424,7 @@ func (a *App) ServeOccurrenceDocumentAttachment(r *fastglue.Request) error {
 	}
 	r.RequestCtx.Response.Header.Set("Content-Type", doc.AttachmentMime)
 	r.RequestCtx.Response.Header.Set("X-Content-Type-Options", "nosniff")
-	r.RequestCtx.Response.Header.Set("Cache-Control", "private, max-age=3600")
+	r.RequestCtx.Response.Header.Set("Cache-Control", "private, no-cache")
 	r.RequestCtx.SetBody(data)
 	return nil
 }

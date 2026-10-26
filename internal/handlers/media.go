@@ -307,7 +307,7 @@ func (a *App) ServeMedia(r *fastglue.Request) error {
 	}
 
 	r.RequestCtx.Response.Header.Set("Content-Type", contentType)
-	r.RequestCtx.Response.Header.Set("Cache-Control", "private, max-age=3600") // Cache for 1 hour, private
+	r.RequestCtx.Response.Header.Set("Cache-Control", "private, no-cache") // revalidated on every use: a later infection verdict cannot hide behind a cached copy
 	r.RequestCtx.SetBody(data)
 
 	return nil

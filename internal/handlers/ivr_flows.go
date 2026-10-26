@@ -615,7 +615,7 @@ func (a *App) ServeIVRAudio(r *fastglue.Request) error {
 	contentType := getMimeTypeFromExtension(ext)
 
 	r.RequestCtx.Response.Header.Set("Content-Type", contentType)
-	r.RequestCtx.Response.Header.Set("Cache-Control", "private, max-age=3600")
+	r.RequestCtx.Response.Header.Set("Cache-Control", "private, no-cache")
 	r.RequestCtx.SetBody(data)
 
 	return nil

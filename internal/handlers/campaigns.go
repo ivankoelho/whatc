@@ -1228,7 +1228,7 @@ func (a *App) ServeCampaignMedia(r *fastglue.Request) error {
 	}
 
 	r.RequestCtx.Response.Header.Set("Content-Type", contentType)
-	r.RequestCtx.Response.Header.Set("Cache-Control", "private, max-age=3600")
+	r.RequestCtx.Response.Header.Set("Cache-Control", "private, no-cache")
 	r.RequestCtx.SetBody(data)
 
 	return nil
