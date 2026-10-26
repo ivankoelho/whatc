@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CornerUpLeft, Loader2, Mic, Paperclip, Send, Smile, X } from 'lucide-vue-next'
+import { Cloud, CornerUpLeft, ListChecks, Loader2, Mic, Monitor, Paperclip, Send, Smile, X } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -10,6 +10,8 @@ import { getErrorMessage } from '@/lib/api-utils'
 import AttachmentQueue from './AttachmentQueue.vue'
 import AudioRecorder from './AudioRecorder.vue'
 import EmojiPicker from './EmojiPicker.vue'
+import NextcloudDialog from './NextcloudDialog.vue'
+import PollDialog from './PollDialog.vue'
 import {
   TEAM_CHAT_ACCEPT, TEAM_CHAT_MAX_BODY, TEAM_CHAT_UPLOAD_ERRORS, chatErrorCode, isOnlyFileNames, isSendableBody,
   pickTypingNames, recordingSupported
@@ -48,6 +50,18 @@ const recorder = ref<InstanceType<typeof AudioRecorder> | null>(null)
 const recActive = ref(false)
 const micAvailable = recordingSupported()
 
+// ---- The attach menu: file from this computer, file from Nextcloud, poll ----
+const attachOpen = ref(false)
+const attachWrap = ref<HTMLElement | null>(null)
+const pollOpen = ref(false)
+const nextcloudOpen = ref(false)
+function chooseAttach(what: 'computer' | 'nextcloud' | 'poll') {
+  attachOpen.value = false
+  if (what === 'computer') fileInput.value?.click()
+  else if (what === 'nextcloud') nextcloudOpen.value = true
+  else pollOpen.value = true
+}
+
 // ---- Emoji while writing ----
 const emojiOpen = ref(false)
 const emojiWrap = ref<HTMLElement | null>(null)
@@ -66,9 +80,13 @@ function insertEmoji(glyph: string) {
 // The emoji panel closes on a click anywhere else, or Escape, like any popover.
 function onDocPointerDown(e: PointerEvent) {
   if (emojiOpen.value && !emojiWrap.value?.contains(e.target as Node)) emojiOpen.value = false
+  if (attachOpen.value && !attachWrap.value?.contains(e.target as Node)) attachOpen.value = false
 }
 function onDocKeyDown(e: KeyboardEvent) {
-  if (e.key === 'Escape') emojiOpen.value = false
+  if (e.key === 'Escape') {
+    emojiOpen.value = false
+    attachOpen.value = false
+  }
 }
 
 const queue = computed(() => store.uploadsFor(props.channelId))
@@ -214,10 +232,27 @@ function onInput() {
         ref="fileInput" type="file" multiple class="hidden" :accept="TEAM_CHAT_ACCEPT"
         data-testid="file-input" @change="onFiles(($event.target as HTMLInputElement).files)"
       >
-      <Button
-        type="button" variant="ghost" size="icon" class="h-10 w-10 shrink-0 md:h-9 md:w-9"
-        :aria-label="t('teamChat.attachments.attach')" @click="fileInput?.click()"
-      ><Paperclip class="h-4 w-4" /></Button>
+      <div ref="attachWrap" class="relative shrink-0" @keydown.esc="attachOpen = false">
+        <Button
+          type="button" variant="ghost" size="icon" class="h-10 w-10 md:h-9 md:w-9"
+          :aria-label="t('teamChat.attachments.attach')" aria-haspopup="menu" :aria-expanded="attachOpen"
+          data-testid="attach-button" @click="attachOpen = !attachOpen"
+        ><Paperclip class="h-4 w-4" /></Button>
+        <div
+          v-if="attachOpen" role="menu" data-testid="attach-menu"
+          class="absolute bottom-full left-0 z-30 mb-2 w-64 rounded-lg border bg-popover p-1 text-popover-foreground shadow-lg"
+        >
+          <button type="button" role="menuitem" class="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm hover:bg-muted" data-testid="attach-computer" @click="chooseAttach('computer')">
+            <Monitor class="h-4 w-4 text-muted-foreground" aria-hidden="true" />{{ t('teamChat.attachMenu.computer') }}
+          </button>
+          <button type="button" role="menuitem" class="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm hover:bg-muted" data-testid="attach-nextcloud" @click="chooseAttach('nextcloud')">
+            <Cloud class="h-4 w-4 text-muted-foreground" aria-hidden="true" />{{ t('teamChat.attachMenu.nextcloud') }}
+          </button>
+          <button type="button" role="menuitem" class="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm hover:bg-muted" data-testid="attach-poll" @click="chooseAttach('poll')">
+            <ListChecks class="h-4 w-4 text-muted-foreground" aria-hidden="true" />{{ t('teamChat.attachMenu.poll') }}
+          </button>
+        </div>
+      </div>
       <Textarea
         id="team-chat-composer"
         ref="box"
@@ -250,6 +285,8 @@ function onInput() {
       </Button>
     </form>
     <p v-else-if="!archived && !canWrite" class="px-1 text-sm text-muted-foreground">{{ t('teamChat.readOnly') }}</p>
+    <PollDialog v-if="pollOpen" v-model:open="pollOpen" :channel-id="channelId" />
+    <NextcloudDialog v-if="nextcloudOpen" v-model:open="nextcloudOpen" :channel-id="channelId" />
     <p v-if="overLimit" class="mt-1 px-1 text-xs text-destructive">{{ t('teamChat.tooLong', { max: TEAM_CHAT_MAX_BODY }) }}</p>
   </footer>
 </template>

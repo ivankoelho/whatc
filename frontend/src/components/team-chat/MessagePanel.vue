@@ -18,6 +18,7 @@ import { useAuthStore } from '@/stores/auth'
 import { getAvatarGradient, getInitials } from '@/lib/utils'
 import { getErrorMessage } from '@/lib/api-utils'
 import MessageAttachments from './MessageAttachments.vue'
+import PollCard from './PollCard.vue'
 import MessageComposer from './MessageComposer.vue'
 import { TEAM_CHAT_REACTIONS, chatErrorCode, isSendableBody, reactionGlyph, systemEventKey } from '@/lib/team-chat'
 import type { TeamChatMessage, TeamChatReplyTo } from '@/services/api'
@@ -312,6 +313,7 @@ async function removeMessage(m: TeamChatMessage) {
                 </div>
               </div>
               <!-- Plain text, escaped by Vue; never v-html -->
+              <PollCard v-else-if="m.poll" :message="m" :can-vote="canWrite && !isArchived" />
               <p v-else-if="m.body" class="whitespace-pre-wrap text-sm [overflow-wrap:anywhere]">{{ m.body }}</p>
 
               <MessageAttachments v-if="m.attachments?.length" :attachments="m.attachments" />

@@ -8,7 +8,8 @@ import {
   type TeamChatMember,
   type TeamChatAdminChannel,
   type TeamChatReaction,
-  type TeamChatAttachment
+  type TeamChatAttachment,
+  type TeamChatPoll
 } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import {
@@ -283,6 +284,38 @@ export const useTeamChatStore = defineStore('teamChat', () => {
     } finally {
       pumping.delete(channelId)
     }
+  }
+
+  /** A file that is already on the server (picked from Nextcloud): goes straight to the queue as ready. */
+  function addReadyAttachment(channelId: string, att: TeamChatAttachment) {
+    uploads.value[channelId] = [...uploadsFor(channelId), {
+      key: newUploadKey(), name: att.name, size: att.size, status: 'ready', progress: 100,
+      kind: att.kind, attachmentId: att.id,
+      expiresAt: Date.now() + (att.pending_ttl_ms ?? TEAM_CHAT_PENDING_TTL_MS) - TEAM_CHAT_PENDING_MARGIN_MS
+    }]
+  }
+
+  /** Imports one Nextcloud file into the channel's queue. */
+  async function attachNextcloud(channelId: string, path: string) {
+    const att = unwrap<TeamChatAttachment>(await teamChatService.attachNextcloudFile(channelId, path))
+    addReadyAttachment(channelId, att)
+    return att
+  }
+
+  async function createPoll(channelId: string, data: { question: string; options: string[]; multiple: boolean }) {
+    const msg = unwrap<TeamChatMessage>(await teamChatService.createPoll(channelId, data))
+    const p = panel(channelId)
+    p.messages = appendUnique(p.messages, msg)
+    const ch = channels.value.find(c => c.id === channelId)
+    if (ch) ch.last_message_at = msg.created_at
+    return msg
+  }
+
+  /** Replaces the caller's choice on a poll; the server answers with the new tally. */
+  async function votePoll(msg: TeamChatMessage, optionIds: string[]) {
+    const res = unwrap<{ poll: TeamChatPoll }>(await teamChatService.votePoll(msg.id, optionIds))
+    const p = panels.value[msg.channel_id]
+    if (p) p.messages = p.messages.map(m => (m.id === msg.id ? { ...m, poll: res.poll } : m))
   }
 
   function retryUpload(channelId: string, key: string) {
@@ -617,7 +650,7 @@ export const useTeamChatStore = defineStore('teamChat', () => {
     archived, showArchived, members, adminChannels, adminLoading, adminError,
     activeChannel, activePanel, totalUnread, userNames, channelById,
     panel, fetchChannels, fetchUsers, selectChannel, loadMessages, loadOlder, refreshLatest,
-    markRead, send, sendVoice, uploads, uploadsFor, uploadsReady, expireStaleUploads, addFiles, retryUpload, cancelUpload, edit, remove, replyTarget, startReply, cancelReply, react, createChannel, openDM, notifyTyping, typingUserIds,
+    markRead, send, sendVoice, uploads, uploadsFor, uploadsReady, expireStaleUploads, addFiles, addReadyAttachment, attachNextcloud, createPoll, votePoll, retryUpload, cancelUpload, edit, remove, replyTarget, startReply, cancelReply, react, createChannel, openDM, notifyTyping, typingUserIds,
     fetchArchived, setShowArchived, fetchMembers, fetchAdminChannels,
     addMember, removeMember, leaveChannel, setRole, renameChannel, archiveChannel, reopenChannel, joinChannel,
     applyPresence, applyEvent, resync

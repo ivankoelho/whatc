@@ -1146,6 +1146,47 @@ export interface TeamChatMessage {
   reply_to?: TeamChatReplyTo
   reactions?: TeamChatReaction[]
   attachments?: TeamChatAttachment[]
+  // Set when the message is a poll: the options with their tally and the viewer's own votes.
+  poll?: TeamChatPoll
+}
+
+export interface TeamChatPollOption {
+  id: string
+  label: string
+  count: number
+  mine: boolean
+  voters: string[]
+}
+
+export interface TeamChatPoll {
+  multiple: boolean
+  options: TeamChatPollOption[]
+  voters: number
+}
+
+export interface NextcloudStatus {
+  configured: boolean
+  connected: boolean
+  base_url?: string
+  username?: string
+  can_configure: boolean
+}
+
+export interface NextcloudEntry {
+  name: string
+  path: string
+  is_dir: boolean
+  size: number
+  mime?: string
+}
+
+export const nextcloudService = {
+  status: () => api.get<NextcloudStatus>('/integrations/nextcloud'),
+  saveServer: (baseUrl: string) => api.put('/integrations/nextcloud', { base_url: baseUrl }),
+  connect: (username: string, appPassword: string) =>
+    api.put('/integrations/nextcloud/me', { username, app_password: appPassword }),
+  disconnect: () => api.delete('/integrations/nextcloud/me'),
+  files: (path: string) => api.get<{ path: string; entries: NextcloudEntry[] }>('/integrations/nextcloud/files', { params: { path } })
 }
 
 export interface TeamChatAttachment {
@@ -1235,6 +1276,12 @@ export const teamChatService = {
       onUploadProgress: e => { if (e.total) opts.onProgress?.(Math.round((e.loaded / e.total) * 100)) }
     })
   },
+  attachNextcloudFile: (channelId: string, path: string) =>
+    api.post<TeamChatAttachment>(`/team-chat/channels/${channelId}/nextcloud-files`, { path }),
+  createPoll: (channelId: string, data: { question: string; options: string[]; multiple: boolean }) =>
+    api.post<TeamChatMessage>(`/team-chat/channels/${channelId}/polls`, data),
+  votePoll: (messageId: string, optionIds: string[]) =>
+    api.put<{ poll: TeamChatPoll }>(`/team-chat/messages/${messageId}/poll-vote`, { option_ids: optionIds }),
   discardAttachment: (channelId: string, attachmentId: string) =>
     api.delete(`/team-chat/channels/${channelId}/attachments/${attachmentId}`),
   message: (messageId: string) => api.get<TeamChatMessage>(`/team-chat/messages/${messageId}`),
