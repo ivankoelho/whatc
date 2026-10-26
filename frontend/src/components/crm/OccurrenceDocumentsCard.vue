@@ -12,7 +12,8 @@ import { type DocumentDraft, newDocumentDraft, draftToInput, isBlankDraft, MAX_A
 import { getErrorMessage } from '@/lib/api-utils'
 import { FileText, Paperclip, Plus, Trash2, Loader2 } from 'lucide-vue-next'
 
-const props = defineProps<{ occurrenceId: string; canWrite: boolean }>()
+// embedded: shown inside the single Attachments card (no frame, no title, no own add button).
+const props = defineProps<{ occurrenceId: string; canWrite: boolean; embedded?: boolean }>()
 const { t } = useI18n()
 
 const documents = ref<OccurrenceDocument[]>([])
@@ -33,6 +34,12 @@ async function load() {
   }
 }
 onMounted(load)
+
+/** Opens the invoice/coupon form, already on the chosen kind (called by the Attachments card). */
+function startDraft(type: 'nf' | 'cupom') {
+  draft.value = [{ ...newDocumentDraft(), type }]
+}
+defineExpose({ startDraft })
 
 function formatDate(value?: string) {
   // purchase_date comes back as a timestamp at local midnight; show the date only.
@@ -114,8 +121,8 @@ async function confirmRemove() {
 </script>
 
 <template>
-  <Card>
-    <CardHeader class="pb-3 flex-row items-center justify-between space-y-0">
+  <Card :class="embedded ? 'border-0 bg-transparent shadow-none' : ''">
+    <CardHeader v-if="!embedded" class="pb-3 flex-row items-center justify-between space-y-0">
       <CardTitle class="text-sm font-medium flex items-center gap-2">
         <FileText class="h-4 w-4 text-sky-400 light:text-sky-600" />
         {{ t('occurrenceDocuments.cardTitle') }}
@@ -124,9 +131,9 @@ async function confirmRemove() {
         <Plus class="h-3.5 w-3.5 mr-1" />{{ t('occurrenceDocuments.addFirst') }}
       </Button>
     </CardHeader>
-    <CardContent class="space-y-3 text-sm">
+    <CardContent :class="embedded ? 'space-y-3 p-0 text-sm' : 'space-y-3 text-sm'">
       <div v-if="isLoading" class="flex justify-center py-2"><Loader2 class="h-4 w-4 animate-spin text-muted-foreground" /></div>
-      <p v-else-if="documents.length === 0 && !draft" class="text-muted-foreground text-xs">{{ t('occurrenceDocuments.empty') }}</p>
+      <p v-else-if="documents.length === 0 && !draft && !embedded" class="text-muted-foreground text-xs">{{ t('occurrenceDocuments.empty') }}</p>
 
       <div
         v-for="doc in documents"

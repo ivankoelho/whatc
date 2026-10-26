@@ -367,6 +367,12 @@
       "changeWarning": "Changing the address disconnects everybody, who will need to connect again."
     }
   },
+  "occurrenceAttach": {
+    "title": "Attachments",
+    "attach": "Attach",
+    "nf": "Invoice",
+    "cupom": "Coupon / order number"
+  },
   "occurrenceFiles": {
     "title": "Documents",
     "attach": "Attach document",

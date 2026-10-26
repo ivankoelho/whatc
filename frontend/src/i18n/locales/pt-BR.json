@@ -367,6 +367,12 @@
       "changeWarning": "Trocar o endereço desconecta todas as pessoas, que precisarão conectar de novo."
     }
   },
+  "occurrenceAttach": {
+    "title": "Anexos",
+    "attach": "Anexar",
+    "nf": "Nota fiscal",
+    "cupom": "Cupom / nº do pedido"
+  },
   "occurrenceFiles": {
     "title": "Documentos",
     "attach": "Anexar documento",

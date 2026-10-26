@@ -5,8 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import DetailPageLayout from '@/components/shared/DetailPageLayout.vue'
 import { IconButton, DeleteConfirmDialog } from '@/components/shared'
-import OccurrenceDocumentsCard from '@/components/crm/OccurrenceDocumentsCard.vue'
-import OccurrenceFilesCard from '@/components/crm/OccurrenceFilesCard.vue'
+import OccurrenceAttachmentsCard from '@/components/crm/OccurrenceAttachmentsCard.vue'
 import OccurrenceHistoryDialog from '@/components/crm/OccurrenceHistoryDialog.vue'
 import OccurrenceExportDialog from '@/components/crm/OccurrenceExportDialog.vue'
 import { eventIcons, eventLabels } from '@/lib/occurrence-events'
@@ -442,6 +441,78 @@ onUnmounted(() => {
           </div>
         </section>
 
+        <!-- The conversation is the heart of the case: right under the identification strip, larger. -->
+        <!-- 4. ONE conversation area with two clearly different destinations: the customer (WhatsApp)
+             and the colleagues (internal). A switch, never both at once, so nothing typed for one can
+             be sent to the other; each tab says who will read it. -->
+        <section id="case-conversation" class="scroll-mt-4 rounded-xl border-2 border-primary/25 bg-card shadow-md" data-testid="case-conversation">
+          <div class="flex border-b" role="tablist" :aria-label="$t('occurrences.convTitle')">
+            <button
+              type="button" role="tab" :aria-selected="convTab === 'customer'" data-testid="conv-tab-customer"
+              class="flex items-center gap-2 border-b-2 px-5 py-3.5 text-base transition-colors"
+              :class="convTab === 'customer' ? 'border-emerald-500 font-medium text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'"
+              @click="convTab = 'customer'"
+            ><MessageCircle class="h-4 w-4 text-emerald-600" aria-hidden="true" />{{ $t('occurrences.waTitle') }}</button>
+            <button
+              type="button" role="tab" :aria-selected="convTab === 'internal'" data-testid="conv-tab-internal"
+              class="flex items-center gap-2 border-b-2 px-5 py-3.5 text-base transition-colors"
+              :class="convTab === 'internal' ? 'border-sky-500 font-medium text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'"
+              @click="convTab = 'internal'"
+            ><MessagesSquare class="h-4 w-4 text-sky-600" aria-hidden="true" />{{ $t('occurrences.internalChat') }}</button>
+          </div>
+          <div class="p-5 [&_[data-testid=occurrence-chat]]:min-h-[26rem] [&_[data-testid=case-whatsapp]]:border-0 [&_[data-testid=case-whatsapp]]:shadow-none [&_[data-testid=occurrence-chat]]:border-0 [&_[data-testid=occurrence-chat]]:shadow-none">
+        <div v-show="convTab === 'customer'" id="case-customer" class="scroll-mt-4 space-y-4">
+          <OccurrenceWhatsAppCard :occurrence-id="occurrence.id" @configured="waConfigured = $event" />
+          <OccurrenceCommunicationCard :occurrence-id="occurrence.id" />
+        <!-- Legacy reply (from the contact's own account): only when the case has no channel account -->
+        <Card v-if="canWrite && (occurrence.can?.reply ?? true) && !waConfigured" class="border-primary/40">
+          <CardHeader class="pb-3">
+            <CardTitle class="text-sm font-medium">{{ $t('occurrences.replyTitle') }}</CardTitle>
+            <p class="text-xs text-muted-foreground">{{ $t('occurrences.replyHint') }}</p>
+          </CardHeader>
+          <CardContent class="space-y-2">
+            <div v-if="occurrence.process_id" class="flex items-center gap-2">
+              <Select v-model="messageStage">
+                <SelectTrigger class="w-56">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="documents">{{ $t('occurrences.stageDocuments') }}</SelectItem>
+                  <SelectItem value="follow_up">{{ $t('occurrences.stageFollowUp') }}</SelectItem>
+                  <SelectItem value="forwarding">{{ $t('occurrences.stageForwarding') }}</SelectItem>
+                  <SelectItem value="closing">{{ $t('occurrences.stageClosing') }}</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button size="sm" variant="outline" :disabled="loadingSuggestion" @click="loadSuggestedMessage">
+                <Loader2 v-if="loadingSuggestion" class="h-4 w-4 mr-2 animate-spin" />
+                {{ $t('occurrences.loadSuggestedMessage') }}
+              </Button>
+            </div>
+            <Textarea
+              v-model="replyContent"
+              :placeholder="$t('occurrences.replyPlaceholder')"
+              :rows="4"
+              @update:model-value="handleReplyInput($event as string)"
+            />
+            <p v-if="replyWindowClosed" class="text-sm text-destructive" role="alert">
+              {{ $t('chat.sendProtocolWindowClosed') }}
+            </p>
+            <Button size="sm" :disabled="!replyContent.trim() || isReplying" @click="submitReply">
+              <Loader2 v-if="isReplying" class="h-4 w-4 mr-2 animate-spin" />
+              <Send v-else class="h-4 w-4 mr-2" />
+              {{ $t('occurrences.sendReply') }}
+            </Button>
+          </CardContent>
+        </Card>
+        </div>
+
+        <!-- Colleagues only (kept mounted so it keeps receiving messages while the other tab is open) -->
+        <div v-show="convTab === 'internal'" id="case-internal" class="scroll-mt-4">
+          <OccurrenceChatPanel :occurrence-id="occurrence.id" />
+        </div>
+          </div>
+        </section>
+
         <!-- 2 + 3. The request with its order and followers; documents and history beside it -->
         <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <section class="rounded-lg border bg-card p-4" data-testid="case-request">
@@ -512,8 +583,7 @@ onUnmounted(() => {
           </section>
 
           <div class="flex flex-col gap-6">
-            <OccurrenceDocumentsCard :occurrence-id="occurrence.id" :can-write="canWrite" />
-            <OccurrenceFilesCard :occurrence-id="occurrence.id" />
+            <OccurrenceAttachmentsCard :occurrence-id="occurrence.id" :can-write="canWrite" />
           <section id="case-history" class="scroll-mt-4 flex-1 rounded-lg border bg-card p-4" data-testid="case-history">
             <div class="mb-3 flex items-center justify-between gap-2">
               <h2 class="text-sm font-semibold">{{ $t('chat.occurrenceTimeline') }}</h2>
@@ -542,76 +612,6 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- 4. ONE conversation area with two clearly different destinations: the customer (WhatsApp)
-             and the colleagues (internal). A switch, never both at once, so nothing typed for one can
-             be sent to the other; each tab says who will read it. -->
-        <section id="case-conversation" class="scroll-mt-4 rounded-lg border bg-card" data-testid="case-conversation">
-          <div class="flex border-b" role="tablist" :aria-label="$t('occurrences.convTitle')">
-            <button
-              type="button" role="tab" :aria-selected="convTab === 'customer'" data-testid="conv-tab-customer"
-              class="flex items-center gap-2 border-b-2 px-4 py-3 text-sm transition-colors"
-              :class="convTab === 'customer' ? 'border-emerald-500 font-medium text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'"
-              @click="convTab = 'customer'"
-            ><MessageCircle class="h-4 w-4 text-emerald-600" aria-hidden="true" />{{ $t('occurrences.waTitle') }}</button>
-            <button
-              type="button" role="tab" :aria-selected="convTab === 'internal'" data-testid="conv-tab-internal"
-              class="flex items-center gap-2 border-b-2 px-4 py-3 text-sm transition-colors"
-              :class="convTab === 'internal' ? 'border-sky-500 font-medium text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'"
-              @click="convTab = 'internal'"
-            ><MessagesSquare class="h-4 w-4 text-sky-600" aria-hidden="true" />{{ $t('occurrences.internalChat') }}</button>
-          </div>
-          <div class="p-4 [&_[data-testid=case-whatsapp]]:border-0 [&_[data-testid=case-whatsapp]]:shadow-none [&_[data-testid=occurrence-chat]]:border-0 [&_[data-testid=occurrence-chat]]:shadow-none">
-        <div v-show="convTab === 'customer'" id="case-customer" class="scroll-mt-4 space-y-4">
-          <OccurrenceWhatsAppCard :occurrence-id="occurrence.id" @configured="waConfigured = $event" />
-          <OccurrenceCommunicationCard :occurrence-id="occurrence.id" />
-        <!-- Legacy reply (from the contact's own account): only when the case has no channel account -->
-        <Card v-if="canWrite && (occurrence.can?.reply ?? true) && !waConfigured" class="border-primary/40">
-          <CardHeader class="pb-3">
-            <CardTitle class="text-sm font-medium">{{ $t('occurrences.replyTitle') }}</CardTitle>
-            <p class="text-xs text-muted-foreground">{{ $t('occurrences.replyHint') }}</p>
-          </CardHeader>
-          <CardContent class="space-y-2">
-            <div v-if="occurrence.process_id" class="flex items-center gap-2">
-              <Select v-model="messageStage">
-                <SelectTrigger class="w-56">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="documents">{{ $t('occurrences.stageDocuments') }}</SelectItem>
-                  <SelectItem value="follow_up">{{ $t('occurrences.stageFollowUp') }}</SelectItem>
-                  <SelectItem value="forwarding">{{ $t('occurrences.stageForwarding') }}</SelectItem>
-                  <SelectItem value="closing">{{ $t('occurrences.stageClosing') }}</SelectItem>
-                </SelectContent>
-              </Select>
-              <Button size="sm" variant="outline" :disabled="loadingSuggestion" @click="loadSuggestedMessage">
-                <Loader2 v-if="loadingSuggestion" class="h-4 w-4 mr-2 animate-spin" />
-                {{ $t('occurrences.loadSuggestedMessage') }}
-              </Button>
-            </div>
-            <Textarea
-              v-model="replyContent"
-              :placeholder="$t('occurrences.replyPlaceholder')"
-              :rows="4"
-              @update:model-value="handleReplyInput($event as string)"
-            />
-            <p v-if="replyWindowClosed" class="text-sm text-destructive" role="alert">
-              {{ $t('chat.sendProtocolWindowClosed') }}
-            </p>
-            <Button size="sm" :disabled="!replyContent.trim() || isReplying" @click="submitReply">
-              <Loader2 v-if="isReplying" class="h-4 w-4 mr-2 animate-spin" />
-              <Send v-else class="h-4 w-4 mr-2" />
-              {{ $t('occurrences.sendReply') }}
-            </Button>
-          </CardContent>
-        </Card>
-        </div>
-
-        <!-- Colleagues only (kept mounted so it keeps receiving messages while the other tab is open) -->
-        <div v-show="convTab === 'internal'" id="case-internal" class="scroll-mt-4">
-          <OccurrenceChatPanel :occurrence-id="occurrence.id" />
-        </div>
-          </div>
-        </section>
       </div>
       </template>
     </DetailPageLayout>
