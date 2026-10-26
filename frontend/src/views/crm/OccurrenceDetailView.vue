@@ -29,7 +29,7 @@ import { useOccurrencesStore } from '@/stores/occurrences'
 import { useUsersStore } from '@/stores/users'
 import { useAuthStore } from '@/stores/auth'
 import { wsService } from '@/services/websocket'
-import { formatDateTime } from '@/lib/utils'
+import { formatDateTime, formatCivilDate } from '@/lib/utils'
 import { getErrorMessage } from '@/lib/api-utils'
 import {
   ClipboardList,
@@ -565,7 +565,7 @@ onUnmounted(() => {
                   </div>
                   <div v-if="occurrence.purchase_date">
                     <dt class="text-xs text-muted-foreground">{{ $t('occurrences.purchaseDateLabel') }}</dt>
-                    <dd>{{ formatDateTime(occurrence.purchase_date) }}</dd>
+                    <dd>{{ formatCivilDate(occurrence.purchase_date) }}</dd>
                   </div>
                   <div v-if="occurrence.product_description">
                     <dt class="text-xs text-muted-foreground">{{ $t('occurrences.secProduct') }}</dt>

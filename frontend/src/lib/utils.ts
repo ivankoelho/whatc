@@ -5,27 +5,8 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-export function formatDate(date: string | Date, options?: Intl.DateTimeFormatOptions): string {
-  const d = typeof date === 'string' ? new Date(date) : date
-  return d.toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    ...options
-  })
-}
-
-export function formatTime(date: string | Date): string {
-  const d = typeof date === 'string' ? new Date(date) : date
-  return d.toLocaleTimeString('en-US', {
-    hour: '2-digit',
-    minute: '2-digit'
-  })
-}
-
-export function formatDateTime(date: string | Date): string {
-  return `${formatDate(date)} ${formatTime(date)}`
-}
+// Dates and times follow one standard (pt-BR: DD/MM/YYYY HH:mm, 24 h, organization time zone): see ./datetime.
+export { formatDate, formatTime, formatDateTime, formatDateTimeSeconds, formatCivilDate } from './datetime'
 
 export function truncate(str: string, length: number): string {
   if (str.length <= length) return str

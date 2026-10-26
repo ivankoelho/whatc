@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDateTime } from '@/lib/utils'
 import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -281,7 +282,7 @@ function viewChat(transfer: AgentTransfer) {
 }
 
 function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleString()
+  return formatDateTime(dateStr)
 }
 
 function getSourceBadge(source: string) {

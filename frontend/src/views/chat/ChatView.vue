@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatTime as formatDtTime, formatDate as formatDtDate } from '@/lib/utils'
 import { ref, watch, onMounted, onUnmounted, nextTick, computed, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -1533,8 +1534,7 @@ function getMessageStatusClass(status: string) {
 }
 
 function formatMessageTime(dateStr: string) {
-  const date = new Date(dateStr)
-  return date.toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
+  return formatDtTime(dateStr)
 }
 
 function formatContactTime(dateStr?: string) {
@@ -1544,13 +1544,13 @@ function formatContactTime(dateStr?: string) {
   const diffDays = Math.floor((now.getTime() - date.getTime()) / 86400000)
 
   if (diffDays === 0) {
-    return date.toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
+    return formatDtTime(dateStr)
   } else if (diffDays === 1) {
     return t('chat.yesterday')
   } else if (diffDays < 7) {
     return date.toLocaleDateString(locale.value, { weekday: 'short' })
   }
-  return date.toLocaleDateString(locale.value, { month: 'short', day: 'numeric' })
+  return formatDtDate(dateStr)
 }
 
 function getDateLabel(dateStr: string): string {
@@ -1565,7 +1565,7 @@ function getDateLabel(dateStr: string): string {
   } else if (diffDays === 1) {
     return t('chat.yesterday')
   }
-  return date.toLocaleDateString(locale.value, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+  return `${date.toLocaleDateString(locale.value, { weekday: 'long' })}, ${formatDtDate(dateStr)}`
 }
 
 function shouldShowDateSeparator(index: number): boolean {

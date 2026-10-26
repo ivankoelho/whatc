@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatTime } from '@/lib/utils'
 import { ref, computed, watch, onBeforeUnmount, nextTick } from 'vue'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -18,7 +19,7 @@ import { ArrowDown, MessagesSquare, Lock } from 'lucide-vue-next'
 // the WhatsApp card, with its own button and its own endpoint.
 const props = defineProps<{ occurrenceId: string }>()
 const { t, locale } = useI18n()
-const timeOf = (iso: string) => new Date(iso).toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
+const timeOf = (iso: string) => formatTime(iso)
 const dayText = (iso: string) => dayLabel(iso, locale.value, { today: t('teamChat.today'), yesterday: t('teamChat.yesterday') })
 
 const store = useTeamChatStore()

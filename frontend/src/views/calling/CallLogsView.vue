@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDateTime } from '@/lib/utils'
 import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useCallingStore } from '@/stores/calling'
@@ -130,7 +131,7 @@ function formatDuration(seconds: number): string {
 
 function formatDate(dateStr?: string): string {
   if (!dateStr) return '-'
-  return new Date(dateStr).toLocaleString()
+  return formatDateTime(dateStr)
 }
 
 function statusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' {

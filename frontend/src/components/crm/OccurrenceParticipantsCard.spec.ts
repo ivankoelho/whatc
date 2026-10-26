@@ -23,6 +23,7 @@ function setup(canWrite = true) {
 
 describe('OccurrenceParticipantsCard (acompanhamento e apoio)', () => {
   beforeEach(() => {
+    document.documentElement.setAttribute('lang', 'pt-BR') // the date standard follows the app language
     Object.values(svc).forEach(f => f.mockReset())
     svc.listParticipants.mockReturnValue(ok({ participants: [row('u1', 'Bia', true), row('u2', 'Caio', false, { removed_by: 'Ana', removed_at: '2026-10-26T14:00:00Z' })] }))
     svc.supportDepartments.mockReturnValue(ok({ departments: [{ id: 'd1', name: 'Logística' }] }))

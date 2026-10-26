@@ -1,4 +1,5 @@
 import { useContactsStore } from '@/stores/contacts'
+import { formatTime } from '@/lib/datetime'
 import { useTransfersStore } from '@/stores/transfers'
 import { useCallingStore } from '@/stores/calling'
 import { useAuthStore } from '@/stores/auth'
@@ -588,7 +589,7 @@ class WebSocketService {
 
       // Show urgent toast
       toast.warning(`SLA Escalation: ${levelName}`, {
-        description: `${contactName} has been waiting since ${new Date(payload.waiting_since).toLocaleTimeString()}`,
+        description: `${contactName} has been waiting since ${formatTime(payload.waiting_since)}`,
         duration: 10000,
         action: {
           label: 'View',

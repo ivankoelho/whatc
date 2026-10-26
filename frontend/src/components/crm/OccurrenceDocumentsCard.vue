@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatCivilDate } from '@/lib/utils'
 import { computed, ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
@@ -45,7 +46,7 @@ defineExpose({ startDraft })
 
 function formatDate(value?: string) {
   // purchase_date comes back as a timestamp at local midnight; show the date only.
-  return value ? new Date(value).toLocaleDateString('pt-BR') : ''
+  return formatCivilDate(value)
 }
 
 async function saveDraft() {

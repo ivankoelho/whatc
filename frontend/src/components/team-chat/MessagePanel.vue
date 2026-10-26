@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatTime as fmtTime } from '@/lib/utils'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowDown, ArrowLeft, Check, CornerUpLeft, FileText, Hash, Loader2, Lock, MessageSquare, Pencil, Settings2, SmilePlus, Trash2, Users, X } from 'lucide-vue-next'
@@ -191,7 +192,7 @@ watch(() => panel.value.messages[panel.value.messages.length - 1]?.id, (now, was
 })
 
 function formatTime(iso: string) {
-  return new Date(iso).toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
+  return fmtTime(iso)
 }
 
 const isOwn = (m: TeamChatMessage) => isOwnMessage(m, myId.value)

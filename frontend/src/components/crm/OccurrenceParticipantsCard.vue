@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { occurrencesService, type OccurrenceParticipant } from '@/services/api'
 import { getErrorMessage } from '@/lib/api-utils'
+import { formatDateTime } from '@/lib/utils'
 import { Users, X } from 'lucide-vue-next'
 
 // "Acompanhamento e apoio": pick a support department, then only its ACTIVE members (the server filters by
@@ -25,9 +26,7 @@ const history = computed(() => participants.value.filter(p => !p.active))
 // people already linked are not offered twice
 const candidates = computed(() => people.value.filter(u => !activeList.value.some(p => p.user_id === u.id)))
 
-const fmt = (iso?: string) => iso
-  ? new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso)).replace(',', '')
-  : ''
+const fmt = (iso?: string) => formatDateTime(iso)
 const roleLabel = (r: string) => (r === 'support' ? t('occurrences.support.roleSupport') : t('occurrences.support.roleFollower'))
 
 async function load() {

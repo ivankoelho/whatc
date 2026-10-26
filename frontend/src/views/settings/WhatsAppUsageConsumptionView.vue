@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDate, formatDateTime } from '@/lib/utils'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
@@ -105,7 +106,7 @@ onMounted(async () => {
 const currencyLocale = computed(() => (locale.value === 'en' ? 'en-US' : 'pt-BR'))
 const money = (amount: number, currency: string) => formatMoney(amount, currency, currencyLocale.value)
 
-const dateOf = (v?: string | null) => (v ? new Date(v).toLocaleString(currencyLocale.value) : '')
+const dateOf = (v?: string | null) => (v ? formatDateTime(v) : '')
 const changedAt = computed(() => dateOf(summary.value?.recording.changed_at))
 
 async function toggleRecording(enabled: boolean) {
@@ -123,7 +124,7 @@ async function toggleRecording(enabled: boolean) {
 
 const since = computed(() => {
   const s = summary.value?.recording.since
-  return s ? new Date(s).toLocaleDateString(currencyLocale.value) : ''
+  return s ? formatDate(s) : ''
 })
 
 interface UsageCard {
@@ -177,7 +178,7 @@ const rowColumns = computed<Column<WhatsAppUsageRow>[]>(() => [
 ])
 
 const stateVariant = (s: string) => (s === 'priced' ? 'success' : s === 'no_rate' || s === 'failed' || s === 'send_failed' ? 'destructive' : 'secondary')
-const when = (v: string) => new Date(v).toLocaleString(currencyLocale.value)
+const when = (v: string) => formatDateTime(v)
 </script>
 
 <template>

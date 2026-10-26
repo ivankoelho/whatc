@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { api } from '@/services/api'
+import { setDisplayTimeZone } from '@/lib/datetime'
 
 export interface UserSettings {
   email_notifications?: boolean
@@ -49,6 +50,15 @@ export const useAuthStore = defineStore('auth', () => {
   const organizationId = computed(() => user.value?.organization_id || '')
   const userSettings = computed(() => user.value?.settings || {})
   const isAvailable = computed(() => user.value?.is_available ?? true)
+
+  // Dates are shown in the organization's configured time zone (browser zone while unknown or invalid).
+  watch(organizationId, async (id) => {
+    if (!id) { setDisplayTimeZone(undefined); return }
+    try {
+      const res = await api.get('/org/settings')
+      setDisplayTimeZone(res.data?.data?.timezone)
+    } catch { setDisplayTimeZone(undefined) }
+  }, { immediate: true })
 
   function setAuth(authData: { user: User }) {
     user.value = authData.user
