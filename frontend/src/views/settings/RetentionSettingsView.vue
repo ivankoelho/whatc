@@ -62,10 +62,10 @@ async function load() {
   }
 }
 async function loadHolds() {
-  holds.value = unwrap<{ holds: RetentionHold[] }>(await retentionService.holds('active')).holds
+  holds.value = unwrap<{ holds: RetentionHold[] | null }>(await retentionService.holds('active')).holds ?? []
 }
 async function loadHistory() {
-  history.value = unwrap<{ history: typeof history.value }>(await retentionService.history()).history
+  history.value = unwrap<{ history: typeof history.value | null }>(await retentionService.history()).history ?? []
 }
 
 const saved = (c: string) => policies.value.find(p => p.category === c)
@@ -224,7 +224,7 @@ onMounted(load)
                         <button type="button" class="text-left underline-offset-2 hover:underline focus-visible:underline" :aria-expanded="openSamples === r.category"
                                 @click="openSamples = openSamples === r.category ? null : r.category">{{ t(`retention.categories.${r.category}.name`) }}</button>
                         <p v-if="!r.applied" class="text-[11px] text-muted-foreground">{{ t(`retention.reason.${r.reason}`) }}</p>
-                        <p v-else class="text-[11px] text-muted-foreground">{{ t('retention.appliedTerm', { n: r.months }) }}<span v-if="r.assumed"> · {{ t('retention.assumed') }}</span></p>
+                        <p v-else class="text-[11px] text-muted-foreground">{{ t('retention.appliedTerm', { n: r.months }, r.months) }}<span v-if="r.assumed"> · {{ t('retention.assumed') }}</span></p>
                       </td>
                       <template v-if="r.applied">
                         <td class="px-2 py-1.5 text-right font-medium tabular-nums">{{ count(r, 'eligible') }}</td>

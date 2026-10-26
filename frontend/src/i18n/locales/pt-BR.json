@@ -429,7 +429,7 @@
     "simulate": "Simular expurgo",
     "simulateHint": "Somente leitura: nada é alterado, apagado ou enfileirado. Usa o prazo digitado em cada linha, mesmo que ainda não salvo.",
     "generatedAt": "Gerada em {date}",
-    "appliedTerm": "Prazo aplicado: {n} meses",
+    "appliedTerm": "Prazo aplicado: {n} mês | Prazo aplicado: {n} meses",
     "assumed": "prazo de simulação, não salvo",
     "noSamples": "Nenhum arquivo para mostrar.",
     "volumeNote": "Volume dos arquivos elegíveis (medido em disco quando o banco não guarda o tamanho). Um asterisco indica medição parcial.",

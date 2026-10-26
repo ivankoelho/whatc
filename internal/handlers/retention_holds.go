@@ -216,7 +216,7 @@ func (a *App) RetentionHistory(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
-	var out []retentionHistoryEntry
+	out := []retentionHistoryEntry{}
 
 	var logs []models.AuditLog
 	a.DB.Where("organization_id = ? AND resource_type = ?", orgID, "retention_policy").Order("created_at DESC").Limit(100).Find(&logs)

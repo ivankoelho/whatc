@@ -429,7 +429,7 @@
     "simulate": "Simulate purge",
     "simulateHint": "Read-only: nothing is changed, deleted or queued. Uses the term typed in each row, even if not saved yet.",
     "generatedAt": "Generated {date}",
-    "appliedTerm": "Term applied: {n} months",
+    "appliedTerm": "Term applied: {n} month | Term applied: {n} months",
     "assumed": "simulation term, not saved",
     "noSamples": "No files to show.",
     "volumeNote": "Volume of the eligible files (measured on disk when the database does not hold the size). An asterisk means a partial measurement.",
