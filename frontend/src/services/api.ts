@@ -1811,6 +1811,8 @@ export const occurrencesService = {
   createStage: (data: Partial<OccurrenceStage>) => api.post<ApiEnvelope<OccurrenceStage>>('/occurrence-stages', data),
   updateStage: (id: string, data: Partial<OccurrenceStage>) =>
     api.put<ApiEnvelope<OccurrenceStage>>(`/occurrence-stages/${id}`, data),
+  reorderStages: (ids: string[], expected: string[]) =>
+    api.post<ApiEnvelope<{ ids: string[] }>>('/occurrence-stages/reorder', { ids, expected }),
   deleteStage: (id: string) => api.delete<ApiEnvelope<{ deleted: boolean }>>(`/occurrence-stages/${id}`),
 }
 

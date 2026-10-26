@@ -954,6 +954,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	// CRM — etapas de ocorrência
 	g.GET("/api/occurrence-stages", app.ListOccurrenceStages)
 	g.POST("/api/occurrence-stages", app.CreateOccurrenceStage)
+	g.POST("/api/occurrence-stages/reorder", app.ReorderOccurrenceStages)
 	g.PUT("/api/occurrence-stages/{id}", app.UpdateOccurrenceStage)
 	g.DELETE("/api/occurrence-stages/{id}", app.DeleteOccurrenceStage)
 

@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"strings"
+	"gorm.io/gorm/clause"
 	"encoding/json"
 	"errors"
 
@@ -395,3 +397,74 @@ func (a *App) validateAllowedFrom(orgID, selfID uuid.UUID, ids []string) error {
 	}
 	return nil
 }
+
+// ReorderStagesRequest carries the new order of the WHOLE pipeline. Expected is the order the client saw
+// when it started; a different current order means someone else reordered (or added/removed a stage) meanwhile.
+type ReorderStagesRequest struct {
+	IDs      []string `json:"ids"`
+	Expected []string `json:"expected"`
+}
+
+// ReorderOccurrenceStages persists a new order for the stages. It only moves positions: no case changes
+// stage and no status changes. Same permission as editing a stage; all rows are read under a lock so two
+// concurrent reorders serialize, and the second one is refused with the current order instead of silently
+// overwriting the first.
+func (a *App) ReorderOccurrenceStages(r *fastglue.Request) error {
+	orgID, _, err := a.requireAuth(r, models.ResourceOccurrenceStages, models.ActionWrite)
+	if err != nil {
+		return nil
+	}
+	var req ReorderStagesRequest
+	if err := a.decodeRequest(r, &req); err != nil {
+		return nil
+	}
+
+	var conflict []string
+	err = a.DB.Transaction(func(tx *gorm.DB) error {
+		var cur []models.OccurrenceStage
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("organization_id = ?", orgID).Order("position ASC, created_at ASC, id ASC").Find(&cur).Error; err != nil {
+			return err
+		}
+		curIDs := make([]string, len(cur))
+		have := map[string]bool{}
+		for i, s := range cur {
+			curIDs[i] = s.ID.String()
+			have[curIDs[i]] = true
+		}
+		// the request must be a permutation of the org's stages: nothing foreign, nothing missing, no repeats
+		seen := map[string]bool{}
+		valid := len(req.IDs) == len(cur)
+		for _, id := range req.IDs {
+			if !have[id] || seen[id] {
+				valid = false
+				break
+			}
+			seen[id] = true
+		}
+		stale := len(req.Expected) > 0 && strings.Join(req.Expected, ",") != strings.Join(curIDs, ",")
+		if !valid || stale {
+			conflict = curIDs
+			return errStageOrderConflict
+		}
+		for i, id := range req.IDs {
+			if err := tx.Model(&models.OccurrenceStage{}).Where("id = ? AND organization_id = ?", id, orgID).
+				Update("position", i).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if errors.Is(err, errStageOrderConflict) {
+		return r.SendJSON(fasthttp.StatusConflict, map[string]any{
+			"status": "error", "message": "The stage order changed meanwhile; reload and try again", "data": map[string]any{"ids": conflict},
+		})
+	}
+	if err != nil {
+		a.Log.Error("Failed to reorder occurrence stages", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to reorder stages", nil, "")
+	}
+	return r.SendEnvelope(map[string]any{"ids": req.IDs})
+}
+
+var errStageOrderConflict = errors.New("stage order conflict")

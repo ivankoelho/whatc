@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -8,12 +8,13 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
-import { PageHeader, DataTable, CrudFormDialog, DeleteConfirmDialog, IconButton, ErrorState, type Column } from '@/components/shared'
+import draggable from 'vuedraggable'
+import { PageHeader, CrudFormDialog, DeleteConfirmDialog, IconButton, ErrorState } from '@/components/shared'
 import { occurrencesService, teamsService, type OccurrenceStage } from '@/services/api'
 import { useOccurrencesStore } from '@/stores/occurrences'
 import { useCrudState } from '@/composables/useCrudState'
 import { toast } from 'vue-sonner'
-import { Plus, ClipboardList, Pencil, Trash2 } from 'lucide-vue-next'
+import { Plus, ClipboardList, Pencil, Trash2, GripVertical, ChevronUp, ChevronDown, Loader2 } from 'lucide-vue-next'
 import { getErrorMessage } from '@/lib/api-utils'
 
 const { t } = useI18n()
@@ -35,20 +36,49 @@ const isLoading = ref(false)
 const isDeleting = ref(false)
 const error = ref(false)
 
+// Ordering. The list is the whole pipeline; a move is sent as the full new order together with the order the
+// screen started from, so the server can refuse it (409) when someone else reordered meanwhile. The screen then
+// reloads the current order instead of guessing.
+const isReordering = ref(false)
+const announce = ref('') // polite live region for the keyboard/button alternative
+const items = ref<OccurrenceStage[]>([])
+watch(() => store.stages, (s) => { items.value = [...s] }, { immediate: true, deep: true })
+
+async function persistOrder(next: OccurrenceStage[], movedName?: string) {
+  const expected = store.stages.map(s => s.id)
+  const ids = next.map(s => s.id)
+  if (ids.join() === expected.join()) return
+  isReordering.value = true
+  try {
+    await occurrencesService.reorderStages(ids, expected)
+    store.stages = next.map((s, i) => ({ ...s, position: i }))
+    if (movedName) announce.value = t('occurrences.stageMoved', { name: movedName, pos: ids.indexOf(next.find(s => s.name === movedName)!.id) + 1, total: ids.length })
+  } catch (e: any) {
+    items.value = [...store.stages]
+    toast.error(e?.response?.status === 409 ? t('occurrences.stageOrderConflict') : getErrorMessage(e, t('occurrences.stageOrderFailed')))
+    await fetchStages()
+  } finally {
+    isReordering.value = false
+  }
+}
+
+function onDragEnd() { persistOrder([...items.value]) }
+
+// the alternative to dragging: Move up / Move down
+function move(index: number, delta: -1 | 1) {
+  const j = index + delta
+  if (j < 0 || j >= items.value.length) return
+  const next = [...items.value]
+  const [m] = next.splice(index, 1)
+  next.splice(j, 0, m)
+  items.value = next
+  persistOrder(next, m.name)
+}
+
 const {
   isSubmitting, isDialogOpen, editingItem: editingStage, deleteDialogOpen, itemToDelete: stageToDelete,
   formData, openCreateDialog: baseOpenCreateDialog, openEditDialog: baseOpenEditDialog, openDeleteDialog, closeDialog, closeDeleteDialog,
 } = useCrudState<OccurrenceStage, StageFormData>(defaultFormData)
-
-const columns = computed<Column<OccurrenceStage>[]>(() => [
-  { key: 'color', label: t('occurrences.columnColor'), width: 'w-[70px]' },
-  { key: 'name', label: t('occurrences.stageName') },
-  { key: 'position', label: t('occurrences.columnPosition'), width: 'w-[100px]' },
-  { key: 'state', label: t('occurrences.generalState') },
-  { key: 'initial', label: t('occurrences.columnInitial'), align: 'center' },
-  { key: 'closing', label: t('occurrences.columnClosing'), align: 'center' },
-  { key: 'actions', label: t('common.actions'), align: 'right' },
-])
 
 function openCreateDialog() {
   baseOpenCreateDialog()
@@ -159,48 +189,36 @@ async function confirmDelete() {
               <CardDescription>{{ $t('occurrences.stagesCardDesc') }}</CardDescription>
             </CardHeader>
             <CardContent>
-              <DataTable
-                :items="store.stages"
-                :columns="columns"
-                :is-loading="isLoading"
-                :empty-icon="ClipboardList"
-                :empty-title="$t('occurrences.noStagesYet')"
-                :empty-description="$t('occurrences.noStagesYetDesc')"
-                item-name="stages"
+              <p class="sr-only" role="status" aria-live="polite" data-testid="stage-announce">{{ announce }}</p>
+              <p v-if="!isLoading && items.length === 0" class="py-8 text-center text-sm text-muted-foreground">{{ $t('occurrences.noStagesYet') }}</p>
+              <div v-else-if="isLoading" class="flex justify-center py-8"><Loader2 class="h-5 w-5 animate-spin text-muted-foreground" aria-hidden="true" /></div>
+              <draggable
+                v-else v-model="items" item-key="id" handle=".stage-handle" tag="ul" :animation="150" :disabled="isReordering"
+                class="divide-y rounded-md border" data-testid="stage-list" @end="onDragEnd"
               >
-                <template #cell-color="{ item: stage }">
-                  <span class="inline-block h-4 w-4 rounded-full border border-white/20 light:border-gray-300" :style="{ backgroundColor: stage.color }" />
+                <template #item="{ element: stage, index }">
+                  <li class="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5" :data-testid="'stage-row-' + stage.id">
+                    <button type="button" class="stage-handle flex h-9 w-9 shrink-0 cursor-grab touch-none items-center justify-center rounded text-muted-foreground hover:bg-muted active:cursor-grabbing" :aria-label="$t('occurrences.stageDrag', { name: stage.name })" :title="$t('occurrences.stageDrag', { name: stage.name })">
+                      <GripVertical class="h-4 w-4" aria-hidden="true" />
+                    </button>
+                    <span class="inline-block h-4 w-4 shrink-0 rounded-full border border-white/20 light:border-gray-300" :style="{ backgroundColor: stage.color }" />
+                    <span class="min-w-0 flex-1 basis-40 font-medium [overflow-wrap:anywhere]">{{ stage.name }}</span>
+                    <div class="flex flex-wrap items-center gap-1.5">
+                      <Badge variant="secondary">{{ $t('occurrences.generalStates.' + (stage.general_state || (stage.is_closing ? 'resolved' : stage.is_initial ? 'new' : 'in_progress'))) }}</Badge>
+                      <Badge v-if="stage.is_initial" variant="success">{{ $t('occurrences.columnInitial') }}</Badge>
+                      <Badge v-if="stage.is_closing" variant="info">{{ $t('occurrences.columnClosing') }}</Badge>
+                    </div>
+                    <div class="ml-auto flex items-center gap-0.5">
+                      <IconButton :icon="ChevronUp" :label="$t('occurrences.stageMoveUp')" class="h-9 w-9" :disabled="isReordering || index === 0" :data-testid="'stage-up-' + stage.id" @click="move(index, -1)" />
+                      <IconButton :icon="ChevronDown" :label="$t('occurrences.stageMoveDown')" class="h-9 w-9" :disabled="isReordering || index === items.length - 1" :data-testid="'stage-down-' + stage.id" @click="move(index, 1)" />
+                      <IconButton :icon="Pencil" :label="$t('occurrences.editStage')" class="h-9 w-9" @click="openEditDialog(stage)" />
+                      <IconButton :label="$t('occurrences.deleteStageTitle')" class="h-9 w-9" @click="openDeleteDialog(stage)">
+                        <Trash2 class="h-4 w-4 text-destructive" />
+                      </IconButton>
+                    </div>
+                  </li>
                 </template>
-                <template #cell-name="{ item: stage }">
-                  <span class="font-medium">{{ stage.name }}</span>
-                </template>
-                <template #cell-position="{ item: stage }">
-                  <span class="text-muted-foreground">{{ stage.position }}</span>
-                </template>
-                <template #cell-state="{ item: stage }">
-                  <Badge variant="secondary">{{ $t('occurrences.generalStates.' + (stage.general_state || (stage.is_closing ? 'resolved' : stage.is_initial ? 'new' : 'in_progress'))) }}</Badge>
-                </template>
-                <template #cell-initial="{ item: stage }">
-                  <Badge :variant="stage.is_initial ? 'success' : 'secondary'">{{ stage.is_initial ? $t('common.yes') : $t('common.no') }}</Badge>
-                </template>
-                <template #cell-closing="{ item: stage }">
-                  <Badge :variant="stage.is_closing ? 'info' : 'secondary'">{{ stage.is_closing ? $t('common.yes') : $t('common.no') }}</Badge>
-                </template>
-                <template #cell-actions="{ item: stage }">
-                  <div class="flex items-center justify-end gap-1">
-                    <IconButton :icon="Pencil" :label="$t('occurrences.editStage')" class="h-8 w-8" @click="openEditDialog(stage)" />
-                    <IconButton :label="$t('occurrences.deleteStageTitle')" class="h-8 w-8" @click="openDeleteDialog(stage)">
-                      <Trash2 class="h-4 w-4 text-destructive" />
-                    </IconButton>
-                  </div>
-                </template>
-                <template #empty-action>
-                  <Button variant="outline" size="sm" @click="openCreateDialog">
-                    <Plus class="h-4 w-4 mr-2" />
-                    {{ $t('occurrences.addStage') }}
-                  </Button>
-                </template>
-              </DataTable>
+              </draggable>
             </CardContent>
           </Card>
         </div>
