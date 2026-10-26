@@ -17,6 +17,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/storage"
 	"github.com/shridarpatil/whatomate/internal/tts"
 	"github.com/shridarpatil/whatomate/internal/websocket"
+	"github.com/shridarpatil/whatomate/internal/antimalware"
 	"github.com/shridarpatil/whatomate/internal/usage"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/valyala/fasthttp"
@@ -54,6 +55,9 @@ type App struct {
 	// Usage records the WhatsApp consumption ledger and contact status history.
 	// nil or disabled (usage.record_enabled=false) = nothing is recorded.
 	Usage *usage.Recorder
+	// Scanner is the antimalware engine (ClamAV). nil = not configured: files stay pending and closed.
+	Scanner antimalware.Scanner
+	scanVer scanVersionCache
 	// wg tracks background goroutines for graceful shutdown
 	wg sync.WaitGroup
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/shridarpatil/whatomate/internal/assignment"
 	"github.com/shridarpatil/whatomate/internal/calling"
+	"github.com/shridarpatil/whatomate/internal/antimalware"
 	"github.com/shridarpatil/whatomate/internal/config"
 	"github.com/shridarpatil/whatomate/internal/database"
 	"github.com/shridarpatil/whatomate/internal/frontend"
@@ -168,6 +169,11 @@ func runServer(args []string) {
 		// Idempotent — re-running is a no-op once every row is converted.
 		if err := handlers.BackfillChatbotFlowGraph(db, lo); err != nil {
 			lo.Fatal("Chatbot flow graph backfill failed", "error", err)
+		}
+		// Registers every file that already exists for antimalware scanning (pending: closed until a
+		// clean verdict). Idempotent; deletes nothing.
+		if err := database.BackfillFileScans(db, lo); err != nil {
+			lo.Fatal("File scan backfill failed", "error", err)
 		}
 		// Concede as permissões do CRM a quem já tem a capacidade equivalente.
 		// Precisa rodar aqui, no bloco de migração: o ListenAndServe só
@@ -337,6 +343,14 @@ func runServer(args []string) {
 		HTTPClient: httpClient,
 		Usage:      usage.New(db, cfg.Usage),
 	}
+	// Antimalware engine (clamd on the private network). Without an address nothing can be cleared, so
+	// every scan-gated file stays closed: say so loudly instead of failing quietly.
+	if cfg.Antimalware.Address != "" {
+		app.Scanner = &antimalware.Clamd{Addr: cfg.Antimalware.Address, Timeout: time.Duration(max(cfg.Antimalware.TimeoutSeconds, 30)) * time.Second}
+		lo.Info("Antimalware scanner configured", "address", cfg.Antimalware.Address)
+	} else {
+		lo.Warn("Antimalware is NOT configured (antimalware.address): uploaded files and media stay blocked until a scanner clears them")
+	}
 
 	// Wire the conversation authorizer into the hub now that the App (which owns
 	// the single visibility rule) exists. This gates all WebSocket conversation
@@ -436,6 +450,10 @@ func runServer(args []string) {
 	chatFilesCtx, chatFilesCancel := context.WithCancel(context.Background())
 	go app.RunChatAttachmentCleanup(chatFilesCtx, time.Hour)
 
+	// Antimalware: scans new and pre-existing files at a gentle pace, retries after an outage
+	fileScanCtx, fileScanCancel := context.WithCancel(context.Background())
+	go app.RunFileScanWorker(fileScanCtx)
+
 	// Customer communications of forwarded cases (templates via the case's logistics account)
 	notifierCtx, notifierCancel := context.WithCancel(context.Background())
 	go app.StartOccurrenceNotifier(notifierCtx)
@@ -503,6 +521,7 @@ func runServer(args []string) {
 	lo.Info("Stopping SLA processor...")
 	slaCancel()
 	chatFilesCancel()
+	fileScanCancel()
 	notifierCancel()
 	slaProcessor.Stop()
 	presenceCancel()

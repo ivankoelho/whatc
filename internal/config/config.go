@@ -34,6 +34,19 @@ type Config struct {
 	Knowledge    KnowledgeConfig    `koanf:"knowledge"`
 	AITools      AIToolsConfig      `koanf:"ai_tools"`
 	Usage        UsageConfig        `koanf:"usage"`
+	Antimalware  AntimalwareConfig  `koanf:"antimalware"`
+}
+
+// AntimalwareConfig points at a clamd daemon on the private network. With Address empty nothing is
+// scanned and, by design, nothing scanned-gated is ever released (fail-closed).
+type AntimalwareConfig struct {
+	Address        string `koanf:"address"`         // host:port of clamd, e.g. clamav:3310 (never exposed publicly)
+	TimeoutSeconds int    `koanf:"timeout_seconds"` // per scan, connect included (default 30)
+	MaxMB          int    `koanf:"max_mb"`          // larger files are not scanned and stay blocked (default 25)
+	InlineMaxKB    int    `koanf:"inline_max_kb"`   // uploads up to this size are scanned before the response (default 2048)
+	ReuseHours     int    `koanf:"reuse_hours"`     // an identical file reuses a clean verdict this fresh (default 24)
+	RescanDays     int    `koanf:"rescan_days"`     // clean files are re-checked after a signature update, older than this (default 7)
+	BatchSize      int    `koanf:"batch_size"`      // scans per worker pass (default 5)
 }
 
 // XProcessConfig holds the switches of the X2 (XProcess) integration.
