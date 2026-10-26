@@ -4327,6 +4327,37 @@
     "valueColShare": "Participação"
   },
   "occurrenceDocuments": {
+    "read": {
+      "button": "Anexar e ler nota fiscal",
+      "failed": "Não foi possível ler o arquivo. Preencha manualmente.",
+      "nothing": "Não foi possível ler os dados deste arquivo.",
+      "reviewTitle": "Dados lidos do arquivo ({method}). Revise antes de salvar.",
+      "filled": "Preenchido: {fields}.",
+      "issuer": "Emitente: {name}",
+      "confirm": "Nada foi salvo ainda: corrija o que for preciso e use Salvar para confirmar.",
+      "method": {
+        "xml": "XML da NF-e",
+        "pdf_text": "texto do PDF"
+      },
+      "field": {
+        "number": "número",
+        "purchase_date": "data",
+        "items": "produtos"
+      },
+      "uncertain": {
+        "access_key": "A chave de acesso não passou na verificação: confira.",
+        "issue_date": "A data é uma estimativa (primeira data da página): confira."
+      },
+      "warning": {
+        "access_key_check_digit": "O dígito verificador da chave de acesso não confere.",
+        "items_truncated": "Só os primeiros produtos foram lidos.",
+        "no_access_key": "Não foi encontrada uma chave de acesso válida no PDF.",
+        "items_not_read": "Os produtos não são lidos de PDF: informe-os manualmente.",
+        "not_an_nfe": "O XML não parece uma NF-e.",
+        "pdf_reader_unavailable": "O servidor não tem leitor de PDF instalado: preencha manualmente.",
+        "scanned_needs_ocr": "Imagem ou PDF digitalizado precisa de OCR, que não está instalado: preencha manualmente."
+      }
+    },
     "sectionLabel": "Notas fiscais e cupons",
     "sectionHint": "Informe se o cliente tem a NF ou só o cupom fiscal (nº do pedido). Dá para adicionar mais de um documento.",
     "typeLabel": "Tipo de documento",

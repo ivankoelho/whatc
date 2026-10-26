@@ -166,7 +166,7 @@ async function confirmRemove() {
       </div>
 
       <template v-if="draft">
-        <OccurrenceDocumentsEditor v-model="draft" single />
+        <OccurrenceDocumentsEditor v-model="draft" single :occurrence-id="occurrenceId" />
         <div class="flex justify-end gap-2">
           <Button variant="ghost" size="sm" :disabled="isSaving" @click="draft = null">{{ t('occurrenceDocuments.cancel') }}</Button>
           <Button size="sm" :disabled="isSaving" @click="saveDraft">

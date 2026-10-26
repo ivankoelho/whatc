@@ -29,6 +29,9 @@ type OccurrenceDocumentRequest struct {
 	Number       string                   `json:"number"`
 	PurchaseDate string                   `json:"purchase_date"` // "2006-01-02", optional
 	Items        []OccurrenceDocumentItem `json:"items"`
+	// Source/AccessKey record that the form was pre-filled from a file (see occurrence_invoice_extract.go).
+	Source    string `json:"source,omitempty"`
+	AccessKey string `json:"access_key,omitempty"`
 }
 
 const (
@@ -96,7 +99,17 @@ func buildOccurrenceDocument(orgID, userID uuid.UUID, loc *time.Location, req Oc
 			"quantity":    strings.TrimSpace(it.Quantity),
 		})
 	}
+	source := ""
+	if req.Source == "xml" || req.Source == "pdf_text" {
+		source = req.Source
+	}
+	key := ""
+	if accessKeyValid(req.AccessKey) {
+		key = req.AccessKey
+	}
 	return models.OccurrenceDocument{
+		Source:         source,
+		AccessKey:      key,
 		OrganizationID: orgID,
 		Type:           req.Type,
 		Number:         number,

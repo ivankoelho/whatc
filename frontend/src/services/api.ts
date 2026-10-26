@@ -1670,6 +1670,21 @@ export interface OccurrenceDocumentInput {
   number: string
   purchase_date?: string
   items: OccurrenceDocumentItem[]
+  // Set when the form was pre-filled from the attached file and then confirmed by the person.
+  source?: 'xml' | 'pdf_text'
+  access_key?: string
+}
+
+export interface InvoiceExtraction {
+  method: 'xml' | 'pdf_text' | 'none'
+  number?: string
+  series?: string
+  issue_date?: string
+  access_key?: string
+  issuer?: string
+  items: OccurrenceDocumentItem[]
+  uncertain: string[]
+  warnings: string[]
 }
 
 export interface OccurrenceDocument extends OccurrenceDocumentInput {
@@ -1687,6 +1702,14 @@ export const occurrenceDocumentsService = {
     api.post<ApiEnvelope<OccurrenceDocument>>(`/occurrences/${occurrenceId}/documents`, data),
   delete: (occurrenceId: string, documentId: string) =>
     api.delete<ApiEnvelope<{ deleted: boolean }>>(`/occurrences/${occurrenceId}/documents/${documentId}`),
+  // Reads an invoice file and PROPOSES form values; nothing is saved.
+  extract: (occurrenceId: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return api.post<ApiEnvelope<InvoiceExtraction>>(`/occurrences/${occurrenceId}/documents/extract`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+  },
   uploadAttachment: (occurrenceId: string, documentId: string, file: File) => {
     const form = new FormData()
     form.append('file', file)

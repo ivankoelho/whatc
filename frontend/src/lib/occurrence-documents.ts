@@ -9,6 +9,9 @@ export interface DocumentDraft {
   purchase_date: string
   items: OccurrenceDocumentItem[]
   file: File | null
+  // Filled when the values were read from the file; cleared if the file is removed.
+  source?: 'xml' | 'pdf_text'
+  access_key?: string
 }
 
 let nextKey = 0
@@ -32,6 +35,7 @@ export function draftToInput(d: DocumentDraft): OccurrenceDocumentInput {
     number: d.number.trim(),
     purchase_date: d.purchase_date || undefined,
     items: d.items.filter(i => i.description.trim()),
+    ...(d.source ? { source: d.source, access_key: d.access_key } : {}),
   }
 }
 
@@ -47,3 +51,23 @@ export function documentsSummary(docs: DocumentDraft[]) {
 
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 export const ATTACHMENT_ACCEPT = 'application/pdf,image/jpeg,image/png,image/webp'
+
+export interface Proposal {
+  number?: string
+  purchase_date?: string
+  items: OccurrenceDocumentItem[]
+}
+
+/**
+ * Applies what was read from an invoice to a draft WITHOUT overwriting anything the person already
+ * typed: a field is filled only when it is empty. Returns the draft and the names of the fields it filled.
+ */
+export function applyProposal(d: DocumentDraft, p: Proposal): { draft: DocumentDraft; filled: string[] } {
+  const filled: string[] = []
+  const draft: DocumentDraft = { ...d, items: d.items.map(i => ({ ...i })) }
+  if (p.number && !draft.number.trim()) { draft.number = p.number; filled.push('number') }
+  if (p.purchase_date && !draft.purchase_date) { draft.purchase_date = p.purchase_date; filled.push('purchase_date') }
+  const blank = draft.items.every(i => !i.description.trim() && !i.code.trim())
+  if (blank && p.items.length > 0) { draft.items = p.items.map(i => ({ ...i })); filled.push('items') }
+  return { draft, filled }
+}

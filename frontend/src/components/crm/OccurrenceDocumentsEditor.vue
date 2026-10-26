@@ -3,9 +3,11 @@ import { useI18n } from 'vue-i18n'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
-import { Paperclip, Plus, Trash2, X, FileText } from 'lucide-vue-next'
+import { Paperclip, Plus, Trash2, X, FileText, ScanText, Loader2 } from 'lucide-vue-next'
+import { ref } from 'vue'
+import { occurrenceDocumentsService, type InvoiceExtraction } from '@/services/api'
 import { toast } from 'vue-sonner'
-import { type DocumentDraft, newDocumentDraft, emptyDocumentItem, MAX_ATTACHMENT_BYTES, ATTACHMENT_ACCEPT } from '@/lib/occurrence-documents'
+import { type DocumentDraft, newDocumentDraft, emptyDocumentItem, applyProposal, MAX_ATTACHMENT_BYTES, ATTACHMENT_ACCEPT } from '@/lib/occurrence-documents'
 
 const props = withDefaults(defineProps<{
   modelValue: DocumentDraft[]
@@ -14,6 +16,8 @@ const props = withDefaults(defineProps<{
   numberRequired?: boolean
   productRequired?: boolean
   dateRequired?: boolean
+  // Known only on an existing case: it is what lets the file be read (the server checks the access).
+  occurrenceId?: string
 }>(), { single: false })
 
 const emit = defineEmits<{ 'update:modelValue': [value: DocumentDraft[]] }>()
@@ -23,6 +27,45 @@ function update(fn: (docs: DocumentDraft[]) => void) {
   const docs = props.modelValue.map(d => ({ ...d, items: d.items.map(i => ({ ...i })) }))
   fn(docs)
   emit('update:modelValue', docs)
+}
+
+// "Attach and read": the file is attached as usual and ALSO read to propose values. Nothing is saved
+// here; the person reviews the form and confirms with the normal save button.
+const reading = ref(false)
+const review = ref<{ index: number; res: InvoiceExtraction; filled: string[] } | null>(null)
+const ACCEPT_READ = '.xml,application/pdf,image/jpeg,image/png,image/webp'
+
+async function onReadFile(index: number, event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0] || null
+  input.value = ''
+  if (!file || !props.occurrenceId) return
+  if (file.size > MAX_ATTACHMENT_BYTES) {
+    toast.error(t('occurrenceDocuments.fileTooLarge'))
+    return
+  }
+  reading.value = true
+  try {
+    const body = (await occurrenceDocumentsService.extract(props.occurrenceId, file)).data as unknown as { data?: InvoiceExtraction }
+    const res = (body.data ?? body) as InvoiceExtraction
+    let filled: string[] = []
+    update(docs => {
+      const r = applyProposal(docs[index], { number: res.number, purchase_date: res.issue_date, items: res.items })
+      filled = r.filled
+      docs[index] = r.draft
+      // The original file is kept as the document's attachment when it is a kind the attachment accepts.
+      if (!file.name.toLowerCase().endsWith('.xml')) docs[index].file = file
+      if (res.method !== 'none') {
+        docs[index].source = res.method
+        docs[index].access_key = res.access_key
+      }
+    })
+    review.value = { index, res, filled }
+  } catch {
+    toast.error(t('occurrenceDocuments.read.failed'))
+  } finally {
+    reading.value = false
+  }
 }
 
 function onFile(index: number, event: Event) {
@@ -120,6 +163,26 @@ function onFile(index: number, event: Event) {
           </button>
         </span>
         <span class="text-[11px] text-muted-foreground">{{ t('occurrenceDocuments.attachHint') }}</span>
+      </div>
+
+      <!-- Read an invoice: proposes values, the person confirms -->
+      <div v-if="occurrenceId && doc.type === 'nf'" class="space-y-2">
+        <label class="inline-flex w-fit cursor-pointer items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs hover:bg-muted" :class="reading ? 'pointer-events-none opacity-60' : ''">
+          <Loader2 v-if="reading" class="h-3.5 w-3.5 animate-spin" /><ScanText v-else class="h-3.5 w-3.5" aria-hidden="true" />
+          {{ t('occurrenceDocuments.read.button') }}
+          <input type="file" class="sr-only" :accept="ACCEPT_READ" data-testid="read-invoice-input" @change="onReadFile(index, $event)" />
+        </label>
+        <div v-if="review && review.index === index" class="rounded-md border border-amber-500/40 bg-amber-500/10 p-2.5 text-xs" data-testid="extraction-review" role="status">
+          <p class="font-medium">{{ review.res.method === 'none' ? t('occurrenceDocuments.read.nothing') : t('occurrenceDocuments.read.reviewTitle', { method: t('occurrenceDocuments.read.method.' + review.res.method) }) }}</p>
+          <p v-if="review.filled.length" class="mt-1">{{ t('occurrenceDocuments.read.filled', { fields: review.filled.map(f => t('occurrenceDocuments.read.field.' + f)).join(', ') }) }}</p>
+          <p v-if="review.res.issuer" class="mt-1 text-muted-foreground">{{ t('occurrenceDocuments.read.issuer', { name: review.res.issuer }) }}</p>
+          <p v-if="review.res.access_key" class="mt-1 break-all font-mono text-[11px] text-muted-foreground">{{ review.res.access_key }}</p>
+          <ul class="mt-1 list-disc pl-4">
+            <li v-for="u in review.res.uncertain" :key="'u' + u">{{ t('occurrenceDocuments.read.uncertain.' + u) }}</li>
+            <li v-for="w in review.res.warnings" :key="'w' + w">{{ t('occurrenceDocuments.read.warning.' + w) }}</li>
+          </ul>
+          <p class="mt-1 text-muted-foreground">{{ t('occurrenceDocuments.read.confirm') }}</p>
+        </div>
       </div>
 
       <!-- Products -->

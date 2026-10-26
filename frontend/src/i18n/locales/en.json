@@ -4338,6 +4338,37 @@
     "valueColShare": "Share"
   },
   "occurrenceDocuments": {
+    "read": {
+      "button": "Attach and read invoice",
+      "failed": "The file could not be read. Fill the form by hand.",
+      "nothing": "No data could be read from this file.",
+      "reviewTitle": "Data read from the file ({method}). Review before saving.",
+      "filled": "Filled in: {fields}.",
+      "issuer": "Issuer: {name}",
+      "confirm": "Nothing is saved yet: fix what is needed and use Save to confirm.",
+      "method": {
+        "xml": "NF-e XML",
+        "pdf_text": "PDF text"
+      },
+      "field": {
+        "number": "number",
+        "purchase_date": "date",
+        "items": "products"
+      },
+      "uncertain": {
+        "access_key": "The access key failed its check: please verify.",
+        "issue_date": "The date is a guess (first date on the page): please verify."
+      },
+      "warning": {
+        "access_key_check_digit": "The access key check digit does not match.",
+        "items_truncated": "Only the first products were read.",
+        "no_access_key": "No valid access key was found in the PDF.",
+        "items_not_read": "Products are not read from PDFs: enter them by hand.",
+        "not_an_nfe": "The XML does not look like an NF-e.",
+        "pdf_reader_unavailable": "The server has no PDF reader installed: fill the form by hand.",
+        "scanned_needs_ocr": "Images and scanned PDFs need OCR, which is not installed: fill the form by hand."
+      }
+    },
     "sectionLabel": "Invoices and receipts",
     "sectionHint": "Say whether the customer has the invoice (NF) or only the receipt (order number). You can add more than one.",
     "typeLabel": "Document type",
