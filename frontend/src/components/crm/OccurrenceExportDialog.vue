@@ -85,10 +85,11 @@ async function run() {
       <div v-if="loading" class="flex justify-center py-6"><Loader2 class="h-5 w-5 animate-spin text-muted-foreground" /></div>
       <form v-else class="space-y-4" @submit.prevent="run">
         <fieldset class="space-y-1.5">
-          <legend class="mb-1 flex items-center justify-between text-sm font-medium">
-            {{ t('occurrences.export.sections') }}
+          <legend class="sr-only">{{ t('occurrences.export.sections') }}</legend>
+          <div class="mb-1 flex items-center justify-between text-sm">
+            <span class="font-medium">{{ t('occurrences.export.sections') }}</span>
             <button type="button" class="text-xs font-normal text-primary hover:underline" data-testid="export-all" @click="everything">{{ t('occurrences.export.all') }}</button>
-          </legend>
+          </div>
           <label
             v-for="s in SECTIONS" :key="s" class="flex items-center gap-2 rounded-md border px-3 py-2 text-sm"
             :class="available[s] ? 'cursor-pointer hover:bg-muted' : 'cursor-not-allowed opacity-60'"
