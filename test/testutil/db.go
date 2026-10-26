@@ -56,7 +56,9 @@ func SetupTestDB(t *testing.T) *gorm.DB {
 		}
 
 		// Clean up any existing data before tests start
-		cleanupTables(testDB)
+		if os.Getenv("TEST_DB_KEEP") != "1" { // homologation phases keep the data of the previous phase
+			cleanupTables(testDB)
+		}
 	})
 
 	if testDBInitErr != nil {

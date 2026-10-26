@@ -66,3 +66,7 @@ docker/.env
 
 # test artifacts: chat attachments written by tests when storage.local_path is empty
 internal/handlers/media/
+
+# antimalware homologation: run evidence and the storage/state of a run
+docker/homologation/evidence/
+docker/homologation/state/
