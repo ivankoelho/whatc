@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"strings"
 	"context"
 	"encoding/json"
 	"os"
@@ -171,9 +172,15 @@ func TestScan_ZipExportOmitsFilesNotCleared(t *testing.T) {
 	assert.Contains(t, joined, clean.ID.String()[:8]+"-limpo.pdf")
 	assert.NotContains(t, joined, bad.ID.String()[:8])
 	assert.NotContains(t, joined, waiting.ID.String()[:8])
-	var al models.AuditLog
-	require.NoError(t, w.app.DB.Where("resource_type = ?", "occurrence_export").Order("created_at DESC").First(&al).Error)
-	assert.Contains(t, string(scanJSON(al)), `"documents_held":2`)
+	// the audit entry is written a moment after the response
+	require.Eventually(t, func() bool {
+		var al models.AuditLog
+		if w.app.DB.Where("resource_type = ? AND organization_id = ?", "occurrence_export", w.logPorto.OrganizationID).
+			Order("created_at DESC").First(&al).Error != nil {
+			return false
+		}
+		return strings.Contains(string(scanJSON(al)), `"documents_held":2`)
+	}, 3*time.Second, 50*time.Millisecond)
 }
 
 func scanJSON(v any) []byte { b, _ := json.Marshal(v); return b }

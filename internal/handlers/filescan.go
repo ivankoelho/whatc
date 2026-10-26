@@ -373,16 +373,18 @@ func (a *App) runScan(ctx context.Context, row models.FileScan, rescan bool) {
 
 	if prior, ok := a.priorVerdict(row, sum, version, cfg.reuse); ok {
 		_ = f.Close() // a verdict that quarantines renames the file: it must not be held open (Windows)
-		a.finishScan(row, prior.Status, prior.Signature, version, sum, st.Size(), rescan, "reused")
+		a.finishScan(row, prior.Status, prior.Signature, version, sum, st.Size(), rescan, "reused", 0)
 		return
 	}
+	began := time.Now()
 	res, err := a.Scanner.Scan(sctx, f)
+	took := time.Since(began).Milliseconds()
 	_ = f.Close() // see above: quarantine moves the file
 	switch {
 	case err == nil && res.Infected:
-		a.finishScan(row, models.ScanInfected, res.Signature, version, sum, st.Size(), rescan, "")
+		a.finishScan(row, models.ScanInfected, res.Signature, version, sum, st.Size(), rescan, "", took)
 	case err == nil:
-		a.finishScan(row, models.ScanClean, "", version, sum, st.Size(), rescan, "")
+		a.finishScan(row, models.ScanClean, "", version, sum, st.Size(), rescan, "", took)
 	case errors.Is(err, antimalware.ErrTooLarge):
 		fail(models.ScanSkipped, "file is over the engine's size limit")
 	default:
@@ -405,16 +407,16 @@ func (a *App) priorVerdict(row models.FileScan, sum, version string, window time
 	return p, false
 }
 
-func (a *App) finishScan(row models.FileScan, status, signature, version, sum string, size int64, rescan bool, note string) {
+func (a *App) finishScan(row models.FileScan, status, signature, version, sum string, size int64, rescan bool, note string, tookMs int64) {
 	now := time.Now()
 	if rescan && status == models.ScanClean { // still clean: just record the fresher check
 		a.DB.Model(&models.FileScan{}).Where("id = ? AND status = ?", row.ID, models.ScanClean).
-			Updates(map[string]any{"scanner_version": version, "scanned_at": now, "updated_at": now})
+			Updates(map[string]any{"scanner_version": version, "scanned_at": now, "scan_ms": tookMs, "updated_at": now})
 		return
 	}
 	upd := map[string]any{
 		"status": status, "signature": signature, "scanner_version": version, "sha256": sum, "size_bytes": size,
-		"scanned_at": now, "attempts": 0, "next_attempt_at": nil, "last_error": note, "updated_at": now,
+		"scanned_at": now, "scan_ms": tookMs, "attempts": 0, "next_attempt_at": nil, "last_error": note, "updated_at": now,
 	}
 	// A verdict only lands on a row that is still waiting (or being re-checked): a replaced file (new
 	// content, row reset to pending by its upload) is not touched by a stale scan of the old bytes.
@@ -556,6 +558,7 @@ func (a *App) FileScanTick(ctx context.Context) {
 		a.runScan(ctx, row, false)
 	}
 	a.rescanStale(ctx, cfg)
+	a.CheckSignatureAge(ctx)
 }
 
 // claimScans leases up to n due rows so a second worker does not take the same ones.

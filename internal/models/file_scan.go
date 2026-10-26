@@ -42,6 +42,7 @@ type FileScan struct {
 	Status         string     `gorm:"size:12;not null;index:idx_file_scan_queue,priority:1" json:"status"`
 	Signature      string     `gorm:"size:200" json:"signature,omitempty"`
 	ScannerVersion string     `gorm:"size:200" json:"scanner_version,omitempty"`
+	ScanMs         int64      `json:"scan_ms,omitempty"` // how long the engine took on the last scan (0: reused verdict)
 	Attempts       int        `gorm:"not null;default:0" json:"attempts"`
 	NextAttemptAt  *time.Time `gorm:"index:idx_file_scan_queue,priority:2" json:"next_attempt_at,omitempty"`
 	LastError      string     `gorm:"size:300" json:"last_error,omitempty"`

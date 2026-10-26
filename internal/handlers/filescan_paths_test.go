@@ -3,6 +3,7 @@ package handlers_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"mime/multipart"
 	"net/textproto"
@@ -251,4 +252,79 @@ func TestScanQueue_ConcurrentWorkersTakeEachFileOnce(t *testing.T) {
 	app.DB.Model(&models.FileScan{}).Where("organization_id = ? AND status = ?", org.ID, models.ScanClean).Count(&clean)
 	assert.EqualValues(t, n, clean, "every file was cleared")
 	assert.Equal(t, n, scannerOf(app).count()+second.Scanner.(*fakeScanner).count(), "and each was scanned exactly once across both workers")
+}
+
+// What the administrators can see: engine state, signature age and a stale alert flag, counts, backlog
+// and average scan time; restricted to settings.general readers and to their own organization.
+func TestAntimalwareStatus_ObservabilityAndAccess(t *testing.T) {
+	w := newPathWorld(t)
+	cleanCase := w.app
+	_ = cleanCase
+	media := withStorageDir(t, w.app, "images/x.jpg", []byte("\xFF\xD8\xFF\xE0observe"))
+	contact := testutil.CreateTestContact(t, w.app.DB, w.org.ID)
+	require.NoError(t, w.app.DB.Create(&models.Message{BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: w.org.ID, ContactID: contact.ID,
+		Direction: models.DirectionIncoming, MessageType: models.MessageTypeImage, MediaURL: media, Status: models.MessageStatusDelivered}).Error)
+	tick(t, w.app, w.org.ID)
+
+	type status struct {
+		Data struct {
+			Reachable   bool   `json:"reachable"`
+			Engine      string `json:"engine"`
+			Stale       bool   `json:"signatures_stale"`
+			AgeHours    int    `json:"signatures_age_hours"`
+			Performance struct {
+				Scans24h  int64 `json:"scans_24h"`
+				AvgScanMs int64 `json:"avg_scan_ms"`
+			} `json:"performance"`
+			Backlog struct {
+				Pending       int64 `json:"pending"`
+				Errors        int64 `json:"errors"`
+				OldUnverified int64 `json:"old_unverified"`
+			} `json:"backlog"`
+		} `json:"data"`
+	}
+	get := func(u *models.User) (int, status) {
+		code, raw := chatDo(t, w.app.AntimalwareStatus, u.OrganizationID, u.ID, nil, nil, nil)
+		var s status
+		_ = json.Unmarshal(raw, &s)
+		return code, s
+	}
+	// fresh signatures: not stale
+	scannerOf(w.app).set(func(s *fakeScanner) {
+		s.version = "ClamAV 1.5.4/28164/" + time.Now().UTC().Add(-2*time.Hour).Format("Mon Jan _2 15:04:05 2006")
+	})
+	code, s := get(w.admin)
+	require.Equal(t, fasthttp.StatusOK, code)
+	assert.True(t, s.Data.Reachable)
+	assert.False(t, s.Data.Stale)
+	assert.LessOrEqual(t, s.Data.AgeHours, 3)
+	assert.EqualValues(t, 1, s.Data.Performance.Scans24h, "the scan was timed")
+	assert.EqualValues(t, 0, s.Data.Backlog.Pending)
+
+	// old signatures: flagged stale
+	scannerOf(w.app).set(func(s *fakeScanner) { s.version = "ClamAV 1.5.4/20000/Mon Jan  5 06:00:00 2026" })
+	_, s = get(w.admin)
+	assert.True(t, s.Data.Stale)
+
+	// engine down: unreachable, and the backlog counts what cannot be cleared
+	scannerOf(w.app).set(func(s *fakeScanner) { s.down = true })
+	media2 := withStorageDir(t, w.app, "images/y.jpg", []byte("\xFF\xD8\xFF\xE0observe-2"))
+	require.NoError(t, w.app.DB.Create(&models.Message{BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: w.org.ID, ContactID: contact.ID,
+		Direction: models.DirectionIncoming, MessageType: models.MessageTypeImage, MediaURL: media2, Status: models.MessageStatusDelivered}).Error)
+	tick(t, w.app, w.org.ID)
+	_, s = get(w.admin)
+	assert.False(t, s.Data.Reachable)
+	assert.EqualValues(t, 1, s.Data.Backlog.Errors)
+
+	// only administrators who may read settings; and never another organization's numbers
+	agentRole := testutil.CreateAgentRole(t, w.app.DB, w.org.ID)
+	agent := testutil.CreateTestUser(t, w.app.DB, w.org.ID, testutil.WithRoleID(&agentRole.ID))
+	code, _ = get(agent)
+	assert.Equal(t, fasthttp.StatusForbidden, code)
+	other := newIsoWorld(t)
+	orole := testutil.CreateAdminRole(t, w.app.DB, other.org.ID)
+	foreign := testutil.CreateTestUser(t, w.app.DB, other.org.ID, testutil.WithRoleID(&orole.ID))
+	_, s = get(foreign)
+	assert.EqualValues(t, 0, s.Data.Backlog.Errors)
+	assert.EqualValues(t, 0, s.Data.Performance.Scans24h)
 }

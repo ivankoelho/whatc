@@ -47,6 +47,8 @@ type AntimalwareConfig struct {
 	ReuseHours     int    `koanf:"reuse_hours"`     // an identical file reuses a clean verdict this fresh (default 24)
 	RescanDays     int    `koanf:"rescan_days"`     // clean files are re-checked after a signature update, older than this (default 7)
 	BatchSize      int    `koanf:"batch_size"`      // scans per worker pass (default 5)
+	// SignatureMaxAgeHours: older signatures raise an alert and show as stale in the panel (default 48).
+	SignatureMaxAgeHours int `koanf:"signature_max_age_hours"`
 }
 
 // XProcessConfig holds the switches of the X2 (XProcess) integration.
