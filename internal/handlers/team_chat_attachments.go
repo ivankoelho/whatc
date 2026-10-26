@@ -188,11 +188,12 @@ func (a *App) finishChatUpload(r *fastglue.Request, orgID, userID uuid.UUID, ch 
 		a.Log.Error("Failed to store chat attachment", "error", werr)
 		return a.sendChatError(r, errChatStorage, "upload the file")
 	}
+	gate := a.chatGateFor(userID, orgID, ch)
 	txErr := a.withLockedChannel(orgID, ch.ID, chatLockShare, func(tx *gorm.DB, locked *models.ChatChannel) error {
-		if !a.canAccessChatChannelDB(tx, userID, orgID, locked) {
+		if !a.canAccessLocked(tx, gate, userID, orgID, locked) {
 			return errChatNotFound
 		}
-		if !a.canPostChatChannelDB(tx, userID, orgID, locked) {
+		if !a.canPostLocked(tx, gate, userID, orgID, locked) {
 			return errChatForbidden
 		}
 		if locked.ArchivedAt != nil {

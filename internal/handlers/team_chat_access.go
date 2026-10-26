@@ -118,3 +118,35 @@ func (a *App) canPostChatChannelDB(db *gorm.DB, userID, orgID uuid.UUID, ch *mod
 	acc, ok := a.occurrenceChatAccess(userID, orgID, ch)
 	return ok && acc.can(models.OccurrenceCapComment)
 }
+
+// chatGate is what the caller may do in a CASE discussion, evaluated on its own connection BEFORE the channel
+// transaction starts. Inside the transaction a request already holds one pooled connection; deriving case access
+// there needs several more queries, and with as many concurrent sends as the pool has connections every request
+// waits for a connection held by another one: the whole server stops answering. (Found in the cross-department
+// homologation: 40 simultaneous messages on one protocol froze the backend.) Other channel kinds keep their
+// in-transaction re-check, since that one runs on the transaction's own connection.
+type chatGate struct {
+	occurrence   bool
+	access, post bool
+}
+
+func (a *App) chatGateFor(userID, orgID uuid.UUID, ch *models.ChatChannel) chatGate {
+	if ch == nil || ch.Kind != models.ChatChannelKindOccurrence {
+		return chatGate{}
+	}
+	return chatGate{occurrence: true, access: a.canAccessChatChannelDB(a.DB, userID, orgID, ch), post: a.canPostChatChannelDB(a.DB, userID, orgID, ch)}
+}
+
+func (a *App) canAccessLocked(tx *gorm.DB, g chatGate, userID, orgID uuid.UUID, locked *models.ChatChannel) bool {
+	if g.occurrence {
+		return g.access && locked.OrganizationID == orgID
+	}
+	return a.canAccessChatChannelDB(tx, userID, orgID, locked)
+}
+
+func (a *App) canPostLocked(tx *gorm.DB, g chatGate, userID, orgID uuid.UUID, locked *models.ChatChannel) bool {
+	if g.occurrence {
+		return g.post && locked.OrganizationID == orgID
+	}
+	return a.canPostChatChannelDB(tx, userID, orgID, locked)
+}

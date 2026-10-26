@@ -313,3 +313,54 @@ func (w *xdWorld) listedFor(t *testing.T, u *models.User, protocol string) bool 
 	require.Equal(t, fasthttp.StatusOK, code, string(raw))
 	return strings.Contains(string(raw), protocol)
 }
+
+// Regression (found in the browser homologation): with as many simultaneous requests as the pool has connections,
+// requests that held a transaction and asked for a second connection froze the server. A tiny pool makes the
+// problem appear with a handful of requests.
+func TestHomologation_ConcurrentWritesDoNotExhaustTheConnectionPool(t *testing.T) {
+	w := newXDWorld(t)
+	sac, log, sup := w.u["SAC"], w.u["Log"], w.u["SupLoja"]
+	occ := w.open(t, sac, w.team["Log"], "Pedido 45872 - pool")
+	w.on(occ)
+	cc, rr := chatDo(t, w.app.GetOccurrenceChat, log.OrganizationID, log.ID, nil, map[string]string{"id": occ.String()}, nil)
+	require.Equal(t, fasthttp.StatusOK, cc)
+	ch := decodeChat[occChatState](t, rr).ChannelID
+	w.chID = ch
+
+	sqlDB, err := w.app.DB.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(4)
+	defer sqlDB.SetMaxOpenConns(25)
+
+	done := make(chan struct{})
+	go func() {
+		var wg sync.WaitGroup
+		for i := 0; i < 12; i++ {
+			for _, u := range []*models.User{log, sup} {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					chatDo(t, w.app.SendChatMessage, u.OrganizationID, u.ID, map[string]any{"body": u.FullName + " " + uuid.NewString()}, map[string]string{"id": ch.String()}, nil)
+				}()
+			}
+		}
+		// simultaneous forwards too (only one can win; none may hang)
+		for i := 0; i < 6; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				chatDo(t, w.app.ForwardOccurrence, log.OrganizationID, log.ID, map[string]any{"team_id": w.team["Vendas"].ID.String(), "reason": "corrida de encaminhamento"}, map[string]string{"id": occ.String()}, nil)
+			}()
+		}
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(45 * time.Second):
+		t.Fatal("the server froze: concurrent writes exhausted the connection pool")
+	}
+	code, msgs := w.read(t, sup.ID)
+	require.Equal(t, fasthttp.StatusOK, code)
+	assert.Len(t, msgs, 24, "every message landed exactly once")
+}

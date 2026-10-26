@@ -634,11 +634,12 @@ func (a *App) SendChatMessage(r *fastglue.Request) error {
 	// message either lands before the archive or is refused, never after it. Access is
 	// re-checked inside the lock: someone removed a moment ago cannot slip one in.
 	var msg models.ChatMessage
+	gate := a.chatGateFor(userID, orgID, ch)
 	txErr := a.withLockedChannel(orgID, ch.ID, chatLockShare, func(tx *gorm.DB, locked *models.ChatChannel) error {
-		if !a.canAccessChatChannelDB(tx, userID, orgID, locked) {
+		if !a.canAccessLocked(tx, gate, userID, orgID, locked) {
 			return errChatNotFound
 		}
-		if !a.canPostChatChannelDB(tx, userID, orgID, locked) {
+		if !a.canPostLocked(tx, gate, userID, orgID, locked) {
 			return errChatForbidden
 		}
 		if locked.ArchivedAt != nil {
@@ -727,8 +728,9 @@ func (a *App) UpdateChatMessage(r *fastglue.Request) error {
 		}
 	}
 	now := time.Now()
+	gate := a.chatGateFor(userID, orgID, ch)
 	txErr := a.withLockedChannel(orgID, ch.ID, chatLockShare, func(tx *gorm.DB, locked *models.ChatChannel) error {
-		if !a.canAccessChatChannelDB(tx, userID, orgID, locked) {
+		if !a.canAccessLocked(tx, gate, userID, orgID, locked) {
 			return errChatNotFound
 		}
 		if locked.ArchivedAt != nil {

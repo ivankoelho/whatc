@@ -195,8 +195,9 @@ func (a *App) changeChatReaction(r *fastglue.Request, add bool) error {
 	if !ok {
 		return nil
 	}
+	gate := a.chatGateFor(userID, orgID, ch)
 	txErr := a.withLockedChannel(orgID, ch.ID, chatLockShare, func(tx *gorm.DB, locked *models.ChatChannel) error {
-		if !a.canAccessChatChannelDB(tx, userID, orgID, locked) {
+		if !a.canAccessLocked(tx, gate, userID, orgID, locked) {
 			return errChatNotFound
 		}
 		if locked.ArchivedAt != nil {

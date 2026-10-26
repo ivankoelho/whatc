@@ -167,11 +167,12 @@ func (a *App) CreateChatPoll(r *fastglue.Request) error {
 	}
 
 	var msg models.ChatMessage
+	gate := a.chatGateFor(userID, orgID, ch)
 	txErr := a.withLockedChannel(orgID, ch.ID, chatLockShare, func(tx *gorm.DB, locked *models.ChatChannel) error {
-		if !a.canAccessChatChannelDB(tx, userID, orgID, locked) {
+		if !a.canAccessLocked(tx, gate, userID, orgID, locked) {
 			return errChatNotFound
 		}
-		if !a.canPostChatChannelDB(tx, userID, orgID, locked) {
+		if !a.canPostLocked(tx, gate, userID, orgID, locked) {
 			return errChatForbidden
 		}
 		if locked.ArchivedAt != nil {
@@ -206,8 +207,9 @@ func (a *App) VoteChatPoll(r *fastglue.Request) error {
 	if err := a.decodeRequest(r, &req); err != nil {
 		return nil
 	}
+	gate := a.chatGateFor(userID, orgID, ch)
 	txErr := a.withLockedChannel(orgID, ch.ID, chatLockShare, func(tx *gorm.DB, locked *models.ChatChannel) error {
-		if !a.canAccessChatChannelDB(tx, userID, orgID, locked) {
+		if !a.canAccessLocked(tx, gate, userID, orgID, locked) {
 			return errChatNotFound
 		}
 		if locked.ArchivedAt != nil {

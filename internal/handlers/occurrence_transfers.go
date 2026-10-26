@@ -297,6 +297,16 @@ func (a *App) applyTransfer(r *fastglue.Request, orgID, userID uuid.UUID, occ *m
 	var stage models.OccurrenceStage
 	_ = a.DB.Where("id = ?", stageID).First(&stage).Error
 
+	// who keeps following is decided BEFORE the transaction: queries on a.DB inside it would need a second pooled
+	// connection per request (see chatGate: that exhausts the pool under concurrent load)
+	var followers []uuid.UUID
+	for _, id := range []*uuid.UUID{&userID, oldUser} {
+		if id == nil || a.seesAllOccurrences(*id, orgID) || (newTeamID != nil && a.userInTeam(*id, *newTeamID)) || (toUser != nil && *toUser == *id) {
+			continue
+		}
+		followers = append(followers, *id)
+	}
+
 	err := a.DB.Transaction(func(tx *gorm.DB) error {
 		q := tx.Model(&models.Occurrence{}).Where("id = ? AND organization_id = ?", occ.ID, orgID)
 		if oldTeam == nil {
@@ -332,10 +342,8 @@ func (a *App) applyTransfer(r *fastglue.Request, orgID, userID uuid.UUID, occ *m
 		}
 		// whoever handed the case over (and its previous holder) keeps following it, able to comment, when the
 		// new responsibility no longer covers them
-		for _, id := range []*uuid.UUID{&userID, oldUser} {
-			if id == nil || a.seesAllOccurrences(*id, orgID) || (newTeamID != nil && a.userInTeam(*id, *newTeamID)) || (toUser != nil && *toUser == *id) {
-				continue
-			}
+		for _, uid := range followers {
+			id := &uid
 			if err := tx.Clauses(clause.OnConflict{
 				Columns:   []clause.Column{{Name: "occurrence_id"}, {Name: "user_id"}},
 				DoUpdates: clause.Assignments(map[string]any{"deleted_at": nil}),
