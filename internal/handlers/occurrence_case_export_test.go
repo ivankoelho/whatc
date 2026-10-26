@@ -70,8 +70,8 @@ func TestOccurrenceExport_FollowsWhatEachPersonMayRead(t *testing.T) {
 	code, pdf, req := w.export(t, w.sac, w.occID, []string{"full"}, "pdf")
 	require.Equal(t, fasthttp.StatusOK, code)
 	assert.True(t, bytes.HasPrefix(pdf, []byte("%PDF-1.4")))
-	assert.Contains(t, string(pdf), "Protocolo")
-	assert.Contains(t, string(pdf), "Se\xe7\xf5es n\xe3o inclu\xeddas", "in WinAnsi: Seções não incluídas")
+	assert.Contains(t, string(pdf), latin1("CÓDIGO DO PROTOCOLO"), "the report names the protocol")
+	assert.Contains(t, string(pdf), latin1("SEÇÕES NÃO INCLUÍDAS"), "the omitted sections are listed")
 	assert.NotContains(t, string(pdf), "SEGREDO", "the customer message text is withheld from someone who cannot read that conversation")
 	assert.Equal(t, "application/pdf", string(req.RequestCtx.Response.Header.Peek("Content-Type")))
 
@@ -148,4 +148,13 @@ func TestOccurrenceExport_ZipCarriesOnlyFilesThePersonMayDownload(t *testing.T) 
 	}
 	assert.Contains(t, works, "restrito.pdf")
 	assert.Contains(t, works, "aberto.pdf")
+}
+
+// latin1 turns text into the single-byte form the PDF writer uses (WinAnsi agrees with Latin-1 for these letters).
+func latin1(s string) string {
+	b := make([]byte, 0, len(s))
+	for _, r := range s {
+		b = append(b, byte(r))
+	}
+	return string(b)
 }

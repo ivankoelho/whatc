@@ -89,7 +89,7 @@ var exportNoticeLabels = map[string]string{
 	"read": "lida", "failed": "falhou", "uncertain": "resultado incerto", "cancelled": "cancelada", "skipped": "não enviada",
 }
 
-var exportStateLabels = map[string]string{"new": "Novo", "in_progress": "Em andamento", "awaiting_customer": "Aguardando cliente", "done": "Concluído"}
+var exportStateLabels = map[string]string{"new": "Novo", "in_progress": "Em andamento", "awaiting_customer": "Aguardando cliente", "waiting_customer": "Aguardando cliente", "resolved": "Concluído", "done": "Concluído"}
 
 func label(m map[string]string, k string) string {
 	if v, ok := m[k]; ok {
@@ -98,7 +98,9 @@ func label(m map[string]string, k string) string {
 	return k
 }
 
-func tsv(t time.Time) string { return t.Local().Format("02/01/2006 15:04") }
+// tsvIn shows an instant in the organization's time zone as DD/MM/YYYY HH:mm (24 h). It never uses the
+// server's own zone: the same case must read the same wherever the server runs.
+func tsvIn(loc *time.Location, t time.Time) string { return t.In(loc).Format("02/01/2006 15:04") }
 
 // ExportOccurrence builds the report.
 func (a *App) ExportOccurrence(r *fastglue.Request) error {
@@ -155,6 +157,10 @@ func (a *App) ExportOccurrence(r *fastglue.Request) error {
 		a.DB.Model(&models.Team{}).Where("id = ? AND organization_id = ?", *occ.TeamID, orgID).Select("name").Scan(&teamName)
 	}
 
+	loc := a.orgLocation(orgID)
+	issuedAt := time.Now()
+	rep := a.newReportData(orgID, userID, occ, teamName, loc, issuedAt, want["summary"])
+
 	var tables []exportTable
 	counts := map[string]int{}
 	if want["history"] {
@@ -191,13 +197,13 @@ func (a *App) ExportOccurrence(r *fastglue.Request) error {
 		}
 		names := a.chatUserNames(ids)
 		for _, f := range files {
-			t.rows = append(t.rows, []string{f.Name, f.Mime, fmt.Sprint(f.SizeBytes), names[f.UploadedByID], tsv(f.CreatedAt), map[bool]string{true: "sim", false: "não"}[f.Restricted]})
+			t.rows = append(t.rows, []string{f.Name, f.Mime, fmt.Sprint(f.SizeBytes), names[f.UploadedByID], tsvIn(loc, f.CreatedAt), map[bool]string{true: "sim", false: "não"}[f.Restricted]})
 		}
 		tables = append(tables, t)
 		counts["documents"] = len(files)
 	}
 
-	stamp := time.Now().Format("20060102-150405")
+	stamp := issuedAt.In(loc).Format("20060102-150405")
 	base := "protocolo-" + strings.ReplaceAll(occ.ProtocolNumber, "/", "-") + "-" + stamp
 	var body []byte
 	var ctype, filename string
@@ -209,7 +215,7 @@ func (a *App) ExportOccurrence(r *fastglue.Request) error {
 		}
 		body, filename, ctype = csvBytes(tables[0]), base+"-"+tables[0].name+".csv", "text/csv; charset=utf-8"
 	case "pdf":
-		body, filename, ctype = a.exportPDF(occ, teamName, want, tables, omitted, files, nil), base+".pdf", "application/pdf"
+		body, filename, ctype = a.exportPDF(rep, want, tables, omitted, files, nil), base+".pdf", "application/pdf"
 	case "zip":
 		// Only files with a clean antimalware verdict travel in the ZIP; the report lists the others.
 		fileIDs := make([]uuid.UUID, len(files))
@@ -231,7 +237,7 @@ func (a *App) ExportOccurrence(r *fastglue.Request) error {
 				_, _ = w.Write(data)
 			}
 		}
-		put("relatorio.pdf", a.exportPDF(occ, teamName, want, tables, omitted, files, held))
+		put("relatorio.pdf", a.exportPDF(rep, want, tables, omitted, files, held))
 		for _, t := range tables {
 			put(t.name+".csv", csvBytes(t))
 		}
@@ -268,7 +274,7 @@ func (a *App) ExportOccurrence(r *fastglue.Request) error {
 		secs = append(secs, s)
 	}
 	a.logAudit(orgID, userID, "occurrence_export", occ.ID, models.AuditActionAccessed, nil,
-		map[string]any{"protocol": occ.ProtocolNumber, "format": req.Format, "sections": secs, "omitted": omitted, "counts": counts})
+		map[string]any{"protocol": occ.ProtocolNumber, "reference": rep.ref, "format": req.Format, "sections": secs, "omitted": omitted, "counts": counts})
 	return nil
 }
 
@@ -295,6 +301,7 @@ func csvBytes(t exportTable) []byte {
 
 func (a *App) exportHistory(orgID, userID uuid.UUID, occ *models.Occurrence, acc occurrenceAccess) (exportTable, bool) {
 	t := exportTable{name: "historico", header: []string{"Data", "Evento", "Autor", "Descrição"}}
+	loc := a.orgLocation(orgID)
 	reads := a.canUseCaseChannel(orgID, userID, occ, acc, a.caseChannelAccount(orgID, occ), false)
 	var events []models.OccurrenceEvent
 	a.DB.Where("organization_id = ? AND occurrence_id = ?", orgID, occ.ID).
@@ -319,13 +326,14 @@ func (a *App) exportHistory(orgID, userID uuid.UUID, occ *models.Occurrence, acc
 		if e.Type == models.OccurrenceEventCustomerNotice {
 			content = label(exportNoticeLabels, content)
 		}
-		t.rows = append(t.rows, []string{tsv(e.CreatedAt), label(exportEventLabels, string(e.Type)), author, content})
+		t.rows = append(t.rows, []string{tsvIn(loc, e.CreatedAt), label(exportEventLabels, string(e.Type)), author, content})
 	}
 	return t, true
 }
 
 func (a *App) exportInternalChat(orgID uuid.UUID, occ *models.Occurrence) (exportTable, bool) {
 	t := exportTable{name: "discussao-interna", header: []string{"Data", "Autor", "Mensagem", "Anexos"}}
+	loc := a.orgLocation(orgID)
 	var ch models.ChatChannel
 	if a.DB.Where("organization_id = ? AND occurrence_id = ? AND kind = ?", orgID, occ.ID, models.ChatChannelKindOccurrence).First(&ch).Error != nil {
 		return t, true
@@ -348,13 +356,14 @@ func (a *App) exportInternalChat(orgID uuid.UUID, occ *models.Occurrence) (expor
 		for _, f := range files[m.ID] {
 			fn = append(fn, f.Name)
 		}
-		t.rows = append(t.rows, []string{tsv(m.CreatedAt), names[m.UserID], m.Body, strings.Join(fn, ", ")})
+		t.rows = append(t.rows, []string{tsvIn(loc, m.CreatedAt), names[m.UserID], m.Body, strings.Join(fn, ", ")})
 	}
 	return t, true
 }
 
 func (a *App) exportWhatsApp(orgID uuid.UUID, occ *models.Occurrence) (exportTable, bool) {
 	t := exportTable{name: "whatsapp", header: []string{"Data", "Sentido", "Mensagem", "Estado", "Enviado por"}}
+	loc := a.orgLocation(orgID)
 	account := a.caseChannelAccount(orgID, occ)
 	if account == nil {
 		return t, true
@@ -375,88 +384,7 @@ func (a *App) exportWhatsApp(orgID uuid.UUID, occ *models.Occurrence) (exportTab
 		if m.Direction == models.DirectionOutgoing {
 			dir = "enviada"
 		}
-		t.rows = append(t.rows, []string{tsv(m.CreatedAt), dir, m.Content, string(m.Status), who})
+		t.rows = append(t.rows, []string{tsvIn(loc, m.CreatedAt), dir, m.Content, string(m.Status), who})
 	}
 	return t, true
-}
-
-func (a *App) exportPDF(occ *models.Occurrence, team string, want map[string]bool, tables []exportTable, omitted []string, files []models.OccurrenceFile, held []string) []byte {
-	now := time.Now()
-	d := newPDF("Protocolo "+occ.ProtocolNumber+" - "+occ.Title, "Gerado em "+now.Format("02/01/2006 15:04"))
-	d.put("Protocolo "+occ.ProtocolNumber, 16, true, 0)
-	d.put(occ.Title, 11, false, 0)
-	d.space(4)
-	if want["summary"] {
-		d.heading("Resumo")
-		stage := ""
-		if occ.Stage != nil {
-			stage = occ.Stage.Name
-		}
-		d.kv("Cliente", func() string {
-			if occ.Contact != nil {
-				return occ.Contact.ProfileName
-			}
-			return ""
-		}())
-		d.kv("Etapa", stage)
-		d.kv("Estado geral", label(exportStateLabels, string(occ.GeneralState)))
-		d.kv("Prioridade", string(occ.Priority))
-		if occ.Unit != nil {
-			d.kv("Unidade/Loja", occ.Unit.Name)
-		}
-		d.kv("Equipe", team)
-		if occ.AssignedUser != nil {
-			d.kv("Responsável", occ.AssignedUser.FullName)
-		}
-		if occ.Category != nil {
-			d.kv("Categoria", occ.Category.Name)
-		}
-		d.kv("Pedido", occ.OrderRef)
-		d.kv("Aberto em", tsv(occ.OpenedAt))
-		if occ.ClosedAt != nil {
-			d.kv("Concluído em", tsv(*occ.ClosedAt))
-		}
-		if strings.TrimSpace(occ.Description) != "" {
-			d.space(3)
-			d.paragraph(occ.Description, 0)
-		}
-	}
-	titles := map[string]string{"historico": "Histórico", "discussao-interna": "Discussão interna", "whatsapp": "Conversa WhatsApp", "documents": "Documentos"}
-	for _, t := range tables {
-		d.heading(fmt.Sprintf("%s (%d)", titles[t.name], len(t.rows)))
-		if len(t.rows) == 0 {
-			d.put("Nenhum registro.", 9.5, false, 0)
-		}
-		for _, row := range t.rows {
-			switch t.name {
-			case "documents":
-				d.put(fmt.Sprintf("%s - %s - %s bytes - %s - %s", row[0], row[1], row[2], row[3], row[4]), 9, false, 0)
-			default:
-				d.put(strings.TrimSpace(row[0]+"  "+row[1]), 9, true, 0)
-				body := row[len(row)-1]
-				if t.name == "whatsapp" {
-					body = row[2]
-				}
-				if t.name == "discussao-interna" {
-					body = row[2]
-					if row[3] != "" {
-						body += "  [anexos: " + row[3] + "]"
-					}
-				}
-				if t.name == "historico" {
-					body = strings.TrimSpace(row[2] + ": " + row[3])
-				}
-				d.paragraph(body, 10)
-			}
-		}
-	}
-	if len(held) > 0 {
-		d.heading("Arquivos não incluídos")
-		d.paragraph(fmt.Sprintf("%d arquivo(s) não incluído(s) no ZIP porque ainda não receberam verificação antimalware limpa (em verificação, com falha ou bloqueados): %s.", len(held), strings.Join(held, ", ")), 0)
-	}
-	if len(omitted) > 0 {
-		d.heading("Seções não incluídas")
-		d.paragraph("Por falta de permissão, as seguintes seções não fazem parte deste relatório: "+strings.Join(omitted, ", ")+".", 0)
-	}
-	return d.bytes()
 }

@@ -17,6 +17,8 @@ type pdfDoc struct {
 	y       float64
 	title   string
 	footer  string
+	org     string // when set, pages carry the organization identity and a coloured top rule
+	ref     string // reference code shown in the page header
 	pageNum int
 }
 
@@ -178,9 +180,19 @@ func (d *pdfDoc) bytes() []byte {
 	obj("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>")
 	obj("<< /Producer (WhatC) >>")
 	for i, lines := range pages {
-		header := fmt.Sprintf("BT /F2 8 Tf %.1f %.1f Td (%s) Tj ET\nBT /F1 8 Tf %.1f %.1f Td (%s) Tj ET\n",
-			pdfMargin, pdfH-28, pdfEscape(winAnsi(d.title)),
-			pdfMargin, 24.0, pdfEscape(winAnsi(fmt.Sprintf("%s   -   %d/%d", d.footer, i+1, len(pages)))))
+		var header string
+		if d.org != "" {
+			pg := fmt.Sprintf("Página %d de %d", i+1, len(pages))
+			header = fmt.Sprintf("%.3f %.3f %.3f rg 0 %.0f %.0f 6 re f\n", colAccent[0], colAccent[1], colAccent[2], pdfH-6, pdfW) +
+				fmt.Sprintf("BT /F2 8 Tf 0.10 0.12 0.15 rg %.1f %.1f Td (%s) Tj ET\n", pdfMargin, pdfH-24, pdfEscape(winAnsi(d.org+"  |  Relatório de ocorrência"))) +
+				fmt.Sprintf("BT /F1 8 Tf 0.42 0.45 0.50 rg %.1f %.1f Td (%s) Tj ET\n", pdfW-pdfMargin-textWidth(d.ref, 8, false), pdfH-24, pdfEscape(winAnsi(d.ref))) +
+				fmt.Sprintf("BT /F1 7.5 Tf 0.42 0.45 0.50 rg %.1f %.1f Td (%s) Tj ET\n", pdfMargin, 24.0, pdfEscape(winAnsi(d.footer))) +
+				fmt.Sprintf("BT /F1 7.5 Tf 0.42 0.45 0.50 rg %.1f %.1f Td (%s) Tj ET\n", pdfW-pdfMargin-textWidth(pg, 7.5, false), 24.0, pdfEscape(winAnsi(pg)))
+		} else {
+			header = fmt.Sprintf("BT /F2 8 Tf %.1f %.1f Td (%s) Tj ET\nBT /F1 8 Tf %.1f %.1f Td (%s) Tj ET\n",
+				pdfMargin, pdfH-28, pdfEscape(winAnsi(d.title)),
+				pdfMargin, 24.0, pdfEscape(winAnsi(fmt.Sprintf("%s   -   %d/%d", d.footer, i+1, len(pages)))))
+		}
 		stream := header + strings.Join(lines, "\n")
 		contentID := obj(fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(stream), stream))
 		pageIDs[i] = obj(fmt.Sprintf("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %.0f %.0f] /Contents %d 0 R /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> >>", pdfW, pdfH, contentID))
