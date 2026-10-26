@@ -460,7 +460,7 @@ onUnmounted(() => {
         </section>
 
         <!-- 2 + 3. The request, and the order it refers to -->
-        <div class="grid gap-6 lg:grid-cols-3">
+        <div class="grid items-start gap-6 lg:grid-cols-3">
           <section class="rounded-lg border bg-card p-4 lg:col-span-2" data-testid="case-request">
             <h2 class="mb-3 text-sm font-semibold">{{ $t('occurrences.secRequest') }}</h2>
             <dl class="grid grid-cols-2 gap-x-6 gap-y-3 text-sm md:grid-cols-4">
@@ -498,6 +498,7 @@ onUnmounted(() => {
             </div>
           </section>
 
+          <div class="space-y-6">
           <section class="rounded-lg border bg-card p-4" data-testid="case-order">
             <h2 class="mb-3 text-sm font-semibold">{{ $t('occurrences.secOrder') }}</h2>
             <template v-if="occurrence.order_ref || occurrence.invoice_number || occurrence.product_description">
@@ -523,11 +524,13 @@ onUnmounted(() => {
             </template>
             <p v-else class="text-sm text-muted-foreground">{{ $t('occurrences.noOrder') }}</p>
           </section>
+          <OccurrenceDocumentsCard :occurrence-id="occurrence.id" :can-write="canWrite" />
+          </div>
         </div>
 
-        <OccurrenceDocumentsCard :occurrence-id="occurrence.id" :can-write="canWrite" />
-
         <!-- 4. The customer (WhatsApp). Never the same place as the internal discussion. -->
+        <!-- Customer and colleagues side by side: two clearly separate conversations, each at readable width. -->
+        <div class="grid items-start gap-6 lg:grid-cols-2">
         <section id="case-customer" class="scroll-mt-4 space-y-3">
           <OccurrenceWhatsAppCard :occurrence-id="occurrence.id" @configured="waConfigured = $event" />
           <OccurrenceCommunicationCard :occurrence-id="occurrence.id" />
@@ -577,6 +580,7 @@ onUnmounted(() => {
         <section id="case-internal" class="scroll-mt-4 space-y-3">
           <OccurrenceChatPanel :occurrence-id="occurrence.id" />
         </section>
+        </div>
 
         <!-- 6. Secondary: history and participants -->
         <div class="grid items-start gap-6 lg:grid-cols-3">
