@@ -418,3 +418,28 @@ type OccurrenceFile struct {
 }
 
 func (OccurrenceFile) TableName() string { return "occurrence_files" }
+
+// OccurrenceTransfer is one move of the main responsibility for a case between teams (departments). The case
+// keeps its protocol, files, discussion and history: only who is responsible changes. A nil FromTeamID means the
+// case came from its requester (opened with a team), and a nil ToTeamID means it went back to the requester.
+type OccurrenceTransfer struct {
+	BaseModel
+	OrganizationID uuid.UUID `gorm:"type:uuid;index;not null" json:"organization_id"`
+	OccurrenceID   uuid.UUID `gorm:"type:uuid;index;not null" json:"occurrence_id"`
+	Kind           string    `gorm:"size:10;not null" json:"kind"` // forward | return
+	FromTeamID     *uuid.UUID `gorm:"type:uuid" json:"from_team_id,omitempty"`
+	ToTeamID       *uuid.UUID `gorm:"type:uuid" json:"to_team_id,omitempty"`
+	FromUserID     *uuid.UUID `gorm:"type:uuid" json:"from_user_id,omitempty"` // who held the case before
+	ToUserID       *uuid.UUID `gorm:"type:uuid" json:"to_user_id,omitempty"`   // who holds it after (may be nobody yet)
+	ByUserID       uuid.UUID `gorm:"type:uuid;not null" json:"by_user_id"`
+	Reason         string    `gorm:"type:text" json:"reason"`
+}
+
+func (OccurrenceTransfer) TableName() string { return "occurrence_transfers" }
+
+const (
+	TransferKindForward = "forward"
+	TransferKindReturn  = "return"
+
+	OccurrenceEventReturned OccurrenceEventType = "returned"
+)

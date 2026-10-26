@@ -421,8 +421,14 @@ func (a *App) ReorderOccurrenceStages(r *fastglue.Request) error {
 
 	var conflict []string
 	err = a.DB.Transaction(func(tx *gorm.DB) error {
+		// Serialize on ONE row per organization first: locking the stage rows alone lets a second request read
+		// them in the old order once the first commits (READ COMMITTED), and both would then pass the stale check.
+		var lock models.Organization
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").Where("id = ?", orgID).First(&lock).Error; err != nil {
+			return err
+		}
 		var cur []models.OccurrenceStage
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		if err := tx.
 			Where("organization_id = ?", orgID).Order("position ASC, created_at ASC, id ASC").Find(&cur).Error; err != nil {
 			return err
 		}

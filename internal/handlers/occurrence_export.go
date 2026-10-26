@@ -81,7 +81,7 @@ var exportEventLabels = map[string]string{
 	"assignment": "Atribuição", "protocol_sent": "Protocolo enviado", "closed": "Ocorrência encerrada", "forwarded": "Encaminhado para uma equipe",
 	"participant_added": "Participante adicionado", "participant_removed": "Participante removido", "reopened": "Reaberto",
 	"scope_regularized": "Escopo regularizado", "customer_notification": "Comunicação com o cliente", "process_message_used": "Mensagem do processo usada",
-	"file_added": "Documento anexado", "file_removed": "Documento removido",
+	"file_added": "Documento anexado", "file_removed": "Documento removido", "returned": "Devolvida ao departamento anterior",
 }
 
 var exportNoticeLabels = map[string]string{

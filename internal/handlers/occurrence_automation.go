@@ -51,6 +51,10 @@ func (a *App) forwardArtifacts(userID uuid.UUID, contact *models.Contact, reques
 			return err
 		}
 
+		if err := recordInitialTransfer(tx, occ, userID); err != nil {
+			return err
+		}
+
 		if !requesterInTeam {
 			if err := tx.Create(&models.OccurrenceParticipant{
 				OrganizationID: occ.OrganizationID, OccurrenceID: occ.ID, UserID: userID, AddedByID: &userID,

@@ -142,6 +142,7 @@ func runMigrations(db *gorm.DB) error {
 		// CRM de ocorrências
 		&models.OccurrenceStage{},
 		&models.OccurrenceParticipant{},
+		&models.OccurrenceTransfer{},
 		&models.OccurrenceChannelConfig{},
 		&models.OccurrenceNotification{},
 		&models.OccurrenceNotificationAttempt{},

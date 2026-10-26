@@ -135,6 +135,7 @@ func GetMigrationModels() []MigrationModel {
 		// CRM de ocorrências
 		{"OccurrenceStage", &models.OccurrenceStage{}},
 		{"OccurrenceParticipant", &models.OccurrenceParticipant{}},
+		{"OccurrenceTransfer", &models.OccurrenceTransfer{}},
 		{"OccurrenceChannelConfig", &models.OccurrenceChannelConfig{}},
 		{"OccurrenceNotification", &models.OccurrenceNotification{}},
 		{"OccurrenceNotificationAttempt", &models.OccurrenceNotificationAttempt{}},

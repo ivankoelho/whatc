@@ -3,6 +3,7 @@ package handlers
 import (
 
 	"github.com/google/uuid"
+	"github.com/valyala/fasthttp"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/zerodha/fastglue"
 )
@@ -22,6 +23,23 @@ func (a *App) ListForwardTargets(r *fastglue.Request) error {
 	orgID, _, err := a.requireAuth(r, models.ResourceOccurrences, models.ActionWrite)
 	if err != nil {
 		return nil
+	}
+	// ?team_id=: the active people of that team, for choosing who receives a forwarded case
+	if tid := string(r.RequestCtx.QueryArgs().Peek("team_id")); tid != "" {
+		id, perr := uuid.Parse(tid)
+		if perr != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid team_id", nil, "")
+		}
+		type member struct {
+			ID       uuid.UUID `json:"id"`
+			FullName string    `json:"full_name"`
+		}
+		var ms []member
+		a.DB.Table("users u").Select("u.id AS id, u.full_name AS full_name").
+			Joins("JOIN team_members tm ON tm.user_id = u.id AND tm.team_id = ?", id).
+			Joins("JOIN teams t ON t.id = tm.team_id AND t.organization_id = ?", orgID).
+			Where("u.organization_id = ? AND u.is_active = ? AND u.deleted_at IS NULL", orgID, true).Order("u.full_name").Scan(&ms)
+		return r.SendEnvelope(map[string]any{"members": ms})
 	}
 	var teams []models.Team
 	a.DB.Where("organization_id = ? AND is_active = ?", orgID, true).Order("name").Find(&teams)

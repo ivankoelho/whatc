@@ -241,6 +241,10 @@ func (a *App) AddOccurrenceParticipant(r *fastglue.Request) error {
 		depID = &id
 	}
 
+	// a person added to help or follow can comment unless the caller said otherwise (an explicit empty list = read only)
+	if req.Capabilities == nil {
+		req.Capabilities = []string{models.OccurrenceCapComment}
+	}
 	caps := make([]string, 0, len(req.Capabilities))
 	seen := map[string]bool{}
 	for _, c := range req.Capabilities {
