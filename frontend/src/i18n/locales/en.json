@@ -517,6 +517,13 @@
       "protocol_history": "Protocol history and data: not files."
     }
   },
+  "attachmentPreview": {
+    "view": "View",
+    "download": "Download",
+    "description": "Attachment preview",
+    "failed": "The preview of this file cannot be shown right now.",
+    "unsupported": "This file type has no safe preview. Use Download to open it on your computer."
+  },
   "occurrenceAttach": {
     "title": "Attachments",
     "attach": "Attach",

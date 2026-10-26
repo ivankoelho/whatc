@@ -11,6 +11,7 @@ import { occurrenceFilesService, type OccurrenceFileItem } from '@/services/api'
 import { chatErrorCode } from '@/lib/team-chat'
 import { formatDateTime } from '@/lib/utils'
 import { usePendingPoll } from '@/composables/usePendingPoll'
+import AttachmentPreviewDialog from '@/components/shared/AttachmentPreviewDialog.vue'
 
 // General documents of the case, apart from the invoice/coupon records. The server decides what
 // each person may do with each file (can_download / can_delete); the buttons only mirror it.
@@ -109,7 +110,11 @@ async function remove() {
 }
 
 const sizeLabel = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`)
+const window = globalThis.window
 const href = (f: OccurrenceFileItem, inline = false) => occurrenceFilesService.url(props.occurrenceId, f.id, inline)
+// Visualizar opens an in-app preview (inline version, same authorization and antimalware gate); Baixar is separate.
+const previewing = ref<OccurrenceFileItem | null>(null)
+const previewOpen = computed({ get: () => !!previewing.value, set: (v: boolean) => { if (!v) previewing.value = null } })
 </script>
 
 <template>
@@ -156,9 +161,9 @@ const href = (f: OccurrenceFileItem, inline = false) => occurrenceFilesService.u
               {{ t(`fileScan.${f.scan_status}`) }}
             </p>
           </div>
-          <a v-if="f.can_preview" :href="href(f, true)" target="_blank" rel="noopener noreferrer" class="rounded p-1.5 hover:bg-muted" :aria-label="t('occurrenceFiles.preview')" :title="t('occurrenceFiles.preview')">
+          <button v-if="f.can_preview" type="button" class="rounded p-1.5 hover:bg-muted" :aria-label="t('occurrenceFiles.preview')" :title="t('occurrenceFiles.preview')" :data-testid="`file-preview-${f.id}`" @click="previewing = f">
             <Eye class="h-4 w-4" aria-hidden="true" />
-          </a>
+          </button>
           <a v-if="f.can_download" :href="href(f)" class="rounded p-1.5 hover:bg-muted" :aria-label="t('occurrenceFiles.download')" :title="t('occurrenceFiles.download')" :data-testid="`file-download-${f.id}`">
             <Download class="h-4 w-4" aria-hidden="true" />
           </a>
@@ -168,6 +173,10 @@ const href = (f: OccurrenceFileItem, inline = false) => occurrenceFilesService.u
           </button>
         </li>
       </ul>
+      <AttachmentPreviewDialog
+        v-model:open="previewOpen" :name="previewing?.name ?? ''" :mime="previewing?.mime ?? ''" :src="previewing ? href(previewing, true) : null"
+        @download="previewing && (window.location.href = href(previewing))"
+      />
     </CardContent>
 
     <NextcloudDialog v-if="ncOpen" v-model:open="ncOpen" @picked="fromNextcloud" />

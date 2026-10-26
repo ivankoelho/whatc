@@ -517,6 +517,13 @@
       "protocol_history": "Histórico e dados do protocolo: não são arquivos."
     }
   },
+  "attachmentPreview": {
+    "view": "Visualizar",
+    "download": "Baixar",
+    "description": "Prévia do anexo",
+    "failed": "Não foi possível exibir a prévia deste arquivo agora.",
+    "unsupported": "Este tipo de arquivo não tem prévia segura. Use Baixar para abri-lo no seu computador."
+  },
   "occurrenceAttach": {
     "title": "Anexos",
     "attach": "Anexar",

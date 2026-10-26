@@ -414,7 +414,12 @@ func (a *App) DownloadChatAttachment(r *fastglue.Request) error {
 	hd.Set("Content-Security-Policy", "default-src 'none'; sandbox")
 	hd.Set("Cross-Origin-Resource-Policy", "same-origin")
 	hd.Set("Accept-Ranges", "bytes")
-	hd.Set("Content-Disposition", chatContentDisposition(att))
+	disp := chatContentDisposition(att)
+	// ?inline=1 asks for a preview of a PDF or plain text; the stored type was detected from the bytes at upload.
+	if string(r.RequestCtx.QueryArgs().Peek("inline")) == "1" && (att.Mime == "application/pdf" || att.Mime == "text/plain") {
+		disp = strings.Replace(disp, "attachment;", "inline;", 1)
+	}
+	hd.Set("Content-Disposition", disp)
 	r.RequestCtx.SetStatusCode(status)
 	r.RequestCtx.SetBodyStream(&sectionCloser{io.NewSectionReader(f, start, length), f}, int(length))
 	return nil

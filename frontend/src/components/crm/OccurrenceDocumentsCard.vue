@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { IconButton, DeleteConfirmDialog } from '@/components/shared'
 import OccurrenceDocumentsEditor from '@/components/crm/OccurrenceDocumentsEditor.vue'
+import AttachmentPreviewDialog from '@/components/shared/AttachmentPreviewDialog.vue'
 import { occurrenceDocumentsService, occurrenceFilesService, type OccurrenceDocument } from '@/services/api'
 import { type DocumentDraft, newDocumentDraft, draftToInput, isBlankDraft, MAX_ATTACHMENT_BYTES, ATTACHMENT_ACCEPT } from '@/lib/occurrence-documents'
 import { getErrorMessage } from '@/lib/api-utils'
@@ -94,13 +95,28 @@ async function attach(doc: OccurrenceDocument, event: Event) {
   }
 }
 
+// The attachment opens in an in-app preview (a blob of the authorized response); Baixar saves it.
+const preview = ref<{ name: string; mime: string; url: string; blob: Blob } | null>(null)
+const previewOpen = computed({ get: () => !!preview.value, set: (v: boolean) => { if (!v) closePreview() } })
+function closePreview() {
+  if (preview.value) URL.revokeObjectURL(preview.value.url)
+  preview.value = null
+}
+function savePreview() {
+  if (!preview.value) return
+  const a = document.createElement('a')
+  a.href = preview.value.url
+  a.download = preview.value.name
+  a.click()
+}
 async function openAttachment(doc: OccurrenceDocument) {
   busyId.value = doc.id
   try {
     const res = await occurrenceDocumentsService.downloadAttachment(props.occurrenceId, doc.id)
-    const url = URL.createObjectURL(res.data)
-    window.open(url, '_blank', 'noopener')
-    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    const blob = res.data as Blob
+    // the type comes from the server's validated Content-Type, not from the file name
+    const mime = (res.headers?.['content-type'] as string | undefined)?.split(';')[0] || blob.type
+    preview.value = { name: doc.attachment_name || 'documento', mime, blob, url: URL.createObjectURL(new Blob([blob], { type: mime })) }
   } catch (e) {
     toast.error(getErrorMessage(e, t('occurrenceDocuments.loadFailed')))
   } finally {
@@ -188,6 +204,10 @@ async function confirmRemove() {
       </template>
     </CardContent>
   </Card>
+
+  <AttachmentPreviewDialog
+    v-model:open="previewOpen" :name="preview?.name ?? ''" :mime="preview?.mime ?? ''" :src="preview?.url ?? null" @download="savePreview"
+  />
 
   <DeleteConfirmDialog
     :open="!!docToDelete"

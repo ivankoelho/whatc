@@ -350,8 +350,16 @@ func (a *App) ServeMedia(r *fastglue.Request) error {
 		contentType = "text/plain"
 	}
 
-	r.RequestCtx.Response.Header.Set("Content-Type", contentType)
-	r.RequestCtx.Response.Header.Set("Cache-Control", "private, no-cache") // revalidated on every use: a later infection verdict cannot hide behind a cached copy
+	// The extension is only a claim: the type served is the one the bytes support (HTML, SVG and the like
+	// become an opaque download), with headers that keep what is shown inert.
+	contentType = validatedMime(data, contentType)
+	h := &r.RequestCtx.Response.Header
+	setSafeFileHeaders(h, contentType) // no-cache: revalidated on every use, so a later infection verdict cannot hide behind a cached copy
+	disp := "attachment"
+	if inlineMime(contentType) || strings.HasPrefix(contentType, "audio/") || strings.HasPrefix(contentType, "video/") {
+		disp = "inline"
+	}
+	h.Set("Content-Disposition", disp)
 	r.RequestCtx.SetBody(data)
 
 	return nil

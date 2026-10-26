@@ -169,7 +169,7 @@ func (a *App) canDeleteOccurrenceFile(userID uuid.UUID, acc occurrenceAccess, f 
 
 func previewable(mime string) bool {
 	switch mime {
-	case "application/pdf", "image/png", "image/jpeg", "image/gif", "image/webp":
+	case "application/pdf", "image/png", "image/jpeg", "image/gif", "image/webp", "text/plain":
 		return true
 	}
 	return false

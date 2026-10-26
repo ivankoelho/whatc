@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"net/url"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -422,9 +423,13 @@ func (a *App) ServeOccurrenceDocumentAttachment(r *fastglue.Request) error {
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Attachment not found", nil, "")
 	}
-	r.RequestCtx.Response.Header.Set("Content-Type", doc.AttachmentMime)
-	r.RequestCtx.Response.Header.Set("X-Content-Type-Options", "nosniff")
-	r.RequestCtx.Response.Header.Set("Cache-Control", "private, no-cache")
+	mime := validatedMime(data, doc.AttachmentMime)
+	setSafeFileHeaders(&r.RequestCtx.Response.Header, mime)
+	disp := "attachment"
+	if inlineMime(mime) && string(r.RequestCtx.QueryArgs().Peek("download")) != "1" {
+		disp = "inline"
+	}
+	r.RequestCtx.Response.Header.Set("Content-Disposition", disp+"; filename*=UTF-8''"+url.PathEscape(doc.AttachmentName))
 	r.RequestCtx.SetBody(data)
 	return nil
 }
