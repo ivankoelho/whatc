@@ -10,7 +10,7 @@ import { useUsersStore } from '@/stores/users'
 import { getErrorMessage } from '@/lib/api-utils'
 import { Users, X } from 'lucide-vue-next'
 
-const props = defineProps<{ occurrenceId: string; canWrite: boolean }>()
+const props = defineProps<{ occurrenceId: string; canWrite: boolean; embedded?: boolean }>()
 
 const { t } = useI18n()
 const usersStore = useUsersStore()
@@ -65,14 +65,14 @@ watch(() => props.occurrenceId, load, { immediate: true })
 </script>
 
 <template>
-  <Card data-testid="occurrence-participants">
-    <CardHeader class="pb-3">
+  <Card data-testid="occurrence-participants" :class="embedded ? 'border-0 bg-transparent shadow-none' : ''">
+    <CardHeader :class="embedded ? 'space-y-0 p-0 pb-2' : 'pb-3'">
       <CardTitle class="text-sm font-medium flex items-center gap-2">
         <Users class="h-4 w-4" aria-hidden="true" />
         {{ $t('occurrences.participants') }}
       </CardTitle>
     </CardHeader>
-    <CardContent class="space-y-3 text-sm">
+    <CardContent :class="embedded ? 'space-y-3 p-0 text-sm' : 'space-y-3 text-sm'">
       <p v-if="participants.length === 0" class="text-muted-foreground">{{ $t('occurrences.participantsNone') }}</p>
       <ul v-else class="space-y-2">
         <li v-for="p in participants" :key="p.user_id" class="flex items-center justify-between gap-2">

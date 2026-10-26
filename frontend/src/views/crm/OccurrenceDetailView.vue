@@ -412,7 +412,7 @@ onUnmounted(() => {
                 {{ occurrence.stage_name }}
               </Badge>
             </div>
-            <dl class="flex flex-1 flex-wrap items-center gap-x-8 gap-y-2">
+            <dl class="flex flex-1 flex-wrap items-start gap-x-8 gap-y-3 [&_dd]:mt-0.5 [&_dd]:flex [&_dd]:h-7 [&_dd]:items-center">
               <div>
                 <dt class="text-xs text-muted-foreground">{{ $t('occurrences.generalState') }}</dt>
                 <dd>{{ $t('occurrences.generalStates.' + (occurrence.general_state || 'new')) }}</dd>
@@ -459,7 +459,7 @@ onUnmounted(() => {
           </div>
         </section>
 
-        <!-- 2 + 3. The request, and the order it refers to -->
+        <!-- 2 + 3. The request with its order and followers; documents and history beside it -->
         <div class="grid gap-6 lg:grid-cols-2">
           <section class="rounded-lg border bg-card p-4" data-testid="case-request">
             <h2 class="mb-3 text-sm font-semibold">{{ $t('occurrences.secRequest') }}</h2>
@@ -496,35 +496,62 @@ onUnmounted(() => {
             <div v-if="occurrence.description" class="mt-4 border-t pt-3">
               <p class="whitespace-pre-wrap text-sm leading-relaxed [overflow-wrap:anywhere]">{{ occurrence.description }}</p>
             </div>
+
+            <div class="mt-4 border-t pt-3" data-testid="case-order">
+              <h3 class="mb-2 text-sm font-semibold">{{ $t('occurrences.secOrder') }}</h3>
+              <template v-if="occurrence.order_ref || occurrence.invoice_number || occurrence.product_description">
+                <dl class="space-y-2 text-sm">
+                  <div v-if="occurrence.order_ref">
+                    <dt class="text-xs text-muted-foreground">{{ $t('occurrences.orderRef') }}</dt>
+                    <dd class="font-mono">{{ occurrence.order_ref }}</dd>
+                  </div>
+                  <div v-if="occurrence.invoice_number">
+                    <dt class="text-xs text-muted-foreground">{{ $t('occurrences.invoiceNumberLabel') }}</dt>
+                    <dd class="font-mono">{{ occurrence.invoice_number }}</dd>
+                  </div>
+                  <div v-if="occurrence.purchase_date">
+                    <dt class="text-xs text-muted-foreground">{{ $t('occurrences.purchaseDateLabel') }}</dt>
+                    <dd>{{ formatDateTime(occurrence.purchase_date) }}</dd>
+                  </div>
+                  <div v-if="occurrence.product_description">
+                    <dt class="text-xs text-muted-foreground">{{ $t('occurrences.secProduct') }}</dt>
+                    <dd class="[overflow-wrap:anywhere]">{{ occurrence.product_description }}</dd>
+                  </div>
+                </dl>
+                <p v-if="occurrence.order_ref" class="mt-3 text-xs text-muted-foreground">{{ $t('occurrences.orderNoIntegration') }}</p>
+              </template>
+              <p v-else class="text-sm text-muted-foreground">{{ $t('occurrences.noOrder') }}</p>
+              </div>
+
+            <div id="case-people" class="mt-4 scroll-mt-4 border-t pt-3">
+              <OccurrenceParticipantsCard embedded :occurrence-id="occurrence.id" :can-write="canWrite && (occurrence.can?.add_participant ?? true)" />
+            </div>
           </section>
 
-          <div class="space-y-6">
-          <section class="rounded-lg border bg-card p-4" data-testid="case-order">
-            <h2 class="mb-3 text-sm font-semibold">{{ $t('occurrences.secOrder') }}</h2>
-            <template v-if="occurrence.order_ref || occurrence.invoice_number || occurrence.product_description">
-              <dl class="space-y-2 text-sm">
-                <div v-if="occurrence.order_ref">
-                  <dt class="text-xs text-muted-foreground">{{ $t('occurrences.orderRef') }}</dt>
-                  <dd class="font-mono">{{ occurrence.order_ref }}</dd>
+          <div class="flex flex-col gap-6">
+            <OccurrenceDocumentsCard :occurrence-id="occurrence.id" :can-write="canWrite" />
+          <section id="case-history" class="scroll-mt-4 flex-1 rounded-lg border bg-card p-4" data-testid="case-history">
+            <h2 class="mb-3 text-sm font-semibold">{{ $t('chat.occurrenceTimeline') }}</h2>
+            <p v-if="store.events.length === 0" class="py-4 text-center text-sm text-muted-foreground">{{ $t('occurrences.noEventsYet') }}</p>
+            <ol v-else class="space-y-3">
+              <li v-for="event in shownEvents" :key="event.id" class="flex gap-3 text-sm">
+                <component :is="eventIcons[event.type] || StickyNote" class="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <div class="min-w-0">
+                  <p class="flex flex-wrap items-baseline gap-x-2">
+                    <span class="font-medium">{{ $t(eventLabels[event.type] || 'occurrences.eventUnknown') }}</span>
+                    <span v-if="event.created_by_name" class="text-xs text-muted-foreground">{{ event.created_by_name }}</span>
+                    <span class="text-xs text-muted-foreground">{{ formatDateTime(event.created_at) }}</span>
+                  </p>
+                  <p v-if="event.type === 'customer_notification'" class="mt-0.5 text-muted-foreground">{{ $t('occurrences.notice.' + event.content) }}</p>
+                  <p v-else-if="event.content" class="mt-0.5 whitespace-pre-wrap text-muted-foreground [overflow-wrap:anywhere]">{{ event.content }}</p>
                 </div>
-                <div v-if="occurrence.invoice_number">
-                  <dt class="text-xs text-muted-foreground">{{ $t('occurrences.invoiceNumberLabel') }}</dt>
-                  <dd class="font-mono">{{ occurrence.invoice_number }}</dd>
-                </div>
-                <div v-if="occurrence.purchase_date">
-                  <dt class="text-xs text-muted-foreground">{{ $t('occurrences.purchaseDateLabel') }}</dt>
-                  <dd>{{ formatDateTime(occurrence.purchase_date) }}</dd>
-                </div>
-                <div v-if="occurrence.product_description">
-                  <dt class="text-xs text-muted-foreground">{{ $t('occurrences.secProduct') }}</dt>
-                  <dd class="[overflow-wrap:anywhere]">{{ occurrence.product_description }}</dd>
-                </div>
-              </dl>
-              <p v-if="occurrence.order_ref" class="mt-3 text-xs text-muted-foreground">{{ $t('occurrences.orderNoIntegration') }}</p>
-            </template>
-            <p v-else class="text-sm text-muted-foreground">{{ $t('occurrences.noOrder') }}</p>
+              </li>
+            </ol>
+            <Button v-if="store.events.length > HISTORY_PREVIEW" variant="ghost" size="sm" class="mt-3" data-testid="history-toggle" :aria-expanded="showAllEvents" @click="showAllEvents = !showAllEvents">
+              <ChevronDown class="mr-1 h-4 w-4 transition-transform" :class="showAllEvents ? 'rotate-180' : ''" aria-hidden="true" />
+              {{ showAllEvents ? $t('occurrences.showLess') : $t('occurrences.showAll', { n: store.events.length }) }}
+            </Button>
           </section>
-          <OccurrenceDocumentsCard :occurrence-id="occurrence.id" :can-write="canWrite" />
           </div>
         </div>
 
@@ -580,36 +607,6 @@ onUnmounted(() => {
         <section id="case-internal" class="flex scroll-mt-4 flex-col">
           <OccurrenceChatPanel :occurrence-id="occurrence.id" class="flex-1" />
         </section>
-        </div>
-
-        <!-- 6. Secondary: history and participants -->
-        <div class="grid items-start gap-6 lg:grid-cols-2">
-          <section id="case-history" class="scroll-mt-4 rounded-lg border bg-card p-4" data-testid="case-history">
-            <h2 class="mb-3 text-sm font-semibold">{{ $t('chat.occurrenceTimeline') }}</h2>
-            <p v-if="store.events.length === 0" class="py-4 text-center text-sm text-muted-foreground">{{ $t('occurrences.noEventsYet') }}</p>
-            <ol v-else class="space-y-3">
-              <li v-for="event in shownEvents" :key="event.id" class="flex gap-3 text-sm">
-                <component :is="eventIcons[event.type] || StickyNote" class="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                <div class="min-w-0">
-                  <p class="flex flex-wrap items-baseline gap-x-2">
-                    <span class="font-medium">{{ $t(eventLabels[event.type] || 'occurrences.eventUnknown') }}</span>
-                    <span v-if="event.created_by_name" class="text-xs text-muted-foreground">{{ event.created_by_name }}</span>
-                    <span class="text-xs text-muted-foreground">{{ formatDateTime(event.created_at) }}</span>
-                  </p>
-                  <p v-if="event.type === 'customer_notification'" class="mt-0.5 text-muted-foreground">{{ $t('occurrences.notice.' + event.content) }}</p>
-                  <p v-else-if="event.content" class="mt-0.5 whitespace-pre-wrap text-muted-foreground [overflow-wrap:anywhere]">{{ event.content }}</p>
-                </div>
-              </li>
-            </ol>
-            <Button v-if="store.events.length > HISTORY_PREVIEW" variant="ghost" size="sm" class="mt-3" data-testid="history-toggle" :aria-expanded="showAllEvents" @click="showAllEvents = !showAllEvents">
-              <ChevronDown class="mr-1 h-4 w-4 transition-transform" :class="showAllEvents ? 'rotate-180' : ''" aria-hidden="true" />
-              {{ showAllEvents ? $t('occurrences.showLess') : $t('occurrences.showAll', { n: store.events.length }) }}
-            </Button>
-          </section>
-
-          <div id="case-people" class="scroll-mt-4">
-            <OccurrenceParticipantsCard :occurrence-id="occurrence.id" :can-write="canWrite && (occurrence.can?.add_participant ?? true)" />
-          </div>
         </div>
       </div>
       </template>
