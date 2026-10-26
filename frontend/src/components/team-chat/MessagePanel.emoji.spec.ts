@@ -220,7 +220,7 @@ describe('long messages wrap inside the pane', () => {
     expect(p.classes().join(' ')).toContain('[overflow-wrap:anywhere]')
     expect(p.text()).toBe(long) // nothing is cut or abbreviated
     const column = p.element.parentElement as HTMLElement
-    expect(column.className).toContain('max-w-3xl') // a readable measure with a margin, not the full width of a wide screen
+    expect(column.className).toContain('36rem') // the bubble keeps a readable measure on a wide screen (and 88% of the pane on a phone)
     expect(column.className).toContain('min-w-0')
   })
 })

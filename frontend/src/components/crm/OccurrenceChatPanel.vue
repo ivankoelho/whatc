@@ -7,7 +7,8 @@ import { useTeamChatStore } from '@/stores/teamChat'
 import { useAuthStore } from '@/stores/auth'
 import MessageComposer from '@/components/team-chat/MessageComposer.vue'
 import MessageAttachments from '@/components/team-chat/MessageAttachments.vue'
-import { formatDateTime } from '@/lib/utils'
+import { bubbleClass, bubbleMeta, dayLabel, isOwnMessage } from '@/lib/chat-bubbles'
+import { useI18n } from 'vue-i18n'
 import { MessagesSquare, Lock } from 'lucide-vue-next'
 
 // The case's INTERNAL discussion: colleagues only. It reuses the internal chat
@@ -15,6 +16,9 @@ import { MessagesSquare, Lock } from 'lucide-vue-next'
 // write from the case itself. Nothing typed here goes to the customer: that is
 // the WhatsApp card, with its own button and its own endpoint.
 const props = defineProps<{ occurrenceId: string }>()
+const { t, locale } = useI18n()
+const timeOf = (iso: string) => new Date(iso).toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
+const dayText = (iso: string) => dayLabel(iso, locale.value, { today: t('teamChat.today'), yesterday: t('teamChat.yesterday') })
 
 const store = useTeamChatStore()
 const auth = useAuthStore()
@@ -70,16 +74,19 @@ onBeforeUnmount(() => { if (store.activeChannelId === channelId.value) void stor
         <p v-if="panel?.loading && messages.length === 0" class="text-sm text-muted-foreground">…</p>
         <p v-else-if="messages.length === 0" class="text-sm text-muted-foreground">{{ $t('occurrences.internalChatEmpty') }}</p>
         <ul v-else class="min-h-48 flex-1 basis-0 space-y-2 overflow-y-auto pr-1" data-testid="internal-messages">
-          <li v-for="m in messages" :key="m.id" class="flex" :class="m.user_id === myId ? 'justify-end' : 'justify-start'">
-            <div class="max-w-[85%] sm:max-w-2xl rounded-lg px-3 py-2 text-sm" :class="m.user_id === myId ? 'bg-sky-500/15' : 'bg-muted'">
-              <div class="mb-0.5 flex flex-wrap items-baseline gap-2 text-xs text-muted-foreground">
-                <span class="font-medium text-foreground">{{ m.user_name }}</span>
-                <span>{{ formatDateTime(m.created_at) }}</span>
+          <template v-for="(m, i) in messages" :key="m.id">
+            <li v-if="bubbleMeta(messages, i).newDay" class="flex justify-center py-1">
+              <span class="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">{{ dayText(m.created_at) }}</span>
+            </li>
+            <li class="flex" :class="[isOwnMessage(m, myId) ? 'justify-end' : 'justify-start', bubbleMeta(messages, i).first ? 'mt-1.5' : '']" :data-own="isOwnMessage(m, myId)">
+              <div class="min-w-0 max-w-[88%] rounded-2xl px-3 py-1.5 text-sm shadow-sm md:max-w-[min(36rem,70%)]" :class="bubbleClass(isOwnMessage(m, myId))">
+                <p v-if="!isOwnMessage(m, myId) && bubbleMeta(messages, i).first" class="text-xs font-semibold text-primary">{{ m.user_name }}</p>
+                <p v-if="m.body" class="whitespace-pre-wrap [overflow-wrap:anywhere]">{{ m.body }}</p>
+                <MessageAttachments v-if="m.attachments?.length" :attachments="m.attachments" />
+                <p class="mt-0.5 text-right text-[11px] text-muted-foreground"><time :datetime="m.created_at">{{ timeOf(m.created_at) }}</time></p>
               </div>
-              <p v-if="m.body" class="whitespace-pre-wrap [overflow-wrap:anywhere]">{{ m.body }}</p>
-              <MessageAttachments v-if="m.attachments?.length" :attachments="m.attachments" />
-            </div>
-          </li>
+            </li>
+          </template>
           <li ref="endRef" aria-hidden="true" />
         </ul>
         <MessageComposer v-if="canPost" :channel-id="channelId" :can-write="canPost" :archived="false" />

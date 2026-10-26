@@ -400,6 +400,8 @@
     }
   },
   "teamChat": {
+    "today": "Today",
+    "yesterday": "Yesterday",
     "sectionOccurrences": "Cases",
     "sectionOccurrenceHits": "Cases found",
     "searchPlaceholder": "Search chats and cases",

@@ -20,6 +20,7 @@ import { getErrorMessage } from '@/lib/api-utils'
 import MessageAttachments from './MessageAttachments.vue'
 import PollCard from './PollCard.vue'
 import MessageComposer from './MessageComposer.vue'
+import { bubbleClass, bubbleMeta, dayLabel, isOwnMessage } from '@/lib/chat-bubbles'
 import { TEAM_CHAT_REACTIONS, chatErrorCode, isSendableBody, reactionGlyph, systemEventKey } from '@/lib/team-chat'
 import type { TeamChatMessage, TeamChatReplyTo } from '@/services/api'
 
@@ -171,7 +172,9 @@ function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
 }
 
-const isOwn = (m: TeamChatMessage) => m.user_id === myId.value
+const isOwn = (m: TeamChatMessage) => isOwnMessage(m, myId.value)
+const metaOf = (i: number) => bubbleMeta(panel.value.messages, i)
+const dayText = (iso: string) => dayLabel(iso, locale.value, { today: t('teamChat.today'), yesterday: t('teamChat.yesterday') })
 const canEdit = (m: TeamChatMessage) => isOwn(m) && canWrite.value
 const canDelete = (m: TeamChatMessage) => isOwn(m) || canModerate.value
 
@@ -269,26 +272,29 @@ async function removeMessage(m: TeamChatMessage) {
             :description="t('teamChat.noMessages')"
           />
 
-          <template v-for="m in panel.messages" :key="m.id">
+          <template v-for="(m, i) in panel.messages" :key="m.id">
+          <div v-if="metaOf(i).newDay" class="flex justify-center py-2" :data-testid="`day-${m.id}`">
+            <span class="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">{{ dayText(m.created_at) }}</span>
+          </div>
           <div v-if="m.kind === 'system'" :data-testid="`system-${m.id}`" class="flex justify-center px-2 py-1">
             <p class="max-w-[90%] break-words rounded-full bg-muted px-3 py-1 text-center text-xs text-muted-foreground">{{ systemText(m) }}</p>
           </div>
           <article
             v-else
             :data-testid="`message-${m.id}`"
-            :class="['group relative flex flex-wrap items-start gap-x-3 rounded-md px-2 py-1.5 transition-colors hover:bg-muted/50 md:flex-nowrap', highlightId === m.id ? 'bg-primary/10' : '']"
+            :data-own="isOwn(m)"
+            :class="['group relative flex flex-wrap items-end gap-x-2 rounded-md px-2 transition-colors md:flex-nowrap', isOwn(m) ? 'flex-row-reverse justify-start' : 'justify-start', metaOf(i).first ? 'mt-2' : 'mt-0.5', highlightId === m.id ? 'bg-primary/10' : '']"
           >
-            <Avatar class="mt-0.5 h-8 w-8 shrink-0">
-              <AvatarFallback :class="'bg-gradient-to-br text-[11px] text-white ' + getAvatarGradient(m.user_name)">
-                {{ getInitials(m.user_name || '?') }}
-              </AvatarFallback>
-            </Avatar>
-            <div :class="['min-w-0 max-w-3xl max-md:flex-1 max-md:basis-[calc(100%-46px)]', editingId === m.id ? 'flex-1' : '']">
-              <div class="flex items-baseline gap-2">
-                <span class="text-sm font-semibold">{{ m.user_name }}</span>
-                <time class="text-[11px] text-muted-foreground" :datetime="m.created_at">{{ formatTime(m.created_at) }}</time>
-                <span v-if="m.edited_at" class="text-[11px] text-muted-foreground">{{ t('teamChat.edited') }}</span>
-              </div>
+            <!-- The avatar sits beside the first bubble of a run by someone else; own messages have none. -->
+            <div v-if="!isOwn(m)" class="h-8 w-8 shrink-0">
+              <Avatar v-if="metaOf(i).first" class="h-8 w-8">
+                <AvatarFallback :class="'bg-gradient-to-br text-[11px] text-white ' + getAvatarGradient(m.user_name)">
+                  {{ getInitials(m.user_name || '?') }}
+                </AvatarFallback>
+              </Avatar>
+            </div>
+            <div :class="['min-w-0 max-w-[88%] rounded-2xl px-3 py-1.5 shadow-sm md:max-w-[min(36rem,70%)]', bubbleClass(isOwn(m)), metaOf(i).first ? '' : (isOwn(m) ? 'rounded-tr-2xl' : 'rounded-tl-2xl'), editingId === m.id ? 'flex-1' : '']">
+              <span v-if="!isOwn(m) && metaOf(i).first" class="block text-xs font-semibold text-primary">{{ m.user_name }}</span>
 
               <button
                 v-if="m.reply_to" type="button" :data-testid="`quote-${m.id}`"
@@ -335,12 +341,17 @@ async function removeMessage(m: TeamChatMessage) {
                   @click="canInteract && toggleReaction(m, r.code)"
                 >{{ reactionGlyph(r.code) }} {{ r.count }}</component>
               </div>
+
+              <div class="mt-0.5 flex items-center justify-end gap-1.5 text-[11px] text-muted-foreground">
+                <span v-if="m.edited_at">{{ t('teamChat.edited') }}</span>
+                <time :datetime="m.created_at">{{ formatTime(m.created_at) }}</time>
+              </div>
             </div>
 
             <!-- Right after the message (not at the far edge of the pane), so the actions stay near what they act on -->
             <div
               v-if="editingId !== m.id && (canInteract || canEdit(m) || canDelete(m))"
-              class="relative flex shrink-0 gap-0.5 transition-opacity max-md:ml-[44px] md:opacity-0 md:focus-within:opacity-100 md:group-hover:opacity-100"
+              class="relative flex shrink-0 gap-0.5 transition-opacity max-md:basis-full max-md:justify-end md:opacity-0 md:focus-within:opacity-100 md:group-hover:opacity-100"
               :class="pickerFor === m.id ? 'md:opacity-100' : ''" :data-testid="`actions-${m.id}`"
             >
               <button v-if="canInteract" type="button" class="flex h-9 w-9 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground md:h-7 md:w-7" :aria-label="t('teamChat.react')" @click="pickerFor = pickerFor === m.id ? null : m.id">

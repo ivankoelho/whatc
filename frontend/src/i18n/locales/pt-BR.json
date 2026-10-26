@@ -400,6 +400,8 @@
     }
   },
   "teamChat": {
+    "today": "Hoje",
+    "yesterday": "Ontem",
     "sectionOccurrences": "Chamados",
     "sectionOccurrenceHits": "Chamados encontrados",
     "searchPlaceholder": "Buscar conversas e chamados",
