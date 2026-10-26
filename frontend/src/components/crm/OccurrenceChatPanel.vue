@@ -52,7 +52,7 @@ onBeforeUnmount(() => { if (store.activeChannelId === channelId.value) void stor
 </script>
 
 <template>
-  <Card data-testid="occurrence-chat" class="border-sky-500/30">
+  <Card data-testid="occurrence-chat" class="flex flex-col border-sky-500/30">
     <CardHeader class="pb-3">
       <CardTitle class="text-sm font-medium flex items-center gap-2">
         <MessagesSquare class="h-4 w-4" aria-hidden="true" />
@@ -61,12 +61,12 @@ onBeforeUnmount(() => { if (store.activeChannelId === channelId.value) void stor
       </CardTitle>
       <p class="text-xs text-muted-foreground">{{ $t('occurrences.internalChatHint') }}</p>
     </CardHeader>
-    <CardContent class="space-y-3">
+    <CardContent class="flex flex-1 flex-col gap-3">
       <p v-if="failed" class="text-sm text-destructive">{{ $t('occurrences.internalChatFailed') }}</p>
       <template v-else-if="channelId">
         <p v-if="panel?.loading && messages.length === 0" class="text-sm text-muted-foreground">…</p>
         <p v-else-if="messages.length === 0" class="text-sm text-muted-foreground">{{ $t('occurrences.internalChatEmpty') }}</p>
-        <ul v-else class="max-h-96 space-y-2 overflow-y-auto pr-1" data-testid="internal-messages">
+        <ul v-else class="min-h-48 flex-1 basis-0 space-y-2 overflow-y-auto pr-1" data-testid="internal-messages">
           <li v-for="m in messages" :key="m.id" class="flex" :class="m.user_id === myId ? 'justify-end' : 'justify-start'">
             <div class="max-w-[85%] sm:max-w-2xl rounded-lg px-3 py-2 text-sm" :class="m.user_id === myId ? 'bg-sky-500/15' : 'bg-muted'">
               <div class="mb-0.5 flex flex-wrap items-baseline gap-2 text-xs text-muted-foreground">
