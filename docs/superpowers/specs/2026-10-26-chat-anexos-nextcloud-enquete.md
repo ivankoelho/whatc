@@ -18,3 +18,9 @@ O clipe do compositor abre um menu: **Arquivo neste computador** (fluxo de uploa
 
 ## Login
 Página única centralizada: logo e nome do sistema pequenos, e-mail, senha, botão, ícones de login social em uma linha e link de cadastro. Sem frase de efeito à esquerda nem blocos de texto grandes.
+
+## Chat Interno centralizado (Fase B.1)
+- As discussões de protocolos aparecem no módulo Chat Interno, seção **Chamados**: as de que a pessoa participa (responsável, quem abriu, participante, quem escreveu ou leu) e que já têm mensagem, até 100, com contagem de não lidas pelo mesmo mecanismo dos demais canais (marcador de leitura por canal).
+- **Busca** (`GET /api/team-chat/occurrence-search?q=`, mínimo de 2 caracteres): protocolo, título ou nome do cliente, entre os chamados que a pessoa pode ver (mesmo escopo da lista de chamados: `visibleOccurrences`); a caixa de busca da barra lateral também filtra canais e conversas já listados. Abrir um resultado aplica o acesso de sempre (acesso ao chamado + `occurrences:read`); ao ler, a discussão passa a fazer parte da lista da pessoa.
+- **Navegação nos dois sentidos**: "Abrir chamado" no cabeçalho da conversa; "Abrir no Chat Interno" no cartão de discussão do chamado.
+- Notificação/ não lidas: eventos das discussões já chegam só a quem pode ver o chamado; o badge soma os não lidos da lista.
