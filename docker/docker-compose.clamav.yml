@@ -1,0 +1,39 @@
+# ClamAV for the WhatC antimalware policy (a separate service, started on its own).
+#
+# Development:   docker compose -f docker/docker-compose.clamav.yml up -d
+#   then set in config.toml:   [antimalware]  address = "127.0.0.1:3310"
+#   (or WHATOMATE_ANTIMALWARE__ADDRESS=127.0.0.1:3310). The first start downloads the signature
+#   database (a few minutes, ~1.5 GB RAM); `docker logs whatc_clamav` shows "socket found, clamd started".
+#
+# Production: do NOT publish the port. Remove the `ports:` block, join the app's compose network and
+# point antimalware.address at "clamav:3310" (clamd has no authentication: only the backend may reach
+# it). freshclam runs inside the image and refreshes the signatures automatically (several times a day).
+#
+# Safe test file: the EICAR string (harmless, flagged by every engine). Never test with real malware.
+services:
+  clamav:
+    image: clamav/clamav:stable
+    container_name: whatc_clamav
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3310:3310" # development only, loopback only
+    environment:
+      CLAMAV_NO_FRESHCLAMD: "false" # keep the automatic signature updates
+      CLAMD_CONF_StreamMaxLength: "30M" # >= antimalware.max_mb
+      CLAMD_CONF_MaxScanSize: "100M"
+      CLAMD_CONF_MaxFileSize: "30M"
+    volumes:
+      - clamav-db:/var/lib/clamav
+    deploy:
+      resources:
+        limits:
+          memory: 3g
+    healthcheck:
+      test: ["CMD-SHELL", "clamdcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 300s
+
+volumes:
+  clamav-db:

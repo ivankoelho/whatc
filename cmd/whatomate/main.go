@@ -925,6 +925,8 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/occurrences/{id}/files/nextcloud", app.AttachNextcloudToOccurrence)
 	g.GET("/api/occurrences/{id}/files/{fid}/download", app.DownloadOccurrenceFile)
 	g.DELETE("/api/occurrences/{id}/files/{fid}", app.DeleteOccurrenceFile)
+	g.GET("/api/integrations/antimalware", app.AntimalwareStatus)
+	g.POST("/api/integrations/antimalware/retry", app.RetryAntimalwareScans)
 	g.GET("/api/integrations/nextcloud", app.GetNextcloudStatus)
 	g.PUT("/api/integrations/nextcloud", app.PutNextcloudSettings)
 	g.PUT("/api/integrations/nextcloud/me", app.ConnectNextcloud)

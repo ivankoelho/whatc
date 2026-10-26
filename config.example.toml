@@ -191,3 +191,15 @@ integrity_interval_minutes = 5
 integrity_window_hours = 48
 # Without delivered/read/failed after this long, a message becomes `unconfirmed`.
 undelivered_after_hours = 72
+
+# Antimalware (ClamAV). Without an address nothing can be scanned and, by design, uploaded files and
+# WhatsApp media stay blocked (fail-closed). clamd must only be reachable from the backend.
+# Development: docker compose -f docker/docker-compose.clamav.yml up -d
+[antimalware]
+address = ""            # e.g. "clamav:3310"
+timeout_seconds = 30    # per scan, connect included
+max_mb = 25             # larger files are not scanned and stay blocked (keep <= clamd StreamMaxLength)
+inline_max_kb = 2048    # uploads up to this size are scanned before the response
+reuse_hours = 24        # an identical file (same organization) reuses a clean verdict this fresh
+rescan_days = 7         # clean files are re-checked after a signature update once older than this
+batch_size = 5          # scans per worker pass (10 s): the pace of the initial scan

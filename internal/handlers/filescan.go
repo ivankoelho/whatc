@@ -160,6 +160,13 @@ type scanVersionCache struct {
 	at time.Time
 }
 
+// ForgetScannerVersion drops the remembered engine version (tests, or a known signature update).
+func (a *App) ForgetScannerVersion() {
+	a.scanVer.mu.Lock()
+	a.scanVer.v = ""
+	a.scanVer.mu.Unlock()
+}
+
 func (a *App) scannerVersion(ctx context.Context) string {
 	if a.Scanner == nil {
 		return ""
@@ -269,10 +276,12 @@ func (a *App) runScan(ctx context.Context, row models.FileScan, rescan bool) {
 	version := a.scannerVersion(sctx)
 
 	if prior, ok := a.priorVerdict(row, sum, version, cfg.reuse); ok {
+		_ = f.Close() // a verdict that quarantines renames the file: it must not be held open (Windows)
 		a.finishScan(row, prior.Status, prior.Signature, version, sum, st.Size(), rescan, "reused")
 		return
 	}
 	res, err := a.Scanner.Scan(sctx, f)
+	_ = f.Close() // see above: quarantine moves the file
 	switch {
 	case err == nil && res.Infected:
 		a.finishScan(row, models.ScanInfected, res.Signature, version, sum, st.Size(), rescan, "")

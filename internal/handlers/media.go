@@ -238,6 +238,12 @@ func (a *App) ServeMedia(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "No media found", nil, "")
 	}
 
+	// Customer-supplied bytes: only a clean antimalware verdict lets them out (lazily queued if the
+	// message predates the policy or was saved by a path that did not register it).
+	if !a.requireCleanFile(r, orgID, models.ScanSourceMessageMedia, message.ID, message.MediaURL) {
+		return nil
+	}
+
 	// Security: prevent directory traversal and symlink attacks
 	filePath := filepath.Clean(message.MediaURL)
 	fullPath, err := a.resolveSafeStoragePath(message.MediaURL)
@@ -251,12 +257,6 @@ func (a *App) ServeMedia(r *fastglue.Request) error {
 		default:
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid file path", nil, "")
 		}
-	}
-
-	// Customer-supplied bytes: only a clean antimalware verdict lets them out (lazily queued if the
-	// message predates the policy or was saved by a path that did not register it).
-	if !a.requireCleanFile(r, orgID, models.ScanSourceMessageMedia, message.ID, message.MediaURL) {
-		return nil
 	}
 
 	// Read file
