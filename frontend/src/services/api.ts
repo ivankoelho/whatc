@@ -1564,6 +1564,17 @@ interface ApiEnvelope<T> {
   data: T
 }
 
+export interface OccurrenceTransfer {
+  id: string
+  kind: 'forward' | 'return'
+  from_team?: string
+  to_team?: string
+  to_user?: string
+  by: string
+  reason: string
+  created_at: string
+}
+
 export interface OccurrenceParticipant {
   user_id: string
   user_name: string
@@ -1786,6 +1797,14 @@ export const occurrencesService = {
     api.post<ApiEnvelope<OccurrenceParticipant>>(`/occurrences/${id}/participants`, {
       user_id: userId, capabilities: opts.capabilities ?? ['comment'], role: opts.role ?? 'follower', department_id: opts.departmentId,
     }),
+  listTransfers: (id: string) =>
+    api.get<ApiEnvelope<{ transfers: OccurrenceTransfer[]; can_forward: boolean; can_return: boolean; return_to?: string }>>(`/occurrences/${id}/transfers`),
+  forward: (id: string, body: { team_id: string; assigned_user_id?: string; reason: string }) =>
+    api.post<ApiEnvelope<Occurrence>>(`/occurrences/${id}/forward`, body),
+  returnCase: (id: string, reason: string) =>
+    api.post<ApiEnvelope<Occurrence>>(`/occurrences/${id}/return`, { reason }),
+  teamMembers: (teamId: string) =>
+    api.get<ApiEnvelope<{ members: { id: string; full_name: string }[] }>>('/occurrences/forward-targets', { params: { team_id: teamId } }),
   supportDepartments: (id: string) =>
     api.get<ApiEnvelope<{ departments: { id: string; name: string }[] }>>(`/occurrences/${id}/support-options`),
   supportUsers: (id: string, departmentId: string) =>

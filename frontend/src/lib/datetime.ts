@@ -112,3 +112,25 @@ export function formatCivilDate(value: Input): string {
   if (displayLocale() === 'pt-BR') return `${dd}/${mm}/${d.getUTCFullYear()}`
   return d.toLocaleDateString('en-US', { timeZone: 'UTC', year: 'numeric', month: 'short', day: 'numeric' })
 }
+
+/** A day without the year, for chart axes: DD/MM (pt-BR) or "Oct 26" (en). */
+export function formatShortDate(value: Input): string {
+  const d = toDate(value)
+  if (!d) return ''
+  if (displayLocale() === 'pt-BR') {
+    const p = ptParts(d, false)
+    return `${p.day}/${p.month}`
+  }
+  return d.toLocaleDateString('en-US', { timeZone: displayTimeZone, month: 'short', day: 'numeric' })
+}
+
+/** A month and year, for chart axes: MM/YYYY (pt-BR) or "Oct 2026" (en). */
+export function formatMonthYear(value: Input): string {
+  const d = toDate(value)
+  if (!d) return ''
+  if (displayLocale() === 'pt-BR') {
+    const p = ptParts(d, false)
+    return `${p.month}/${p.year}`
+  }
+  return d.toLocaleDateString('en-US', { timeZone: displayTimeZone, month: 'short', year: 'numeric' })
+}

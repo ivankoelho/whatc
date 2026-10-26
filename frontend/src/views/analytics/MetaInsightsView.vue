@@ -60,6 +60,7 @@ import {
 import { Line, Bar } from '@/lib/charts'
 import { toast } from 'vue-sonner'
 import { useDateRange } from '@/composables/useDateRange'
+import { formatShortDate, formatMonthYear, formatTime } from '@/lib/datetime'
 
 
 const { t } = useI18n()
@@ -592,11 +593,11 @@ function callChartDataFor(data: ReturnType<typeof aggregateCallData>) {
 function formatTimestamp(ts: number): string {
   const date = new Date(ts * 1000)
   if (selectedGranularity.value === 'HALF_HOUR') {
-    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+    return formatTime(date)
   } else if (selectedGranularity.value === 'MONTH') {
-    return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+    return formatMonthYear(date)
   }
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  return formatShortDate(date)
 }
 
 function formatCategory(category: string): string {

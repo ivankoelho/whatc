@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatTime } from '@/lib/datetime'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { SimulationMessage } from '@/types/flow-preview'
@@ -11,11 +12,7 @@ const props = defineProps<{
 const { t } = useI18n()
 
 const formattedTime = computed(() => {
-  return props.message.timestamp.toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true
-  })
+  return formatTime(props.message.timestamp)
 })
 
 const isBot = computed(() => props.message.type === 'bot')

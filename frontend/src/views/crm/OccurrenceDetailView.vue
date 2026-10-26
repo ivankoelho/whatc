@@ -10,6 +10,7 @@ import OccurrenceHistoryDialog from '@/components/crm/OccurrenceHistoryDialog.vu
 import OccurrenceExportDialog from '@/components/crm/OccurrenceExportDialog.vue'
 import { eventIcons, eventLabels } from '@/lib/occurrence-events'
 import OccurrenceParticipantsCard from '@/components/crm/OccurrenceParticipantsCard.vue'
+import OccurrenceTransferCard from '@/components/crm/OccurrenceTransferCard.vue'
 import OccurrenceCommunicationCard from '@/components/crm/OccurrenceCommunicationCard.vue'
 import OccurrenceChatPanel from '@/components/crm/OccurrenceChatPanel.vue'
 import OccurrenceWhatsAppCard from '@/components/crm/OccurrenceWhatsAppCard.vue'
@@ -141,6 +142,10 @@ async function claimOccurrence() {
     isClaiming.value = false
     await loadOccurrence()
   }
+}
+
+async function onTransferred() {
+  await Promise.all([loadOccurrence(), store.fetchEvents(occurrenceId.value)])
 }
 
 async function loadOccurrence() {
@@ -576,6 +581,13 @@ onUnmounted(() => {
               </template>
               <p v-else class="text-sm text-muted-foreground">{{ $t('occurrences.noOrder') }}</p>
               </div>
+
+            <div id="case-transfer" class="mt-4 scroll-mt-4 border-t pt-3">
+              <OccurrenceTransferCard
+                :occurrence-id="occurrence.id" :team-name="occurrence.team_name" :assigned-name="occurrence.assigned_user_name"
+                :closed="occurrence.general_state === 'resolved'" @changed="onTransferred"
+              />
+            </div>
 
             <div id="case-people" class="mt-4 scroll-mt-4 border-t pt-3">
               <OccurrenceParticipantsCard embedded :occurrence-id="occurrence.id" :can-write="canWrite && (occurrence.can?.add_participant ?? true)" />

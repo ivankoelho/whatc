@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDateTimeSeconds } from '@/lib/datetime'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ExecutionLogEntry } from '@/types/flow-preview'
@@ -24,12 +25,7 @@ const { t } = useI18n()
 
 const formattedEntries = computed(() => {
   return props.entries.map(entry => {
-    const time = entry.timestamp.toLocaleTimeString('en-US', {
-      hour: 'numeric',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false
-    })
+    const time = formatDateTimeSeconds(entry.timestamp).split(' ').pop() ?? '' // simulation log: seconds are useful here
 
     let icon = Play
     let color = 'text-gray-500'
