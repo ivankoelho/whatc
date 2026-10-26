@@ -75,8 +75,9 @@ func workTheCase(acc occurrenceAccess) bool { return acc.interact || acc.supervi
 // canUseCaseChannel: least privilege for the CONTENT of the customer conversation.
 // Supervising a case (unit supervision) never opens it. It takes explicit chat
 // permission (chat:read, plus chat:write to send) AND being the assignee, a member
-// of the case's team, or holding the explicit conversations:view_all permission.
-func (a *App) canUseCaseChannel(orgID, userID uuid.UUID, occ *models.Occurrence, acc occurrenceAccess, write bool) bool {
+// of the case's team or of the account's team, or holding the explicit
+// conversations:view_all permission.
+func (a *App) canUseCaseChannel(orgID, userID uuid.UUID, occ *models.Occurrence, acc occurrenceAccess, account *models.WhatsAppAccount, write bool) bool {
 	if !workTheCase(acc) || !a.HasPermission(userID, models.ResourceChat, models.ActionRead, orgID) {
 		return false
 	}
@@ -89,12 +90,21 @@ func (a *App) canUseCaseChannel(orgID, userID uuid.UUID, occ *models.Occurrence,
 	if occ.AssignedUserID != nil && *occ.AssignedUserID == userID {
 		return true
 	}
+	// Explicit team authorization: the case's own team, or the team that owns the
+	// WhatsApp account (its default team) -- the mechanism conversations already use.
+	teams := []uuid.UUID{}
 	if occ.TeamID != nil {
-		var n int64
-		a.DB.Model(&models.TeamMember{}).Where("user_id = ? AND team_id = ?", userID, *occ.TeamID).Count(&n)
-		return n > 0
+		teams = append(teams, *occ.TeamID)
 	}
-	return false
+	if account != nil && account.DefaultTeamID != nil {
+		teams = append(teams, *account.DefaultTeamID)
+	}
+	if len(teams) == 0 {
+		return false
+	}
+	var n int64
+	a.DB.Model(&models.TeamMember{}).Where("user_id = ? AND team_id IN ?", userID, teams).Count(&n)
+	return n > 0
 }
 
 // GetOccurrenceWhatsApp returns the case's channel conversation to those who
@@ -109,11 +119,11 @@ func (a *App) GetOccurrenceWhatsApp(r *fastglue.Request) error {
 		return nil
 	}
 	account := a.caseChannelAccount(orgID, occ)
-	out := map[string]any{"configured": account != nil, "restricted": !a.canUseCaseChannel(orgID, userID, occ, acc, false)}
+	out := map[string]any{"configured": account != nil, "restricted": !a.canUseCaseChannel(orgID, userID, occ, acc, account, false)}
 	if account != nil {
 		out["account"] = account.Name
 	}
-	if account == nil || !a.canUseCaseChannel(orgID, userID, occ, acc, false) {
+	if account == nil || !a.canUseCaseChannel(orgID, userID, occ, acc, account, false) {
 		return r.SendEnvelope(out)
 	}
 
@@ -182,10 +192,10 @@ func (a *App) SendOccurrenceWhatsApp(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
-	if !a.canUseCaseChannel(orgID, userID, occ, acc, true) {
+	account := a.caseChannelAccount(orgID, occ)
+	if !a.canUseCaseChannel(orgID, userID, occ, acc, account, true) {
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You can follow this case but not write to the customer", nil, "")
 	}
-	account := a.caseChannelAccount(orgID, occ)
 	if account == nil {
 		return r.SendErrorEnvelope(fasthttp.StatusConflict, "This case has no WhatsApp account configured", nil, "")
 	}

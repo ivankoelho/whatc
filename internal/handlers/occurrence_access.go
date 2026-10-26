@@ -35,7 +35,7 @@ func (a *App) myTeamIDs(userID uuid.UUID) *gorm.DB {
 // visibleOccurrences scopes a query on the occurrences table to what the user
 // may see. Organization filtering stays with the caller.
 func (a *App) visibleOccurrences(query *gorm.DB, userID, orgID uuid.UUID) *gorm.DB {
-	if a.HasPermission(userID, models.ResourceConversations, models.ActionViewAll, orgID) {
+	if a.seesAllOccurrences(userID, orgID) {
 		return query
 	}
 	cond := "occurrences.assigned_user_id = ? OR occurrences.opened_by_user_id = ? OR occurrences.team_id IN (?) OR occurrences.id IN (?)"
@@ -53,12 +53,21 @@ func (a *App) visibleOccurrences(query *gorm.DB, userID, orgID uuid.UUID) *gorm.
 	return query.Where("("+cond+")", args...)
 }
 
+// seesAllOccurrences: supervision of every case. It is its own permission
+// (occurrences:view_all); conversations:view_all keeps implying it so nobody who
+// supervised cases before loses that. The reverse is not true: supervising cases
+// never opens a customer conversation (see canUseCaseChannel).
+func (a *App) seesAllOccurrences(userID, orgID uuid.UUID) bool {
+	return a.HasPermission(userID, models.ResourceOccurrences, models.ActionViewAll, orgID) ||
+		a.HasPermission(userID, models.ResourceConversations, models.ActionViewAll, orgID)
+}
+
 // authorizeOccurrence is the Go twin of visibleOccurrences.
 func (a *App) authorizeOccurrence(userID, orgID uuid.UUID, occ *models.Occurrence) occurrenceAccess {
 	if occ.OrganizationID != orgID {
 		return occurrenceAccess{}
 	}
-	if a.HasPermission(userID, models.ResourceConversations, models.ActionViewAll, orgID) {
+	if a.seesAllOccurrences(userID, orgID) {
 		return occurrenceAccess{view: true, interact: true, supervisor: true}
 	}
 	if occ.AssignedUserID != nil && *occ.AssignedUserID == userID {
@@ -199,7 +208,7 @@ func (a *App) occurrenceScopeSQL(dataSource string, orgID, viewerID uuid.UUID, c
 	if viewerID == uuid.Nil {
 		return " AND 1 = 0"
 	}
-	if a.HasPermission(viewerID, models.ResourceConversations, models.ActionViewAll, orgID) {
+	if a.seesAllOccurrences(viewerID, orgID) {
 		return ""
 	}
 	sub := a.DB.ToSQL(func(tx *gorm.DB) *gorm.DB {

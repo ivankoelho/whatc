@@ -57,10 +57,10 @@ func TeamProfiles() []TeamProfile {
 		},
 		{
 			Name:        "Supervisor de SAC",
-			Description: "Acesso operacional completo: todas as lojas, chats de vendas e logística e agentes de SAC",
+			Description: "Supervisiona os chamados de todas as lojas e os agentes de SAC; só lê as conversas das contas e equipes a que pertence (conversations:view_all é concessão explícita)",
 			Permissions: with(
 				"contacts:read", "contacts:write", "contacts:export", "tags:read", "templates:read",
-				"conversations:view_all", "chat.assign:write",
+				"conversations:view_team", "occurrences:view_all", "chat.assign:write",
 				"sales_opportunities:read", "sales_opportunities:write", "sales_opportunities:view_all",
 				"team_chat:manage",
 				"analytics:read", "analytics.agents:read",

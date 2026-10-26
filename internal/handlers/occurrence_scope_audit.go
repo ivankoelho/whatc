@@ -49,7 +49,7 @@ func (a *App) requireScopeAdmin(r *fastglue.Request) (orgID, userID uuid.UUID, o
 	if err != nil {
 		return uuid.Nil, uuid.Nil, false
 	}
-	if !a.HasPermission(userID, models.ResourceConversations, models.ActionViewAll, orgID) {
+	if !a.seesAllOccurrences(userID, orgID) {
 		_ = r.SendErrorEnvelope(fasthttp.StatusForbidden, "Insufficient permissions", nil, "")
 		return uuid.Nil, uuid.Nil, false
 	}

@@ -47,7 +47,7 @@ func (a *App) ListOccurrenceStages(r *fastglue.Request) error {
 	// Organization-wide stages for everyone; a team's own stages only to its
 	// members and to those who administer the pipeline or supervise everything.
 	q := a.DB.Where("organization_id = ?", orgID)
-	seesAll := a.HasPermission(userID, models.ResourceConversations, models.ActionViewAll, orgID) ||
+	seesAll := a.seesAllOccurrences(userID, orgID) ||
 		a.HasPermission(userID, models.ResourceOccurrenceStages, models.ActionWrite, orgID)
 	if !seesAll {
 		q = q.Where("team_id IS NULL OR team_id IN (?)", a.myTeamIDs(userID))
