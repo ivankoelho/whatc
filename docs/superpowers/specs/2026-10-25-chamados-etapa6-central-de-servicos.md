@@ -36,3 +36,13 @@ Go: `occurrence_chat_test.go` (IDOR entre organizações/lojas, participante sem
 - participantes precisam das permissões `team_chat:*` para usar o chat;
 - pedido é só referência: não há integração de ERP;
 - a documentação pública `webhooks.mdx` ainda pode citar assinatura opcional.
+
+## Revisão final de segurança e interface
+
+**Conteúdo da conversa de WhatsApp do chamado (menor privilégio).** Supervisionar um chamado (inclusive por unidade) não abre a conversa. A leitura exige `chat:read`; o envio exige também `chat:write`; e é preciso ser o responsável, membro da equipe do chamado ou ter a permissão explícita `conversations:view_all`. O papel "Supervisor de SAC" mantém acesso por ter `conversations:view_all`; se a decisão de negócio for restringi-lo, retirar essa permissão do papel. Testes: `TestCaseWhatsApp_NeedsExplicitChatPermission`.
+
+**Ambiente de desenvolvimento (somente banco `whatomate_valida`, local).** Para validar no navegador, as senhas das contas de teste `sac`, `suploja`, `supsac` e `logistica2` (domínio `perfil.local`) foram redefinidas para um valor de teste via API de administração. Nada disso está em commit, seed ou relatório; contas existem só no banco local. Também foi marcada manualmente como `uncertain` a notificação do chamado 2026-000220 para exibir o estado "resultado incerto" na tela. Não afetam produção nem homologação.
+
+**Mensagem de "não encontrado".** A tela do chamado passa a usar `occurrences.notFoundHint` (pt-BR e en) no lugar do texto padrão em inglês do layout.
+
+**Layout em duas colunas.** Medido no navegador: a 1366 px cada coluna tem 608 px; a 1920 px o conteúdo é limitado a 1600 px e cada coluna tem 788 px; bordas esquerdas das duas colunas coincidem nas linhas de Solicitação, WhatsApp e Discussão. Limitação conhecida: com a discussão interna vazia, o bloco acompanha a altura da coluna do WhatsApp.

@@ -360,6 +360,7 @@ onUnmounted(() => {
       :is-loading="isLoading"
       :is-not-found="isNotFound"
       :not-found-title="$t('occurrences.notFound')"
+      :not-found-description="$t('occurrences.notFoundHint')"
     >
       <template #actions>
         <div v-if="occurrence" class="flex w-full flex-wrap items-center gap-2 lg:w-auto">

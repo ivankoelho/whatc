@@ -2594,6 +2594,7 @@
     "noMatchingOccurrences": "Nenhuma ocorrência correspondente",
     "noMatchingOccurrencesDesc": "Tente ajustar a busca ou o filtro de etapa",
     "notFound": "Ocorrência não encontrada",
+    "notFoundHint": "Ela não existe ou você não tem acesso a ela.",
     "stageLabel": "Etapa",
     "selectStage": "Selecionar etapa",
     "stageChanged": "Etapa atualizada",

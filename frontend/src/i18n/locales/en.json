@@ -2605,6 +2605,7 @@
     "noMatchingOccurrences": "No matching occurrences",
     "noMatchingOccurrencesDesc": "Try adjusting the search or stage filter",
     "notFound": "Occurrence not found",
+    "notFoundHint": "It does not exist or you do not have access to it.",
     "stageLabel": "Stage",
     "selectStage": "Select stage",
     "stageChanged": "Stage updated",
