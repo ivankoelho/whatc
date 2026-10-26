@@ -2461,3 +2461,36 @@ export const caseWhatsAppService = {
   sendTemplate: (occurrenceId: string, template: string, language: string, params: string[]) =>
     api.post(`/occurrences/${occurrenceId}/whatsapp`, { template, language, params }),
 }
+
+// General documents of a case (Word, Excel, PDF, images, NF-e XML), apart from invoice/coupon records.
+export interface OccurrenceFileItem {
+  id: string
+  name: string
+  mime: string
+  kind: 'image' | 'file'
+  size_bytes: number
+  restricted: boolean
+  uploaded_by_id: string
+  uploaded_by_name: string
+  created_at: string
+  can_download: boolean
+  can_delete: boolean
+  can_preview: boolean
+}
+
+export const occurrenceFilesService = {
+  list: (occurrenceId: string) => api.get(`/occurrences/${occurrenceId}/files`),
+  upload: (occurrenceId: string, file: File, restricted: boolean) => {
+    const form = new FormData()
+    form.append('file', file)
+    form.append('restricted', restricted ? 'true' : 'false')
+    return api.post(`/occurrences/${occurrenceId}/files`, form, { headers: { 'Content-Type': 'multipart/form-data' } })
+  },
+  fromNextcloud: (occurrenceId: string, path: string, restricted: boolean) =>
+    api.post(`/occurrences/${occurrenceId}/files/nextcloud`, { path, restricted }),
+  remove: (occurrenceId: string, fileId: string) => api.delete(`/occurrences/${occurrenceId}/files/${fileId}`),
+  url: (occurrenceId: string, fileId: string, inline = false) => {
+    const base = (((window as unknown as { __BASE_PATH__?: string }).__BASE_PATH__) ?? '').replace(/\/$/, '')
+    return `${base}/api/occurrences/${occurrenceId}/files/${fileId}/download${inline ? '?inline=1' : ''}`
+  }
+}

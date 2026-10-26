@@ -367,6 +367,32 @@
       "changeWarning": "Trocar o endereço desconecta todas as pessoas, que precisarão conectar de novo."
     }
   },
+  "occurrenceFiles": {
+    "title": "Documentos",
+    "attach": "Anexar documento",
+    "empty": "Nenhum documento anexado.",
+    "restricted": "Restrito a quem trabalha o chamado",
+    "restrictedHint": "Restrito a quem trabalha o chamado",
+    "noAccess": "Sem acesso",
+    "preview": "Visualizar",
+    "download": "Baixar",
+    "deleteTitle": "Remover documento",
+    "deleteWarning": "O arquivo será apagado e a remoção fica registrada no histórico.",
+    "added": "Documento anexado.",
+    "errors": {
+      "generic": "Não foi possível concluir. Tente novamente.",
+      "file_type_not_allowed": "Este tipo de arquivo não é permitido.",
+      "invalid_file": "O arquivo é inválido ou não corresponde à extensão.",
+      "file_too_large": "Arquivo grande demais.",
+      "forbidden": "Você não tem permissão para isso.",
+      "not_found": "Documento não encontrado.",
+      "rate_limited": "Muitos envios, aguarde um instante.",
+      "nextcloud_not_connected": "Conecte sua conta do Nextcloud primeiro.",
+      "nextcloud_auth": "O Nextcloud não aceitou o usuário ou a senha de aplicativo.",
+      "nextcloud_not_found": "Arquivo não encontrado no Nextcloud.",
+      "nextcloud_unreachable": "Não foi possível falar com o Nextcloud."
+    }
+  },
   "teamChat": {
     "sectionOccurrences": "Chamados",
     "sectionOccurrenceHits": "Chamados encontrados",
@@ -2746,6 +2772,8 @@
     "stageTeamHint": "Deixe vazio para uma etapa compartilhada por todas as equipes. Não pode ser alterada depois.",
     "stageTeamAll": "Todas as equipes",
     "openInChat": "Abrir no Chat Interno",
+    "eventFileAdded": "Documento anexado",
+    "eventFileRemoved": "Documento removido",
     "internalChat": "Discussão interna",
     "secRequest": "Solicitação",
     "secProcess": "Processo",

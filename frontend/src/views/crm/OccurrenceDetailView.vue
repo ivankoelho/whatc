@@ -6,6 +6,7 @@ import { toast } from 'vue-sonner'
 import DetailPageLayout from '@/components/shared/DetailPageLayout.vue'
 import { IconButton, DeleteConfirmDialog } from '@/components/shared'
 import OccurrenceDocumentsCard from '@/components/crm/OccurrenceDocumentsCard.vue'
+import OccurrenceFilesCard from '@/components/crm/OccurrenceFilesCard.vue'
 import OccurrenceParticipantsCard from '@/components/crm/OccurrenceParticipantsCard.vue'
 import OccurrenceCommunicationCard from '@/components/crm/OccurrenceCommunicationCard.vue'
 import OccurrenceChatPanel from '@/components/crm/OccurrenceChatPanel.vue'
@@ -138,6 +139,8 @@ const eventLabels: Record<string, string> = {
   participant_added: 'occurrences.eventParticipantAdded',
   participant_removed: 'occurrences.eventParticipantRemoved',
   reopened: 'occurrences.eventReopened',
+  file_added: 'occurrences.eventFileAdded',
+  file_removed: 'occurrences.eventFileRemoved',
   scope_regularized: 'occurrences.eventScopeRegularized',
   customer_notification: 'occurrences.eventCustomerNotice',
 }
@@ -531,6 +534,7 @@ onUnmounted(() => {
 
           <div class="flex flex-col gap-6">
             <OccurrenceDocumentsCard :occurrence-id="occurrence.id" :can-write="canWrite" />
+            <OccurrenceFilesCard :occurrence-id="occurrence.id" />
           <section id="case-history" class="scroll-mt-4 flex-1 rounded-lg border bg-card p-4" data-testid="case-history">
             <h2 class="mb-3 text-sm font-semibold">{{ $t('chat.occurrenceTimeline') }}</h2>
             <p v-if="store.events.length === 0" class="py-4 text-center text-sm text-muted-foreground">{{ $t('occurrences.noEventsYet') }}</p>

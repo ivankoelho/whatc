@@ -14,8 +14,10 @@ import { chatErrorCode } from '@/lib/team-chat'
 // Pick a file from the person's own Nextcloud. Three states, one dialog: the organization has no
 // server yet (an administrator registers it; anyone else is told to ask), the person has not
 // connected (user name + app password, which Nextcloud lets them revoke), or the browser.
-const props = defineProps<{ open: boolean; channelId: string }>()
-const emit = defineEmits<{ 'update:open': [value: boolean] }>()
+// With a channelId the file goes to that chat; without one the dialog only reports the choice
+// (the case documents use it that way and attach it themselves).
+const props = defineProps<{ open: boolean; channelId?: string }>()
+const emit = defineEmits<{ 'update:open': [value: boolean]; picked: [entry: NextcloudEntry] }>()
 const { t } = useI18n()
 const store = useTeamChatStore()
 
@@ -106,6 +108,10 @@ async function disconnect() {
 
 async function pick(e: NextcloudEntry) {
   if (e.is_dir) return browse(e.path)
+  if (!props.channelId) {
+    emit('picked', e)
+    return
+  }
   busy.value = true
   try {
     await store.attachNextcloud(props.channelId, e.path)

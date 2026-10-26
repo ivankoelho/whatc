@@ -367,6 +367,32 @@
       "changeWarning": "Changing the address disconnects everybody, who will need to connect again."
     }
   },
+  "occurrenceFiles": {
+    "title": "Documents",
+    "attach": "Attach document",
+    "empty": "No documents attached.",
+    "restricted": "Restricted to those who work the case",
+    "restrictedHint": "Restricted to those who work the case",
+    "noAccess": "No access",
+    "preview": "Preview",
+    "download": "Download",
+    "deleteTitle": "Remove document",
+    "deleteWarning": "The file will be erased and the removal is recorded in the history.",
+    "added": "Document attached.",
+    "errors": {
+      "generic": "Could not complete. Try again.",
+      "file_type_not_allowed": "This type of file is not allowed.",
+      "invalid_file": "The file is invalid or does not match its extension.",
+      "file_too_large": "File too large.",
+      "forbidden": "You do not have permission for this.",
+      "not_found": "Document not found.",
+      "rate_limited": "Too many uploads, wait a moment.",
+      "nextcloud_not_connected": "Connect your Nextcloud account first.",
+      "nextcloud_auth": "Nextcloud did not accept the user or app password.",
+      "nextcloud_not_found": "File not found in Nextcloud.",
+      "nextcloud_unreachable": "Nextcloud could not be reached."
+    }
+  },
   "teamChat": {
     "sectionOccurrences": "Cases",
     "sectionOccurrenceHits": "Cases found",
@@ -2757,6 +2783,8 @@
     "stageTeamHint": "Leave empty for a stage every team shares. Cannot be changed later.",
     "stageTeamAll": "All teams",
     "openInChat": "Open in Internal Chat",
+    "eventFileAdded": "Document attached",
+    "eventFileRemoved": "Document removed",
     "internalChat": "Internal discussion",
     "secRequest": "Request",
     "secProcess": "Process",
