@@ -224,7 +224,21 @@ type OccurrenceParticipant struct {
 	AddedByID      *uuid.UUID `gorm:"type:uuid" json:"added_by_id,omitempty"`
 	// Capabilities beyond viewing (see OccurrenceCap*). Empty = read only.
 	Capabilities []string `gorm:"serializer:json;type:jsonb" json:"capabilities"`
+	// Role says why the person is on the case: "support" (apoio: asked to help) or "follower" (acompanha).
+	// Neither is the requester or the main assignee, and neither grants anything by itself: access is the
+	// capabilities above, and never the WhatsApp conversation or restricted files.
+	Role string `gorm:"size:12;not null;default:'follower'" json:"role"`
+	// DepartmentID is the department the person was picked from (informational; the link is the user).
+	DepartmentID *uuid.UUID `gorm:"type:uuid" json:"department_id,omitempty"`
+	// RemovedByID: who ended the link. The row is soft-deleted (deleted_at is when) and kept as history.
+	RemovedByID *uuid.UUID `gorm:"type:uuid" json:"removed_by_id,omitempty"`
 }
+
+// Participant roles.
+const (
+	ParticipantRoleSupport  = "support"
+	ParticipantRoleFollower = "follower"
+)
 
 func (OccurrenceParticipant) TableName() string { return "occurrence_participants" }
 
