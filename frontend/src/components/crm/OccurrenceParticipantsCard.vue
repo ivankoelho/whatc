@@ -2,7 +2,6 @@
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { occurrencesService, type OccurrenceParticipant } from '@/services/api'
@@ -96,62 +95,63 @@ watch(() => props.occurrenceId, () => { load(); loadDepartments() }, { immediate
 </script>
 
 <template>
-  <Card data-testid="occurrence-participants" :class="embedded ? 'border-0 bg-transparent shadow-none' : ''">
-    <CardHeader :class="embedded ? 'space-y-0 p-0 pb-2' : 'pb-3'">
-      <CardTitle class="text-sm font-medium flex items-center gap-2">
-        <Users class="h-4 w-4" aria-hidden="true" />
-        {{ $t('occurrences.support.title') }}
-      </CardTitle>
-    </CardHeader>
-    <CardContent :class="embedded ? 'space-y-3 p-0 text-sm' : 'space-y-3 text-sm'">
-      <p v-if="activeList.length === 0" class="text-muted-foreground">{{ $t('occurrences.support.none') }}</p>
-      <ul v-else class="space-y-2">
-        <li v-for="p in activeList" :key="p.user_id" class="flex items-start justify-between gap-2" :data-testid="`participant-${p.user_id}`">
-          <div class="min-w-0">
-            <div class="flex flex-wrap items-center gap-2">
-              <span class="truncate font-medium">{{ p.user_name }}</span>
-              <Badge :variant="p.role === 'support' ? 'default' : 'secondary'" class="text-xs">{{ roleLabel(p.role) }}</Badge>
-              <Badge v-for="c in p.capabilities" :key="c" variant="outline" class="text-xs">{{ $t('occurrences.cap.' + c) }}</Badge>
-            </div>
-            <p class="text-xs text-muted-foreground">
-              <span v-if="p.department_name">{{ p.department_name }} · </span>{{ $t('occurrences.support.addedBy', { name: p.added_by || '—' }) }} · {{ fmt(p.added_at) }}
-            </p>
-          </div>
-          <Button v-if="canWrite" variant="ghost" size="icon" class="h-7 w-7 shrink-0" :disabled="isBusy" :aria-label="$t('occurrences.participantsRemove')" @click="remove(p.user_id)">
-            <X class="h-4 w-4" />
-          </Button>
-        </li>
-      </ul>
+  <!-- A plain section, not <Card>: the Card's hover surface (blur, border and shadow on hover) painted over the
+       neighbouring text when this sits inside the case panel. -->
+  <section data-testid="occurrence-participants" class="space-y-3 text-sm">
+    <h3 class="flex items-center gap-2 text-sm font-medium">
+      <Users class="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+      {{ $t('occurrences.support.title') }}
+    </h3>
 
-      <div v-if="canWrite && departments.length > 0" class="space-y-2 rounded-md border p-2">
+    <p v-if="activeList.length === 0" class="text-muted-foreground">{{ $t('occurrences.support.none') }}</p>
+    <ul v-else class="divide-y rounded-md border">
+      <li v-for="p in activeList" :key="p.user_id" class="flex items-start gap-3 px-3 py-2.5" :data-testid="`participant-${p.user_id}`">
+        <div class="min-w-0 flex-1 space-y-1">
+          <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span class="font-medium [overflow-wrap:anywhere]">{{ p.user_name }}</span>
+            <Badge :variant="p.role === 'support' ? 'default' : 'secondary'" class="text-xs">{{ roleLabel(p.role) }}</Badge>
+            <Badge v-for="c in p.capabilities" :key="c" variant="outline" class="text-xs">{{ $t('occurrences.cap.' + c) }}</Badge>
+          </div>
+          <p class="text-xs leading-relaxed text-muted-foreground">
+            <span v-if="p.department_name">{{ p.department_name }} · </span>{{ $t('occurrences.support.addedBy', { name: p.added_by || '—' }) }} · {{ fmt(p.added_at) }}
+          </p>
+        </div>
+        <Button v-if="canWrite" variant="ghost" size="icon" class="-mr-1 h-8 w-8 shrink-0" :disabled="isBusy" :aria-label="$t('occurrences.participantsRemove')" @click="remove(p.user_id)">
+          <X class="h-4 w-4" />
+        </Button>
+      </li>
+    </ul>
+
+    <div v-if="canWrite && departments.length > 0" class="space-y-3 rounded-md border bg-muted/20 p-3">
+      <div class="space-y-1.5">
         <label class="block text-xs font-medium" for="support-department">{{ $t('occurrences.support.department') }}</label>
         <select id="support-department" v-model="departmentId" class="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="support-department">
           <option value="">{{ $t('occurrences.support.pickDepartment') }}</option>
           <option v-for="d in departments" :key="d.id" :value="d.id">{{ d.name }}</option>
         </select>
-        <template v-if="departmentId">
-          <p v-if="candidates.length === 0" class="text-xs text-muted-foreground">{{ $t('occurrences.support.noPeople') }}</p>
-          <fieldset v-else>
-            <legend class="mb-1 text-xs font-medium">{{ $t('occurrences.support.people') }}</legend>
-            <label v-for="u in candidates" :key="u.id" class="flex min-h-9 items-center gap-2">
-              <input v-model="selected" type="checkbox" :value="u.id" :data-testid="`support-user-${u.id}`">
-              <span>{{ u.full_name }}</span>
-            </label>
-          </fieldset>
-          <Button size="sm" :disabled="selected.length === 0 || isBusy" data-testid="participant-add" @click="add">{{ $t('occurrences.support.add') }}</Button>
-        </template>
-        <p class="text-xs text-muted-foreground">{{ $t('occurrences.support.note') }}</p>
       </div>
+      <template v-if="departmentId">
+        <p v-if="candidates.length === 0" class="text-xs text-muted-foreground">{{ $t('occurrences.support.noPeople') }}</p>
+        <fieldset v-else class="space-y-1">
+          <legend class="mb-1 text-xs font-medium">{{ $t('occurrences.support.people') }}</legend>
+          <label v-for="u in candidates" :key="u.id" class="flex min-h-9 cursor-pointer items-center gap-2 rounded px-1 hover:bg-muted/40">
+            <input v-model="selected" type="checkbox" class="h-4 w-4 shrink-0" :value="u.id" :data-testid="`support-user-${u.id}`">
+            <span class="[overflow-wrap:anywhere]">{{ u.full_name }}</span>
+          </label>
+        </fieldset>
+        <Button size="sm" :disabled="selected.length === 0 || isBusy" data-testid="participant-add" @click="add">{{ $t('occurrences.support.add') }}</Button>
+      </template>
+      <p class="text-xs leading-relaxed text-muted-foreground">{{ $t('occurrences.support.note') }}</p>
+    </div>
 
-      <details v-if="history.length > 0" class="text-xs" data-testid="participant-history">
-        <summary class="cursor-pointer font-medium">{{ $t('occurrences.support.history') }} ({{ history.length }})</summary>
-        <ul class="mt-1 space-y-1 text-muted-foreground">
-          <li v-for="p in history" :key="p.user_id">
-            {{ p.user_name }} · {{ roleLabel(p.role) }}<span v-if="p.department_name"> · {{ p.department_name }}</span>
-            · {{ $t('occurrences.support.removedBy', { name: p.removed_by || '—' }) }} · {{ fmt(p.removed_at) }}
-          </li>
-        </ul>
-      </details>
-    </CardContent>
-  </Card>
+    <details v-if="history.length > 0" class="text-xs" data-testid="participant-history">
+      <summary class="cursor-pointer font-medium">{{ $t('occurrences.support.history') }} ({{ history.length }})</summary>
+      <ul class="mt-2 space-y-1.5 text-muted-foreground">
+        <li v-for="p in history" :key="p.user_id" class="leading-relaxed">
+          {{ p.user_name }} · {{ roleLabel(p.role) }}<span v-if="p.department_name"> · {{ p.department_name }}</span>
+          · {{ $t('occurrences.support.removedBy', { name: p.removed_by || '—' }) }} · {{ fmt(p.removed_at) }}
+        </li>
+      </ul>
+    </details>
+  </section>
 </template>
