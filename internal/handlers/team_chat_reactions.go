@@ -132,8 +132,10 @@ func (a *App) chatMessageResponses(viewerID uuid.UUID, msgs []models.ChatMessage
 		}
 	}
 
+	polls := a.chatPollResponses(viewerID, msgs, a.chatUserNames)
 	for i, m := range msgs {
 		out[i] = chatMessageToResponse(m, names)
+		out[i].Poll = polls[m.ID]
 		out[i].Reactions = []ChatReactionSummary{}
 		out[i].Attachments = []ChatAttachmentResponse{}
 		for _, f := range files[m.ID] {

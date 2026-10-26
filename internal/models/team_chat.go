@@ -179,3 +179,19 @@ type ChatAttachment struct {
 }
 
 func (ChatAttachment) TableName() string { return "chat_attachments" }
+
+// ChatPollVote is one person's vote for one option of a poll message. The poll
+// itself (question, options, single/multiple choice) lives in the message's Meta
+// ("poll"), so a poll is an ordinary message that every existing path (access,
+// archive, deletion, events) already governs. Removing a vote deletes the row.
+type ChatPollVote struct {
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
+	OrganizationID uuid.UUID `gorm:"type:uuid;index;not null" json:"organization_id"`
+	ChannelID      uuid.UUID `gorm:"type:uuid;not null" json:"channel_id"`
+	MessageID      uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_chat_poll_vote_unique,priority:1" json:"message_id"`
+	UserID         uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_chat_poll_vote_unique,priority:2" json:"user_id"`
+	OptionID       string    `gorm:"size:10;not null;uniqueIndex:idx_chat_poll_vote_unique,priority:3" json:"option_id"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+func (ChatPollVote) TableName() string { return "chat_poll_votes" }

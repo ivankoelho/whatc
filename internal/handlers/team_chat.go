@@ -74,6 +74,9 @@ type ChatMessageResponse struct {
 
 	// Attachments are the files and voice notes of the message.
 	Attachments []ChatAttachmentResponse `json:"attachments"`
+
+	// Poll is set when the message is a poll: its options with the tally and the viewer's own votes.
+	Poll *ChatPollResponse `json:"poll,omitempty"`
 }
 
 type chatChannelRequest struct {
@@ -694,6 +697,9 @@ func (a *App) UpdateChatMessage(r *fastglue.Request) error {
 	}
 	if msg.UserID != userID {
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You can only edit your own messages", nil, "")
+	}
+	if _, _, isPoll := pollOf(*msg); isPoll {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "A poll cannot be edited", nil, fastglue.ErrorType("poll_message"))
 	}
 	var req chatMessageRequest
 	if err := a.decodeRequest(r, &req); err != nil {
