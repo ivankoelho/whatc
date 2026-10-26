@@ -1568,6 +1568,16 @@ export interface OccurrenceParticipant {
   user_id: string
   user_name: string
   capabilities: string[]
+  /** 'support' (pessoa de apoio) or 'follower' (participante acompanhando) */
+  role: 'support' | 'follower'
+  department_id?: string
+  department_name?: string
+  added_by?: string
+  added_at: string
+  /** false once removed: the row stays as history */
+  active: boolean
+  removed_by?: string
+  removed_at?: string
 }
 
 export interface OccurrenceStage {
@@ -1772,8 +1782,14 @@ export const occurrencesService = {
     api.post<ApiEnvelope<Occurrence>>(`/occurrences/${id}/reassign`, { assigned_user_id: assignedUserId }),
   listParticipants: (id: string) =>
     api.get<ApiEnvelope<{ participants: OccurrenceParticipant[] }>>(`/occurrences/${id}/participants`),
-  addParticipant: (id: string, userId: string, capabilities: string[] = ['comment']) =>
-    api.post<ApiEnvelope<OccurrenceParticipant>>(`/occurrences/${id}/participants`, { user_id: userId, capabilities }),
+  addParticipant: (id: string, userId: string, opts: { role?: 'support' | 'follower'; departmentId?: string; capabilities?: string[] } = {}) =>
+    api.post<ApiEnvelope<OccurrenceParticipant>>(`/occurrences/${id}/participants`, {
+      user_id: userId, capabilities: opts.capabilities ?? ['comment'], role: opts.role ?? 'follower', department_id: opts.departmentId,
+    }),
+  supportDepartments: (id: string) =>
+    api.get<ApiEnvelope<{ departments: { id: string; name: string }[] }>>(`/occurrences/${id}/support-options`),
+  supportUsers: (id: string, departmentId: string) =>
+    api.get<ApiEnvelope<{ users: { id: string; full_name: string }[] }>>(`/occurrences/${id}/support-options`, { params: { department_id: departmentId } }),
   removeParticipant: (id: string, userId: string) =>
     api.delete<ApiEnvelope<{ removed: boolean }>>(`/occurrences/${id}/participants/${userId}`),
   forwardTargets: () =>

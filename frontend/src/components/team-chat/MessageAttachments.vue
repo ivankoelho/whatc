@@ -62,8 +62,8 @@ function onPlay(e: Event) {
         <span v-if="a.duration_ms" class="text-[11px] text-muted-foreground">{{ formatDuration(a.duration_ms) }}</span>
       </div>
 
-      <div v-else class="flex w-full max-w-xs items-center gap-1" :data-testid="`attachment-${a.id}`">
-        <a :href="teamChatAttachmentUrl(a.id)" download class="flex min-w-0 flex-1 items-center gap-2 rounded-md border px-2 py-1.5 text-xs hover:bg-muted">
+      <div v-else class="flex w-full max-w-xs items-center gap-1">
+        <a :href="teamChatAttachmentUrl(a.id)" download :data-testid="`attachment-${a.id}`" class="flex min-w-0 flex-1 items-center gap-2 rounded-md border px-2 py-1.5 text-xs hover:bg-muted">
           <FileText class="h-4 w-4 shrink-0 text-muted-foreground" />
           <span class="min-w-0 flex-1">
             <span class="block truncate font-medium">{{ a.name }}</span>
