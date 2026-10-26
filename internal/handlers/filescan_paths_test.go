@@ -541,3 +541,46 @@ func TestAudioGate_LegacyAudioIsPreVerifiedAndNeverScannedDuringACall(t *testing
 	require.NoError(t, w.app.ServeIVRAudio(req))
 	assert.Equal(t, fasthttp.StatusLocked, testutil.GetResponseStatusCode(req), "another organization's audio is not opened by name")
 }
+
+// Campaigns and template sends accept only Meta media ids this server uploaded after a scan; older campaigns
+// are reported, not invalidated; an infected campaign is not sent (worker test).
+func TestCampaignMedia_OnlyServerUploadedIdsAreAccepted(t *testing.T) {
+	w := newPathWorld(t)
+	acct := testutil.CreateTestWhatsAppAccount(t, w.app.DB, w.org.ID)
+	tmpl := testutil.CreateTestTemplate(t, w.app.DB, w.org.ID, acct.Name)
+	require.NoError(t, w.app.DB.Model(tmpl).Update("header_type", "IMAGE").Error)
+	create := func(mediaID string) int {
+		req := testutil.NewJSONRequest(t, map[string]any{"name": "c-" + uuid.NewString()[:6], "whatsapp_account": acct.Name,
+			"template_id": tmpl.ID.String(), "header_media_id": mediaID})
+		testutil.SetAuthContext(req, w.admin.OrganizationID, w.admin.ID)
+		require.NoError(t, w.app.CreateCampaign(req))
+		return testutil.GetResponseStatusCode(req)
+	}
+	assert.Equal(t, fasthttp.StatusBadRequest, create("media-from-somewhere-else"), "an id WhatC never uploaded is refused")
+	assert.NotEqual(t, fasthttp.StatusBadRequest, create(""), "no id is fine: the upload endpoint sets it after the scan")
+	require.NoError(t, w.app.DB.Create(&models.MetaMedia{ID: uuid.New(), OrganizationID: w.org.ID, MediaID: "media-uploaded-here", Source: "campaign_media"}).Error)
+	assert.NotEqual(t, fasthttp.StatusBadRequest, create("media-uploaded-here"))
+	// another organization's upload does not vouch for this one
+	other := newIsoWorld(t)
+	require.NoError(t, w.app.DB.Create(&models.MetaMedia{ID: uuid.New(), OrganizationID: other.org.ID, MediaID: "media-of-another-org", Source: "campaign_media"}).Error)
+	assert.Equal(t, fasthttp.StatusBadRequest, create("media-of-another-org"))
+
+	// the template send's "pre-uploaded" option follows the same rule (no WhatsApp client here: reaching Meta would panic)
+	contact := testutil.CreateTestContact(t, w.app.DB, w.org.ID)
+	req := testutil.NewJSONRequest(t, map[string]any{"contact_id": contact.ID.String(), "template_id": tmpl.ID.String(),
+		"header_media_id": "media-from-somewhere-else", "template_params": map[string]string{"1": "Ana"}})
+	testutil.SetAuthContext(req, w.admin.OrganizationID, w.admin.ID)
+	require.NoError(t, w.app.SendTemplateMessage(req))
+	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
+
+	// older campaigns with an id nobody uploaded here are reported to the administrators, and stay untouched
+	old := &models.BulkMessageCampaign{BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: w.org.ID, WhatsAppAccount: acct.Name,
+		Name: "antiga", TemplateID: tmpl.ID, Status: models.CampaignStatusDraft, CreatedBy: w.admin.ID, HeaderMediaID: "media-legacy"}
+	require.NoError(t, w.app.DB.Create(old).Error)
+	code, raw := chatDo(t, w.app.AntimalwareStatus, w.org.ID, w.admin.ID, nil, nil, nil)
+	require.Equal(t, fasthttp.StatusOK, code, string(raw))
+	assert.Contains(t, string(raw), `"campaigns_unverified_media":1`)
+	var still models.BulkMessageCampaign
+	require.NoError(t, w.app.DB.First(&still, "id = ?", old.ID).Error)
+	assert.Equal(t, "media-legacy", still.HeaderMediaID, "never invalidated")
+}

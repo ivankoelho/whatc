@@ -111,6 +111,21 @@ func (w *Worker) HandleRecipientJob(ctx context.Context, job *queue.RecipientJob
 		return nil
 	}
 
+	// Media the antimalware scan found infected is never sent: the local copy of the campaign's header is
+	// the evidence WhatC holds about what Meta hosts for it.
+	if campaign.HeaderMediaID != "" || campaign.HeaderMediaLocalPath != "" {
+		var verdict string
+		w.DB.Model(&models.FileScan{}).Select("status").
+			Where("source = ? AND resource_id = ? AND organization_id = ?", models.ScanSourceCampaignMedia, campaign.ID, job.OrganizationID).
+			Limit(1).Scan(&verdict)
+		if verdict == models.ScanInfected {
+			w.Log.Error("Campaign media is infected; not sending", "campaign_id", campaign.ID)
+			w.updateRecipientStatus(job.RecipientID, models.MessageStatusFailed, "", "Campaign media blocked: malware detected")
+			w.incrementCampaignCount(job.CampaignID, "failed_count")
+			return nil
+		}
+	}
+
 	// Build recipient for sending
 	recipient := &models.BulkMessageRecipient{
 		PhoneNumber:    job.PhoneNumber,

@@ -345,6 +345,10 @@ func runServer(args []string) {
 		HTTPClient: httpClient,
 		Usage:      usage.New(db, cfg.Usage),
 	}
+	// Telephony plays audio only after a clean verdict (checked from memory, never during a call).
+	calling.SetAudioGate(app.AudioGate())
+	app.AudioGate().Refresh()
+
 	// Antimalware engine (clamd on the private network). Without an address nothing can be cleared, so
 	// every scan-gated file stays closed: say so loudly instead of failing quietly.
 	if cfg.Antimalware.Address != "" {

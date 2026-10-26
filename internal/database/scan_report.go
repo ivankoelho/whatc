@@ -32,6 +32,8 @@ type ScanReport struct {
 	NoVerdictB  int64            `json:"no_verdict_bytes"`
 	AvgScanMs   float64          `json:"avg_scan_ms"`  // from past scans (0: none yet)
 	AvgBytesPer float64          `json:"avg_bytes_ms"` // bytes per ms of past scans (0: none yet)
+	// CampaignsUnverified: campaigns whose Meta media id was not uploaded by this server (older ones).
+	CampaignsUnverified int64 `json:"campaigns_unverified_media"`
 }
 
 // reportSources: how to list the files of each kind, and where their size is known in the table.
@@ -116,6 +118,7 @@ func BuildScanReport(db *gorm.DB, mediaRoot string, stat bool) (ScanReport, erro
 		COALESCE(sum(size_bytes)::float8 / NULLIF(sum(scan_ms),0), 0) AS bytes_per_ms
 		FROM file_scans WHERE status IN ('clean','infected') AND scan_ms > 0 AND scanned_at > ?`, time.Now().Add(-30*24*time.Hour)).Scan(&perf)
 	rep.AvgScanMs, rep.AvgBytesPer = perf.AvgMs, perf.BytesPerMs
+	db.Raw(`SELECT count(*) FROM bulk_message_campaigns c WHERE c.deleted_at IS NULL AND COALESCE(c.header_media_id,'') <> '' AND NOT EXISTS (SELECT 1 FROM meta_media_uploads m WHERE m.organization_id = c.organization_id AND m.media_id = c.header_media_id)`).Scan(&rep.CampaignsUnverified)
 	return rep, nil
 }
 

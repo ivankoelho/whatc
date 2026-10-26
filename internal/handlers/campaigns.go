@@ -177,6 +177,11 @@ func (a *App) CreateCampaign(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "WhatsApp account not found", nil, "")
 	}
 
+	// A media id the client names is only accepted if THIS server uploaded it (after a scan): otherwise the
+	// campaign would send content hosted on Meta that WhatC never saw. The upload endpoint sets it itself.
+	if req.HeaderMediaID != "" && !a.metaMediaKnown(orgID, req.HeaderMediaID) {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Unknown media: upload the header file to the campaign instead", nil, "")
+	}
 	campaign := models.BulkMessageCampaign{
 		OrganizationID:  orgID,
 		WhatsAppAccount: req.WhatsAppAccount,
@@ -1096,6 +1101,8 @@ func (a *App) UploadCampaignMedia(r *fastglue.Request) error {
 		a.Log.Error("Failed to upload media to WhatsApp", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to upload media to WhatsApp", nil, "")
 	}
+
+	a.recordMetaMedia(orgID, campaign.WhatsAppAccount, mediaID, "campaign_media", data)
 
 	// Save file locally for preview
 	localPath, err := a.saveCampaignMedia(campaignUUID.String(), data, mimeType)

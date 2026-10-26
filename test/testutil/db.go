@@ -170,6 +170,7 @@ func runMigrations(db *gorm.DB) error {
 		&models.NextcloudCredential{},
 		&models.ChatAttachment{},
 		&models.FileScan{},
+		&models.MetaMedia{},
 		// Help Desk — unidade e departamento
 		&models.Unit{},
 		&models.Department{},
@@ -201,6 +202,7 @@ func cleanupTables(db *gorm.DB) {
 	tables := []string{
 		// Antimalware verdicts
 		"file_scans",
+		"meta_media_uploads",
 		"occurrence_files",
 		"chat_attachments",
 		"occurrence_documents",

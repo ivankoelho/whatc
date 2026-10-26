@@ -163,6 +163,7 @@ func GetMigrationModels() []MigrationModel {
 		{"NextcloudCredential", &models.NextcloudCredential{}},
 		{"ChatAttachment", &models.ChatAttachment{}},
 		{"FileScan", &models.FileScan{}},
+		{"MetaMedia", &models.MetaMedia{}},
 
 		// Help Desk — unidade e departamento
 		{"Unit", &models.Unit{}},

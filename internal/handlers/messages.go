@@ -1016,7 +1016,11 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 	var headerMimeType string
 	if template.HeaderType == "IMAGE" || template.HeaderType == "VIDEO" || template.HeaderType == "DOCUMENT" {
 		if req.HeaderMediaID != "" {
-			// Option 1: Pre-uploaded WhatsApp media ID — use directly (no local preview)
+			// Option 1: Pre-uploaded WhatsApp media ID — only one this server uploaded after a scan; an id
+			// from anywhere else is content WhatC never saw.
+			if !a.metaMediaKnown(orgID, req.HeaderMediaID) {
+				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Unknown media: upload the header file instead", nil, "")
+			}
 			headerMediaID = req.HeaderMediaID
 		} else if req.HeaderMediaURL != "" {
 			// Option 2: Download from the URL the person typed, then upload to WhatsApp. That URL is
@@ -1049,6 +1053,7 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 				return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to upload header media to WhatsApp", nil, "")
 			}
 			headerMediaID = mediaID
+			a.recordMetaMedia(orgID, account.Name, mediaID, "template_header_media", headerMediaData)
 		}
 	}
 
