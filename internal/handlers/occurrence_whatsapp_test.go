@@ -150,3 +150,39 @@ func TestCaseWhatsApp_NeedsExplicitChatPermission(t *testing.T) {
 	_, body = w.call(t, w.app.GetOccurrenceWhatsApp, withChat.ID, w.occID, nil, nil)
 	assert.Contains(t, string(body), `"restricted":false`)
 }
+
+// Supervising every case (occurrences:view_all) shows the case, its internal
+// discussion and indicators, but not the customer's conversation on a channel the
+// supervisor was not authorized for. Authorization is by team (the case's team or
+// the account's default team) or by the explicit conversations:view_all.
+func TestCaseWhatsApp_CaseSupervisionDoesNotOpenOtherTeamsChannel(t *testing.T) {
+	w := newChatWorld(t)
+	w.run()
+	sup := chatUser(t, w.app, w.org.ID, []string{"occurrences:read", "occurrences:write", "occurrences:view_all",
+		"chat:read", "chat:write", "conversations:view_team", "team_chat:read", "team_chat:write"})
+
+	// The case itself and the internal discussion stay supervised.
+	code, _ := w.call(t, w.app.GetOccurrence, sup.ID, w.occID, nil, nil)
+	assert.Equal(t, fasthttp.StatusOK, code)
+	assert.Equal(t, fasthttp.StatusOK, w.state2(t, sup.ID))
+
+	// The Logistics conversation is not theirs.
+	_, body := w.call(t, w.app.GetOccurrenceWhatsApp, sup.ID, w.occID, nil, nil)
+	assert.Contains(t, string(body), `"restricted":true`)
+	assert.NotContains(t, string(body), `"messages"`)
+	code, _ = w.call(t, w.app.SendOccurrenceWhatsApp, sup.ID, w.occID, map[string]any{"content": "oi"}, nil)
+	assert.Equal(t, fasthttp.StatusForbidden, code)
+
+	// Joining the team that owns the account is the explicit authorization.
+	team := &models.Team{BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: w.org.ID, Name: "Dona da conta", IsActive: true}
+	require.NoError(t, w.app.DB.Create(team).Error)
+	require.NoError(t, w.app.DB.Model(w.account).Update("default_team_id", team.ID).Error)
+	require.NoError(t, w.app.DB.Create(&models.TeamMember{BaseModel: models.BaseModel{ID: uuid.New()}, TeamID: team.ID, UserID: sup.ID, Role: "agent"}).Error)
+	_, body = w.call(t, w.app.GetOccurrenceWhatsApp, sup.ID, w.occID, nil, nil)
+	assert.Contains(t, string(body), `"restricted":false`)
+}
+
+func (w *chatWorld) state2(t *testing.T, user uuid.UUID) int {
+	code, _ := w.call(t, w.app.GetOccurrenceChat, user, w.occID, nil, nil)
+	return code
+}

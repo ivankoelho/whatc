@@ -357,10 +357,16 @@ func TestChatMessages_EditAndDelete(t *testing.T) {
 	require.Equal(t, fasthttp.StatusOK, code)
 	assert.Empty(t, decodeChat[chatMessagesData](t, raw).Messages, "deleted messages leave the history")
 
-	var audits int64
-	app.DB.Model(&models.AuditLog{}).Where("organization_id = ? AND resource_type = ? AND resource_id = ?",
-		org.ID, "chat_message", msg.ID).Count(&audits)
-	assert.EqualValues(t, 1, audits, "moderation of someone else's message is audited")
+	// The audit entry is written by a goroutine (audit.LogAudit is fire-and-forget),
+	// so wait for it instead of counting at once.
+	auditCount := func() int64 {
+		var n int64
+		app.DB.Model(&models.AuditLog{}).Where("organization_id = ? AND resource_type = ? AND resource_id = ?",
+			org.ID, "chat_message", msg.ID).Count(&n)
+		return n
+	}
+	require.Eventually(t, func() bool { return auditCount() >= 1 }, 5*time.Second, 25*time.Millisecond, "moderation of someone else's message is audited")
+	assert.EqualValues(t, 1, auditCount())
 
 	// The author deleting their own message is not moderation.
 	_, own := sendMsg(t, app, org.ID, author.ID, ch.ID, "mine")
