@@ -179,7 +179,8 @@ const initiateSSO = (provider: string) => {
         </p>
       </div>
 
-      <footer v-if="footerText || footerVersion" class="mt-6 text-center text-xs text-white/50">
+      <!-- The footer message sits at the bottom edge of the screen, over any background. -->
+      <footer v-if="footerText || footerVersion" class="fixed inset-x-0 bottom-3 px-4 text-center text-xs text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.7)]" data-testid="login-footer">
         <span v-if="footerText">© {{ currentYear }} {{ footerText }}</span>
         <span v-if="footerText && footerVersion"> · </span>
         <span v-if="footerVersion">v{{ footerVersion }}</span>

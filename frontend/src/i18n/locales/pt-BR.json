@@ -357,6 +357,16 @@
     "ariaUserMenu": "Menu do usuário",
     "ariaToggleAvailability": "Alternar status de disponibilidade"
   },
+  "integrations": {
+    "nextcloud": {
+      "tab": "Nextcloud",
+      "title": "Nextcloud",
+      "description": "Endereço do Nextcloud da empresa. Cada pessoa conecta a própria conta (com uma senha de aplicativo) pelo clipe do Chat Interno e escolhe os arquivos dela.",
+      "saved": "Endereço do Nextcloud salvo.",
+      "notConfigured": "Ainda não configurado. Use o endereço https do servidor.",
+      "changeWarning": "Trocar o endereço desconecta todas as pessoas, que precisarão conectar de novo."
+    }
+  },
   "teamChat": {
     "sectionOccurrences": "Chamados",
     "sectionOccurrenceHits": "Chamados encontrados",

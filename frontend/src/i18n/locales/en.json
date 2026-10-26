@@ -357,6 +357,16 @@
     "ariaUserMenu": "User menu",
     "ariaToggleAvailability": "Toggle availability status"
   },
+  "integrations": {
+    "nextcloud": {
+      "tab": "Nextcloud",
+      "title": "Nextcloud",
+      "description": "The company Nextcloud address. Each person connects their own account (with an app password) from the paperclip of the Internal Chat and picks their own files.",
+      "saved": "Nextcloud address saved.",
+      "notConfigured": "Not set up yet. Use the https address of the server.",
+      "changeWarning": "Changing the address disconnects everybody, who will need to connect again."
+    }
+  },
   "teamChat": {
     "sectionOccurrences": "Cases",
     "sectionOccurrenceHits": "Cases found",
