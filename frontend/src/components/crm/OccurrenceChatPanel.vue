@@ -52,7 +52,7 @@ onBeforeUnmount(() => { if (store.activeChannelId === channelId.value) void stor
 </script>
 
 <template>
-  <Card data-testid="occurrence-chat" class="flex flex-col border-sky-500/30">
+  <Card data-testid="occurrence-chat" class="flex flex-col border-sky-500/30" :class="messages.length > 0 ? 'flex-1' : ''">
     <CardHeader class="pb-3">
       <CardTitle class="text-sm font-medium flex items-center gap-2">
         <MessagesSquare class="h-4 w-4" aria-hidden="true" />

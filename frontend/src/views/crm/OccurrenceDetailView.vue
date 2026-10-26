@@ -461,7 +461,7 @@ onUnmounted(() => {
         </section>
 
         <!-- 2 + 3. The request with its order and followers; documents and history beside it -->
-        <div class="grid gap-6 lg:grid-cols-2">
+        <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <section class="rounded-lg border bg-card p-4" data-testid="case-request">
             <h2 class="mb-3 text-sm font-semibold">{{ $t('occurrences.secRequest') }}</h2>
             <dl class="grid grid-cols-2 gap-x-6 gap-y-3 text-sm md:grid-cols-4">
@@ -558,7 +558,7 @@ onUnmounted(() => {
 
         <!-- 4. The customer (WhatsApp). Never the same place as the internal discussion. -->
         <!-- Customer and colleagues side by side: two clearly separate conversations, each at readable width. -->
-        <div class="grid gap-6 lg:grid-cols-2">
+        <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <section id="case-customer" class="scroll-mt-4 space-y-4">
           <OccurrenceWhatsAppCard :occurrence-id="occurrence.id" @configured="waConfigured = $event" />
           <OccurrenceCommunicationCard :occurrence-id="occurrence.id" />
@@ -606,7 +606,7 @@ onUnmounted(() => {
 
         <!-- 5. Colleagues only -->
         <section id="case-internal" class="flex scroll-mt-4 flex-col">
-          <OccurrenceChatPanel :occurrence-id="occurrence.id" class="flex-1" />
+          <OccurrenceChatPanel :occurrence-id="occurrence.id" />
         </section>
         </div>
       </div>

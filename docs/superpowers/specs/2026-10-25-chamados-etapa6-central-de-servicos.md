@@ -46,3 +46,27 @@ Go: `occurrence_chat_test.go` (IDOR entre organizações/lojas, participante sem
 **Mensagem de "não encontrado".** A tela do chamado passa a usar `occurrences.notFoundHint` (pt-BR e en) no lugar do texto padrão em inglês do layout.
 
 **Layout em duas colunas.** Medido no navegador: a 1366 px cada coluna tem 608 px; a 1920 px o conteúdo é limitado a 1600 px e cada coluna tem 788 px; bordas esquerdas das duas colunas coincidem nas linhas de Solicitação, WhatsApp e Discussão. Limitação conhecida: com a discussão interna vazia, o bloco acompanha a altura da coluna do WhatsApp.
+
+## Supervisão de chamados × leitura de conversas (decisão final)
+
+Supervisionar chamados e ler conversas de WhatsApp são poderes distintos.
+
+- Nova permissão `occurrences:view_all`: enxerga e supervisiona **todos os chamados** (lista, Kanban, indicadores, discussão interna, auditoria de escopo, etapas de equipe). Não abre nenhuma conversa de cliente. `conversations:view_all` continua implicando a supervisão de chamados (ninguém perde o que tinha).
+- Conteúdo da conversa de WhatsApp do chamado (`GET/POST /api/occurrences/{id}/whatsapp`): leitura exige `chat:read`; envio exige também `chat:write`; e uma destas autorizações explícitas: ser o responsável, membro da equipe do chamado, membro da equipe dona da conta WhatsApp (`default_team_id`, o mesmo mecanismo que as conversas já usam) ou ter `conversations:view_all`.
+- Perfil padrão "Supervisor de SAC": `conversations:view_all` saiu; entraram `conversations:view_team` e `occurrences:view_all`. A permissão ampla continua podendo ser concedida explicitamente a quem for autorizado.
+
+### Matriz de permissões (perfis padrão)
+
+| Perfil | Chamados | Conversa WhatsApp do chamado |
+|---|---|---|
+| SAC | próprios e participações | só o resumo do envio automático |
+| Logística | equipe/unidade (membro da equipe) | lê e responde (equipe do chamado, `chat:*`) |
+| Supervisor de Loja | chamados da unidade (`view_team`) | lê e responde se for membro da equipe do chamado ou da conta |
+| Supervisor de SAC | todos os chamados (`occurrences:view_all`) | só contas/equipes a que pertence; sem `view_all` não lê Logística |
+| Administrador | tudo | `conversations:view_all` explícito |
+
+### Migração e implantação
+
+- `BackfillOccurrenceViewAll`: concede `occurrences:view_all` a todo papel que já tem `conversations:view_all` (aditivo; roda uma vez por organização — se algum papel da organização já tem a permissão, não reaplica, para não desfazer revogações).
+- `ReconcileSupervisorSACPreset`: remove `conversations:view_all` de um papel "Supervisor de SAC" **somente se ele ainda for exatamente o preset anterior** (nunca personalizado), trocando por `conversations:view_team`. Papel editado por alguém é mantido e registrado em log com a diferença. Toda alteração é registrada em log (nível warn). Não toca em concessões individuais nem em outros papéis.
+- Atenção no deploy: as permissões de usuário ficam em cache no Redis (`permissions:user:*`, TTL de horas). Após a migração, limpe essas chaves ou aguarde o TTL para a mudança valer de imediato.
