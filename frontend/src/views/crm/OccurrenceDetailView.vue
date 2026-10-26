@@ -8,6 +8,7 @@ import { IconButton, DeleteConfirmDialog } from '@/components/shared'
 import OccurrenceDocumentsCard from '@/components/crm/OccurrenceDocumentsCard.vue'
 import OccurrenceFilesCard from '@/components/crm/OccurrenceFilesCard.vue'
 import OccurrenceHistoryDialog from '@/components/crm/OccurrenceHistoryDialog.vue'
+import OccurrenceExportDialog from '@/components/crm/OccurrenceExportDialog.vue'
 import { eventIcons, eventLabels } from '@/lib/occurrence-events'
 import OccurrenceParticipantsCard from '@/components/crm/OccurrenceParticipantsCard.vue'
 import OccurrenceCommunicationCard from '@/components/crm/OccurrenceCommunicationCard.vue'
@@ -41,6 +42,7 @@ import {
   Trash2,
   MessageCircle,
   ChevronDown,
+  Download,
 } from 'lucide-vue-next'
 
 const route = useRoute()
@@ -72,6 +74,7 @@ function openLegacySection() {
 }
 
 const historyOpen = ref(false)
+const exportOpen = ref(false)
 const HISTORY_PREVIEW = 6
 const showAllEvents = ref(false)
 const shownEvents = computed(() => {
@@ -339,6 +342,10 @@ onUnmounted(() => {
               </SelectItem>
             </SelectContent>
           </Select>
+          <Button size="sm" variant="outline" data-testid="export-open" @click="exportOpen = true">
+            <Download class="h-4 w-4 mr-2" aria-hidden="true" />
+            {{ $t('occurrences.export.button') }}
+          </Button>
           <Button size="sm" variant="outline" as-child>
             <RouterLink :to="`/chat/${occurrence.contact_id}`">
               <MessageCircle class="h-4 w-4 mr-2 text-emerald-500" aria-hidden="true" />
@@ -582,6 +589,7 @@ onUnmounted(() => {
       </template>
     </DetailPageLayout>
 
+    <OccurrenceExportDialog v-if="occurrence && exportOpen" v-model:open="exportOpen" :occurrence-id="occurrence.id" />
     <OccurrenceHistoryDialog
       v-if="occurrence && historyOpen" v-model:open="historyOpen"
       :occurrence-id="occurrence.id" :protocol="occurrence.protocol_number" :title="occurrence.title"

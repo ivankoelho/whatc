@@ -2795,6 +2795,35 @@
       "end": "End of the history.",
       "withheld": "The text of the message to the customer is not available for your profile."
     },
+    "export": {
+      "button": "Export",
+      "title": "Export case",
+      "hint": "Choose what to include. You can only export what you can already read.",
+      "sections": "What to export",
+      "all": "Everything I can",
+      "section": {
+        "summary": "Case summary",
+        "history": "Full history",
+        "internal_chat": "Internal discussion",
+        "whatsapp": "WhatsApp conversation",
+        "documents": "Documents"
+      },
+      "noPermission": "No permission",
+      "format": "Format",
+      "fmt": {
+        "pdf": "PDF",
+        "csv": "CSV",
+        "zip": "ZIP"
+      },
+      "csvOne": "CSV holds one table: choose a single section (without the summary) or use PDF or ZIP.",
+      "zipHint": "The ZIP has the PDF report, the tables as CSV and the documents you may download.",
+      "run": "Export",
+      "working": "Generating…",
+      "done": "Export generated.",
+      "failed": "The export could not be done.",
+      "forbidden": "You do not have permission to export this section.",
+      "tooLarge": "The content is too large to export at once."
+    },
     "internalChat": "Internal discussion",
     "secRequest": "Request",
     "secProcess": "Process",

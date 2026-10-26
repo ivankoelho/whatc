@@ -2519,3 +2519,10 @@ export const occurrenceFilesService = {
     return `${base}/api/occurrences/${occurrenceId}/files/${fileId}/download${inline ? '?inline=1' : ''}`
   }
 }
+
+export const occurrenceExportService = {
+  options: (occurrenceId: string) => api.get(`/occurrences/${occurrenceId}/export/options`),
+  // The file comes back as the response body; the caller saves it.
+  run: (occurrenceId: string, sections: string[], format: 'pdf' | 'csv' | 'zip') =>
+    api.post<Blob>(`/occurrences/${occurrenceId}/export`, { sections, format }, { responseType: 'blob' }),
+}

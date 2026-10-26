@@ -2784,6 +2784,35 @@
       "end": "Fim do histórico.",
       "withheld": "Texto da mensagem ao cliente indisponível para o seu perfil."
     },
+    "export": {
+      "button": "Exportar",
+      "title": "Exportar protocolo",
+      "hint": "Escolha o que incluir. Você só pode exportar o que já pode consultar.",
+      "sections": "O que exportar",
+      "all": "Tudo o que posso",
+      "section": {
+        "summary": "Resumo do protocolo",
+        "history": "Histórico completo",
+        "internal_chat": "Discussão interna",
+        "whatsapp": "Conversa WhatsApp",
+        "documents": "Documentos"
+      },
+      "noPermission": "Sem permissão",
+      "format": "Formato",
+      "fmt": {
+        "pdf": "PDF",
+        "csv": "CSV",
+        "zip": "ZIP"
+      },
+      "csvOne": "O CSV guarda uma tabela: escolha uma única seção (sem o resumo) ou use PDF ou ZIP.",
+      "zipHint": "O ZIP traz o relatório em PDF, as tabelas em CSV e os documentos que você pode baixar.",
+      "run": "Exportar",
+      "working": "Gerando…",
+      "done": "Exportação gerada.",
+      "failed": "Não foi possível exportar.",
+      "forbidden": "Você não tem permissão para exportar esta seção.",
+      "tooLarge": "O conteúdo é grande demais para exportar de uma vez."
+    },
     "internalChat": "Discussão interna",
     "secRequest": "Solicitação",
     "secProcess": "Processo",
