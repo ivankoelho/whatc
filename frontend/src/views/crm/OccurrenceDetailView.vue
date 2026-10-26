@@ -7,6 +7,8 @@ import DetailPageLayout from '@/components/shared/DetailPageLayout.vue'
 import { IconButton, DeleteConfirmDialog } from '@/components/shared'
 import OccurrenceDocumentsCard from '@/components/crm/OccurrenceDocumentsCard.vue'
 import OccurrenceFilesCard from '@/components/crm/OccurrenceFilesCard.vue'
+import OccurrenceHistoryDialog from '@/components/crm/OccurrenceHistoryDialog.vue'
+import { eventIcons, eventLabels } from '@/lib/occurrence-events'
 import OccurrenceParticipantsCard from '@/components/crm/OccurrenceParticipantsCard.vue'
 import OccurrenceCommunicationCard from '@/components/crm/OccurrenceCommunicationCard.vue'
 import OccurrenceChatPanel from '@/components/crm/OccurrenceChatPanel.vue'
@@ -33,13 +35,8 @@ import {
   ClipboardList,
   Send,
   Loader2,
-  PlusCircle,
   StickyNote,
-  Reply,
-  Lightbulb,
-  ArrowRightLeft,
   UserPlus,
-  CheckCircle2,
   Copy,
   Trash2,
   MessageCircle,
@@ -74,6 +71,7 @@ function openLegacySection() {
   setTimeout(() => el?.scrollIntoView?.({ block: 'start' }), 700)
 }
 
+const historyOpen = ref(false)
 const HISTORY_PREVIEW = 6
 const showAllEvents = ref(false)
 const shownEvents = computed(() => {
@@ -102,47 +100,11 @@ const waConfigured = ref(false)
 const isDeleteDialogOpen = ref(false)
 const isDeleting = ref(false)
 
-const eventIcons: Record<string, any> = {
-  opened: PlusCircle,
-  note: StickyNote,
-  stage_change: ArrowRightLeft,
-  assignment: UserPlus,
-  protocol_sent: Send,
-  closed: CheckCircle2,
-  reply: Reply,
-  process_message_used: Lightbulb,
-  forwarded: Send,
-  participant_added: UserPlus,
-  participant_removed: UserPlus,
-  reopened: ArrowRightLeft,
-  scope_regularized: ClipboardList,
-  customer_notification: Send,
-}
-
 const priorityLabels: Record<string, string> = {
   low: 'occurrences.priorityLow',
   normal: 'occurrences.priorityNormal',
   high: 'occurrences.priorityHigh',
   urgent: 'occurrences.priorityUrgent',
-}
-
-const eventLabels: Record<string, string> = {
-  opened: 'occurrences.eventOpened',
-  note: 'occurrences.eventNote',
-  stage_change: 'occurrences.eventStageChange',
-  assignment: 'occurrences.eventAssignment',
-  protocol_sent: 'occurrences.eventProtocolSent',
-  closed: 'occurrences.eventClosed',
-  reply: 'occurrences.eventReply',
-  process_message_used: 'occurrences.eventProcessMessageUsed',
-  forwarded: 'occurrences.eventForwarded',
-  participant_added: 'occurrences.eventParticipantAdded',
-  participant_removed: 'occurrences.eventParticipantRemoved',
-  reopened: 'occurrences.eventReopened',
-  file_added: 'occurrences.eventFileAdded',
-  file_removed: 'occurrences.eventFileRemoved',
-  scope_regularized: 'occurrences.eventScopeRegularized',
-  customer_notification: 'occurrences.eventCustomerNotice',
 }
 
 const breadcrumbs = computed(() => [
@@ -536,7 +498,10 @@ onUnmounted(() => {
             <OccurrenceDocumentsCard :occurrence-id="occurrence.id" :can-write="canWrite" />
             <OccurrenceFilesCard :occurrence-id="occurrence.id" />
           <section id="case-history" class="scroll-mt-4 flex-1 rounded-lg border bg-card p-4" data-testid="case-history">
-            <h2 class="mb-3 text-sm font-semibold">{{ $t('chat.occurrenceTimeline') }}</h2>
+            <div class="mb-3 flex items-center justify-between gap-2">
+              <h2 class="text-sm font-semibold">{{ $t('chat.occurrenceTimeline') }}</h2>
+              <Button variant="outline" size="sm" data-testid="open-full-history" @click="historyOpen = true">{{ $t('occurrences.history.openFull') }}</Button>
+            </div>
             <p v-if="store.events.length === 0" class="py-4 text-center text-sm text-muted-foreground">{{ $t('occurrences.noEventsYet') }}</p>
             <ol v-else class="space-y-3">
               <li v-for="event in shownEvents" :key="event.id" class="flex gap-3 text-sm">
@@ -617,6 +582,10 @@ onUnmounted(() => {
       </template>
     </DetailPageLayout>
 
+    <OccurrenceHistoryDialog
+      v-if="occurrence && historyOpen" v-model:open="historyOpen"
+      :occurrence-id="occurrence.id" :protocol="occurrence.protocol_number" :title="occurrence.title"
+    />
     <DeleteConfirmDialog
       v-model:open="isDeleteDialogOpen"
       :title="$t('occurrences.deleteProtocolTitle')"

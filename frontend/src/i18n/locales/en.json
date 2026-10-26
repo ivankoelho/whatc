@@ -2785,6 +2785,16 @@
     "openInChat": "Open in Internal Chat",
     "eventFileAdded": "Document attached",
     "eventFileRemoved": "Document removed",
+    "history": {
+      "openFull": "View full history",
+      "subtitle": "Every event of the case, newest first.",
+      "search": "Search the history",
+      "filter": "Filter by event type",
+      "empty": "No events found.",
+      "failed": "The history could not be loaded.",
+      "end": "End of the history.",
+      "withheld": "The text of the message to the customer is not available for your profile."
+    },
     "internalChat": "Internal discussion",
     "secRequest": "Request",
     "secProcess": "Process",

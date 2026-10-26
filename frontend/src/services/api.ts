@@ -1756,6 +1756,8 @@ export const occurrencesService = {
   }) => api.put<ApiEnvelope<Occurrence>>(`/occurrences/${id}`, data),
   changeStage: (id: string, stageId: string) =>
     api.put<ApiEnvelope<Occurrence>>(`/occurrences/${id}/stage`, { stage_id: stageId }),
+  history: (id: string, params: { limit?: number; cursor?: string; types?: string; q?: string }) =>
+    api.get(`/occurrences/${id}/history`, { params }),
   listEvents: (id: string) =>
     api.get<ApiEnvelope<{ events: OccurrenceEvent[] }>>(`/occurrences/${id}/events`),
   addNote: (id: string, content: string) =>

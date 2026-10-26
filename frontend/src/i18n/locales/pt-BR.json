@@ -2774,6 +2774,16 @@
     "openInChat": "Abrir no Chat Interno",
     "eventFileAdded": "Documento anexado",
     "eventFileRemoved": "Documento removido",
+    "history": {
+      "openFull": "Ver histórico completo",
+      "subtitle": "Todos os eventos do chamado, do mais recente ao mais antigo.",
+      "search": "Buscar no histórico",
+      "filter": "Filtrar por tipo de evento",
+      "empty": "Nenhum evento encontrado.",
+      "failed": "Não foi possível carregar o histórico.",
+      "end": "Fim do histórico.",
+      "withheld": "Texto da mensagem ao cliente indisponível para o seu perfil."
+    },
     "internalChat": "Discussão interna",
     "secRequest": "Solicitação",
     "secProcess": "Processo",
