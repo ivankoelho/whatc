@@ -2554,3 +2554,42 @@ export const antimalwareService = {
   status: () => api.get('/integrations/antimalware'),
   retry: () => api.post('/integrations/antimalware/retry')
 }
+
+export interface RetentionPolicyView {
+  category: string
+  enabled: boolean
+  keep_months: number
+  updated_at?: string
+  updated_by?: string
+}
+export interface RetentionSample { id: string; name: string; bytes: number; bucket: string; reason: string; related?: string; reference_at?: string }
+export interface RetentionCategoryReport {
+  category: string
+  applied: boolean
+  reason?: string
+  months: number
+  assumed: boolean
+  buckets: Record<string, { count: number; bytes: number }>
+  bytes_partial: boolean
+  samples: RetentionSample[]
+  protected_samples: RetentionSample[]
+}
+export interface RetentionHold {
+  id: string
+  scope_type: 'occurrence' | 'contact'
+  scope_label: string
+  reason: string
+  created_by: string
+  created_at: string
+  active: boolean
+}
+
+export const retentionService = {
+  get: () => api.get('/retention'),
+  putPolicy: (category: string, body: { keep_months: number; enabled: boolean }) => api.put(`/retention/policies/${category}`, body),
+  simulate: (body: { categories?: string[]; months?: Record<string, number> }) => api.post('/retention/simulate', body),
+  holds: (status: 'active' | 'revoked' | 'all' = 'active') => api.get('/retention/holds', { params: { status } }),
+  createHold: (body: { scope_type: string; protocol_number?: string; scope_id?: string; reason: string }) => api.post('/retention/holds', body),
+  revokeHold: (id: string, reason: string) => api.post(`/retention/holds/${id}/revoke`, { reason }),
+  history: () => api.get('/retention/history')
+}

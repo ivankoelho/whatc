@@ -409,6 +409,114 @@
       "skipped": "Não verificados"
     }
   },
+  "retention": {
+    "tab": "Retenção",
+    "title": "Retenção de arquivos",
+    "description": "Defina por quanto tempo cada tipo de arquivo é mantido, simule o impacto e suspenda a exclusão de protocolos sob litígio ou obrigação legal. O histórico dos protocolos e a auditoria não fazem parte desta política.",
+    "engineOff": "A exclusão automática está desativada nesta versão: nenhum arquivo é apagado. As regras abaixo servem para configurar e simular; o que for decidido só passa a valer quando a exclusão for habilitada.",
+    "engineOn": "A exclusão automática está habilitada.",
+    "rules": "Regras por categoria",
+    "rulesHint": "Não há prazo padrão: cada categoria começa desligada e sem prazo. Os prazos devem ser validados pela sua assessoria jurídica (LGPD, obrigações fiscais e contratuais).",
+    "enable": "Ativar a política de {name}",
+    "on": "Ativa",
+    "off": "Desativada",
+    "months": "Meses",
+    "save": "Salvar",
+    "saved": "Regra salva.",
+    "needTerm": "Informe o prazo em meses antes de ativar.",
+    "updatedBy": "Alterado por {name} em {date}",
+    "simulation": "Simulação",
+    "simulate": "Simular expurgo",
+    "simulateHint": "Somente leitura: nada é alterado, apagado ou enfileirado. Usa o prazo digitado em cada linha, mesmo que ainda não salvo.",
+    "generatedAt": "Gerada em {date}",
+    "appliedTerm": "Prazo aplicado: {n} meses",
+    "assumed": "prazo de simulação, não salvo",
+    "noSamples": "Nenhum arquivo para mostrar.",
+    "volumeNote": "Volume dos arquivos elegíveis (medido em disco quando o banco não guarda o tamanho). Um asterisco indica medição parcial.",
+    "col": {
+      "category": "Categoria",
+      "eligible": "Elegíveis",
+      "volume": "Volume",
+      "notDue": "No prazo",
+      "open": "Protocolo aberto",
+      "held": "Suspensos",
+      "shared": "Compartilhados",
+      "quarantine": "Quarentena"
+    },
+    "bucket": {
+      "eligible": "Elegível",
+      "held": "Suspensão",
+      "shared": "Referência compartilhada",
+      "quarantine": "Quarentena",
+      "not_due": "No prazo",
+      "open": "Protocolo aberto"
+    },
+    "reason": {
+      "no_policy": "Sem regra configurada",
+      "policy_disabled": "Política desativada",
+      "no_term": "Sem prazo definido"
+    },
+    "holds": "Suspensões de exclusão",
+    "holdsHint": "Enquanto uma suspensão estiver ativa, nada ligado ao protocolo pode ser expurgado nem excluído manualmente.",
+    "noHolds": "Nenhuma suspensão ativa.",
+    "newHold": "Nova suspensão",
+    "newHoldHint": "A justificativa é obrigatória e fica registrada com o seu nome e a data.",
+    "protocol": "Número do protocolo",
+    "reasonLabel": "Justificativa",
+    "reasonHelp": "Mínimo de {n} caracteres.",
+    "placeHold": "Suspender exclusão",
+    "holdPlaced": "Suspensão aplicada.",
+    "protocolNotFound": "Protocolo não encontrado.",
+    "holdExists": "Este protocolo já tem uma suspensão ativa.",
+    "revoke": "Revogar",
+    "revokeTitle": "Revogar suspensão",
+    "holdRevoked": "Suspensão revogada.",
+    "placedBy": "Aplicada por {name} em {date}",
+    "scope": {
+      "occurrence": "Protocolo",
+      "contact": "Contato"
+    },
+    "history": "Histórico",
+    "noHistory": "Nenhuma operação registrada.",
+    "kind": {
+      "policy": "Regra",
+      "hold_placed": "Suspensão",
+      "hold_revoked": "Revogação",
+      "run": "Execução"
+    },
+    "notCovered": "Fora desta política",
+    "categories": {
+      "occurrence_files": {
+        "name": "Documentos do protocolo",
+        "rule": "Conta a partir da conclusão do protocolo. Inclui cópias importadas do Nextcloud (o original continua no Nextcloud)."
+      },
+      "occurrence_invoices": {
+        "name": "Notas fiscais e cupons (anexos)",
+        "rule": "Conta a partir da conclusão do protocolo. Só o arquivo anexado; o registro do documento permanece."
+      },
+      "chat_attachments": {
+        "name": "Anexos do Chat Interno",
+        "rule": "Conta a partir do envio; nas discussões de protocolo, a partir da conclusão do protocolo."
+      },
+      "whatsapp_media": {
+        "name": "Mídias do WhatsApp",
+        "rule": "Conta a partir da mensagem. Só o arquivo guardado pelo WhatC; a mensagem permanece."
+      },
+      "campaign_media": {
+        "name": "Mídia de campanhas (cópia local)",
+        "rule": "Conta a partir da criação da campanha. Não afeta o que a Meta hospeda."
+      }
+    },
+    "out": {
+      "nextcloud_originals": "Originais no Nextcloud: ficam na conta de quem os tem; o WhatC só guarda cópias.",
+      "meta_hosted_media": "Mídias hospedadas pela Meta: não há como excluí-las pelo WhatC.",
+      "ivr_audio": "Áudios de URA: configuração em uso pelos fluxos de chamada.",
+      "call_recordings": "Gravações de chamadas: armazenamento de objetos, precisam de regra própria.",
+      "exports": "Relatórios exportados: não são guardados.",
+      "audit_logs": "Registros de auditoria: nunca são excluídos junto com arquivos; exigem política específica.",
+      "protocol_history": "Histórico e dados do protocolo: não são arquivos."
+    }
+  },
   "occurrenceAttach": {
     "title": "Anexos",
     "attach": "Anexar",

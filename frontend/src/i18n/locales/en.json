@@ -409,6 +409,114 @@
       "skipped": "Not scanned"
     }
   },
+  "retention": {
+    "tab": "Retention",
+    "title": "File retention",
+    "description": "Set how long each kind of file is kept, simulate the impact and suspend deletion for protocols under dispute or legal obligation. Protocol history and the audit trail are not part of this policy.",
+    "engineOff": "Automatic deletion is disabled in this version: no file is deleted. The rules below are for configuring and simulating; what you decide only takes effect once deletion is enabled.",
+    "engineOn": "Automatic deletion is enabled.",
+    "rules": "Rules per category",
+    "rulesHint": "There is no default term: every category starts off, with no term. Terms should be validated by your legal advisors (privacy law, tax and contractual obligations).",
+    "enable": "Enable the policy for {name}",
+    "on": "On",
+    "off": "Off",
+    "months": "Months",
+    "save": "Save",
+    "saved": "Rule saved.",
+    "needTerm": "Enter the term in months before enabling.",
+    "updatedBy": "Changed by {name} on {date}",
+    "simulation": "Simulation",
+    "simulate": "Simulate purge",
+    "simulateHint": "Read-only: nothing is changed, deleted or queued. Uses the term typed in each row, even if not saved yet.",
+    "generatedAt": "Generated {date}",
+    "appliedTerm": "Term applied: {n} months",
+    "assumed": "simulation term, not saved",
+    "noSamples": "No files to show.",
+    "volumeNote": "Volume of the eligible files (measured on disk when the database does not hold the size). An asterisk means a partial measurement.",
+    "col": {
+      "category": "Category",
+      "eligible": "Eligible",
+      "volume": "Volume",
+      "notDue": "Within term",
+      "open": "Protocol open",
+      "held": "On hold",
+      "shared": "Shared",
+      "quarantine": "Quarantine"
+    },
+    "bucket": {
+      "eligible": "Eligible",
+      "held": "Hold",
+      "shared": "Shared reference",
+      "quarantine": "Quarantine",
+      "not_due": "Within term",
+      "open": "Protocol open"
+    },
+    "reason": {
+      "no_policy": "No rule configured",
+      "policy_disabled": "Policy disabled",
+      "no_term": "No term set"
+    },
+    "holds": "Deletion holds",
+    "holdsHint": "While a hold is active, nothing tied to the protocol can be purged or deleted by hand.",
+    "noHolds": "No active holds.",
+    "newHold": "New hold",
+    "newHoldHint": "A justification is required and is recorded with your name and the date.",
+    "protocol": "Protocol number",
+    "reasonLabel": "Justification",
+    "reasonHelp": "At least {n} characters.",
+    "placeHold": "Suspend deletion",
+    "holdPlaced": "Hold placed.",
+    "protocolNotFound": "Protocol not found.",
+    "holdExists": "This protocol already has an active hold.",
+    "revoke": "Revoke",
+    "revokeTitle": "Revoke hold",
+    "holdRevoked": "Hold revoked.",
+    "placedBy": "Placed by {name} on {date}",
+    "scope": {
+      "occurrence": "Protocol",
+      "contact": "Contact"
+    },
+    "history": "History",
+    "noHistory": "No operations recorded.",
+    "kind": {
+      "policy": "Rule",
+      "hold_placed": "Hold",
+      "hold_revoked": "Revocation",
+      "run": "Run"
+    },
+    "notCovered": "Outside this policy",
+    "categories": {
+      "occurrence_files": {
+        "name": "Protocol documents",
+        "rule": "Counted from the protocol closing. Includes copies imported from Nextcloud (the original stays in Nextcloud)."
+      },
+      "occurrence_invoices": {
+        "name": "Invoices and coupons (attachments)",
+        "rule": "Counted from the protocol closing. The attached file only; the document record stays."
+      },
+      "chat_attachments": {
+        "name": "Chat Interno attachments",
+        "rule": "Counted from sending; in protocol discussions, from the protocol closing."
+      },
+      "whatsapp_media": {
+        "name": "WhatsApp media",
+        "rule": "Counted from the message. Only the file WhatC stores; the message stays."
+      },
+      "campaign_media": {
+        "name": "Campaign media (local copy)",
+        "rule": "Counted from campaign creation. Does not affect what Meta hosts."
+      }
+    },
+    "out": {
+      "nextcloud_originals": "Nextcloud originals: they stay in their owner account; WhatC only keeps copies.",
+      "meta_hosted_media": "Media hosted by Meta: WhatC cannot delete it.",
+      "ivr_audio": "IVR audio: configuration in use by call flows.",
+      "call_recordings": "Call recordings: object storage, need their own rule.",
+      "exports": "Exported reports: they are not stored.",
+      "audit_logs": "Audit logs: never deleted together with files; they need a specific policy.",
+      "protocol_history": "Protocol history and data: not files."
+    }
+  },
   "occurrenceAttach": {
     "title": "Attachments",
     "attach": "Attach",

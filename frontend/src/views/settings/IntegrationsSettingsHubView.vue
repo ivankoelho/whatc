@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { SettingsTabHub, type HubTab } from '@/components/shared'
-import { Key, Webhook, Zap, Plug, Brain, Cloud, ShieldCheck } from 'lucide-vue-next'
+import { Key, Webhook, Zap, Plug, Brain, Cloud, ShieldCheck, Archive } from 'lucide-vue-next'
 import AISettingsView from './AISettingsView.vue'
 import APIKeysView from './APIKeysView.vue'
 import WebhooksView from './WebhooksView.vue'
@@ -8,6 +8,7 @@ import CustomActionsView from './CustomActionsView.vue'
 import XProcessIntegrationView from './XProcessIntegrationView.vue'
 import NextcloudSettingsView from './NextcloudSettingsView.vue'
 import AntimalwareSettingsView from './AntimalwareSettingsView.vue'
+import RetentionSettingsView from './RetentionSettingsView.vue'
 
 // IA first: the AI provider is the integration people look for most.
 const tabs: HubTab[] = [
@@ -17,6 +18,7 @@ const tabs: HubTab[] = [
   { value: 'custom-actions', icon: Zap, labelKey: 'nav.customActions', permission: 'custom_actions', component: CustomActionsView },
   { value: 'nextcloud', icon: Cloud, labelKey: 'integrations.nextcloud.tab', permission: 'settings.general', component: NextcloudSettingsView },
   { value: 'antimalware', icon: ShieldCheck, labelKey: 'integrations.antimalware.tab', permission: 'settings.general', component: AntimalwareSettingsView },
+  { value: 'retention', icon: Archive, labelKey: 'retention.tab', permission: 'settings.general', component: RetentionSettingsView },
   { value: 'xprocess', icon: Plug, labelKey: 'nav.xprocessIntegration', permission: 'xprocess_integration', component: XProcessIntegrationView },
 ]
 </script>
