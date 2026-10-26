@@ -10,6 +10,7 @@ import NextcloudDialog from '@/components/team-chat/NextcloudDialog.vue'
 import { occurrenceFilesService, type OccurrenceFileItem } from '@/services/api'
 import { chatErrorCode } from '@/lib/team-chat'
 import { formatDateTime } from '@/lib/utils'
+import { usePendingPoll } from '@/composables/usePendingPoll'
 
 // General documents of the case, apart from the invoice/coupon records. The server decides what
 // each person may do with each file (can_download / can_delete); the buttons only mirror it.
@@ -50,6 +51,8 @@ async function load() {
   }
 }
 onMounted(load)
+// A file still being checked for malware: the list refreshes by itself until it is released.
+usePendingPoll(() => files.value.some(f => f.scan_status === 'pending' || f.scan_status === 'error'), load)
 
 defineExpose({
   canUpload: computed(() => canUpload.value),

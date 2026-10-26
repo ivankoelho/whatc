@@ -2,6 +2,7 @@
 import { ref, watch, onMounted, onUnmounted, nextTick, computed, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { useMediaScan } from '@/composables/useMediaScan'
 import { useContactsStore, type Contact, type Message } from '@/stores/contacts'
 import { useAuthStore } from '@/stores/auth'
 import { useUsersStore } from '@/stores/users'
@@ -82,6 +83,7 @@ import {
   MapPin,
   ExternalLink,
   Loader2,
+  ShieldAlert,
   Zap,
   Ticket,
   ArrowLeft,
@@ -120,6 +122,9 @@ const { t, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const contactsStore = useContactsStore()
+// WhatsApp media that is still being checked for malware: a "verifying" card in its place, and a
+// controlled refresh until the server releases it.
+const { blockedState: mediaBlocked, releasedAt: mediaReleased } = useMediaScan(computed(() => contactsStore.messages))
 const { notifyTyping } = useTypingNotifier()
 const authStore = useAuthStore()
 const usersStore = useUsersStore()
@@ -1742,7 +1747,8 @@ function isMediaMessage(message: Message): boolean {
 function getMediaUrl(message: Message): string {
   if (!message.media_url) return ''
   const basePath = ((window as any).__BASE_PATH__ ?? '').replace(/\/$/, '')
-  return `${basePath}/api/media/${message.id}`
+  const released = mediaReleased[message.id]
+  return `${basePath}/api/media/${message.id}${released ? `?r=${released}` : ''}`
 }
 
 // Every media attachment in the open conversation, in chronological order, that
@@ -2357,8 +2363,18 @@ async function sendMediaMessage() {
                     {{ getReplyPreviewContent(message) }}
                   </p>
                 </div>
+                <!-- Media not cleared by the antimalware scan: its state, nothing about the scanner -->
+                <div
+                  v-if="message.media_url && mediaBlocked(message.id)" class="mb-2 flex items-center gap-2 rounded-lg bg-background/50 px-3 py-2 text-sm"
+                  :class="mediaBlocked(message.id) === 'infected' ? 'text-destructive' : 'text-muted-foreground'"
+                  :data-testid="`media-scan-${message.id}`" :data-scan="mediaBlocked(message.id)"
+                >
+                  <Loader2 v-if="mediaBlocked(message.id) === 'pending'" class="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />
+                  <ShieldAlert v-else class="h-4 w-4 shrink-0" aria-hidden="true" />
+                  <span>{{ t(`fileScan.${mediaBlocked(message.id)}`) }}</span>
+                </div>
                 <!-- Template header media (image/video/document shown above template text) -->
-                <div v-if="message.message_type === 'template' && message.media_url" class="mb-2">
+                <div v-else-if="message.message_type === 'template' && message.media_url" class="mb-2">
                   <img
                     v-if="message.media_mime_type?.startsWith('image/')"
                     :src="getMediaUrl(message)"

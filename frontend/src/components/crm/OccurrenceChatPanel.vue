@@ -9,6 +9,7 @@ import MessageComposer from '@/components/team-chat/MessageComposer.vue'
 import MessageAttachments from '@/components/team-chat/MessageAttachments.vue'
 import { bubbleClass, bubbleMeta, dayLabel, isOwnMessage } from '@/lib/chat-bubbles'
 import { useI18n } from 'vue-i18n'
+import { usePendingPoll } from '@/composables/usePendingPoll'
 import { ArrowDown, MessagesSquare, Lock } from 'lucide-vue-next'
 
 // The case's INTERNAL discussion: colleagues only. It reuses the internal chat
@@ -30,6 +31,11 @@ const endRef = ref<HTMLElement | null>(null)
 
 const panel = computed(() => (channelId.value ? store.panel(channelId.value) : null))
 const messages = computed(() => (panel.value?.messages ?? []).filter(m => m.kind !== 'system'))
+// An attachment still being checked for malware: refresh by itself until it is released.
+usePendingPoll(
+  () => messages.value.some(m => m.attachments?.some(a => a.scan_status === 'pending' || a.scan_status === 'error')),
+  () => (channelId.value ? store.refreshLatest(channelId.value) : undefined)
+)
 const myId = computed(() => auth.user?.id)
 
 async function open() {

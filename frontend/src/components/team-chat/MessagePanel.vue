@@ -13,6 +13,7 @@ import { ErrorState } from '@/components/shared'
 import { Badge } from '@/components/ui/badge'
 import ChannelManagePanel from './ChannelManagePanel.vue'
 import { useInfiniteScroll } from '@/composables/useInfiniteScroll'
+import { usePendingPoll } from '@/composables/usePendingPoll'
 import { useTeamChatStore } from '@/stores/teamChat'
 import { useAuthStore } from '@/stores/auth'
 import { getAvatarGradient, getInitials } from '@/lib/utils'
@@ -39,6 +40,9 @@ const editingBody = ref('')
 const endRef = ref<HTMLElement | null>(null)
 
 const panel = computed(() => store.panel(props.channelId))
+// An attachment still being checked for malware: refresh by itself (controlled polling) until released.
+const hasUnsettledFile = computed(() => panel.value.messages.some(m => m.attachments?.some(a => a.scan_status === 'pending' || a.scan_status === 'error')))
+usePendingPoll(hasUnsettledFile, () => store.refreshLatest(props.channelId))
 const channel = computed(() => store.channelById(props.channelId))
 const isArchived = computed(() => !!channel.value?.archived_at)
 const manageOpen = ref(false)

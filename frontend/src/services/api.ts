@@ -2536,8 +2536,18 @@ export interface AntimalwareStatus {
   configured: boolean
   reachable: boolean
   engine: string
+  signatures_at?: string
+  signatures_age_hours?: number
+  signatures_stale?: boolean
+  performance?: { scans_24h: number; avg_scan_ms: number }
+  backlog?: { pending: number; errors: number; old_unverified: number; old_unverified_bytes: number; pending_bytes: number }
   counts: { source: string; status: FileScanStatus; n: number }[]
   flagged: { id: string; source: string; status: FileScanStatus; signature?: string; last_error?: string; attempts: number; scanned_at?: string; updated_at: string; size_bytes: number }[]
+}
+
+export const mediaScanService = {
+  /** Scan state of WhatsApp media by message id (only those the caller may see are answered). */
+  status: (ids: string[]) => api.get('/media-status', { params: { ids: ids.join(',') } })
 }
 
 export const antimalwareService = {
