@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
@@ -41,6 +41,7 @@ import {
   Copy,
   Trash2,
   MessageCircle,
+  MessagesSquare,
   ChevronDown,
   Download,
 } from 'lucide-vue-next'
@@ -65,6 +66,8 @@ const legacySection: Record<string, string> = {
 function openLegacySection() {
   const aba = route.query.aba
   if (typeof aba !== 'string') return
+  if (aba === 'internal') convTab.value = 'internal'
+  if (aba === 'customer') convTab.value = 'customer'
   const { aba: _drop, ...rest } = route.query
   void router.replace({ query: rest })
   const el = document.getElementById(legacySection[aba] ?? '')
@@ -72,6 +75,13 @@ function openLegacySection() {
   // The customer card loads after the page: scroll again once the layout settles.
   setTimeout(() => el?.scrollIntoView?.({ block: 'start' }), 700)
 }
+
+// Which conversation is showing; the last one used is remembered on this device.
+const CONV_KEY = 'case-conversation-tab'
+const convTab = ref<'customer' | 'internal'>((() => {
+  try { return localStorage.getItem(CONV_KEY) === 'internal' ? 'internal' : 'customer' } catch { return 'customer' }
+})())
+watch(convTab, v => { try { localStorage.setItem(CONV_KEY, v) } catch { /* private window */ } })
 
 const historyOpen = ref(false)
 const exportOpen = ref(false)
@@ -532,10 +542,26 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- 4. The customer (WhatsApp). Never the same place as the internal discussion. -->
-        <!-- Customer and colleagues side by side: two clearly separate conversations, each at readable width. -->
-        <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <section id="case-customer" class="scroll-mt-4 space-y-4">
+        <!-- 4. ONE conversation area with two clearly different destinations: the customer (WhatsApp)
+             and the colleagues (internal). A switch, never both at once, so nothing typed for one can
+             be sent to the other; each tab says who will read it. -->
+        <section id="case-conversation" class="scroll-mt-4 rounded-lg border bg-card" data-testid="case-conversation">
+          <div class="flex border-b" role="tablist" :aria-label="$t('occurrences.convTitle')">
+            <button
+              type="button" role="tab" :aria-selected="convTab === 'customer'" data-testid="conv-tab-customer"
+              class="flex items-center gap-2 border-b-2 px-4 py-3 text-sm transition-colors"
+              :class="convTab === 'customer' ? 'border-emerald-500 font-medium text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'"
+              @click="convTab = 'customer'"
+            ><MessageCircle class="h-4 w-4 text-emerald-600" aria-hidden="true" />{{ $t('occurrences.waTitle') }}</button>
+            <button
+              type="button" role="tab" :aria-selected="convTab === 'internal'" data-testid="conv-tab-internal"
+              class="flex items-center gap-2 border-b-2 px-4 py-3 text-sm transition-colors"
+              :class="convTab === 'internal' ? 'border-sky-500 font-medium text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'"
+              @click="convTab = 'internal'"
+            ><MessagesSquare class="h-4 w-4 text-sky-600" aria-hidden="true" />{{ $t('occurrences.internalChat') }}</button>
+          </div>
+          <div class="p-4 [&_[data-testid=case-whatsapp]]:border-0 [&_[data-testid=case-whatsapp]]:shadow-none [&_[data-testid=occurrence-chat]]:border-0 [&_[data-testid=occurrence-chat]]:shadow-none">
+        <div v-show="convTab === 'customer'" id="case-customer" class="scroll-mt-4 space-y-4">
           <OccurrenceWhatsAppCard :occurrence-id="occurrence.id" @configured="waConfigured = $event" />
           <OccurrenceCommunicationCard :occurrence-id="occurrence.id" />
         <!-- Legacy reply (from the contact's own account): only when the case has no channel account -->
@@ -578,13 +604,14 @@ onUnmounted(() => {
             </Button>
           </CardContent>
         </Card>
-        </section>
-
-        <!-- 5. Colleagues only -->
-        <section id="case-internal" class="flex scroll-mt-4 flex-col">
-          <OccurrenceChatPanel :occurrence-id="occurrence.id" />
-        </section>
         </div>
+
+        <!-- Colleagues only (kept mounted so it keeps receiving messages while the other tab is open) -->
+        <div v-show="convTab === 'internal'" id="case-internal" class="scroll-mt-4">
+          <OccurrenceChatPanel :occurrence-id="occurrence.id" />
+        </div>
+          </div>
+        </section>
       </div>
       </template>
     </DetailPageLayout>

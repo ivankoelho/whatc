@@ -2824,6 +2824,7 @@
       "forbidden": "You do not have permission to export this section.",
       "tooLarge": "The content is too large to export at once."
     },
+    "convTitle": "Case conversations",
     "internalChat": "Internal discussion",
     "secRequest": "Request",
     "secProcess": "Process",

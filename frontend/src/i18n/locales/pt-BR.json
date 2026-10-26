@@ -2813,6 +2813,7 @@
       "forbidden": "Você não tem permissão para exportar esta seção.",
       "tooLarge": "O conteúdo é grande demais para exportar de uma vez."
     },
+    "convTitle": "Conversas do chamado",
     "internalChat": "Discussão interna",
     "secRequest": "Solicitação",
     "secProcess": "Processo",
