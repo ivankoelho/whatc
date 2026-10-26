@@ -121,6 +121,8 @@ type AppConfig struct {
 	// private network. For local development only: otherwise an admin could aim the server
 	// at the internal network.
 	AllowPrivateNextcloud bool `koanf:"allow_private_nextcloud"`
+	// OccurrenceFileMaxMB caps one document of a case (default 15).
+	OccurrenceFileMaxMB int `koanf:"occurrence_file_max_mb"`
 }
 
 type ServerConfig struct {

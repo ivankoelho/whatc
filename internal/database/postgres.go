@@ -158,6 +158,7 @@ func GetMigrationModels() []MigrationModel {
 		{"ChatRead", &models.ChatRead{}},
 		{"ChatMessageReaction", &models.ChatMessageReaction{}},
 		{"ChatPollVote", &models.ChatPollVote{}},
+		{"OccurrenceFile", &models.OccurrenceFile{}},
 		{"NextcloudSettings", &models.NextcloudSettings{}},
 		{"NextcloudCredential", &models.NextcloudCredential{}},
 		{"ChatAttachment", &models.ChatAttachment{}},

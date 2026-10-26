@@ -163,6 +163,7 @@ func runMigrations(db *gorm.DB) error {
 		&models.ChatRead{},
 		&models.ChatMessageReaction{},
 		&models.ChatPollVote{},
+		&models.OccurrenceFile{},
 		&models.NextcloudSettings{},
 		&models.NextcloudCredential{},
 		&models.ChatAttachment{},

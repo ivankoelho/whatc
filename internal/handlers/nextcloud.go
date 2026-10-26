@@ -400,32 +400,42 @@ func (a *App) AttachNextcloudFile(r *fastglue.Request) error {
 	if !valid || p == "/" {
 		return a.sendChatError(r, errNextcloudBadPath, "attach the file")
 	}
-	s, serr := a.nextcloudFor(orgID, userID)
-	if serr != nil {
-		return a.sendChatError(r, serr, "attach the file")
+	data, ferr := a.fetchNextcloudFile(context.Background(), orgID, userID, p, chatMaxFileBytes)
+	if ferr != nil {
+		return a.sendChatError(r, ferr, "attach the file")
 	}
-	resp, derr := a.nextcloudDo(context.Background(), s, http.MethodGet, p, nil, nil)
+	return a.finishChatUpload(r, orgID, userID, ch, data, path.Base(p), false, "")
+}
+
+// fetchNextcloudFile downloads one file of the CALLER's own Nextcloud (their stored credentials),
+// refusing anything larger than max bytes. Errors are the chat's HTTP errors.
+func (a *App) fetchNextcloudFile(ctx context.Context, orgID, userID uuid.UUID, p string, max int) ([]byte, error) {
+	s, err := a.nextcloudFor(orgID, userID)
+	if err != nil {
+		return nil, err
+	}
+	resp, derr := a.nextcloudDo(ctx, s, http.MethodGet, p, nil, nil)
 	if derr != nil {
-		return a.sendChatError(r, errNextcloudUnreachable, "attach the file")
+		return nil, errNextcloudUnreachable
 	}
 	defer func() { _ = resp.Body.Close() }()
 	switch {
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-		return a.sendChatError(r, errNextcloudAuth, "attach the file")
+		return nil, errNextcloudAuth
 	case resp.StatusCode == http.StatusNotFound:
-		return a.sendChatError(r, errNextcloudNotFound, "attach the file")
+		return nil, errNextcloudNotFound
 	case resp.StatusCode != http.StatusOK:
-		return a.sendChatError(r, errNextcloudUnreachable, "attach the file")
+		return nil, errNextcloudUnreachable
 	}
-	if resp.ContentLength > chatMaxFileBytes {
-		return a.sendChatError(r, errChatFileTooLarge, "attach the file")
+	if resp.ContentLength > int64(max) {
+		return nil, errChatFileTooLarge
 	}
-	data, rerr := io.ReadAll(io.LimitReader(resp.Body, chatMaxFileBytes+1))
+	data, rerr := io.ReadAll(io.LimitReader(resp.Body, int64(max)+1))
 	if rerr != nil {
-		return a.sendChatError(r, errNextcloudUnreachable, "attach the file")
+		return nil, errNextcloudUnreachable
 	}
-	if len(data) > chatMaxFileBytes {
-		return a.sendChatError(r, errChatFileTooLarge, "attach the file")
+	if len(data) > max {
+		return nil, errChatFileTooLarge
 	}
-	return a.finishChatUpload(r, orgID, userID, ch, data, path.Base(p), false, "")
+	return data, nil
 }

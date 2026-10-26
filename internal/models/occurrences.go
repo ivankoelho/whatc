@@ -24,6 +24,8 @@ const (
 	OccurrenceEventParticipantRemoved OccurrenceEventType = "participant_removed"
 	OccurrenceEventReopened           OccurrenceEventType = "reopened"
 	OccurrenceEventScopeRegularized   OccurrenceEventType = "scope_regularized"
+	OccurrenceEventFileAdded          OccurrenceEventType = "file_added"
+	OccurrenceEventFileRemoved        OccurrenceEventType = "file_removed"
 	// A customer communication milestone: Content is the notification status.
 	OccurrenceEventCustomerNotice OccurrenceEventType = "customer_notification"
 
@@ -382,3 +384,23 @@ type OccurrenceNotificationAttempt struct {
 }
 
 func (OccurrenceNotificationAttempt) TableName() string { return "occurrence_notification_attempts" }
+
+// OccurrenceFile is a general document of a case (Word, Excel, PDF, image, NF-e XML...), kept
+// apart from the invoice/coupon records. Removing it is a soft delete (the row stays for the
+// audit trail; the stored file is erased). Restricted files can be downloaded only by those who
+// work the case and by whoever sent them; the rest of the people who can open the case see them listed.
+type OccurrenceFile struct {
+	BaseModel
+	OrganizationID uuid.UUID `gorm:"type:uuid;index;not null" json:"organization_id"`
+	OccurrenceID   uuid.UUID `gorm:"type:uuid;index;not null" json:"occurrence_id"`
+	UploadedByID   uuid.UUID `gorm:"type:uuid;not null" json:"uploaded_by_id"`
+	Name           string    `gorm:"size:255;not null" json:"name"`
+	Mime           string    `gorm:"size:100;not null" json:"mime"`
+	Kind           string    `gorm:"size:10;not null" json:"kind"`
+	SizeBytes      int64     `gorm:"not null" json:"size_bytes"`
+	SHA256         string    `gorm:"size:64;index" json:"-"`
+	StoragePath    string    `gorm:"size:400;not null" json:"-"`
+	Restricted     bool      `gorm:"not null" json:"restricted"` // set explicitly on every insert (a gorm default would swallow false)
+}
+
+func (OccurrenceFile) TableName() string { return "occurrence_files" }
