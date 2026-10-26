@@ -955,6 +955,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/occurrences/{id}/reply", app.ReplyToOccurrence)
 	g.GET("/api/occurrences/{id}/documents", app.ListOccurrenceDocuments)
 	g.POST("/api/occurrences/{id}/documents", app.CreateOccurrenceDocument)
+	g.POST("/api/occurrences/{id}/documents/extract", app.ExtractOccurrenceInvoice)
 	g.DELETE("/api/occurrences/{id}/documents/{docId}", app.DeleteOccurrenceDocument)
 	g.POST("/api/occurrences/{id}/documents/{docId}/attachment", app.UploadOccurrenceDocumentAttachment)
 	g.GET("/api/occurrences/{id}/documents/{docId}/attachment", app.ServeOccurrenceDocumentAttachment)
