@@ -52,6 +52,8 @@ func main() {
 		runKnowledge(os.Args[2:])
 	case "contacts":
 		runContacts(os.Args[2:])
+	case "antimalware":
+		runAntimalware(os.Args[2:])
 	case "version":
 		fmt.Printf("Whatomate %s (built %s)\n", Version, BuildTime)
 	case "help", "-h", "--help":

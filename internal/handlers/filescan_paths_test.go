@@ -328,3 +328,48 @@ func TestAntimalwareStatus_ObservabilityAndAccess(t *testing.T) {
 	assert.EqualValues(t, 0, s.Data.Backlog.Errors)
 	assert.EqualValues(t, 0, s.Data.Performance.Scans24h)
 }
+
+// The migration diagnostic is read-only and tells the truth about what has no verdict.
+func TestScanReport_IsReadOnlyAndCountsWhatHasNoVerdict(t *testing.T) {
+	w := newFilesWorld(t)
+	w.run()
+	clean := w.upl(t, w.logPorto, "limpo.pdf", pdfBytes())
+	legacy := w.upl(t, w.logPorto, "antigo.pdf", append(pdfBytes(), 'L'))
+	require.NoError(t, w.app.DB.Where("resource_id = ?", legacy.ID).Delete(&models.FileScan{}).Error) // predates the policy
+	_ = clean
+	// WhatsApp media: its size is only known on disk
+	media := withStorageDir(t, w.app, "images/m.jpg", []byte("\xFF\xD8\xFF\xE0twelve-bytes"))
+	contact := testutil.CreateTestContact(t, w.app.DB, w.logPorto.OrganizationID)
+	require.NoError(t, w.app.DB.Create(&models.Message{BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: w.logPorto.OrganizationID, ContactID: contact.ID,
+		Direction: models.DirectionIncoming, MessageType: models.MessageTypeImage, MediaURL: media, Status: models.MessageStatusDelivered}).Error)
+
+	var before int64
+	w.app.DB.Model(&models.FileScan{}).Count(&before)
+	rep, err := database.BuildScanReport(w.app.DB, w.app.Config.Storage.LocalPath, true)
+	require.NoError(t, err)
+	var after int64
+	w.app.DB.Model(&models.FileScan{}).Count(&after)
+	assert.Equal(t, before, after, "the report writes nothing")
+
+	by := map[string]database.ScanReportLine{}
+	for _, l := range rep.Lines {
+		by[l.Source] = l
+	}
+	of := by[models.ScanSourceOccurrenceFile]
+	assert.GreaterOrEqual(t, of.Total, int64(2))
+	assert.GreaterOrEqual(t, of.Unregistered, int64(1), "the legacy file has no row")
+	assert.GreaterOrEqual(t, of.NoVerdict, int64(1))
+	assert.Positive(t, of.NoVerdictB)
+	mm := by[models.ScanSourceMessageMedia]
+	assert.GreaterOrEqual(t, mm.Total, int64(1))
+	assert.Positive(t, mm.Bytes, "sizes of files not measured in the database come from disk")
+	assert.Equal(t, rep.NoVerdict, of.NoVerdict+by[models.ScanSourceChatAttachment].NoVerdict+by[models.ScanSourceOccurrenceDocument].NoVerdict+mm.NoVerdict+by[models.ScanSourceCampaignMedia].NoVerdict)
+
+	// the arithmetic of the estimate: 1 800 files at 5 per 10 s is one hour; 36 GB at the assumed 10 MB/s is longer
+	e := database.EstimateScan(database.ScanReport{NoVerdict: 1800, NoVerdictB: 1 << 20}, 5, 10*time.Second)
+	assert.Equal(t, time.Hour, e.ByWorker.Round(time.Second))
+	assert.True(t, e.EngineAssumed)
+	e = database.EstimateScan(database.ScanReport{NoVerdict: 10, NoVerdictB: 36 << 30}, 5, 10*time.Second)
+	assert.Greater(t, e.ByEngine, e.ByWorker)
+	assert.Equal(t, e.ByEngine, e.Total, "the slower bound decides")
+}
