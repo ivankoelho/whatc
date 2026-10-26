@@ -157,7 +157,7 @@ function badge(n: number): string {
       <Skeleton v-for="i in 5" :key="i" class="h-9 w-full" />
     </div>
 
-    <ScrollArea v-else class="flex-1">
+    <ScrollArea v-else class="flex-1 [&_[data-reka-scroll-area-viewport]>div]:!block [&_[data-reka-scroll-area-viewport]>div]:!min-w-0">
       <p v-if="term && sections.every(s => s.items.length === 0)" class="px-4 py-8 text-center text-sm text-muted-foreground" data-testid="search-empty">
         {{ searching ? t('teamChat.searching') : t('teamChat.searchNothing') }}
       </p>
