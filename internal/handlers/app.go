@@ -57,6 +57,8 @@ type App struct {
 	Usage *usage.Recorder
 	// Scanner is the antimalware engine (ClamAV). nil = not configured: files stay pending and closed.
 	Scanner antimalware.Scanner
+	// MediaFetcher downloads media from URLs people supply (nil = the safe client of internal/safehttp).
+	MediaFetcher MediaFetcher
 	scanVer scanVersionCache
 	// wg tracks background goroutines for graceful shutdown
 	wg sync.WaitGroup

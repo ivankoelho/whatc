@@ -1,13 +1,13 @@
 package handlers
 
 import (
+	"github.com/shridarpatil/whatomate/internal/safehttp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"maps"
-	"net/http"
 	"net/url"
 	"path"
 	"strings"
@@ -1019,21 +1019,15 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 			// Option 1: Pre-uploaded WhatsApp media ID — use directly (no local preview)
 			headerMediaID = req.HeaderMediaID
 		} else if req.HeaderMediaURL != "" {
-			// Option 2: Download from URL, then upload to WhatsApp
-			resp, err := http.Get(req.HeaderMediaURL)
-			if err != nil {
-				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Failed to download header media from URL", nil, "")
+			// Option 2: Download from the URL the person typed, then upload to WhatsApp. That URL is
+			// untrusted input aimed at this server's network position: it goes through the safe client
+			// (https only, public addresses only, bounded), and the bytes are scanned below before use.
+			fetched, ferr := a.mediaFetcher().Fetch(context.Background(), req.HeaderMediaURL, maxHeaderMediaURLBytes)
+			if ferr != nil {
+				return a.sendMediaFetchError(r, ferr)
 			}
-			defer resp.Body.Close() //nolint:errcheck
-			if resp.StatusCode != http.StatusOK {
-				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, fmt.Sprintf("Header media URL returned status %d", resp.StatusCode), nil, "")
-			}
-			headerMediaData, err = io.ReadAll(resp.Body)
-			if err != nil {
-				a.Log.Error("Failed to read header media from URL", "error", err)
-				return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to read header media from URL", nil, "")
-			}
-			headerMimeType = resp.Header.Get("Content-Type")
+			headerMediaData = fetched.Data
+			headerMimeType = fetched.ContentType
 			if headerMimeType == "" {
 				headerMimeType = "application/octet-stream"
 			}
@@ -1176,4 +1170,33 @@ func (a *App) senderNameForBroadcast(msg *models.Message) string {
 	var name string
 	a.DB.Model(&models.User{}).Where("id = ?", *msg.SentByUserID).Pluck("full_name", &name)
 	return name
+}
+
+// maxHeaderMediaURLBytes bounds a template header downloaded from a URL (WhatsApp's own limit is 16 MB).
+const maxHeaderMediaURLBytes = 16 << 20
+
+// MediaFetcher downloads media from a URL a person supplied. Production uses internal/safehttp.
+type MediaFetcher interface {
+	Fetch(ctx context.Context, rawURL string, maxBytes int64) (*safehttp.Result, error)
+}
+
+func (a *App) mediaFetcher() MediaFetcher {
+	if a.MediaFetcher != nil {
+		return a.MediaFetcher
+	}
+	return safehttp.Default()
+}
+
+// sendMediaFetchError answers without revealing what the server's network looks like: the person
+// learns that the URL cannot be used, not which internal address it pointed at.
+func (a *App) sendMediaFetchError(r *fastglue.Request, err error) error {
+	a.Log.Warn("Remote media download refused or failed", "error", err)
+	switch {
+	case errors.Is(err, safehttp.ErrTooLarge):
+		return r.SendErrorEnvelope(fasthttp.StatusRequestEntityTooLarge, "The media at that URL is too large", nil, "")
+	case errors.Is(err, safehttp.ErrBlockedURL), errors.Is(err, safehttp.ErrBlockedAddress):
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "That media URL is not allowed: use a public https address", nil, "")
+	default:
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Failed to download header media from URL", nil, "")
+	}
 }

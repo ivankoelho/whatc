@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/shridarpatil/whatomate/internal/safehttp"
 	"mime/multipart"
 	"net/textproto"
 	"os"
@@ -425,4 +426,53 @@ func TestMediaScanStatus_FollowsMediaVisibility(t *testing.T) {
 	orole := testutil.CreateTestRoleWithKeys(t, app.DB, other.org.ID, "media-reader", []string{"contacts:read"})
 	foreign := testutil.CreateTestUser(t, app.DB, other.org.ID, testutil.WithRoleID(&orole.ID))
 	assert.Empty(t, ask(foreign, waiting.ID))
+}
+
+type fakeFetcher struct {
+	res   *safehttp.Result
+	err   error
+	calls []string
+}
+
+func (f *fakeFetcher) Fetch(_ context.Context, u string, _ int64) (*safehttp.Result, error) {
+	f.calls = append(f.calls, u)
+	return f.res, f.err
+}
+
+// A template header typed as a URL goes through the safe client, never a raw http.Get; what comes back is
+// scanned before WhatsApp sees it, and refusals say nothing about the server's network.
+func TestTemplateHeaderURL_UsesTheSafeFetcherAndTheScanner(t *testing.T) {
+	w := newPathWorld(t)
+	acct := testutil.CreateTestWhatsAppAccount(t, w.app.DB, w.org.ID)
+	tmpl := testutil.CreateTestTemplate(t, w.app.DB, w.org.ID, acct.Name)
+	require.NoError(t, w.app.DB.Model(tmpl).Update("header_type", "IMAGE").Error)
+	contact := testutil.CreateTestContact(t, w.app.DB, w.org.ID)
+	send := func(url string) (int, string) {
+		req := testutil.NewJSONRequest(t, map[string]any{"contact_id": contact.ID.String(), "template_id": tmpl.ID.String(), "header_media_url": url, "template_params": map[string]string{"1": "Ana"}})
+		testutil.SetAuthContext(req, w.admin.OrganizationID, w.admin.ID)
+		require.NoError(t, w.app.SendTemplateMessage(req))
+		return testutil.GetResponseStatusCode(req), string(testutil.GetResponseBody(req))
+	}
+	ff := &fakeFetcher{}
+	w.app.MediaFetcher = ff
+
+	ff.err = fmt.Errorf("%w: 10.0.0.5", safehttp.ErrBlockedAddress)
+	code, body := send("https://intranet.example/logo.png")
+	assert.Equal(t, fasthttp.StatusBadRequest, code)
+	assert.NotContains(t, body, "10.0.0.5", "the answer does not reveal the internal address")
+	assert.Equal(t, []string{"https://intranet.example/logo.png"}, ff.calls)
+
+	ff.err = safehttp.ErrTooLarge
+	code, _ = send("https://cdn.example/huge.png")
+	assert.Equal(t, fasthttp.StatusRequestEntityTooLarge, code)
+
+	// fetched bytes are still scanned: infected is refused, and with the engine down nothing is forwarded
+	// (the App has no WhatsApp client: forwarding would panic)
+	ff.err, ff.res = nil, &safehttp.Result{Data: eicarJPEG(), ContentType: "image/jpeg"}
+	code, _ = send("https://cdn.example/evil.jpg")
+	assert.Equal(t, fasthttp.StatusUnprocessableEntity, code)
+	scannerOf(w.app).set(func(s *fakeScanner) { s.down = true })
+	ff.res = &safehttp.Result{Data: jpegMagicBytes(), ContentType: "image/jpeg"}
+	code, _ = send("https://cdn.example/ok.jpg")
+	assert.Equal(t, fasthttp.StatusServiceUnavailable, code)
 }

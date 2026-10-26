@@ -1,9 +1,12 @@
 package handlers
 
 import (
+	"net/netip"
+
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/shridarpatil/whatomate/internal/safehttp"
 	"net"
 	"net/url"
 	"strings"
@@ -68,13 +71,14 @@ func SSRFSafeDialer() func(ctx context.Context, network, addr string) (net.Conn,
 		}
 
 		for _, ipStr := range ips {
-			ip := net.ParseIP(ipStr)
-			if ip == nil {
+			ip, perr := netip.ParseAddr(ipStr)
+			if perr != nil {
 				continue
 			}
-			if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
-				ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
-				return nil, fmt.Errorf("connection to private address %s is not allowed", ipStr)
+			// The same address policy as internal/safehttp: also CGNAT, reserved, metadata, IPv4-mapped
+			// and tunnelled IPv6, not just loopback/private.
+			if cerr := safehttp.CheckAddr(ip); cerr != nil {
+				return nil, fmt.Errorf("connection to address %s is not allowed", ipStr)
 			}
 		}
 
