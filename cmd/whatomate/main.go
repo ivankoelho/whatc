@@ -203,6 +203,15 @@ func runServer(args []string) {
 			lo.Fatal("Sales opportunity permissions backfill failed", "error", err)
 		}
 
+		// Same window: supervising cases became its own permission. Grant it to
+		// whoever could (conversations:view_all), THEN narrow the untouched preset.
+		if err := database.BackfillOccurrenceViewAll(db, lo); err != nil {
+			lo.Fatal("Occurrence view_all backfill failed", "error", err)
+		}
+		if err := database.ReconcileSupervisorSACPreset(db, lo); err != nil {
+			lo.Fatal("Supervisor de SAC preset reconcile failed", "error", err)
+		}
+
 		// Same window: xprocess_integration is a brand-new resource, needs its
 		// own guard rather than piggybacking on an existing one.
 		if err := database.BackfillXProcessIntegrationPermission(db, lo); err != nil {
