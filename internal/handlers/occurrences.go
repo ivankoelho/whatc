@@ -977,6 +977,11 @@ func (a *App) DeleteOccurrence(r *fastglue.Request) error {
 		return nil
 	}
 
+	// A legal hold on the protocol (or its contact) forbids deleting it, whoever asks.
+	if a.occurrenceHeld(orgID, occ) {
+		return r.SendErrorEnvelope(fasthttp.StatusLocked, "This protocol is under a legal hold and cannot be deleted", nil, "")
+	}
+
 	snapshot := map[string]any{
 		"protocol_number": occ.ProtocolNumber,
 		"title":           occ.Title,

@@ -431,6 +431,9 @@ func (a *App) DeleteOccurrenceFile(r *fastglue.Request) error {
 	if !a.HasPermission(userID, models.ResourceOccurrences, models.ActionWrite, orgID) || !a.canDeleteOccurrenceFile(userID, acc, f) {
 		return a.sendChatError(r, errOccFileForbid, "remove the file")
 	}
+	if a.occurrenceHeld(orgID, occ) {
+		return r.SendErrorEnvelope(fasthttp.StatusLocked, "This protocol is under a legal hold: its files cannot be removed", nil, "")
+	}
 	txErr := a.DB.Transaction(func(tx *gorm.DB) error {
 		res := tx.Where("id = ?", f.ID).Delete(&models.OccurrenceFile{})
 		if res.Error != nil {

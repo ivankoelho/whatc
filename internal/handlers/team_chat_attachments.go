@@ -594,6 +594,7 @@ func (a *App) CleanupChatAttachments(now time.Time) ChatCleanupResult {
 		var batch []models.ChatAttachment
 		a.DB.Raw(`SELECT a.* FROM chat_attachments a JOIN chat_messages m ON m.id = a.message_id
 			WHERE a.purged_at IS NULL AND m.deleted_at IS NOT NULL AND m.deleted_at < ? AND a.id > ?
+			  AND NOT `+heldChatAttachmentSQL+`
 			ORDER BY a.id LIMIT ?`, deletedCutoff, last, chatCleanupBatch).Scan(&batch)
 		if len(batch) == 0 {
 			break
