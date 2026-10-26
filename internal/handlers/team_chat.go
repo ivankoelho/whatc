@@ -37,6 +37,8 @@ type ChatChannelResponse struct {
 	Name          string                 `json:"name"`
 	TeamID        *uuid.UUID             `json:"team_id,omitempty"`
 	DMUserID      *uuid.UUID             `json:"dm_user_id,omitempty"`
+	// OccurrenceID is set for the discussion of a case (kind "occurrence"): the UI links back to it.
+	OccurrenceID *uuid.UUID `json:"occurrence_id,omitempty"`
 	UnreadCount   int64                  `json:"unread_count"`
 	LastMessageAt *time.Time             `json:"last_message_at,omitempty"`
 	CreatedAt     time.Time              `json:"created_at"`
@@ -265,7 +267,12 @@ func (a *App) ListChatChannels(r *fastglue.Request) error {
 	case len(memberIDs) > 0:
 		q = q.Where("id IN ?", memberIDs)
 	default:
-		return r.SendEnvelope(map[string]any{"channels": []ChatChannelResponse{}})
+		// No team or free channel: the person may still be in case discussions.
+		if string(r.RequestCtx.QueryArgs().Peek("archived")) == "true" {
+			return r.SendEnvelope(map[string]any{"channels": []ChatChannelResponse{}})
+		}
+		return r.SendEnvelope(map[string]any{"channels": a.chatOccurrenceResponses(userID,
+			a.chatOccurrenceChannels(orgID, userID, true, "", chatOccurrenceListLimit))})
 	}
 	if err := q.Find(&channels).Error; err != nil {
 		a.Log.Error("Failed to list chat channels", "error", err)
@@ -393,6 +400,11 @@ func (a *App) ListChatChannels(r *fastglue.Request) error {
 			resp.LastMessageAt = &t
 		}
 		out = append(out, resp)
+	}
+	if !archivedOnly {
+		// The discussions of the cases the person takes part in sit beside their channels.
+		out = append(out, a.chatOccurrenceResponses(userID,
+			a.chatOccurrenceChannels(orgID, userID, true, "", chatOccurrenceListLimit))...)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		li, lj := out[i].LastMessageAt, out[j].LastMessageAt
