@@ -476,3 +476,68 @@ func TestTemplateHeaderURL_UsesTheSafeFetcherAndTheScanner(t *testing.T) {
 	code, _ = send("https://cdn.example/ok.jpg")
 	assert.Equal(t, fasthttp.StatusServiceUnavailable, code)
 }
+
+// Telephony plays only audio with a clean verdict, decided from memory during the call; older files are
+// pre-verified in the background.
+func TestAudioGate_LegacyAudioIsPreVerifiedAndNeverScannedDuringACall(t *testing.T) {
+	w := newPathWorld(t)
+	dir := w.app.Config.Calling.AudioDir
+	uniq := uuid.NewString()[:8] // the shared test database keeps verdicts of other tests: names must be unique
+	put := func(name string, b []byte) string {
+		p := filepath.Join(dir, uniq+"-"+name)
+		require.NoError(t, os.WriteFile(p, b, 0o644))
+		return p
+	}
+	gate := w.app.AudioGate()
+	w.app.Config.Antimalware.BatchSize = 100 // rows of other tests (system-owned) share the queue
+	legacy := put("legacy-greeting.ogg", []byte("OggS-old-greeting"))
+	evil := put("legacy-evil.ogg", append([]byte("OggS"), []byte(eicarTest)...))
+	orgB := newIsoWorld(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "org_"+orgB.org.ID.String()+"_hold_music.ogg"), []byte("OggS-other-org"), 0o644)) // the org id is already unique
+
+	// before any verification: closed, and asking costs nothing (no scan, no I/O)
+	scannerOf(w.app).set(func(s *fakeScanner) { s.delay = 5 * time.Second })
+	began := time.Now()
+	assert.False(t, gate.Approved(legacy))
+	assert.Less(t, time.Since(began), 50*time.Millisecond, "a call never waits for a scan")
+	scannerOf(w.app).set(func(s *fakeScanner) { s.delay = 0 })
+
+	// the engine is down: still closed after the background pass
+	scannerOf(w.app).set(func(s *fakeScanner) { s.down = true })
+	tick(t, w.app, uuid.Nil, orgB.org.ID)
+	assert.False(t, gate.Approved(legacy), "no verdict, no playback")
+	scannerOf(w.app).set(func(s *fakeScanner) { s.down = false })
+
+	// the engine is back: the older file is cleared in the background and joins the gate; the infected one never does
+	tick(t, w.app, uuid.Nil, orgB.org.ID)
+	assert.True(t, gate.Approved(legacy))
+	assert.False(t, gate.Approved(evil))
+	var row models.FileScan
+	// quarantine moved the row's path: find it by its resource id
+	require.NoError(t, w.app.DB.Where("source = ? AND organization_id = ? AND status = ? AND storage_path LIKE ?", models.ScanSourceIVRAudio, uuid.Nil, models.ScanInfected, "quarantine%").First(&row).Error)
+	assert.Equal(t, models.ScanInfected, row.Status)
+	_, err := os.Stat(evil)
+	assert.True(t, os.IsNotExist(err), "the infected audio was moved to quarantine")
+	var orgRow models.FileScan
+	require.NoError(t, w.app.DB.Where("source = ? AND storage_path = ?", models.ScanSourceIVRAudio, "org_"+orgB.org.ID.String()+"_hold_music.ogg").First(&orgRow).Error)
+	assert.Equal(t, orgB.org.ID, orgRow.OrganizationID, "organization audio is registered to its organization")
+
+	// paths that are not plain files of the audio directory are never approved, whatever their name
+	assert.False(t, gate.Approved(filepath.Join(dir, "..", uniq+"-legacy-greeting.ogg")))
+	assert.False(t, gate.Approved(filepath.Join(dir, "sub", uniq+"-legacy-greeting.ogg")))
+	assert.False(t, gate.Approved(filepath.Join(t.TempDir(), uniq+"-legacy-greeting.ogg")))
+
+	// a withdrawn verdict leaves the gate on the next refresh
+	require.NoError(t, w.app.DB.Model(&models.FileScan{}).Where("source = ? AND storage_path = ?", models.ScanSourceIVRAudio, uniq+"-legacy-greeting.ogg").
+		Update("status", models.ScanInfected).Error)
+	gate.Refresh()
+	assert.False(t, gate.Approved(legacy))
+
+	// the editor's download follows the same verdict, for the organization that may see it
+	foreignUser := testutil.CreateTestUser(t, w.app.DB, w.org.ID, testutil.WithRoleID(&testutil.CreateAdminRole(t, w.app.DB, w.org.ID).ID))
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, foreignUser.OrganizationID, foreignUser.ID)
+	testutil.SetPathParam(req, "filename", "org_"+orgB.org.ID.String()+"_hold_music.ogg")
+	require.NoError(t, w.app.ServeIVRAudio(req))
+	assert.Equal(t, fasthttp.StatusLocked, testutil.GetResponseStatusCode(req), "another organization's audio is not opened by name")
+}

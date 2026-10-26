@@ -78,7 +78,12 @@ func (a *App) scanCfg() scanSettings {
 // queued) and reported as pending. The organization must match: another tenant's row never counts.
 func (a *App) fileStatus(orgID uuid.UUID, source string, id uuid.UUID, storagePath string) string {
 	var s models.FileScan
-	err := a.DB.Select("status").Where("organization_id = ? AND source = ? AND resource_id = ?", orgID, source, id).First(&s).Error
+	orgs := []uuid.UUID{orgID}
+	if source == models.ScanSourceIVRAudio {
+		orgs = append(orgs, uuid.Nil) // audio that predates the policy, or came with the deployment, is the system's
+	}
+	err := a.DB.Select("status").Where("organization_id IN ? AND source = ? AND resource_id = ?", orgs, source, id).
+		Order("(organization_id = '" + orgID.String() + "') DESC").First(&s).Error
 	if err == nil {
 		return s.Status
 	}
@@ -215,6 +220,9 @@ func (a *App) recordIngressClean(orgID uuid.UUID, source string, id uuid.UUID, s
 	}).Create(&row).Error
 	if err != nil {
 		a.Log.Error("Could not record a scan verdict", "source", source, "error", err)
+	}
+	if source == models.ScanSourceIVRAudio && err == nil {
+		a.AudioGate().add(filepath.Base(storagePath)) // playable at once: it was scanned before ffmpeg touched it
 	}
 }
 
@@ -462,7 +470,7 @@ func (a *App) recordScanFailure(row models.FileScan, status, why string) {
 // quarantine moves an infected file out of every served path. The row keeps pointing at the new
 // location; the file's own table still names the old path, which no longer exists.
 func (a *App) quarantine(row models.FileScan) {
-	full, err := a.resolveSafeStoragePath(row.StoragePath)
+	full, err := a.scanFilePath(row)
 	if err != nil {
 		return
 	}
@@ -548,6 +556,9 @@ func (a *App) FileScanTick(ctx context.Context) {
 	if _, err := database.RegisterUnscannedFiles(a.DB, 200); err != nil {
 		a.Log.Error("Registering unscanned files failed", "error", err)
 	}
+	// Telephony plays only what is in the gate's set: queue the older audio and refresh the approvals.
+	a.registerAudioDir(100)
+	a.AudioGate().Refresh()
 	if a.Scanner == nil {
 		return
 	}
@@ -559,6 +570,7 @@ func (a *App) FileScanTick(ctx context.Context) {
 	}
 	a.rescanStale(ctx, cfg)
 	a.CheckSignatureAge(ctx)
+	a.AudioGate().Refresh() // what was just cleared (or quarantined) is reflected right away
 }
 
 // claimScans leases up to n due rows so a second worker does not take the same ones.

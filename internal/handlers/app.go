@@ -60,6 +60,9 @@ type App struct {
 	// MediaFetcher downloads media from URLs people supply (nil = the safe client of internal/safehttp).
 	MediaFetcher MediaFetcher
 	scanVer scanVersionCache
+	// audioGate is what telephony asks before playing a file (see audio_gate.go).
+	audioGate     *AudioGate
+	audioGateOnce sync.Once
 	// wg tracks background goroutines for graceful shutdown
 	wg sync.WaitGroup
 }
