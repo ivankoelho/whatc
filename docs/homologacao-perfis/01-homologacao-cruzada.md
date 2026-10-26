@@ -676,29 +676,40 @@ Causa: a sincronização só liga permissões a papéis de sistema que não têm
 
 ## 10. Regressões
 
-- Go: ver seção 11. Frontend: `vue-tsc` limpo; vitest 58 arquivos, 458 testes.
+- Go: ver seção 11 (2001 aprovados no `handlers`, só as 3 falhas preexistentes). Frontend: `vue-tsc` limpo; vitest 58 arquivos, 458 testes.
 - Falhas conhecidas e anteriores (não são regressões): `TestServeLoginBackground_RejectsSymlink`, `TestApp_ServeMedia_RejectsSymlink` (symlink no Windows) e `TestUpdateContactChatbotMessage_SetsTimestampAndResetsReminder`.
 
 
-## 11. Resultado final da suíte Go e pendências
+## 11. Resultado final da suíte Go, frontend e desempenho
 
-**Suíte Go:** 24 pacotes `ok`; o pacote `internal/handlers` (rodado sozinho com `-timeout 40m`, 1250 s) tem **4 falhas**:
+**Go (banco e Redis isolados, `-p 1`, nada mais no mesmo banco e sem o servidor de desenvolvimento no ar):**
 
-| Teste | Natureza |
-|---|---|
-| `TestServeLoginBackground_RejectsSymlink` | conhecida, anterior (symlink no Windows) |
-| `TestApp_ServeMedia_RejectsSymlink` | conhecida, anterior (symlink no Windows) |
-| `TestUpdateContactChatbotMessage_SetsTimestampAndResetsReminder` | conhecida, anterior |
-| `TestPhaseA_Concurrency_NoDeadlockUnderMixedWrites` | **limiar de desempenho** (`total > 100` operações em 2 s num canal livre: observado 32–87). **Não é regressão das correções desta rodada:** reproduz de forma idêntica no commit anterior às correções (`62991ddf`) e o teste só exerce canais livres (a mudança do pool não altera esse caminho). Passou na rodada completa anterior no mesmo ambiente; sensível à carga. Precisa de investigação separada. |
+- 24 pacotes `ok` (rodada completa anterior) e o pacote `internal/handlers` rodado isolado: **2001 testes passam, 3 falham, 4 são ignorados (skip); duração 389 s (6,5 min); nenhuma falha nova.**
+- As 3 falhas são **conhecidas e anteriores a este trabalho**: `TestServeLoginBackground_RejectsSymlink` e `TestApp_ServeMedia_RejectsSymlink` (symlink no Windows) e `TestUpdateContactChatbotMessage_SetsTimestampAndResetsReminder`.
+- Testes mais lentos: `TestHomologation_CrossDepartmentLifecycle` 30,4 s (12 cenários × 17 passos), `TestAgentAnalytics_QueryCountDoesNotGrowWithAgents` 16,3 s, `TestApp_DispatchWebhook_HTTPTimeout` 15,0 s (espera de timeout intencional), `TestPhaseA_AuditFailureRollsEverythingBack` 13,0 s, `TestAttachments_UploadRateLimit_RedisDownFailsOpenAndIsLoggedOnce` 10,7 s. Apenas 5 testes passam de 10 s; nenhum travou. Não é necessário dividir o pacote agora; se o tempo crescer, a divisão natural é unitários / integração de ocorrências / concorrência (`-run` por prefixo), mantendo a suíte completa executável.
+- **Frontend:** `vue-tsc --noEmit` limpo; vitest 58 arquivos, 458 testes aprovados.
 
-O pacote estourou o timeout padrão de 10 min na rodada completa (os testes novos somam tempo); por isso foi rodado isolado com timeout maior.
+**Episódio de desempenho (limitação do ambiente, documentada como tal):** numa rodada anterior o pacote levou ~20 min (e estourou os 10 min padrão na rodada completa) e `TestPhaseA_Concurrency_NoDeadlockUnderMixedWrites` falhou de forma reproduzível (32–87 operações contra o mínimo de 100 em 2 s). Causa identificada por experimento, não por suposição: o **servidor de desenvolvimento que eu mantinha no ar na porta 8081 disputava banco e disco** com os testes (o disco do contêiner é lento: commit de 4 a 10 ms, medido com `pg_test_fsync`). Com o servidor parado o teste passou (8,4 s e 2,9 s) e o pacote inteiro terminou em 6,5 min. A falha também reproduzia no commit anterior às correções, o que a separa do código. Uma tentativa intermediária (`synchronous_commit = off` só no banco de teste) **não** resolveu e foi **desfeita** (`RESET`); a configuração original do banco foi restaurada e a suíte final passou **sem nenhuma modificação** no banco. Isto significa: o código é estável, mas a infraestrutura local é **sensível à disputa por recursos**; suítes de homologação não devem rodar com um servidor concorrente no mesmo Postgres.
 
-**Pendências por gravidade**
+Essa interferência (desempenho do teste) é um problema **distinto** do defeito corrigido de esgotamento do pool (seção 8, item 1), que continua válido: o teste de regressão com pool de 4 conexões falha sem a correção e passa com ela.
 
-- **Alta (impede aprovação de merge):** (1) decidir/investigar `TestPhaseA_Concurrency_NoDeadlockUnderMixedWrites` (ou confirmar flaky no CI); (2) conferir os papéis de sistema de produção e aprovar/rejeitar a migração aditiva de permissões (`02-...md`) **antes de qualquer deploy**; (3) homologação em **dois navegadores simultâneos reais** (só um navegador estava disponível) e, se exigida, a tela de cada uma das 12 combinações.
-- **Média:** veredito *infected* do ClamAV real não demonstrado neste host (Windows Defender remove o EICAR) — repetir em ambiente sem antivírus no host; cenário de três departamentos só em Go (não no navegador); casos encaminhados antes do registro de movimentações usam o evento "encaminhado" como origem.
-- **Baixa:** gráficos de analytics de outras telas além dos corrigidos; o relatório PDF não afirma autenticidade (código de referência só ligado ao log de auditoria); dados de teste criados no banco de desenvolvimento (equipes, usuários colegas, organização estrangeira).
+## 12. Pendências e riscos
 
-## 12. Recomendação sobre prontidão para merge
+**Bloqueantes para merge:** nenhum identificado.
 
-**Não aprovar o merge ainda; a branch está tecnicamente muito perto.** A favor: funcionalidade completa (L1, apoio, PDF, ordenação, datas, prévia), 12 cenários cruzados × 39 verificações aprovados no servidor real com perfis reais, simultaneidade e negativos aprovados, dois defeitos reais (congelamento do pool de conexões e perda do nome da equipe em tempo real) encontrados **justamente pela homologação operacional** e corrigidos com regressão, nenhuma permissão concedida para passar. Contra / pendente: um teste de desempenho do Chat Interno falhando de forma reproduzível no ambiente atual (precisa ser explicado), a decisão sobre a migração de permissões dos papéis de sistema (bloqueia deploy, não o merge em si), e a homologação em dois navegadores reais simultâneos. Critério de encerramento sugerido: explicar ou estabilizar o teste de desempenho, executar o teste dos dois navegadores, e só então reavaliar.
+**Ressalvas registradas (não bloqueiam a avaliação de merge em desenvolvimento):**
+- Só havia um navegador: o teste simultâneo foi feito com sessões HTTP/WebSocket reais independentes e uma tela de navegador observando; não houve vários perfis em navegadores gráficos simultâneos. A prévia de PDF e imagem foi comprovada na tela para os 5 perfis receptores, não para as 12 combinações individualmente.
+- O cenário de três departamentos foi comprovado em Go (handlers), não repetido no navegador.
+- O veredito *infected* do ClamAV real não pôde ser demonstrado neste host (o Windows Defender remove o EICAR; o arquivo fica sem veredito limpo e o download é bloqueado com 423). O veredito *infected* está coberto por testes com scanner falso e pela homologação anterior.
+- Casos encaminhados antes do registro de movimentações usam o evento "encaminhado" como origem da devolução.
+
+**Bloqueantes apenas para produção (não para a avaliação de merge):**
+1. **Migração de permissões dos papéis de sistema** (`02-proposta-migracao-permissoes.md`): o `admin` dos ambientes antigos não recebeu 4 permissões criadas depois do papel. Conferir produção (consultas da seção 4 da proposta), decidir sobre as permissões destrutivas (`*:delete`) e só então executar a migração aditiva revisada, com dry-run, snapshot e auditoria. **Não foi executada.**
+2. Homologação da infraestrutura de produção (pool de conexões e carga do Postgres sob escrita concorrente, ClamAV de produção com veredito *infected* real, WebSocket atrás do proxy) e plano de implantação.
+3. Dimensionar/observar o pool de conexões (25 por padrão) e o disco do banco; a homologação mostrou que ambos aparecem sob concorrência.
+
+## 13. Parecer técnico
+
+**APTO PARA AVALIAÇÃO DE MERGE (em ambiente de desenvolvimento), com as ressalvas da seção 12. NÃO autoriza deploy em produção.**
+
+Evidências: 12 cenários cruzados × 39 verificações (468) aprovados no servidor real com sessões independentes e permissões efetivas; teste simultâneo 18/18; negativos 13/13 (e 13+ em Go); prévia de PDF/imagem nos 5 perfis receptores no navegador; dois defeitos reais encontrados pela homologação e corrigidos com regressão (esgotamento do pool de conexões; perda do nome da equipe nas atualizações em tempo real); Go `handlers` 2001 aprovados e somente as 3 falhas preexistentes; `vue-tsc` limpo e 458 testes de frontend aprovados. Nenhuma permissão foi concedida a perfil algum para fazer um cenário passar.
