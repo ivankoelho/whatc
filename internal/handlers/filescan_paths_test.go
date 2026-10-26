@@ -373,3 +373,56 @@ func TestScanReport_IsReadOnlyAndCountsWhatHasNoVerdict(t *testing.T) {
 	assert.Greater(t, e.ByEngine, e.ByWorker)
 	assert.Equal(t, e.ByEngine, e.Total, "the slower bound decides")
 }
+
+// The conversation screen learns which media are still being checked, with the media's own visibility
+// and without anything about the scanner.
+func TestMediaScanStatus_FollowsMediaVisibility(t *testing.T) {
+	app := newTestApp(t)
+	dropLeftoverMedia(t, app)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "media-reader", []string{"contacts:read"})
+	reader := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	mk := func(rel string, b []byte) *models.Message {
+		p := withStorageDir(t, app, rel, b)
+		m := &models.Message{BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: org.ID, ContactID: contact.ID,
+			Direction: models.DirectionIncoming, MessageType: models.MessageTypeImage, MediaURL: p, Status: models.MessageStatusDelivered}
+		require.NoError(t, app.DB.Create(m).Error)
+		return m
+	}
+	waiting := mk("images/a.jpg", []byte("\xFF\xD8\xFF\xE0a"))
+	text := &models.Message{BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: org.ID, ContactID: contact.ID,
+		Direction: models.DirectionIncoming, MessageType: models.MessageTypeText, Status: models.MessageStatusDelivered}
+	require.NoError(t, app.DB.Create(text).Error)
+
+	ask := func(u *models.User, ids ...uuid.UUID) map[string]string {
+		strs := ""
+		for i, id := range ids {
+			if i > 0 {
+				strs += ","
+			}
+			strs += id.String()
+		}
+		req := testutil.NewGETRequest(t)
+		req.RequestCtx.QueryArgs().Parse("ids=" + strs)
+		testutil.SetAuthContext(req, u.OrganizationID, u.ID)
+		require.NoError(t, app.MediaScanStatus(req))
+		var env struct {
+			Data struct {
+				Statuses map[string]string `json:"statuses"`
+			} `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &env))
+		return env.Data.Statuses
+	}
+	got := ask(reader, waiting.ID, text.ID, uuid.New())
+	assert.Equal(t, map[string]string{waiting.ID.String(): models.ScanPending}, got, "no row yet is pending; non-media and unknown ids are absent")
+	tick(t, app, org.ID)
+	assert.Equal(t, models.ScanClean, ask(reader, waiting.ID)[waiting.ID.String()])
+
+	// another organization sees nothing of it
+	other := newIsoWorld(t)
+	orole := testutil.CreateTestRoleWithKeys(t, app.DB, other.org.ID, "media-reader", []string{"contacts:read"})
+	foreign := testutil.CreateTestUser(t, app.DB, other.org.ID, testutil.WithRoleID(&orole.ID))
+	assert.Empty(t, ask(foreign, waiting.ID))
+}

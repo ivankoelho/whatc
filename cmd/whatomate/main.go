@@ -1069,6 +1069,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.PUT("/api/occurrence-sla-policies/{priority}", app.UpsertOccurrenceSLAPolicy)
 
 	// Media (serves media files for messages, auth-protected)
+	g.GET("/api/media-status", app.MediaScanStatus)
 	g.GET("/api/media/{message_id}", app.ServeMedia)
 
 	// Templates

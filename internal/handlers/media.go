@@ -181,6 +181,76 @@ func (a *App) DownloadAndSaveMedia(ctx context.Context, mediaID string, mimeType
 	return relativePath, nil
 }
 
+// canViewMessageMedia: access to a conversation's media is governed by the same visibility scope as
+// the conversation itself — this check always runs, regardless of contacts:read, so a contacts:read
+// holder cannot use it to bypass strict conversation visibility. With the flag off (or for a
+// contacts:read holder when the flag is off), scopeVisibleConversations already returns the query
+// unchanged, so behavior there is unaffected. Shared by ServeMedia and MediaScanStatus.
+func (a *App) canViewMessageMedia(orgID, userID uuid.UUID, message *models.Message) bool {
+	// Unscoped: messages survive contact soft-deletion, so a soft-deleted contact must still resolve
+	// here to match the flag-off behaviour (which never scoped this lookup by deleted_at at all).
+	var contact models.Contact
+	q := a.scopeVisibleConversations(a.DB.Unscoped().Where("id = ? AND organization_id = ?", message.ContactID, orgID), userID, orgID)
+	if err := q.First(&contact).Error; err == nil {
+		return true
+	}
+	// Not owner / not directly assigned — check team membership via an active, UNASSIGNED
+	// (agent_id IS NULL) team-queue transfer. An active transfer with BOTH team_id and agent_id set is
+	// agent-assigned — per authorizeConversation/scopeVisibleConversations that conversation is
+	// governed by the agent alone, so other team members must not match here (that would grant media
+	// access the visibility rule denies).
+	var transfer models.AgentTransfer
+	if err := a.DB.Where("contact_id = ? AND organization_id = ? AND status = ? AND team_id IS NOT NULL AND agent_id IS NULL",
+		message.ContactID, orgID, models.TransferStatusActive).First(&transfer).Error; err != nil {
+		return false
+	}
+	var count int64
+	a.DB.Model(&models.TeamMember{}).Where("team_id = ? AND user_id = ?", transfer.TeamID, userID).Count(&count)
+	return count > 0
+}
+
+// MediaScanStatus tells the conversation screen which of its media are still being checked, so it can
+// show "verifying" and refresh by itself. Same visibility as the media: ids the caller cannot see are
+// simply absent; nothing about the scanner is revealed, only the file's own state.
+func (a *App) MediaScanStatus(r *fastglue.Request) error {
+	orgID, userID, err := a.getOrgAndUserID(r)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+	var ids []uuid.UUID
+	for _, s := range strings.Split(string(r.RequestCtx.QueryArgs().Peek("ids")), ",") {
+		if id, perr := uuid.Parse(strings.TrimSpace(s)); perr == nil {
+			ids = append(ids, id)
+		}
+		if len(ids) == 100 {
+			break
+		}
+	}
+	out := map[string]string{}
+	if len(ids) == 0 {
+		return r.SendEnvelope(map[string]any{"statuses": out})
+	}
+	var msgs []models.Message
+	a.DB.Where("organization_id = ? AND id IN ? AND COALESCE(media_url,'') <> ''", orgID, ids).Find(&msgs)
+	visible := make([]uuid.UUID, 0, len(msgs))
+	seen := map[uuid.UUID]bool{} // visibility is per contact, not per message
+	for i := range msgs {
+		ok, cached := seen[msgs[i].ContactID]
+		if !cached {
+			ok = a.canViewMessageMedia(orgID, userID, &msgs[i])
+			seen[msgs[i].ContactID] = ok
+		}
+		if ok {
+			visible = append(visible, msgs[i].ID)
+		}
+	}
+	statuses := a.scanStatuses(orgID, models.ScanSourceMessageMedia, visible)
+	for _, id := range visible {
+		out[id.String()] = scanStatusOf(statuses, id)
+	}
+	return r.SendEnvelope(map[string]any{"statuses": out})
+}
+
 // ServeMedia serves media files from local storage
 // Only authorized users who have access to the message can view the media
 func (a *App) ServeMedia(r *fastglue.Request) error {
@@ -203,34 +273,8 @@ func (a *App) ServeMedia(r *fastglue.Request) error {
 		return nil
 	}
 
-	// Access to a conversation's media is governed by the same visibility scope
-	// as the conversation itself — this check always runs, regardless of
-	// contacts:read, so a contacts:read holder cannot use this endpoint to
-	// bypass strict conversation visibility. With the flag off (or for a
-	// contacts:read holder when the flag is off), scopeVisibleConversations
-	// already returns the query unchanged, so behavior there is unaffected.
-	var contact models.Contact
-	// Unscoped: messages survive contact soft-deletion, so a soft-deleted
-	// contact must still resolve here to match the flag-off behaviour (which
-	// never scoped this lookup by deleted_at at all).
-	q := a.scopeVisibleConversations(a.DB.Unscoped().Where("id = ? AND organization_id = ?", message.ContactID, orgID), userID, orgID)
-	if err := q.First(&contact).Error; err != nil {
-		// Not owner / not directly assigned — check team membership via an
-		// active, UNASSIGNED (agent_id IS NULL) team-queue transfer. An active
-		// transfer with BOTH team_id and agent_id set is agent-assigned — per
-		// authorizeConversation/scopeVisibleConversations that conversation is
-		// governed by the agent alone, so other team members must not match
-		// here (that would grant media access the visibility rule denies).
-		var transfer models.AgentTransfer
-		if err := a.DB.Where("contact_id = ? AND organization_id = ? AND status = ? AND team_id IS NOT NULL AND agent_id IS NULL",
-			message.ContactID, orgID, models.TransferStatusActive).First(&transfer).Error; err != nil {
-			return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Access denied", nil, "")
-		}
-		var count int64
-		a.DB.Model(&models.TeamMember{}).Where("team_id = ? AND user_id = ?", transfer.TeamID, userID).Count(&count)
-		if count == 0 {
-			return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Access denied", nil, "")
-		}
+	if !a.canViewMessageMedia(orgID, userID, message) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Access denied", nil, "")
 	}
 
 	// Check if message has media
