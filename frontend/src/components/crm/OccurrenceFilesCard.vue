@@ -149,6 +149,9 @@ const href = (f: OccurrenceFileItem, inline = false) => occurrenceFilesService.u
               <Lock v-if="f.restricted" class="h-3 w-3 shrink-0 text-muted-foreground" :title="t('occurrenceFiles.restricted')" :aria-label="t('occurrenceFiles.restricted')" />
             </p>
             <p class="truncate text-xs text-muted-foreground">{{ sizeLabel(f.size_bytes) }} · {{ f.uploaded_by_name }} · {{ formatDateTime(f.created_at) }}</p>
+            <p v-if="f.scan_status && f.scan_status !== 'clean'" class="text-xs" :class="f.scan_status === 'infected' ? 'font-medium text-destructive' : 'text-amber-600'" :data-testid="`file-scan-${f.id}`" :data-scan="f.scan_status">
+              {{ t(`fileScan.${f.scan_status}`) }}
+            </p>
           </div>
           <a v-if="f.can_preview" :href="href(f, true)" target="_blank" rel="noopener noreferrer" class="rounded p-1.5 hover:bg-muted" :aria-label="t('occurrenceFiles.preview')" :title="t('occurrenceFiles.preview')">
             <Eye class="h-4 w-4" aria-hidden="true" />
@@ -156,7 +159,7 @@ const href = (f: OccurrenceFileItem, inline = false) => occurrenceFilesService.u
           <a v-if="f.can_download" :href="href(f)" class="rounded p-1.5 hover:bg-muted" :aria-label="t('occurrenceFiles.download')" :title="t('occurrenceFiles.download')" :data-testid="`file-download-${f.id}`">
             <Download class="h-4 w-4" aria-hidden="true" />
           </a>
-          <span v-else class="text-xs text-muted-foreground">{{ t('occurrenceFiles.noAccess') }}</span>
+          <span v-else-if="!f.scan_status || f.scan_status === 'clean'" class="text-xs text-muted-foreground">{{ t('occurrenceFiles.noAccess') }}</span>
           <button v-if="f.can_delete" type="button" class="rounded p-1.5 text-destructive hover:bg-muted" :aria-label="t('common.delete')" :title="t('common.delete')" :data-testid="`file-delete-${f.id}`" @click="toDelete = f">
             <Trash2 class="h-4 w-4" aria-hidden="true" />
           </button>

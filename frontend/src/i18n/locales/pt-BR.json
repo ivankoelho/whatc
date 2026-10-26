@@ -358,6 +358,28 @@
     "ariaToggleAvailability": "Alternar status de disponibilidade"
   },
   "integrations": {
+    "antimalware": {
+      "tab": "Antimalware",
+      "title": "Antimalware (ClamAV)",
+      "description": "Todo arquivo enviado ou recebido é verificado antes de poder ser aberto. Arquivos em verificação, com falha ou infectados não podem ser baixados, visualizados nem exportados.",
+      "online": "Mecanismo de verificação ativo",
+      "offline": "Mecanismo de verificação inacessível",
+      "notConfigured": "Mecanismo de verificação não configurado",
+      "failClosed": "Enquanto isso, nenhum arquivo novo é liberado: eles ficam em verificação e são conferidos assim que o mecanismo voltar.",
+      "kind": "Tipo de arquivo",
+      "total": "Total",
+      "attention": "Precisam de atenção",
+      "refresh": "Atualizar",
+      "retry": "Reprocessar {n} com falha",
+      "queued": "{n} arquivo(s) voltaram para a fila.",
+      "migrationHint": "Arquivos que já existiam antes desta política ficam em verificação e só voltam a abrir depois de verificados; a varredura é gradual. Use estes números para estimar a janela de migração.",
+      "sources": {
+        "occurrence_file": "Documentos do protocolo",
+        "chat_attachment": "Anexos do Chat Interno",
+        "occurrence_document": "Anexos de nota/cupom",
+        "message_media": "Mídias do WhatsApp"
+      }
+    },
     "nextcloud": {
       "tab": "Nextcloud",
       "title": "Nextcloud",
@@ -365,6 +387,19 @@
       "saved": "Endereço do Nextcloud salvo.",
       "notConfigured": "Ainda não configurado. Use o endereço https do servidor.",
       "changeWarning": "Trocar o endereço desconecta todas as pessoas, que precisarão conectar de novo."
+    }
+  },
+  "fileScan": {
+    "pending": "Verificando segurança do arquivo…",
+    "error": "Verificação de segurança pendente: tentaremos de novo",
+    "infected": "Bloqueado: malware detectado",
+    "skipped": "Arquivo não verificado: não pode ser aberto",
+    "state": {
+      "pending": "Em verificação",
+      "clean": "Liberados",
+      "error": "Com falha",
+      "infected": "Infectados",
+      "skipped": "Não verificados"
     }
   },
   "occurrenceAttach": {
@@ -4404,6 +4439,7 @@
         "no_access_key": "Não foi encontrada uma chave de acesso válida no PDF.",
         "items_not_read": "Os produtos não são lidos de PDF: informe-os manualmente.",
         "not_an_nfe": "O XML não parece uma NF-e.",
+        "antimalware_unavailable": "O arquivo não pôde ser verificado contra malware agora, por isso não foi lido: preencha manualmente.",
         "pdf_reader_unavailable": "O servidor não tem leitor de PDF instalado: preencha manualmente.",
         "scanned_needs_ocr": "Imagem ou PDF digitalizado precisa de OCR, que não está instalado: preencha manualmente."
       }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
-import { Download, FileText } from 'lucide-vue-next'
+import { Download, FileText, ShieldAlert, ShieldCheck } from 'lucide-vue-next'
 import { formatBytes, formatDuration, teamChatAttachmentUrl } from '@/lib/team-chat'
 import type { TeamChatAttachment } from '@/services/api'
 
@@ -18,8 +18,22 @@ function onPlay(e: Event) {
 <template>
   <div class="mt-1 flex flex-col gap-1.5" data-testid="attachments-list">
     <template v-for="a in attachments" :key="a.id">
+      <!-- Not cleared by the antimalware scan: nothing is loaded or offered, only the state. -->
+      <div
+        v-if="a.scan_status && a.scan_status !== 'clean'" :data-testid="`attachment-${a.id}`" :data-scan="a.scan_status"
+        class="flex w-full max-w-xs items-center gap-2 rounded-md border border-dashed px-2 py-1.5 text-xs"
+        :class="a.scan_status === 'infected' ? 'border-destructive/50 text-destructive' : 'text-muted-foreground'"
+      >
+        <ShieldAlert v-if="a.scan_status === 'infected'" class="h-4 w-4 shrink-0" aria-hidden="true" />
+        <ShieldCheck v-else class="h-4 w-4 shrink-0" aria-hidden="true" />
+        <span class="min-w-0 flex-1">
+          <span class="block truncate font-medium">{{ a.name }}</span>
+          <span>{{ t(`fileScan.${a.scan_status}`) }}</span>
+        </span>
+      </div>
+
       <a
-        v-if="a.kind === 'image'" :href="teamChatAttachmentUrl(a.id)" target="_blank" rel="noopener noreferrer"
+        v-else-if="a.kind === 'image'" :href="teamChatAttachmentUrl(a.id)" target="_blank" rel="noopener noreferrer"
         class="block w-fit" :data-testid="`attachment-${a.id}`" :aria-label="t('teamChat.attachments.openImage', { name: a.name })"
       >
         <img

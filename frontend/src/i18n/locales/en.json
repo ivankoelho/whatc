@@ -358,6 +358,28 @@
     "ariaToggleAvailability": "Toggle availability status"
   },
   "integrations": {
+    "antimalware": {
+      "tab": "Antimalware",
+      "title": "Antimalware (ClamAV)",
+      "description": "Every uploaded or received file is scanned before it can be opened. Files being scanned, failed or infected cannot be downloaded, previewed or exported.",
+      "online": "Scanning engine online",
+      "offline": "Scanning engine unreachable",
+      "notConfigured": "Scanning engine not configured",
+      "failClosed": "Meanwhile no new file is released: they wait in scanning and are checked as soon as the engine is back.",
+      "kind": "Kind of file",
+      "total": "Total",
+      "attention": "Need attention",
+      "refresh": "Refresh",
+      "retry": "Retry {n} failed",
+      "queued": "{n} file(s) queued again.",
+      "migrationHint": "Files that existed before this policy stay in scanning and open again only once scanned; the scan is gradual. Use these numbers to estimate the migration window.",
+      "sources": {
+        "occurrence_file": "Case documents",
+        "chat_attachment": "Chat Interno attachments",
+        "occurrence_document": "Invoice/coupon attachments",
+        "message_media": "WhatsApp media"
+      }
+    },
     "nextcloud": {
       "tab": "Nextcloud",
       "title": "Nextcloud",
@@ -365,6 +387,19 @@
       "saved": "Nextcloud address saved.",
       "notConfigured": "Not set up yet. Use the https address of the server.",
       "changeWarning": "Changing the address disconnects everybody, who will need to connect again."
+    }
+  },
+  "fileScan": {
+    "pending": "Checking the file for malware…",
+    "error": "Security check pending: it will be retried",
+    "infected": "Blocked: malware detected",
+    "skipped": "File not scanned: it cannot be opened",
+    "state": {
+      "pending": "Scanning",
+      "clean": "Cleared",
+      "error": "Failed",
+      "infected": "Infected",
+      "skipped": "Not scanned"
     }
   },
   "occurrenceAttach": {
@@ -4415,6 +4450,7 @@
         "no_access_key": "No valid access key was found in the PDF.",
         "items_not_read": "Products are not read from PDFs: enter them by hand.",
         "not_an_nfe": "The XML does not look like an NF-e.",
+        "antimalware_unavailable": "The file could not be scanned for malware right now, so it was not read: fill the form by hand.",
         "pdf_reader_unavailable": "The server has no PDF reader installed: fill the form by hand.",
         "scanned_needs_ocr": "Images and scanned PDFs need OCR, which is not installed: fill the form by hand."
       }

@@ -1191,8 +1191,12 @@ export const nextcloudService = {
   files: (path: string) => api.get<{ path: string; entries: NextcloudEntry[] }>('/integrations/nextcloud/files', { params: { path } })
 }
 
+/** Antimalware verdict of a stored file: only "clean" can be opened. */
+export type FileScanStatus = 'pending' | 'clean' | 'infected' | 'error' | 'skipped'
+
 export interface TeamChatAttachment {
   id: string
+  scan_status?: FileScanStatus
   kind: 'image' | 'audio' | 'file'
   name: string
   mime: string
@@ -2501,6 +2505,7 @@ export interface OccurrenceFileItem {
   can_download: boolean
   can_delete: boolean
   can_preview: boolean
+  scan_status?: FileScanStatus
 }
 
 export const occurrenceFilesService = {
@@ -2525,4 +2530,17 @@ export const occurrenceExportService = {
   // The file comes back as the response body; the caller saves it.
   run: (occurrenceId: string, sections: string[], format: 'pdf' | 'csv' | 'zip') =>
     api.post<Blob>(`/occurrences/${occurrenceId}/export`, { sections, format }, { responseType: 'blob' }),
+}
+
+export interface AntimalwareStatus {
+  configured: boolean
+  reachable: boolean
+  engine: string
+  counts: { source: string; status: FileScanStatus; n: number }[]
+  flagged: { id: string; source: string; status: FileScanStatus; signature?: string; last_error?: string; attempts: number; scanned_at?: string; updated_at: string; size_bytes: number }[]
+}
+
+export const antimalwareService = {
+  status: () => api.get('/integrations/antimalware'),
+  retry: () => api.post('/integrations/antimalware/retry')
 }
