@@ -197,6 +197,11 @@ func runMigrations(db *gorm.DB) error {
 // Uses TRUNCATE CASCADE to handle foreign key constraints properly.
 func cleanupTables(db *gorm.DB) {
 	tables := []string{
+		// Antimalware verdicts
+		"file_scans",
+		"occurrence_files",
+		"chat_attachments",
+		"occurrence_documents",
 		// Chat interno
 		"chat_reads",
 		"chat_messages",
