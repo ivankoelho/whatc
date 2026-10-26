@@ -73,19 +73,24 @@ func validNextcloudBase(raw string, allowPrivate bool) (string, bool) {
 		return "", false
 	}
 	if !allowPrivate {
-		host := u.Hostname()
-		ips, lerr := net.LookupIP(host)
+		ips, lerr := net.LookupIP(u.Hostname())
 		if lerr != nil || len(ips) == 0 {
 			return "", false
 		}
 		for _, ip := range ips {
-			if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() || ip.IsMulticast() {
+			if blockedNextcloudIP(ip) {
 				return "", false
 			}
 		}
 	}
 	u.Path = strings.TrimRight(u.Path, "/")
 	return u.String(), true
+}
+
+// blockedNextcloudIP: addresses an administrator-supplied server must never resolve to.
+func blockedNextcloudIP(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+		ip.IsUnspecified() || ip.IsMulticast()
 }
 
 // cleanNextcloudPath normalizes a user path to "/a/b" with no traversal.
@@ -104,8 +109,31 @@ func cleanNextcloudPath(p string) (string, bool) {
 
 func (a *App) nextcloudClient(base string) *http.Client {
 	baseURL, _ := url.Parse(base)
+	transport := &http.Transport{Proxy: nil}
+	if !a.Config.App.AllowPrivateNextcloud {
+		// The address was checked when it was saved, but a name can later resolve somewhere
+		// else (DNS rebinding): check again at connection time, on the address actually dialed.
+		dialer := &net.Dialer{Timeout: 10 * time.Second}
+		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, err
+			}
+			ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+			if err != nil || len(ips) == 0 {
+				return nil, errNextcloudBadURL
+			}
+			for _, ia := range ips {
+				if blockedNextcloudIP(ia.IP) {
+					return nil, errNextcloudBadURL
+				}
+			}
+			return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
+		}
+	}
 	return &http.Client{
-		Timeout: nextcloudTimeout,
+		Transport: transport,
+		Timeout:   nextcloudTimeout,
 		// Never follow a redirect to another host: credentials would go with it.
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if baseURL == nil || req.URL.Host != baseURL.Host || len(via) > 3 {

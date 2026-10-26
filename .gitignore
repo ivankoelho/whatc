@@ -63,3 +63,6 @@ test-results/
 
 # Docker 
 docker/.env
+
+# test artifacts: chat attachments written by tests when storage.local_path is empty
+internal/handlers/media/

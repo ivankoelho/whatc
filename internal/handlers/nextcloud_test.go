@@ -57,6 +57,7 @@ func fakeNextcloud(t *testing.T, file []byte) *httptest.Server {
 func TestNextcloud_SetupConnectBrowseAndAttach(t *testing.T) {
 	app := newTestApp(t)
 	app.Config.App.AllowPrivateNextcloud = true
+	app.Config.Storage.LocalPath = t.TempDir() // attachments must not land in the source tree
 	srv := fakeNextcloud(t, tinyPNG(t))
 
 	org := testutil.CreateTestOrganization(t, app.DB)
@@ -131,6 +132,12 @@ func TestNextcloud_SetupConnectBrowseAndAttach(t *testing.T) {
 	fu := chatUser(t, app, foreign.org.ID, chatUserKeys)
 	_, raw = chatDo(t, app.GetNextcloudStatus, foreign.org.ID, fu.ID, nil, nil, nil)
 	assert.Contains(t, string(raw), `"configured":false`)
+
+	// Production mode: the connection itself refuses a local address, whatever the saved URL says.
+	app.Config.App.AllowPrivateNextcloud = false
+	code, _ = chatDo(t, app.ListNextcloudFiles, org.ID, user.ID, nil, nil, nil)
+	assert.Equal(t, fasthttp.StatusBadGateway, code, "dial-time check blocks loopback")
+	app.Config.App.AllowPrivateNextcloud = true
 
 	// Disconnecting forgets the password.
 	code, _ = chatDo(t, app.DisconnectNextcloud, org.ID, user.ID, nil, nil, nil)
