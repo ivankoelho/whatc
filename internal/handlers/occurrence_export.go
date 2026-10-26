@@ -75,6 +75,29 @@ type exportTable struct {
 	rows   [][]string
 }
 
+// Names for people reading the report (the screens translate the same codes).
+var exportEventLabels = map[string]string{
+	"opened": "Ocorrência aberta", "note": "Nota interna", "reply": "Resposta ao cliente", "stage_change": "Mudança de etapa",
+	"assignment": "Atribuição", "protocol_sent": "Protocolo enviado", "closed": "Ocorrência encerrada", "forwarded": "Encaminhado para uma equipe",
+	"participant_added": "Participante adicionado", "participant_removed": "Participante removido", "reopened": "Reaberto",
+	"scope_regularized": "Escopo regularizado", "customer_notification": "Comunicação com o cliente", "process_message_used": "Mensagem do processo usada",
+	"file_added": "Documento anexado", "file_removed": "Documento removido",
+}
+
+var exportNoticeLabels = map[string]string{
+	"prepared": "preparada", "pending": "na fila", "processing": "enviando", "accepted": "aceita pelo provedor", "delivered": "entregue",
+	"read": "lida", "failed": "falhou", "uncertain": "resultado incerto", "cancelled": "cancelada", "skipped": "não enviada",
+}
+
+var exportStateLabels = map[string]string{"new": "Novo", "in_progress": "Em andamento", "awaiting_customer": "Aguardando cliente", "done": "Concluído"}
+
+func label(m map[string]string, k string) string {
+	if v, ok := m[k]; ok {
+		return v
+	}
+	return k
+}
+
 func tsv(t time.Time) string { return t.Local().Format("02/01/2006 15:04") }
 
 // ExportOccurrence builds the report.
@@ -191,7 +214,7 @@ func (a *App) ExportOccurrence(r *fastglue.Request) error {
 		var buf bytes.Buffer
 		zw := zip.NewWriter(&buf)
 		put := func(name string, data []byte) {
-			if w, e := zw.Create(name); e == nil {
+			if w, e := zw.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Deflate, Modified: time.Now()}); e == nil {
 				_, _ = w.Write(data)
 			}
 		}
@@ -280,7 +303,10 @@ func (a *App) exportHistory(orgID, userID uuid.UUID, occ *models.Occurrence, acc
 		if e.CreatedBy != nil {
 			author = e.CreatedBy.FullName
 		}
-		t.rows = append(t.rows, []string{tsv(e.CreatedAt), string(e.Type), author, content})
+		if e.Type == models.OccurrenceEventCustomerNotice {
+			content = label(exportNoticeLabels, content)
+		}
+		t.rows = append(t.rows, []string{tsv(e.CreatedAt), label(exportEventLabels, string(e.Type)), author, content})
 	}
 	return t, true
 }
@@ -360,7 +386,7 @@ func (a *App) exportPDF(occ *models.Occurrence, team string, want map[string]boo
 			return ""
 		}())
 		d.kv("Etapa", stage)
-		d.kv("Estado geral", string(occ.GeneralState))
+		d.kv("Estado geral", label(exportStateLabels, string(occ.GeneralState)))
 		d.kv("Prioridade", string(occ.Priority))
 		if occ.Unit != nil {
 			d.kv("Unidade/Loja", occ.Unit.Name)
