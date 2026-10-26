@@ -362,7 +362,7 @@ onUnmounted(() => {
       :not-found-title="$t('occurrences.notFound')"
     >
       <template #actions>
-        <div v-if="occurrence" class="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+        <div v-if="occurrence" class="flex w-full flex-wrap items-center gap-2 lg:w-auto">
           <Select :model-value="occurrence.stage_id" :disabled="!!occurrence.can && !occurrence.can.change_status && !occurrence.can.resolve" @update:model-value="handleStageChange($event as string)">
             <SelectTrigger class="w-48">
               <SelectValue :placeholder="$t('occurrences.selectStage')" />
