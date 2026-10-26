@@ -105,6 +105,7 @@ func (a *App) chatMessageResponses(viewerID uuid.UUID, msgs []models.ChatMessage
 	// Files of these messages and of the quoted ones: one query for both.
 	fileOwners := append(append([]uuid.UUID{}, msgIDs...), parentIDs...)
 	files := a.chatAttachmentsFor(fileOwners)
+	fileScans := a.chatScanStatuses(files)
 
 	type agg struct {
 		order []string
@@ -139,7 +140,7 @@ func (a *App) chatMessageResponses(viewerID uuid.UUID, msgs []models.ChatMessage
 		out[i].Reactions = []ChatReactionSummary{}
 		out[i].Attachments = []ChatAttachmentResponse{}
 		for _, f := range files[m.ID] {
-			out[i].Attachments = append(out[i].Attachments, chatAttachmentResponse(f))
+			out[i].Attachments = append(out[i].Attachments, chatAttachmentResponse(f, scanStatusOf(fileScans, f.ID)))
 		}
 		if g := perMsg[m.ID]; g != nil {
 			for _, code := range g.order {

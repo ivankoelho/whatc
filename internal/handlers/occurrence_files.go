@@ -155,6 +155,8 @@ type OccurrenceFileResponse struct {
 	CanDownload  bool      `json:"can_download"`
 	CanDelete    bool      `json:"can_delete"`
 	CanPreview   bool      `json:"can_preview"`
+	// ScanStatus is the antimalware verdict: only "clean" can be opened.
+	ScanStatus string `json:"scan_status"`
 }
 
 func (a *App) canDownloadOccurrenceFile(userID uuid.UUID, acc occurrenceAccess, f *models.OccurrenceFile) bool {
@@ -179,15 +181,25 @@ func (a *App) occurrenceFileResponses(userID uuid.UUID, acc occurrenceAccess, fi
 		ids[i] = f.UploadedByID
 	}
 	names := a.chatUserNames(ids)
+	fileIDs := make([]uuid.UUID, len(files))
+	for i, f := range files {
+		fileIDs[i] = f.ID
+	}
+	var scanOrg uuid.UUID
+	if len(files) > 0 {
+		scanOrg = files[0].OrganizationID
+	}
+	scans := a.scanStatuses(scanOrg, models.ScanSourceOccurrenceFile, fileIDs)
 	out := make([]OccurrenceFileResponse, len(files))
 	for i := range files {
 		f := &files[i]
-		dl := a.canDownloadOccurrenceFile(userID, acc, f)
+		st := scanStatusOf(scans, f.ID)
+		dl := a.canDownloadOccurrenceFile(userID, acc, f) && st == models.ScanClean
 		out[i] = OccurrenceFileResponse{
 			ID: f.ID, Name: f.Name, Mime: f.Mime, Kind: f.Kind, SizeBytes: f.SizeBytes, Restricted: f.Restricted,
 			UploadedBy: f.UploadedByID, UploaderName: names[f.UploadedByID], CreatedAt: f.CreatedAt,
 			CanDownload: dl, CanPreview: dl && previewable(f.Mime),
-			CanDelete: canWrite && a.canDeleteOccurrenceFile(userID, acc, f),
+			CanDelete: canWrite && a.canDeleteOccurrenceFile(userID, acc, f), ScanStatus: st,
 		}
 	}
 	return out
@@ -248,6 +260,10 @@ func (a *App) storeOccurrenceFile(r *fastglue.Request, orgID, userID uuid.UUID, 
 		if err := tx.Create(&f).Error; err != nil {
 			return err
 		}
+		// The file is stored but closed: it is queued for the antimalware scan in the same transaction.
+		if err := registerScanTx(tx, orgID, models.ScanSourceOccurrenceFile, f.ID, f.StoragePath, f.SHA256, f.SizeBytes); err != nil {
+			return err
+		}
 		return tx.Create(&models.OccurrenceEvent{
 			OrganizationID: orgID, OccurrenceID: occ.ID, Type: models.OccurrenceEventFileAdded, Content: f.Name,
 			Metadata: models.JSONB{"file_id": f.ID.String(), "size_bytes": f.SizeBytes, "mime": f.Mime, "origin": origin}, CreatedByID: &userID,
@@ -259,6 +275,7 @@ func (a *App) storeOccurrenceFile(r *fastglue.Request, orgID, userID uuid.UUID, 
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to attach the document", nil, "")
 	}
 	a.logAudit(orgID, userID, "occurrence_file", f.ID, models.AuditActionCreated, nil, map[string]any{"name": f.Name, "occurrence_id": occ.ID.String(), "origin": origin})
+	a.ScanNow(models.ScanSourceOccurrenceFile, f.ID) // small files are cleared (or blocked) before the answer
 	a.broadcastOccurrence(orgID, occ.ID, websocket.WSMessage{Type: websocket.TypeOccurrenceChanged, Payload: occurrenceToResponse(*occ)})
 	acc := a.authorizeOccurrence(userID, orgID, occ)
 	return r.SendEnvelope(map[string]any{"file": a.occurrenceFileResponses(userID, acc, []models.OccurrenceFile{f}, true)[0]})
@@ -376,6 +393,10 @@ func (a *App) DownloadOccurrenceFile(r *fastglue.Request) error {
 	}
 	if !a.canDownloadOccurrenceFile(userID, acc, f) {
 		return a.sendChatError(r, errOccFileForbid, "download the file")
+	}
+	// Permission first (so nobody learns the scan state of a file they may not see), then the verdict.
+	if !a.requireCleanFile(r, orgID, models.ScanSourceOccurrenceFile, f.ID, f.StoragePath) {
+		return nil
 	}
 	full, perr := a.resolveSafeStoragePath(f.StoragePath)
 	if perr != nil {

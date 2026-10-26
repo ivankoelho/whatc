@@ -272,6 +272,19 @@ func (a *App) ExtractOccurrenceInvoice(r *fastglue.Request) error {
 		return a.sendChatError(r, ierr, "read the invoice")
 	}
 
+	// pdftotext is the largest attack surface of the server: the bytes are scanned first, and with no
+	// verdict (engine off or down) the file is simply not read. Nothing is stored here either way.
+	if info.Mime == "application/pdf" || info.Mime == "application/xml" {
+		res, serr := a.scanBuffer(r.RequestCtx, data)
+		if serr != nil {
+			out := InvoiceExtraction{Method: "none", Items: []invoiceItem{}, Uncertain: []string{}, Warnings: []string{"antimalware_unavailable"}}
+			return r.SendEnvelope(out)
+		}
+		if res.Infected {
+			return r.SendErrorEnvelope(fasthttp.StatusUnprocessableEntity, "This file was blocked: malware was detected", nil, "")
+		}
+	}
+
 	none := InvoiceExtraction{Method: "none", Items: []invoiceItem{}, Uncertain: []string{}, Warnings: []string{}}
 	switch {
 	case info.Mime == "application/xml":

@@ -167,6 +167,7 @@ func runMigrations(db *gorm.DB) error {
 		&models.NextcloudSettings{},
 		&models.NextcloudCredential{},
 		&models.ChatAttachment{},
+		&models.FileScan{},
 		// Help Desk — unidade e departamento
 		&models.Unit{},
 		&models.Department{},

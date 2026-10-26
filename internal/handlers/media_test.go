@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"time"
 	"os"
 	"path/filepath"
 	"testing"
@@ -46,6 +47,11 @@ func makeMediaMessage(t *testing.T, app *handlers.App, orgID uuid.UUID, contactI
 		Status:         models.MessageStatusDelivered,
 	}
 	require.NoError(t, app.DB.Create(msg).Error)
+	if mediaURL != "" { // the usual case under test is a file the antimalware policy has already cleared
+		now := time.Now()
+		require.NoError(t, app.DB.Create(&models.FileScan{ID: uuid.New(), OrganizationID: orgID, Source: models.ScanSourceMessageMedia,
+			ResourceID: msg.ID, StoragePath: mediaURL, Status: models.ScanClean, ScannedAt: &now}).Error)
+	}
 	return msg
 }
 

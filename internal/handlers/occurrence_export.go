@@ -209,8 +209,21 @@ func (a *App) ExportOccurrence(r *fastglue.Request) error {
 		}
 		body, filename, ctype = csvBytes(tables[0]), base+"-"+tables[0].name+".csv", "text/csv; charset=utf-8"
 	case "pdf":
-		body, filename, ctype = a.exportPDF(occ, teamName, want, tables, omitted, files), base+".pdf", "application/pdf"
+		body, filename, ctype = a.exportPDF(occ, teamName, want, tables, omitted, files, nil), base+".pdf", "application/pdf"
 	case "zip":
+		// Only files with a clean antimalware verdict travel in the ZIP; the report lists the others.
+		fileIDs := make([]uuid.UUID, len(files))
+		for i, f := range files {
+			fileIDs[i] = f.ID
+		}
+		scans := a.scanStatuses(orgID, models.ScanSourceOccurrenceFile, fileIDs)
+		var held []string
+		for _, f := range files {
+			if a.canDownloadOccurrenceFile(userID, acc, &f) && scanStatusOf(scans, f.ID) != models.ScanClean {
+				held = append(held, f.Name+" ("+scanStatusOf(scans, f.ID)+")")
+			}
+		}
+		counts["documents_held"] = len(held)
 		var buf bytes.Buffer
 		zw := zip.NewWriter(&buf)
 		put := func(name string, data []byte) {
@@ -218,13 +231,13 @@ func (a *App) ExportOccurrence(r *fastglue.Request) error {
 				_, _ = w.Write(data)
 			}
 		}
-		put("relatorio.pdf", a.exportPDF(occ, teamName, want, tables, omitted, files))
+		put("relatorio.pdf", a.exportPDF(occ, teamName, want, tables, omitted, files, held))
 		for _, t := range tables {
 			put(t.name+".csv", csvBytes(t))
 		}
 		total := 0
 		for _, f := range files {
-			if !a.canDownloadOccurrenceFile(userID, acc, &f) {
+			if !a.canDownloadOccurrenceFile(userID, acc, &f) || scanStatusOf(scans, f.ID) != models.ScanClean {
 				continue
 			}
 			full, perr := a.resolveSafeStoragePath(f.StoragePath)
@@ -367,7 +380,7 @@ func (a *App) exportWhatsApp(orgID uuid.UUID, occ *models.Occurrence) (exportTab
 	return t, true
 }
 
-func (a *App) exportPDF(occ *models.Occurrence, team string, want map[string]bool, tables []exportTable, omitted []string, files []models.OccurrenceFile) []byte {
+func (a *App) exportPDF(occ *models.Occurrence, team string, want map[string]bool, tables []exportTable, omitted []string, files []models.OccurrenceFile, held []string) []byte {
 	now := time.Now()
 	d := newPDF("Protocolo "+occ.ProtocolNumber+" - "+occ.Title, "Gerado em "+now.Format("02/01/2006 15:04"))
 	d.put("Protocolo "+occ.ProtocolNumber, 16, true, 0)
@@ -436,6 +449,10 @@ func (a *App) exportPDF(occ *models.Occurrence, team string, want map[string]boo
 				d.paragraph(body, 10)
 			}
 		}
+	}
+	if len(held) > 0 {
+		d.heading("Arquivos não incluídos")
+		d.paragraph(fmt.Sprintf("%d arquivo(s) não incluído(s) no ZIP porque ainda não receberam verificação antimalware limpa (em verificação, com falha ou bloqueados): %s.", len(held), strings.Join(held, ", ")), 0)
 	}
 	if len(omitted) > 0 {
 		d.heading("Seções não incluídas")

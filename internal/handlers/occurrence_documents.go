@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
 	"net/http"
@@ -370,6 +372,13 @@ func (a *App) UploadOccurrenceDocumentAttachment(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save file", nil, "")
 	}
 	relPath := filepath.Join(subdir, doc.ID.String()+getExtensionFromMimeType(mimeType))
+	// The path is reused when a file is replaced, so the old verdict is withdrawn (row back to pending)
+	// before the new bytes are written: the new content is never served under the old "clean".
+	sumB := sha256.Sum256(data)
+	if err := registerScanTx(a.DB, orgID, models.ScanSourceOccurrenceDocument, doc.ID, relPath, hex.EncodeToString(sumB[:]), int64(len(data))); err != nil {
+		a.Log.Error("Failed to queue attachment scan", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save file", nil, "")
+	}
 	if err := os.WriteFile(filepath.Join(a.getMediaStoragePath(), relPath), data, 0644); err != nil {
 		a.Log.Error("Failed to save attachment", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save file", nil, "")
@@ -385,6 +394,7 @@ func (a *App) UploadOccurrenceDocumentAttachment(r *fastglue.Request) error {
 		a.removeOccurrenceAttachment(relPath)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save file", nil, "")
 	}
+	a.ScanNow(models.ScanSourceOccurrenceDocument, doc.ID)
 	return r.SendEnvelope(doc)
 }
 
@@ -400,6 +410,9 @@ func (a *App) ServeOccurrenceDocumentAttachment(r *fastglue.Request) error {
 	}
 	if doc.AttachmentPath == "" {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "No attachment", nil, "")
+	}
+	if !a.requireCleanFile(r, orgID, models.ScanSourceOccurrenceDocument, doc.ID, doc.AttachmentPath) {
+		return nil
 	}
 	fullPath, err := a.resolveSafeStoragePath(doc.AttachmentPath)
 	if err != nil {

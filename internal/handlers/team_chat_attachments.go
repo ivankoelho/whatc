@@ -60,13 +60,28 @@ type ChatAttachmentResponse struct {
 	DurationMs *int      `json:"duration_ms,omitempty"`
 	// PendingTTLMs is only on the upload response: the pending file is guaranteed for this long.
 	PendingTTLMs int64 `json:"pending_ttl_ms,omitempty"`
+	// ScanStatus is the antimalware verdict: only "clean" can be opened.
+	ScanStatus string `json:"scan_status"`
 }
 
-func chatAttachmentResponse(a models.ChatAttachment) ChatAttachmentResponse {
+func chatAttachmentResponse(a models.ChatAttachment, scanStatus string) ChatAttachmentResponse {
 	return ChatAttachmentResponse{
 		ID: a.ID, Kind: a.Kind, Name: a.Name, Mime: a.Mime, Size: a.SizeBytes,
-		Width: a.Width, Height: a.Height, DurationMs: a.DurationMs,
+		Width: a.Width, Height: a.Height, DurationMs: a.DurationMs, ScanStatus: scanStatus,
 	}
+}
+
+// chatScanStatuses reads the verdicts of a set of attachments (all of one organization) in one query.
+func (a *App) chatScanStatuses(files map[uuid.UUID][]models.ChatAttachment) map[uuid.UUID]string {
+	var ids []uuid.UUID
+	var org uuid.UUID
+	for _, list := range files {
+		for _, f := range list {
+			ids = append(ids, f.ID)
+			org = f.OrganizationID
+		}
+	}
+	return a.scanStatuses(org, models.ScanSourceChatAttachment, ids)
 }
 
 // chatUploadAllowed is a fixed one-minute window per person. It fails open when
@@ -194,13 +209,17 @@ func (a *App) finishChatUpload(r *fastglue.Request, orgID, userID uuid.UUID, ch 
 		if pending >= chatMaxPending {
 			return errChatTooManyAtt
 		}
-		return tx.Create(&att).Error
+		if err := tx.Create(&att).Error; err != nil {
+			return err
+		}
+		return registerScanTx(tx, orgID, models.ScanSourceChatAttachment, att.ID, att.StoragePath, att.SHA256, att.SizeBytes)
 	})
 	if txErr != nil {
 		_ = a.removeChatFile(att.StoragePath)
 		return a.sendChatError(r, txErr, "upload the file")
 	}
-	resp := chatAttachmentResponse(att)
+	a.ScanNow(models.ScanSourceChatAttachment, att.ID) // small files are cleared (or blocked) before the answer
+	resp := chatAttachmentResponse(att, a.fileStatus(orgID, models.ScanSourceChatAttachment, att.ID, att.StoragePath))
 	resp.PendingTTLMs = chatPendingGrace.Milliseconds()
 	return r.SendEnvelope(resp)
 }
@@ -342,6 +361,10 @@ func (a *App) DownloadChatAttachment(r *fastglue.Request) error {
 		if n == 0 {
 			return notFound()
 		}
+	}
+	// Before anything is read, ranged or answered 304: only a clean verdict opens the file.
+	if !a.requireCleanFile(r, orgID, models.ScanSourceChatAttachment, att.ID, att.StoragePath) {
+		return nil
 	}
 	full, serr := a.resolveSafeStoragePath(att.StoragePath)
 	if serr != nil {

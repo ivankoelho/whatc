@@ -253,6 +253,12 @@ func (a *App) ServeMedia(r *fastglue.Request) error {
 		}
 	}
 
+	// Customer-supplied bytes: only a clean antimalware verdict lets them out (lazily queued if the
+	// message predates the policy or was saved by a path that did not register it).
+	if !a.requireCleanFile(r, orgID, models.ScanSourceMessageMedia, message.ID, message.MediaURL) {
+		return nil
+	}
+
 	// Read file
 	data, err := os.ReadFile(fullPath)
 	if err != nil {

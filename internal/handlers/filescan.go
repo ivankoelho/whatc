@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -398,6 +399,17 @@ func (a *App) alertScan(row models.FileScan, kind, detail string) {
 		Type:    "file_scan_alert",
 		Payload: map[string]any{"kind": kind, "source": row.Source, "id": row.ResourceID, "detail": detail},
 	})
+}
+
+// scanBuffer scans bytes that are only read in memory (never stored). No engine, or no verdict, is an
+// error: the caller must not touch the bytes then.
+func (a *App) scanBuffer(ctx context.Context, data []byte) (antimalware.Result, error) {
+	if a.Scanner == nil {
+		return antimalware.Result{}, errors.New("antimalware is not configured")
+	}
+	sctx, cancel := context.WithTimeout(ctx, a.scanCfg().timeout)
+	defer cancel()
+	return a.Scanner.Scan(sctx, bytes.NewReader(data))
 }
 
 // --- worker ------------------------------------------------------------------------------------
