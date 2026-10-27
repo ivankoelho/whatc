@@ -218,7 +218,7 @@ func (m *Manager) InitiateOutgoingCall(
 		// Update call log as failed
 		m.db.Model(&callLog).Updates(map[string]any{
 			"status":          models.CallStatusFailed,
-			"error_message":   err.Error(),
+			"error_message":   whatsapp.PublicErrorText(err),
 			"ended_at":        time.Now(),
 			"disconnected_by": models.DisconnectedBySystem,
 		})

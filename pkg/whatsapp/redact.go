@@ -128,5 +128,5 @@ func parseMetaAPIErrorRedacted(statusCode int, respBody []byte, secrets []string
 		}
 		return &APIError{Status: statusCode, Code: e.Code, msg: errMsg}
 	}
-	return &APIError{Status: statusCode, msg: fmt.Sprintf("API returned status %d: %s", statusCode, redactSecrets(string(respBody), secrets))}
+	return &APIError{Status: statusCode, msg: fmt.Sprintf("API returned status %d", statusCode)}
 }

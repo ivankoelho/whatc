@@ -1,6 +1,7 @@
 package whatsapp
 
 import (
+	"errors"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -181,7 +182,7 @@ func (c *Client) InitiateCall(ctx context.Context, account *Account, rcpt Recipi
 		} `json:"calls"`
 	}
 	if parseErr := json.Unmarshal(respBody, &resp); parseErr != nil || len(resp.Calls) == 0 || resp.Calls[0].ID == "" {
-		return "", fmt.Errorf("failed to parse call_id from response: %s", string(respBody))
+		return "", errors.New("failed to parse call_id from response")
 	}
 
 	c.Log.Info("Outgoing call initiated", "phone", rcpt.Phone, "call_id", resp.Calls[0].ID)

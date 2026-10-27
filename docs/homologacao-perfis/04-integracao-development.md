@@ -50,10 +50,30 @@ O `development` não alterou permissões nem migrações: só trouxe os subcoman
 - **Frontend:** `vue-tsc` limpo; vitest 60 arquivos, 478 testes aprovados.
 - Falhas preexistentes **não foram modificadas** nem tratadas como inofensivas (análise em `03-revisao-pre-merge.md`).
 
+## 6-B. Avaliação final: varredura de erros do provedor (após o merge)
+
+Auditados todos os consumidores de `ParseMetaAPIError` e os pontos que gravam ou registram erro do WhatsApp (chatbot, templates, campanhas, notificações de caso, OTP, webhooks, chamadas). Exposição real encontrada e corrigida:
+
+- O erro genérico (resposta que **não** é um objeto de erro da Meta: página HTML de proxy, eco da requisição) trazia o **corpo bruto** no texto. Agora é só `API returned status N`; status e código seguem intactos, então a classificação (recusado / transitório / desconhecido) e o `delivery_uncertain` não mudam.
+- Upload de mídia, upload retomável, troca de token e `call_id` ilegível ecoavam o corpo: passam a dizer só o status e, quando houver, a mensagem estruturada da Meta.
+- `messages.error_message` (e o broadcast) e o `error_message` do log de chamadas gravavam o erro cru: passam por `PublicErrorText`.
+- **Mensagens estruturadas da Meta:** o código OTP já era mascarado (teste existente). Faltavam o **token de acesso** (agora mascarado em toda chamada) e o **código de autorização e segredo do app** na troca de token (mascarados). Telefones são dado pessoal, não segredo: continuam legíveis de propósito (o agente já vê o contato).
+- Testes: `error_body_leak_test.go` (corpo bruto nunca entra; erro da Meta mantém código e mensagem; token, código e segredo mascarados em mensagem estruturada; classificação preservada) e `message_error_leak_test.go` (o que é gravado em `messages.error_message`).
+
+**Limites da auditoria (não testados, documentados):**
+- A redação é por **valor conhecido** (token da conta, código, segredo do app, parâmetros OTP da requisição), aplicada na origem (`doRequest` e nos erros de upload/troca de token), antes de o erro chegar a log, banco, WebSocket ou resposta HTTP. Um segredo que a Meta devolvesse **transformado** (codificado, truncado, em URL ou em campo fora de `message`/`error_user_msg`/`details`) não seria reconhecido; o corpo bruto, porém, nunca entra em erro.
+- **Privacidade de telefones:** legíveis no atendimento autorizado, mas logs técnicos e mensagens exibidas a outros perfis têm públicos diferentes. Risco registrado; revisar a necessidade de exposição por destino fica fora do escopo desta integração.
+
+Cobertura das 6 h de carência da mídia: coberta pelos testes do portão (marco persistido em `file_scans.created_at`, retentativa e reinício não reiniciam o prazo, pendente/erro mantêm o job, expirado falha o destinatário, infectada falha na hora).
+
+### Resultado da suíte final (árvore endurecida)
+
+Suíte Go completa, banco e Redis isolados, `-p 1`, nada competindo, 1022 s, sem alteração de código durante a execução: **27 pacotes `ok`; `internal/handlers` com 2 falhas, ambas preexistentes** (`TestServeLoginBackground_RejectsSymlink` e `TestApp_ServeMedia_RejectsSymlink`, só no Windows); 4319 testes aprovados (inclui subtestes), 14 ignorados, **nenhuma falha nova**. A instabilidade `TestUpdateContactChatbotMessage_SetsTimestampAndResetsReminder` não ocorreu nesta rodada (falhou na anterior). Testes direcionados posteriores ao endurecimento: `pkg/whatsapp`, `worker`, `calling`, `cmd/whatomate` e o filtro de envio/OTP/campanhas/templates/vazamento/mídia em `handlers` aprovados (exceto o symlink conhecido). Frontend inalterado desde a última verificação (`vue-tsc` limpo; vitest 60 arquivos, 478 testes).
+
 ## 7. Riscos de segurança residuais
 
 1. Mídia histórica na Meta sem procedência é enviada em campanhas normais (compatibilidade); contador dedicado é pendência.
-2. A resposta bruta de erros no `ParseMetaAPIError` ainda contém o corpo para consumidores internos que registram erros em log (fluxos, templates); o que é **armazenado/exibido** nos caminhos de campanha e de notificação passa por `PublicErrorText`. Vale uma varredura dos demais consumidores.
+2. (Resolvido na seção 6-B.) Telefones em mensagens estruturadas da Meta continuam legíveis: dado pessoal, não segredo.
 3. Retentativas de mídia retida geram até ~72 reprocessamentos por destinatário em 6 h; aceitável, mas observar em campanhas grandes.
 4. O restante já registrado em `03-revisao-pre-merge.md` (auditoria da reordenação de etapas, visibilidade de membros entre lojas, migração de permissões do admin, ClamAV de produção).
 

@@ -1,7 +1,9 @@
 package whatsapp
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"strings"
 )
@@ -158,4 +160,24 @@ func PublicErrorText(err error) string {
 		k++
 	}
 	return text[:k]
+}
+
+// answerSummary is all that an error may say about a provider answer's BODY: the Meta error message when the
+// answer is a Meta error object, nothing otherwise. A raw body (an HTML page from a proxy, an echoed request, any
+// text the provider chose to send) never goes into an error: errors are stored, logged and shown to people.
+func answerSummary(body []byte, secrets []string) string {
+	var m MetaAPIError
+	if json.Unmarshal(body, &m) == nil && m.Error.Message != "" {
+		return fmt.Sprintf("API error %d: %s", m.Error.Code, redactSecrets(m.Error.Message, secrets))
+	}
+	return ""
+}
+
+// statusText builds "<prefix> with status N[: Meta message]"; secrets (the access token, an authorization code,
+// the app secret) are masked in the Meta message.
+func statusText(prefix string, status int, body []byte, secrets ...string) string {
+	if s := answerSummary(body, secrets); s != "" {
+		return fmt.Sprintf("%s with status %d: %s", prefix, status, s)
+	}
+	return fmt.Sprintf("%s with status %d", prefix, status)
 }

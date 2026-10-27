@@ -606,7 +606,7 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 			}
 			err = errors.New(templateutil.RedactValues(err.Error(), secrets))
 		}
-		errMsg := err.Error()
+		errMsg := whatsapp.PublicErrorText(err) // what is stored and broadcast: never a raw provider body
 
 		a.DB.Model(&models.Message{}).Where("id = ?", msg.ID).Updates(map[string]any{
 			"status":        models.MessageStatusFailed,

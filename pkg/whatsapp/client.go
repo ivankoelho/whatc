@@ -1,6 +1,7 @@
 package whatsapp
 
 import (
+	"errors"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -82,7 +83,7 @@ func (c *Client) doRequest(ctx context.Context, method, url string, body any, ac
 	// Values that must never come back in an error or a log line (one-time
 	// codes): errors leave this function already redacted, so every caller's
 	// logging is covered at once.
-	secrets := requestSecrets(ctx, jsonBody)
+	secrets := append(requestSecrets(ctx, jsonBody), accessToken)
 
 	req, err := http.NewRequestWithContext(ctx, method, url, reqBody)
 	if err != nil {
@@ -346,7 +347,7 @@ func (c *Client) UploadMedia(ctx context.Context, account *Account, data []byte,
 	}
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return "", fmt.Errorf("media upload failed with status %d: %s", resp.StatusCode, string(respBody))
+		return "", errors.New(statusText("media upload failed", resp.StatusCode, respBody, account.AccessToken))
 	}
 
 	var uploadResp UploadMediaResponse
@@ -505,7 +506,7 @@ func (c *Client) ResumableUpload(ctx context.Context, account *Account, data []b
 	}
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return "", fmt.Errorf("upload failed with status %d: %s", resp.StatusCode, string(respBody))
+		return "", errors.New(statusText("upload failed", resp.StatusCode, respBody, account.AccessToken))
 	}
 
 	var finishResp ResumableUploadFinishResponse
@@ -623,11 +624,7 @@ func (c *Client) ExchangeCodeForToken(ctx context.Context, code, appID, appSecre
 
 	if resp.StatusCode != http.StatusOK {
 		// Parse Meta error using same pattern as doRequest
-		var metaErr MetaAPIError
-		if json.Unmarshal(respBody, &metaErr) == nil && metaErr.Error.Message != "" {
-			return "", fmt.Errorf("token exchange failed: %s", metaErr.Error.Message)
-		}
-		return "", fmt.Errorf("token exchange failed with status %d: %s", resp.StatusCode, string(respBody))
+		return "", errors.New(statusText("token exchange failed", resp.StatusCode, respBody, code, appSecret))
 	}
 
 	var tokenResp TokenExchangeResponse
