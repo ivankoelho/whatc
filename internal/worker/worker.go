@@ -2,8 +2,11 @@ package worker
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,6 +20,7 @@ import (
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/zerodha/logf"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // Worker processes jobs from the queue
@@ -30,6 +34,20 @@ type Worker struct {
 	Publisher *queue.Publisher
 	// Usage records the WhatsApp consumption ledger (fail-open; nil or disabled = nothing).
 	Usage *usage.Recorder
+	// ClaimStale overrides how long a recipient claim may stay unresolved before it is
+	// declared delivery_uncertain (tests); zero = default.
+	ClaimStale time.Duration
+	// Now overrides the clock used for the code's validity (tests); nil = time.Now. Claim
+	// ageing never uses it: it uses the database clock (see claimStale).
+	Now func() time.Time
+
+	// closing is set when the worker starts shutting down: it takes on no new
+	// one-time-code send from then on (jobs already started are drained).
+	closing atomic.Bool
+	// inflight counts the jobs being handled, so shutdown can wait for them.
+	inflight inflightJobs
+	// afterClaim is a test hook, called right after a claim is made; nil in production.
+	afterClaim func()
 }
 
 // Ensure Worker implements JobHandler interface
@@ -60,6 +78,32 @@ func New(cfg *config.Config, db *gorm.DB, rdb *redis.Client, log logf.Logger) (*
 func (w *Worker) Run(ctx context.Context) error {
 	w.Log.Info("Worker starting")
 
+	// Housekeeping, independent of the queue: every few minutes, claims of one-time
+	// codes that were abandoned are declared uncertain (straight from PostgreSQL, no
+	// job has to come back from Redis); once an hour, retention drops the sealed
+	// verification codes that can no longer be sent.
+	go func() {
+		t := time.NewTicker(housekeepingEvery)
+		defer t.Stop()
+		for tick := 0; ; tick++ {
+			if _, err := w.ResolveStaleClaims(ctx); err != nil {
+				w.Log.Error("Failed to resolve stale claims", "error", err)
+			}
+			if tick%retentionEveryNthTick == 0 {
+				if n, err := ScrubExpiredSecrets(w.DB, w.now(), w.otpPolicy()); err != nil {
+					w.Log.Error("Failed to scrub expired verification codes", "error", err)
+				} else if n > 0 {
+					w.Log.Info("Scrubbed expired verification codes", "count", n)
+				}
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+			}
+		}
+	}()
+
 	err := w.Consumer.Consume(ctx, w)
 	if err != nil && ctx.Err() == nil {
 		return fmt.Errorf("consumer error: %w", err)
@@ -71,6 +115,9 @@ func (w *Worker) Run(ctx context.Context) error {
 
 // HandleRecipientJob processes a single recipient message job
 func (w *Worker) HandleRecipientJob(ctx context.Context, job *queue.RecipientJob) error {
+	w.inflight.begin()
+	defer w.inflight.end()
+
 	// Check if campaign is still active before sending
 	var campaign models.BulkMessageCampaign
 	if err := w.DB.Where("id = ?", job.CampaignID).Preload("Template").First(&campaign).Error; err != nil {
@@ -111,19 +158,16 @@ func (w *Worker) HandleRecipientJob(ctx context.Context, job *queue.RecipientJob
 		return nil
 	}
 
-	// Media the antimalware scan found infected is never sent: the local copy of the campaign's header is
-	// the evidence WhatC holds about what Meta hosts for it.
-	if campaign.HeaderMediaID != "" || campaign.HeaderMediaLocalPath != "" {
-		var verdict string
-		w.DB.Model(&models.FileScan{}).Select("status").
-			Where("source = ? AND resource_id = ? AND organization_id = ?", models.ScanSourceCampaignMedia, campaign.ID, job.OrganizationID).
-			Limit(1).Scan(&verdict)
-		if verdict == models.ScanInfected {
-			w.Log.Error("Campaign media is infected; not sending", "campaign_id", campaign.ID)
-			w.updateRecipientStatus(job.RecipientID, models.MessageStatusFailed, "", "Campaign media blocked: malware detected")
-			w.incrementCampaignCount(job.CampaignID, "failed_count")
-			return nil
-		}
+	// The antimalware gate comes FIRST and applies to every path below, the one-time-code path included.
+	secret := (campaign.Template != nil && templateutil.IsAuthCategory(campaign.Template.Category)) || templateutil.IsSealed(job.TemplateParams)
+	if done, err := w.campaignMediaGate(&campaign, job, secret); done {
+		return err
+	}
+
+	// One-time codes (authentication templates, or any sealed params) take a separate
+	// path: they are sent under a claim recorded in PostgreSQL (see worker_claim.go).
+	if (campaign.Template != nil && templateutil.IsAuthCategory(campaign.Template.Category)) || templateutil.IsSealed(job.TemplateParams) {
+		return w.sendSecretRecipient(ctx, job, &campaign, &account, contact)
 	}
 
 	// Build recipient for sending
@@ -167,8 +211,8 @@ func (w *Worker) HandleRecipientJob(ctx context.Context, job *queue.RecipientJob
 	if err != nil {
 		w.Log.Error("Failed to send message", "error", err, "recipient", job.PhoneNumber)
 		message.Status = models.MessageStatusFailed
-		message.ErrorMessage = err.Error()
-		w.updateRecipientStatus(job.RecipientID, models.MessageStatusFailed, "", err.Error())
+		message.ErrorMessage = whatsapp.PublicErrorText(err)
+		w.updateRecipientStatus(job.RecipientID, models.MessageStatusFailed, "", whatsapp.PublicErrorText(err))
 		w.incrementCampaignCount(job.CampaignID, "failed_count")
 	} else {
 		w.Log.Info("Message sent", "recipient", job.PhoneNumber, "message_id", waMessageID)
@@ -314,11 +358,27 @@ func (w *Worker) sendTemplateMessage(ctx context.Context, account *models.WhatsA
 		campaignHeaderMediaID, campaignHeaderMediaFilename,
 	)
 	if err != nil {
-		return "", fmt.Errorf("failed to build template components: %w", err)
+		return "", whatsapp.NewNotSentError(fmt.Errorf("failed to build template components: %w", err))
 	}
 	// Add auto-generated button components (Flow needs flow_token)
 	flowComponents := whatsapp.AutoButtonComponents(template.Buttons)
 	components = append(components, flowComponents...)
+
+	// Authentication templates: Meta also wants the code on the OTP button
+	// (same rule and helper as the direct send in handlers.SendTemplateMessage).
+	if templateutil.IsAuthCategory(template.Category) && len(resolvedParams) > 0 {
+		code := resolvedParams[0]
+		if v, ok := recipient.TemplateParams["1"]; ok {
+			code = fmt.Sprintf("%v", v)
+		}
+		components = append(components,
+			whatsapp.ButtonURLParamsToComponents(whatsapp.OTPButtonParams(template.Buttons, code), template.Buttons)...)
+	}
+
+	if templateutil.IsAuthCategory(template.Category) {
+		// The client redacts echoed codes from errors before any logging.
+		ctx = whatsapp.WithSecrets(ctx, resolvedParams...)
+	}
 
 	rcpt := whatsapp.Recipient{Phone: recipient.PhoneNumber}
 	return w.WhatsApp.SendTemplateMessage(ctx, waAccount, rcpt, template.Name, template.Language, components)
@@ -333,8 +393,15 @@ func (w *Worker) decryptAccountSecrets(account *models.WhatsAppAccount) {
 	account.DecryptSecrets(key)
 }
 
-// Close cleans up worker resources
+// Close cleans up worker resources. It first stops the worker from starting new
+// one-time-code sends and gives the jobs already started a bounded time to finish
+// (a send that does not finish in time keeps its claim and is resolved as
+// delivery_uncertain, never resent).
 func (w *Worker) Close() error {
+	w.BeginShutdown()
+	if !w.Drain(w.drainTimeout()) {
+		w.Log.Warn("Shutdown left sends in flight; their claims stay and will be resolved as delivery_uncertain", "in_flight", w.inflight.count())
+	}
 	if w.Consumer != nil {
 		return w.Consumer.Close()
 	}
@@ -369,3 +436,146 @@ func (w *Worker) recordCampaignUsage(ctx context.Context, msg *models.Message, c
 		w.Log.Error("Usage recording failed", "op", "settle", "error", err, "message_id", msg.ID)
 	}
 }
+
+// ScrubExpiredSecrets drops sealed codes older than templateutil.SealedTTL,
+// whatever the recipient's state (a failed recipient keeps its code only for
+// the retry window).
+func ScrubExpiredSecrets(db *gorm.DB, now time.Time, policy templateutil.OTPPolicy) (int64, error) {
+	maxSecs := int64(policy.MaxValidity / time.Second)
+	if maxSecs <= 0 {
+		maxSecs = int64(templateutil.DefaultOTPMaxValidity / time.Second)
+	}
+	// Same rule as OTPPolicy.Expired: a code with the issuer's valid_until goes at
+	// min(valid_until, sealed_at+max); one without it only at the retention limit,
+	// so pending legacy campaigns keep their (still sendable) codes.
+	res := db.Unscoped().Model(&models.BulkMessageRecipient{}).
+		Where(`template_params->>@sealed IS NOT NULL AND CASE
+			WHEN template_params->>@until IS NOT NULL THEN
+				LEAST((template_params->>@until)::bigint, COALESCE((template_params->>@at)::bigint + @max, (template_params->>@until)::bigint)) <= @now
+			ELSE COALESCE((template_params->>@at)::bigint, 0) < @cutoff END`,
+			sql.Named("sealed", templateutil.SealedKey), sql.Named("until", templateutil.SealedValidUntilKey),
+			sql.Named("at", templateutil.SealedAtKey), sql.Named("max", maxSecs),
+			sql.Named("now", now.Unix()), sql.Named("cutoff", now.Add(-templateutil.SealedTTL).Unix())).
+		UpdateColumn("template_params", models.JSONB{})
+	if res.Error != nil {
+		return res.RowsAffected, res.Error
+	}
+
+	// Clear-text codes of authentication campaigns that predate sealing have no
+	// sealed_at: their retention runs from the row's creation. Only recipients
+	// whose campaign template is KNOWN to be AUTHENTICATION are touched, so
+	// ordinary campaigns and rows that cannot be resolved are left alone. Plain
+	// SQL, no audit table and no updated_at involved, and a second run changes nothing.
+	legacy := db.Exec(`UPDATE bulk_message_recipients r SET template_params = '{}'::jsonb
+		FROM bulk_message_campaigns c JOIN templates t ON t.id = c.template_id
+		WHERE c.id = r.campaign_id AND upper(t.category) = 'AUTHENTICATION'
+		  AND r.template_params IS NOT NULL AND r.template_params <> '{}'::jsonb
+		  AND r.template_params->>@sealed IS NULL
+		  AND r.created_at < @created`,
+		sql.Named("sealed", templateutil.SealedKey), sql.Named("created", now.Add(-templateutil.SealedTTL)))
+	return res.RowsAffected + legacy.RowsAffected, legacy.Error
+}
+
+// now is the worker clock (injectable in tests).
+func (w *Worker) now() time.Time {
+	if w.Now != nil {
+		return w.Now()
+	}
+	return time.Now()
+}
+
+// otpPolicy builds the OTP validity policy from configuration.
+func (w *Worker) otpPolicy() templateutil.OTPPolicy {
+	if w.Config == nil {
+		return templateutil.OTPPolicy{}
+	}
+	return templateutil.OTPPolicy{
+		MaxValidity:       w.Config.OTP.MaxValidity(),
+		RequireValidUntil: w.Config.OTP.RequireValidUntil,
+	}
+}
+
+// otpOpenFailure says, without any secret, why a sealed code could not be opened.
+func otpOpenFailure(err error) string {
+	switch {
+	case errors.Is(err, templateutil.ErrSealKeyMissing):
+		return "encryption key not configured on this worker"
+	case errors.Is(err, templateutil.ErrSealInvalid):
+		return "stored value is not a valid ciphertext"
+	default:
+		return "cannot be decrypted (wrong encryption key?)"
+	}
+}
+
+// mediaVerdictGrace is how long a header file may wait for its antimalware verdict before the recipient is failed
+// for good: a held job is retried by the queue, and a scanner that is never configured must not keep a campaign
+// open forever.
+const mediaVerdictGrace = 6 * time.Hour
+
+// campaignMediaGate decides whether the campaign's header media may be sent. It returns done=true when the job
+// must stop here (with the error to hand back to the queue: nil = recipient settled, non-nil = retry later).
+//
+//   - A LOCAL copy (header_media_local_path) is WhatC-controlled content under the antimalware policy: only a
+//     clean verdict releases it. Infected: the recipient fails for good. Pending, error or NO verdict at all: the
+//     job is held and retried, and after mediaVerdictGrace the recipient fails ("could not be verified"). Missing
+//     rows are NOT treated as clean.
+//   - A Meta-hosted id WITHOUT a local copy cannot be inspected by WhatC. If this server uploaded it (it is in
+//     meta_media_uploads, recorded only after a clean scan) it is proven. If it is not, it is historical,
+//     uninspectable media: normal campaigns keep sending it (and say so in the log), but one-time-code messages
+//     never do, so nothing silently skips the policy for a code.
+func (w *Worker) campaignMediaGate(campaign *models.BulkMessageCampaign, job *queue.RecipientJob, secret bool) (done bool, err error) {
+	if campaign.HeaderMediaID == "" && campaign.HeaderMediaLocalPath == "" {
+		return false, nil
+	}
+	var scan models.FileScan
+	hasScan := w.DB.Where("source = ? AND resource_id = ? AND organization_id = ?", models.ScanSourceCampaignMedia, campaign.ID, job.OrganizationID).
+		Limit(1).Find(&scan).RowsAffected > 0
+
+	fail := func(msg string) (bool, error) {
+		w.updateRecipientStatus(job.RecipientID, models.MessageStatusFailed, "", msg)
+		w.incrementCampaignCount(job.CampaignID, "failed_count")
+		return true, nil
+	}
+	if hasScan && scan.Status == models.ScanInfected {
+		w.Log.Error("Campaign media is infected; not sending", "campaign_id", campaign.ID)
+		return fail("Campaign media blocked: malware detected")
+	}
+	if campaign.HeaderMediaLocalPath != "" {
+		if hasScan && scan.Status == models.ScanClean {
+			return false, nil
+		}
+		if !hasScan {
+			// No row at all: register one (pending) so the scan worker reaches the file AND the wait has a persisted
+			// start. Without a stored marker the grace would restart on every retry and never run out.
+			pending := models.FileScan{ID: uuid.New(), OrganizationID: job.OrganizationID, Source: models.ScanSourceCampaignMedia,
+				ResourceID: campaign.ID, StoragePath: campaign.HeaderMediaLocalPath, Status: models.ScanPending, NextAttemptAt: ptrTime(time.Now())}
+			w.DB.Clauses(clause.OnConflict{DoNothing: true}).Create(&pending)
+			hasScan = w.DB.Where("source = ? AND resource_id = ? AND organization_id = ?", models.ScanSourceCampaignMedia, campaign.ID, job.OrganizationID).
+				Limit(1).Find(&scan).RowsAffected > 0
+		}
+		verdict, since := "no_verdict", time.Now()
+		if hasScan {
+			verdict, since = scan.Status, scan.CreatedAt // persisted: a restart or a retry does not reset it
+		}
+		if hasScan && time.Since(since) > mediaVerdictGrace {
+			w.Log.Error("Campaign media never received a clean verdict; failing the recipient", "campaign_id", campaign.ID, "verdict", verdict)
+			return fail("Campaign media blocked: it could not be verified by the antimalware scan")
+		}
+		w.Log.Warn("Campaign media has no clean verdict yet; not sending now", "campaign_id", campaign.ID, "verdict", verdict)
+		return true, fmt.Errorf("campaign media awaiting a clean antimalware verdict (%s)", verdict)
+	}
+	// Meta-hosted id with no local copy.
+	var uploadedHere int64
+	w.DB.Model(&models.MetaMedia{}).Where("organization_id = ? AND media_id = ?", job.OrganizationID, campaign.HeaderMediaID).Count(&uploadedHere)
+	if uploadedHere > 0 || (hasScan && scan.Status == models.ScanClean) {
+		return false, nil
+	}
+	if secret {
+		w.Log.Error("One-time-code campaign refused: header media cannot be verified", "campaign_id", campaign.ID)
+		return fail("Campaign media blocked: one-time-code messages only send media this server scanned")
+	}
+	w.Log.Warn("Campaign header media is hosted at Meta and cannot be inspected here (historical); sending as before", "campaign_id", campaign.ID)
+	return false, nil
+}
+
+func ptrTime(t time.Time) *time.Time { return &t }

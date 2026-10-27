@@ -72,7 +72,7 @@ func mediaFiles(t *testing.T, app *handlers.App, root string, org, contact uuid.
 	return ids
 }
 
-func countStatus(t *testing.T, app *handlers.App, org uuid.UUID, source, status string) int64 {
+func countScanStatus(t *testing.T, app *handlers.App, org uuid.UUID, source, status string) int64 {
 	t.Helper()
 	var n int64
 	app.DB.Model(&models.FileScan{}).Where("organization_id = ? AND source = ? AND status = ?", org, source, status).Count(&n)
@@ -138,13 +138,13 @@ func TestHomolog_A(t *testing.T) {
 		passes := 0
 		for ; passes < 40; passes++ {
 			f.app.FileScanTick(context.Background())
-			if countStatus(t, f.app, f.org.ID, models.ScanSourceMessageMedia, models.ScanClean) >= n {
+			if countScanStatus(t, f.app, f.org.ID, models.ScanSourceMessageMedia, models.ScanClean) >= n {
 				passes++
 				break
 			}
 		}
 		took := time.Since(began)
-		assert.Equal(t, int64(n), countStatus(t, f.app, f.org.ID, models.ScanSourceMessageMedia, models.ScanClean))
+		assert.Equal(t, int64(n), countScanStatus(t, f.app, f.org.ID, models.ScanSourceMessageMedia, models.ScanClean))
 		assert.GreaterOrEqual(t, passes, n/5, "at most batch_size files per pass: the scan is gradual")
 		t.Logf("%d legacy files cleared in %d passes, %s (%.1f files/s)", len(ids), passes, took.Round(time.Millisecond), float64(n)/took.Seconds())
 	})
@@ -152,7 +152,7 @@ func TestHomolog_A(t *testing.T) {
 	t.Run("12 concurrent workers share the queue", func(t *testing.T) {
 		const n = 60
 		mediaFiles(t, f.app, root, f.org.ID, contact.ID, "conc", n)
-		before := countStatus(t, f.app, f.org.ID, models.ScanSourceMessageMedia, models.ScanClean)
+		before := countScanStatus(t, f.app, f.org.ID, models.ScanSourceMessageMedia, models.ScanClean)
 		workers := make([]*handlers.App, 3)
 		for i := range workers {
 			workers[i] = &handlers.App{Config: f.app.Config, DB: f.app.DB, Log: f.app.Log, Redis: f.app.Redis, Scanner: eng}
@@ -169,7 +169,7 @@ func TestHomolog_A(t *testing.T) {
 			}(w)
 		}
 		wg.Wait()
-		assert.Equal(t, before+n, countStatus(t, f.app, f.org.ID, models.ScanSourceMessageMedia, models.ScanClean), "every file cleared")
+		assert.Equal(t, before+n, countScanStatus(t, f.app, f.org.ID, models.ScanSourceMessageMedia, models.ScanClean), "every file cleared")
 		var retried int64
 		f.app.DB.Model(&models.FileScan{}).Where("organization_id = ? AND source = ? AND attempts > 0", f.org.ID, models.ScanSourceMessageMedia).Count(&retried)
 		assert.Zero(t, retried, "no file failed or was taken twice into an error")
@@ -192,8 +192,8 @@ func TestHomolog_B(t *testing.T) {
 		contact := testutil.CreateTestContact(t, f.app.DB, f.org.ID)
 		mediaFiles(t, f.app, root, f.org.ID, contact.ID, "down", 6)
 		tick(t, f.app, f.org.ID)
-		assert.Zero(t, countStatus(t, f.app, f.org.ID, models.ScanSourceMessageMedia, models.ScanClean), "nothing is cleared without a verdict")
-		assert.Positive(t, countStatus(t, f.app, f.org.ID, models.ScanSourceChatAttachment, models.ScanError))
+		assert.Zero(t, countScanStatus(t, f.app, f.org.ID, models.ScanSourceMessageMedia, models.ScanClean), "nothing is cleared without a verdict")
+		assert.Positive(t, countScanStatus(t, f.app, f.org.ID, models.ScanSourceChatAttachment, models.ScanError))
 	})
 
 	t.Run("6 an engine that hangs times out and keeps the file closed", func(t *testing.T) {

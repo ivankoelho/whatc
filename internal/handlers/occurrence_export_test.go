@@ -68,3 +68,12 @@ func (a *App) NewForwardNotificationForTest(occ *models.Occurrence, contact *mod
 func (a *App) UpdateMessageStatusForTest(wamid, status string) {
 	a.updateMessageStatus(wamid, status, nil)
 }
+
+// BuildOutgoingMessageForTest exposes the pure message builder to the external test package.
+func (a *App) BuildOutgoingMessageForTest(req OutgoingMessageRequest) *models.Message {
+	return a.createOutgoingMessage(req, MessageSendOptions{})
+}
+
+// ClassifySendErrorForTest and PublicSendErrorForTest expose the notifier's error handling.
+func ClassifySendErrorForTest(err error) (string, bool, string) { return classifySendError(err) }
+func PublicSendErrorForTest(err error) string                   { return publicErrorText(err) }

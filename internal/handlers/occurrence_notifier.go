@@ -133,24 +133,28 @@ type notificationOutcome struct {
 // classifySendError separates "the provider refused it" (safe to retry or give
 // up) from "we do not know" (never repeated automatically).
 func classifySendError(err error) (status string, retry bool, reason string) {
+	// The provider package decides what an error PROVES about delivery (Meta error code together with a 4xx
+	// status); anything it cannot prove stays "unknown" and is never repeated automatically.
 	var api *whatsapp.APIError
-	var tr *whatsapp.TransportError
-	switch {
-	case errors.As(err, &api):
-		switch {
-		case api.StatusCode == 429:
-			return models.NotificationFailed, true, "provider_rate_limited"
-		case api.StatusCode >= 500:
-			return models.NotificationUncertain, false, "provider_server_error"
-		default:
+	isAPI := errors.As(err, &api)
+	switch whatsapp.Classify(err) {
+	case whatsapp.OutcomeTransient:
+		return models.NotificationFailed, true, "provider_rate_limited"
+	case whatsapp.OutcomeRefused:
+		if isAPI {
 			return models.NotificationFailed, false, "provider_rejected"
 		}
-	case errors.As(err, &tr):
-		return models.NotificationUncertain, false, "provider_result_unknown"
-	default:
 		return models.NotificationFailed, false, "not_sent"
+	default:
+		if isAPI && api.Status >= 500 {
+			return models.NotificationUncertain, false, "provider_server_error"
+		}
+		return models.NotificationUncertain, false, "provider_result_unknown"
 	}
 }
+
+// publicErrorText is what is stored and shown about a failed send (see whatsapp.PublicErrorText).
+func publicErrorText(err error) string { return whatsapp.PublicErrorText(err) }
 
 func (a *App) processNotification(ctx context.Context, n *models.OccurrenceNotification) {
 	started := time.Now()
@@ -262,7 +266,7 @@ func (a *App) sendNotification(ctx context.Context, n *models.OccurrenceNotifica
 		out.status, out.retry, out.reason, out.err = models.NotificationFailed, true, "not_sent", errString(err)
 	case sendErr != nil:
 		out.status, out.retry, out.reason = classifySendError(sendErr)
-		out.err = sendErr.Error()
+		out.err = publicErrorText(sendErr)
 	default:
 		out.status, out.wamid = models.NotificationAccepted, wamid
 	}

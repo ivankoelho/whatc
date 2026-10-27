@@ -54,6 +54,16 @@ func main() {
 		runContacts(os.Args[2:])
 	case "antimalware":
 		runAntimalware(os.Args[2:])
+	case "verify-template-names":
+		runVerifyTemplateNames(os.Args[2:])
+	case "otp-uncertain":
+		runOTPUncertain(os.Args[2:])
+	case "otp-validity-report":
+		runOTPValidityReport(os.Args[2:])
+	case "audit-queue-otp":
+		runAuditQueueOTP(os.Args[2:])
+	case "mask-auth-codes":
+		runMaskAuthCodes(os.Args[2:])
 	case "version":
 		fmt.Printf("Whatomate %s (built %s)\n", Version, BuildTime)
 	case "help", "-h", "--help":

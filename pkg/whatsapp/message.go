@@ -679,3 +679,21 @@ func (c *Client) SendTemplateMessage(ctx context.Context, account *Account, rcpt
 	c.Log.Info("Template message sent", "message_id", messageID, "phone", rcpt.Phone, "template", templateName)
 	return messageID, nil
 }
+
+// OTPButtonParams maps the first OTP button of an AUTHENTICATION template to the
+// code, in the shape ButtonURLParamsToComponents expects. Meta requires the code
+// again on the button, not only in the body. Returns nil when there is no code
+// or no OTP button. Shared by the direct send and the campaign worker.
+func OTPButtonParams(templateButtons []any, code string) map[string]string {
+	if code == "" {
+		return nil
+	}
+	for i, raw := range templateButtons {
+		if btn, ok := raw.(map[string]any); ok {
+			if btnType, _ := btn["type"].(string); strings.EqualFold(btnType, "OTP") {
+				return map[string]string{fmt.Sprintf("%d", i): code}
+			}
+		}
+	}
+	return nil
+}

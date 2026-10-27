@@ -33,6 +33,7 @@ type Config struct {
 	XProcess     XProcessConfig     `koanf:"xprocess"`
 	Knowledge    KnowledgeConfig    `koanf:"knowledge"`
 	AITools      AIToolsConfig      `koanf:"ai_tools"`
+	OTP          OTPConfig          `koanf:"otp"`
 	Usage        UsageConfig        `koanf:"usage"`
 	Antimalware  AntimalwareConfig  `koanf:"antimalware"`
 }
@@ -231,10 +232,15 @@ type RateLimitConfig struct {
 // Load loads configuration from file and environment variables
 func Load(configPath string) (*Config, error) {
 	k := koanf.New(".")
+	// Switches that must never come from the environment are read from the FILE only.
+	fileOnly := koanf.New(".")
 
 	// Load from config file if provided
 	if configPath != "" {
 		if err := k.Load(file.Provider(configPath), toml.Parser()); err != nil {
+			return nil, err
+		}
+		if err := fileOnly.Load(file.Provider(configPath), toml.Parser()); err != nil {
 			return nil, err
 		}
 	}
@@ -258,6 +264,10 @@ func Load(configPath string) (*Config, error) {
 	if err := k.Unmarshal("", &cfg); err != nil {
 		return nil, err
 	}
+
+	// Only a real TOML boolean true enables it; anything else (absent, "true" as text) is false.
+	allow, _ := fileOnly.Get("otp.allow_local_release").(bool) // a type assertion, not koanf.Bool, which would read "true" and 1 as true
+	cfg.OTP.AllowLocalRelease = allow
 
 	// Set defaults
 	setDefaults(&cfg)
@@ -534,4 +544,33 @@ type KnowledgeConfig struct {
 	// false, and an unparseable value makes the configuration fail to load (it never turns
 	// the switch on). With it off the chatbot behaves exactly as before.
 	RAGEnabled bool `koanf:"rag_enabled"`
+}
+
+// OTPConfig holds the policy for one-time codes sent through campaigns
+// (AUTHENTICATION templates). Validity belongs to the external issuer; this is
+// only the guard rail around it.
+type OTPConfig struct {
+	// MaxValidityMinutes caps how long after upload a code may still be sent,
+	// whatever valid_until says (default 5, max 90).
+	MaxValidityMinutes int `koanf:"max_validity_minutes"`
+	// RequireValidUntil rejects recipients of authentication campaigns that come
+	// without the issuer's valid_until, and refuses to send codes that lack it.
+	// Off by default so existing campaigns keep working during the transition.
+	RequireValidUntil bool `koanf:"require_valid_until"`
+	// AllowLocalRelease lets `whatomate otp-uncertain -release` free a recipient whose
+	// delivery is uncertain so it can be sent again (the code may already have reached the
+	// customer). It is OFF unless the config FILE sets `allow_local_release = true` under
+	// [otp]: an absent key, a non-boolean value and the environment all mean false. The tag
+	// is "-" on purpose, so WHATOMATE_OTP__ALLOW_LOCAL_RELEASE can never switch it on; Load
+	// reads it from the file only. The operator it records is not authenticated.
+	AllowLocalRelease bool `koanf:"-"`
+}
+
+// MaxValidity returns the send window, bounded and defaulted.
+func (c OTPConfig) MaxValidity() time.Duration {
+	m := c.MaxValidityMinutes
+	if m < 1 || m > 90 {
+		m = 5
+	}
+	return time.Duration(m) * time.Minute
 }

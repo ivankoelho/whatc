@@ -21,6 +21,15 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  batchValidUntilError,
+  buildCsvRecipients,
+  buildManualRecipients,
+  localInputToUTC,
+  manualValidUntilIndex,
+  parseValidUntil,
+  type RecipientContext,
+} from '@/utils/campaignRecipients'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Select,
@@ -282,6 +291,7 @@ const manualEntryFormat = computed(() => {
   for (const p of templateBodyParamNames.value) {
     labels.push(/^\d+$/.test(p) ? `param${p}` : p)
   }
+  if (isAuthTemplate.value) labels.push('valid_until (optional, e.g. 2030-01-01T12:05:00Z)')
   if (labels.length === 0) return 'phone_number, name (optional)'
   return `phone_number, name, ${labels.join(', ')}`
 })
@@ -612,6 +622,21 @@ const templateHasParams = computed(() => templateParamNames.value.length > 0 || 
 // editable and remembered per category because Meta changes its price table.
 const DEFAULT_PRICE_BRL: Record<string, number> = { MARKETING: 0.35, UTILITY: 0.05, AUTHENTICATION: 0.05 }
 const templateCategory = computed(() => (selectedTemplate.value?.category || 'MARKETING').toUpperCase())
+
+// Authentication templates carry one-time codes: each recipient may come with
+// the validity (valid_until) given by the system that issued the code. The UI
+// never makes one up; the user types it per recipient or once for the batch.
+const isAuthTemplate = computed(() => templateCategory.value === 'AUTHENTICATION')
+const defaultValidUntilLocal = ref('') // <input type="datetime-local">, the user's own time zone
+const defaultValidUntilISO = computed(() => localInputToUTC(defaultValidUntilLocal.value))
+// The server is the authority; this only warns early and keeps the import buttons off.
+const defaultValidUntilError = computed(() => (isAuthTemplate.value ? batchValidUntilError(defaultValidUntilLocal.value) : null))
+const recipientContext = computed<RecipientContext>(() => ({
+  headerName: templateHeaderParamName.value,
+  bodyNames: templateBodyParamNames.value,
+  isAuth: isAuthTemplate.value,
+  defaultValidUntil: defaultValidUntilISO.value,
+}))
 const pricePerMessage = ref(0)
 watch(templateCategory, (cat) => {
   let saved: string | null = null
@@ -683,6 +708,7 @@ async function openAddRecipientsDialog() {
   loadSegmentOptions()
   recipientsInput.value = ''
   csvFile.value = null
+  defaultValidUntilLocal.value = ''
   dddInput.value = ''
   segmentType.value = segmentUnit.value = segmentDepartment.value = ALL
   dddPreview.value = null
@@ -730,7 +756,15 @@ const manualInputValidation = computed(() => {
     // Layout: phone, name, <header_value if any>, <body_val_1>, ..., <body_val_n>
     // Name (parts[1]) is optional — accept blank — but the column count must
     // match the template so values don't shift into the wrong slot.
-    const provided = parts.slice(2).filter((p: string) => p.length > 0).length
+    const validUntilAt = manualValidUntilIndex(recipientContext.value)
+    const provided = parts.slice(2, isAuthTemplate.value ? validUntilAt : undefined).filter((p: string) => p.length > 0).length
+    if (isAuthTemplate.value && parts[validUntilAt]) {
+      const parsed = parseValidUntil(parts[validUntilAt])
+      if (parsed.error !== undefined) {
+        invalidLines.push({ lineNumber: i + 1, reason: parsed.error })
+        continue
+      }
+    }
     if (expectedCount > 0 && provided < expectedCount) {
       invalidLines.push({
         lineNumber: i + 1,
@@ -738,12 +772,12 @@ const manualInputValidation = computed(() => {
       })
       continue
     }
-    if (expectedCount > 0 && parts.length - 2 > expectedCount) {
+    if (expectedCount > 0 && parts.length - 2 > expectedCount + (isAuthTemplate.value ? 1 : 0)) {
       // Extra trailing columns usually mean an unquoted comma in a value —
       // call it out instead of silently truncating.
       invalidLines.push({
         lineNumber: i + 1,
-        reason: `Too many columns: expected ${expectedCount + 2}, got ${parts.length}. If a value contains a comma, remove it.`,
+        reason: `Too many columns: expected ${expectedCount + 2 + (isAuthTemplate.value ? 1 : 0)}, got ${parts.length}. If a value contains a comma, remove it.`,
       })
     }
   }
@@ -770,46 +804,7 @@ async function addRecipients() {
     return
   }
 
-  // Layout: phone, name, <header value if any>, <body_val_1>, ..., <body_val_n>
-  // Header and body values are split into separate payload keys so a
-  // positional header {{1}} doesn't collide with body {{1}}.
-  const headerName = templateHeaderParamName.value
-  const bodyNames = templateBodyParamNames.value
-  const recipientsList = lines.map(line => {
-    const parts = line.split(',').map(p => p.trim())
-    const recipient: {
-      phone_number: string
-      recipient_name?: string
-      template_params?: Record<string, any>
-      header_params?: Record<string, any>
-    } = {
-      phone_number: parts[0].replace(/[^\d+]/g, ''),
-    }
-    if (parts[1]?.trim()) {
-      recipient.recipient_name = parts[1].trim()
-    }
-
-    let cursor = 2
-    if (headerName) {
-      const val = parts[cursor]
-      if (val && val.length > 0) {
-        recipient.header_params = { [headerName]: val }
-      }
-      cursor++
-    }
-
-    const params: Record<string, any> = {}
-    for (let i = 0; i < bodyNames.length; i++) {
-      const val = parts[cursor + i]
-      if (val && val.length > 0) {
-        params[bodyNames[i]] = val
-      }
-    }
-    if (Object.keys(params).length > 0) {
-      recipient.template_params = params
-    }
-    return recipient
-  })
+  const recipientsList = buildManualRecipients(lines, recipientContext.value)
 
   isAddingRecipients.value = true
   try {
@@ -840,16 +835,23 @@ const csvColumns = computed<string[]>(() => {
   const cols = ['phone_number', 'name']
   if (templateHeaderParamName.value) cols.push('header')
   for (const p of templateBodyParamNames.value) cols.push(p)
+  if (isAuthTemplate.value) cols.push('valid_until')
   return cols
 })
 
 const csvHeaderRow = computed(() => csvColumns.value.join(','))
+
+// Only an example for the downloaded sample file, never sent anywhere.
+function sampleValidUntil(): string {
+  return new Date(Date.now() + 5 * 60_000).toISOString().replace(/\.\d{3}Z$/, 'Z')
+}
 
 function downloadSampleCSV() {
   const cols = csvColumns.value
   const exampleRow = cols.map((c, idx) => {
     if (idx === 0) return '+1234567890'
     if (c === 'name') return 'John Doe'
+    if (c === 'valid_until') return sampleValidUntil()
     if (c === 'header') return templateHeaderParamName.value
       ? exampleValue(templateHeaderParamName.value, 0)
       : 'Summer'
@@ -858,6 +860,7 @@ function downloadSampleCSV() {
   const secondRow = cols.map((c, idx) => {
     if (idx === 0) return '+0987654321'
     if (c === 'name') return 'Jane Smith'
+    if (c === 'valid_until') return sampleValidUntil()
     if (c === 'header') return templateHeaderParamName.value
       ? exampleValue(templateHeaderParamName.value, 1)
       : 'Winter'
@@ -883,107 +886,29 @@ async function addRecipientsFromCSV() {
   isAddingRecipients.value = true
   try {
     const text = await csvFile.value.text()
-    const lines = text.split('\n').filter(line => line.trim())
-    if (lines.length < 2) {
+    const built = buildCsvRecipients(text, recipientContext.value)
+    if (built.error === 'empty') {
       toast.error(t('campaigns.csvEmpty', 'CSV file is empty or has no data rows'))
       isAddingRecipients.value = false
       return
     }
-
-    const headers = lines[0].split(',').map(h => h.toLowerCase().trim())
-    const phoneIndex = headers.findIndex(h =>
-      h === 'phone' || h === 'phone_number' || h === 'phonenumber' || h === 'mobile' || h === 'number'
-    )
-
-    if (phoneIndex === -1) {
+    if (built.error === 'missing_phone') {
       toast.error(t('campaigns.missingPhoneColumn', 'CSV must have a phone_number column'))
       isAddingRecipients.value = false
       return
     }
-
-    // Detect name column
-    const nameIndex = headers.findIndex(h =>
-      h === 'name' || h === 'recipient_name' || h === 'recipientname' || h === 'customer_name'
-    )
-
-    // Header parameter column — accept the reserved name 'header', or the
-    // variable's name itself when unambiguous (named templates only).
-    const headerName = templateHeaderParamName.value
-    let headerColIdx = -1
-    if (headerName) {
-      headerColIdx = headers.findIndex(h => h === 'header')
-      if (headerColIdx === -1 && !/^\d+$/.test(headerName)) {
-        headerColIdx = headers.findIndex(h => h === headerName.toLowerCase())
-      }
+    if (built.error === 'invalid_rows') {
+      const first = built.rowErrors.slice(0, 3).map(e => `line ${e.line}: ${e.reason}`).join('; ')
+      toast.error(t('campaigns.invalidValidUntilRows', { count: built.rowErrors.length, first }, `${built.rowErrors.length} row(s) have an invalid valid_until (${first})`))
+      isAddingRecipients.value = false
+      return
     }
-
-    const bodyNames = templateBodyParamNames.value
-    const recipientsList: {
-      phone_number: string
-      recipient_name?: string
-      template_params?: Record<string, any>
-      header_params?: Record<string, any>
-    }[] = []
-
-    for (let i = 1; i < lines.length; i++) {
-      const values = lines[i].split(',').map(v => v.trim())
-      const phone = values[phoneIndex]?.replace(/[^\d+]/g, '')
-      if (!phone) continue
-
-      const recipient: {
-        phone_number: string
-        recipient_name?: string
-        template_params?: Record<string, any>
-        header_params?: Record<string, any>
-      } = { phone_number: phone }
-
-      if (nameIndex !== -1 && values[nameIndex]?.trim()) {
-        recipient.recipient_name = values[nameIndex].trim()
-      }
-
-      const usedIndices = new Set<number>([phoneIndex])
-      if (nameIndex !== -1) usedIndices.add(nameIndex)
-
-      if (headerName && headerColIdx !== -1) {
-        const v = values[headerColIdx]?.trim()
-        if (v) recipient.header_params = { [headerName]: v }
-        usedIndices.add(headerColIdx)
-      }
-
-      if (bodyNames.length > 0) {
-        const params: Record<string, any> = {}
-
-        // Try name matching first
-        for (const paramName of bodyNames) {
-          const colIdx = headers.findIndex((h, idx) =>
-            !usedIndices.has(idx) && h === paramName.toLowerCase()
-          )
-          if (colIdx !== -1) {
-            params[paramName] = values[colIdx]?.trim() || ''
-            usedIndices.add(colIdx)
-          }
-        }
-
-        // Positional fallback for unmapped params
-        const unmapped = bodyNames.filter(p => !(p in params))
-        const remainingCols = headers.map((_, idx) => idx).filter(idx => !usedIndices.has(idx))
-        for (let j = 0; j < unmapped.length && j < remainingCols.length; j++) {
-          params[unmapped[j]] = values[remainingCols[j]]?.trim() || ''
-        }
-
-        if (Object.keys(params).length > 0) {
-          recipient.template_params = params
-        }
-      }
-
-      recipientsList.push(recipient)
-    }
-
-    if (recipientsList.length === 0) {
+    if (built.error === 'no_valid_rows') {
       toast.error(t('campaigns.noValidRowsToImport', 'No valid rows found in CSV'))
       isAddingRecipients.value = false
       return
     }
+    const recipientsList = built.recipients
 
     const response = await campaignsService.addRecipients(campaign.value.id, recipientsList)
     const result = (response.data as any).data
@@ -1478,6 +1403,21 @@ onUnmounted(() => {
         </DialogDescription>
       </DialogHeader>
 
+      <div v-if="isAuthTemplate" class="space-y-1.5 rounded-md border p-3" data-testid="valid-until-default">
+        <Label for="valid-until-default" class="text-xs">
+          {{ $t('campaigns.validUntilLabel', 'Code valid until (optional, your time zone)') }}
+        </Label>
+        <Input id="valid-until-default" v-model="defaultValidUntilLocal" type="datetime-local" />
+        <p class="text-[10px] text-muted-foreground">
+          {{ $t('campaigns.validUntilHelp', 'Must come from the system that issued the codes: Whatomate does not generate or validate them. Used for recipients without their own valid_until. Leave empty if unknown: nothing is assumed, and a code without validity may be sent after it has already expired. Codes are never sent after this moment, nor later than the send window after upload.') }}
+        </p>
+        <p v-if="defaultValidUntilError" class="text-xs text-destructive">
+          {{ defaultValidUntilError === 'past'
+            ? $t('campaigns.validUntilPast', 'This moment has already passed: the codes would never be sent')
+            : $t('campaigns.validUntilInvalid', 'Invalid date') }}
+        </p>
+      </div>
+
       <Tabs v-model="addRecipientsTab">
         <TabsList class="w-full">
           <TabsTrigger value="manual" class="flex-1">
@@ -1532,7 +1472,7 @@ onUnmounted(() => {
           <DialogFooter>
             <Button
               @click="addRecipients"
-              :disabled="isAddingRecipients || !manualInputValidation.isValid"
+              :disabled="isAddingRecipients || !manualInputValidation.isValid || !!defaultValidUntilError"
             >
               <UserPlus class="h-4 w-4 mr-1" />
               {{ isAddingRecipients ? $t('common.adding', 'Adding...') : $t('campaigns.addRecipients', 'Add Recipients') }}
@@ -1571,7 +1511,7 @@ onUnmounted(() => {
           <DialogFooter>
             <Button
               @click="addRecipientsFromCSV"
-              :disabled="isAddingRecipients || !csvFile"
+              :disabled="isAddingRecipients || !csvFile || !!defaultValidUntilError"
             >
               <FileSpreadsheet class="h-4 w-4 mr-1" />
               {{ isAddingRecipients ? $t('common.importing', 'Importing...') : $t('campaigns.importCSV', 'Import CSV') }}

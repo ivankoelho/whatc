@@ -203,3 +203,10 @@ inline_max_kb = 2048    # uploads up to this size are scanned before the respons
 reuse_hours = 24        # an identical file (same organization) reuses a clean verdict this fresh
 rescan_days = 7         # clean files are re-checked after a signature update once older than this
 batch_size = 5          # scans per worker pass (10 s): the pace of the initial scan
+
+# One-time codes sent through campaigns (AUTHENTICATION templates).
+# Validity belongs to the system that issues the code (recipient "valid_until", RFC 3339).
+[otp]
+max_validity_minutes = 5       # send window counted from upload; the smaller of this and valid_until wins
+require_valid_until = false    # true: refuse recipients/sends without valid_until (see `whatomate otp-validity-report` first)
+allow_local_release = false    # EXCEPTIONAL. true lets `whatomate otp-uncertain -release` free an uncertain delivery for resend. Read from THIS FILE ONLY (the environment is ignored). The operator it records is not authenticated; see the docs

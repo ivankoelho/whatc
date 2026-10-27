@@ -678,6 +678,10 @@ func TestWorker_HandleRecipientJob_Success(t *testing.T) {
 	campaign.HeaderMediaMimeType = "application/pdf"
 	campaign.HeaderMediaFilename = "invoice.pdf"
 	require.NoError(t, w.DB.Save(campaign).Error)
+	// A local copy is released only by a clean verdict (the real upload path records one at ingress); a missing
+	// scan row is not "clean".
+	require.NoError(t, w.DB.Create(&models.FileScan{ID: uuid.New(), OrganizationID: org.ID, Source: models.ScanSourceCampaignMedia,
+		ResourceID: campaign.ID, StoragePath: campaign.HeaderMediaLocalPath, Status: models.ScanClean}).Error)
 
 	// Create mock server
 	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
