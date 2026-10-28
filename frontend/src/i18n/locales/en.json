@@ -1335,6 +1335,8 @@
     "noPermissionsSeeded": "No permissions available. Please check if permissions are seeded in the database."
   },
   "teams": {
+    "commercial": "Commercial team",
+    "commercialHint": "Does not receive protocols.",
     "unit": "Unit",
     "department": "Department",
     "placementHint": "Used by a flow transfer node set to the contact's registration.",

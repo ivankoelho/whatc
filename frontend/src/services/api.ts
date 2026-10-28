@@ -859,6 +859,8 @@ export interface Team {
   assignment_strategy: 'round_robin' | 'load_balanced' | 'manual'
   per_agent_timeout_secs: number
   is_active: boolean
+  // Sales team: never a protocol destination.
+  commercial?: boolean
   unit_id?: string
   department_id?: string
   member_count: number

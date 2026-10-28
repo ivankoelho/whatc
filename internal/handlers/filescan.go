@@ -127,7 +127,7 @@ func (a *App) requireCleanFile(r *fastglue.Request, orgID uuid.UUID, source stri
 	}
 	msg := map[string]string{
 		models.ScanPending:  "This file is still being scanned for malware",
-		models.ScanInfected: "This file was blocked: malware was detected",
+		models.ScanInfected: "Arquivo bloqueado: foi detectado um vírus ou código malicioso",
 		models.ScanError:    "This file could not be scanned yet; it will be retried",
 		models.ScanSkipped:  "This file was not scanned and cannot be opened",
 	}[st]
@@ -182,7 +182,7 @@ func (a *App) scanIngress(r *fastglue.Request, orgID uuid.UUID, what string, dat
 		a.logAudit(orgID, uuid.Nil, "file_scan_ingress", id, models.AuditActionCreated, nil,
 			map[string]any{"what": what, "signature": res.Signature, "status": models.ScanInfected, "size": len(data)})
 		a.alertOrg(orgID, "infected", what, id, res.Signature)
-		_ = r.SendErrorEnvelope(fasthttp.StatusUnprocessableEntity, "This file was blocked: malware was detected", nil, "")
+		_ = r.SendErrorEnvelope(fasthttp.StatusUnprocessableEntity, "Arquivo bloqueado: foi detectado um vírus ou código malicioso", nil, "")
 		return false
 	}
 	return true

@@ -780,6 +780,10 @@ func (a *App) GetOccurrence(r *fastglue.Request) error {
 	a.DB.Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").Preload("WhatHappened").Preload("Process").First(occ, occ.ID)
 	resp := occurrenceToResponse(*occ)
 	resp.Can = viewerCapabilities(acc, occ, userID)
+	// Talking to the customer, or going to the chat, is the chat's right and not the case's: without chat:write there
+	// is no reply, and without access to the conversation there is no "open conversation". The endpoints enforce the same.
+	resp.Can["reply"] = resp.Can["reply"] && a.HasPermission(userID, models.ResourceChat, models.ActionWrite, orgID)
+	resp.Can["open_conversation"] = a.HasPermission(userID, models.ResourceChat, models.ActionRead, orgID) && a.CanViewConversationByID(userID, orgID, occ.ContactID)
 	if occ.TeamID != nil {
 		a.DB.Model(&models.Team{}).Where("id = ? AND organization_id = ?", *occ.TeamID, orgID).Select("name").Scan(&resp.TeamName)
 	}

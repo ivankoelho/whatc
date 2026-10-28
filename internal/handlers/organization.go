@@ -506,25 +506,8 @@ func (a *App) CreateOrganization(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create organization", nil, "")
 	}
 
-	// Get admin role for this org and add the creator as admin
-	var adminRole models.CustomRole
-	if err := tx.Where("organization_id = ? AND name = ? AND is_system = ?", org.ID, "admin", true).First(&adminRole).Error; err != nil {
-		tx.Rollback()
-		a.Log.Error("Failed to find admin role", "error", err, "org_id", org.ID)
-		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create organization", nil, "")
-	}
-
-	userOrg := models.UserOrganization{
-		UserID:         userID,
-		OrganizationID: org.ID,
-		RoleID:         &adminRole.ID,
-		IsDefault:      false,
-	}
-	if err := tx.Create(&userOrg).Error; err != nil {
-		tx.Rollback()
-		a.Log.Error("Failed to add creator to organization", "error", err)
-		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create organization", nil, "")
-	}
+	// The creator is NOT made a member: a super admin reaches any organization through the global privilege, and
+	// belonging to one is an explicit, separate act (adding the person as a member with a role).
 
 	// Seed default dashboard widgets for the new organization
 	if err := database.SeedDefaultWidgetsForOrg(tx, org.ID, userID); err != nil {

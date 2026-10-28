@@ -1322,6 +1322,8 @@
     "noPermissionsSeeded": "Nenhuma permissão disponível. Verifique se as permissões foram inicializadas no banco de dados."
   },
   "teams": {
+    "commercial": "Equipe comercial",
+    "commercialHint": "Não recebe protocolos.",
     "unit": "Unidade",
     "department": "Departamento",
     "placementHint": "Usados pelo nó de transferência do fluxo configurado como cadastro do contato.",

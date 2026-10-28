@@ -360,7 +360,7 @@ onUnmounted(() => {
             <Download class="h-4 w-4 mr-2" aria-hidden="true" />
             {{ $t('occurrences.export.button') }}
           </Button>
-          <Button size="sm" variant="outline" as-child>
+          <Button v-if="occurrence.can?.open_conversation ?? false" size="sm" variant="outline" as-child>
             <RouterLink :to="`/chat/${occurrence.contact_id}`">
               <MessageCircle class="h-4 w-4 mr-2 text-emerald-500" aria-hidden="true" />
               {{ $t('chat.openConversation') }}

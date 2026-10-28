@@ -566,6 +566,10 @@ func MigrateUserOrganizations(db *gorm.DB) error {
 // BackfillCommercialDepartments flags the departments named Vendas/Comercial as commercial, only in
 // organizations where no department is flagged yet, so an administrator's later choice is not overridden.
 func BackfillCommercialDepartments(db *gorm.DB) error {
+	// teams: the ones named like sales teams (the server also treats those as commercial when they have no department)
+	if err := db.Exec(`UPDATE teams SET commercial = true WHERE deleted_at IS NULL AND commercial = false AND (name ILIKE 'vendas%' OR name ILIKE 'comercial%')`).Error; err != nil {
+		return err
+	}
 	return db.Exec(`
 		UPDATE departments d SET commercial = true
 		WHERE d.deleted_at IS NULL AND d.commercial = false
