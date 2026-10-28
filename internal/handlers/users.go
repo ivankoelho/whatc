@@ -26,6 +26,14 @@ type UserRequest struct {
 	DepartmentID       *string    `json:"department_id"`
 }
 
+// membershipKind names how a person belongs to the organization being listed.
+func membershipKind(home, org uuid.UUID) string {
+	if home == org {
+		return "home"
+	}
+	return "guest"
+}
+
 // superAdminField is used to extract is_super_admin separately from the request body.
 // Only super admins can use this field.
 type superAdminField struct {
@@ -56,10 +64,14 @@ type UserResponse struct {
 	// PresenceState (online | away | offline) and StatusSince are reported by the
 	// user list only. StatusSince is when the state really began, and is absent
 	// when the presence log cannot say so honestly.
-	PresenceState  *string      `json:"presence_state,omitempty"`
-	StatusSince    *time.Time   `json:"status_since,omitempty"`
-	IsSuperAdmin   bool         `json:"is_super_admin"`
+	PresenceState *string    `json:"presence_state,omitempty"`
+	StatusSince   *time.Time `json:"status_since,omitempty"`
+	IsSuperAdmin  bool       `json:"is_super_admin"`
+	// IsMember: a guest, listed through a membership of this organization while their home organization is another one
+	// (the name is historical and the screens rely on it). Membership says WHY the person is in this list: "home" or
+	// "guest". A global privilege (is_super_admin) is separate and never puts anyone in an organization's list.
 	IsMember       bool         `json:"is_member"`
+	Membership     string       `json:"membership,omitempty"`
 	UnitID         *uuid.UUID   `json:"unit_id,omitempty"`
 	DepartmentID   *uuid.UUID   `json:"department_id,omitempty"`
 	OrganizationID uuid.UUID    `json:"organization_id"`
@@ -203,6 +215,7 @@ func (a *App) ListUsers(r *fastglue.Request) error {
 		}
 		resp := userToResponse(user)
 		resp.IsMember = homeOrgMap[user.ID] != orgID
+		resp.Membership = membershipKind(homeOrgMap[user.ID], orgID)
 		_, online := onlineSet[user.ID]
 		resp.IsOnline = &online
 		state := string(states[user.ID])
@@ -254,6 +267,7 @@ func (a *App) GetUser(r *fastglue.Request) error {
 
 	resp := userToResponse(user)
 	resp.IsMember = user.OrganizationID != orgID
+	resp.Membership = membershipKind(user.OrganizationID, orgID)
 	return r.SendEnvelope(resp)
 }
 

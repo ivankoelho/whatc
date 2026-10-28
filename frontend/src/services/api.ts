@@ -1667,6 +1667,8 @@ export interface Department {
   id: string
   name: string
   active: boolean
+  // Sales department: its teams are never a protocol destination.
+  commercial?: boolean
 }
 
 export interface OccurrenceCategory {
@@ -2052,9 +2054,9 @@ export const unitsService = {
 
 export const departmentsService = {
   list: () => api.get<ApiEnvelope<{ departments: Department[] }>>('/departments'),
-  create: (data: { name: string; active: boolean }) =>
+  create: (data: { name: string; active: boolean; commercial?: boolean }) =>
     api.post<ApiEnvelope<Department>>('/departments', data),
-  update: (id: string, data: { name: string; active: boolean }) =>
+  update: (id: string, data: { name: string; active: boolean; commercial?: boolean }) =>
     api.put<ApiEnvelope<Department>>(`/departments/${id}`, data),
   delete: (id: string) => api.delete<ApiEnvelope<{ deleted: boolean }>>(`/departments/${id}`),
 }

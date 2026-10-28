@@ -2764,6 +2764,11 @@
     "loadModelsHint": "Enter the API key and click \"Load models\" to see this provider's models."
   },
   "agentTransfers": {
+    "toastAssignedTitle": "Transfer assigned",
+    "toastAssignedBody": "A transfer has been assigned to you",
+    "toastNewTitle": "New transfer",
+    "toastNewBody": "{name} has been transferred to you",
+    "toastView": "View",
     "title": "Transfers",
     "subtitle": "Manage agent transfers and queue",
     "waitingInQueue": "{count} waiting in queue",
@@ -3321,6 +3326,8 @@
     "cnpj": "CNPJ"
   },
   "departments": {
+    "commercial": "Commercial department",
+    "commercialHint": "Teams in this department do not receive protocols; they work in the CRM and chat.",
     "title": "Departments",
     "subtitle": "Company sectors used when registering employees, users and teams",
     "cardTitle": "Registered departments",

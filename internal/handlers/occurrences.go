@@ -340,10 +340,16 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 		if !team.IsActive {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Team is inactive", nil, "")
 		}
+		if a.isCommercialTeam(orgID, team) {
+			return r.SendErrorEnvelope(fasthttp.StatusUnprocessableEntity, errCommercialDestination, nil, "")
+		}
 		teamID, teamUnitID, teamDeptID = &id, team.UnitID, team.DepartmentID
 	} else if req.SourceTransferID != nil {
 		if tid, perr := uuid.Parse(*req.SourceTransferID); perr == nil {
 			teamID = a.teamFromTransfer(orgID, tid)
+			if teamID != nil && a.isCommercialTeamID(orgID, *teamID) {
+				return r.SendErrorEnvelope(fasthttp.StatusUnprocessableEntity, errCommercialDestination, nil, "")
+			}
 		}
 	}
 

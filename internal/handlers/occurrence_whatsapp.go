@@ -127,6 +127,8 @@ func (a *App) GetOccurrenceWhatsApp(r *fastglue.Request) error {
 		return r.SendEnvelope(out)
 	}
 
+	a.auditCaseChannelRead(orgID, userID, occ.ID)
+
 	var rows []models.Message
 	// Only what happened since THIS case was opened: the customer's earlier
 	// exchanges on the channel (other cases, other subjects) are not part of it.
@@ -148,6 +150,21 @@ func (a *App) GetOccurrenceWhatsApp(r *fastglue.Request) error {
 	out["can_reply"] = canWrite
 	out["templates"] = a.caseTemplates(orgID, account.Name)
 	return r.SendEnvelope(out)
+}
+
+// auditCaseChannelRead records that someone read the customer's WhatsApp conversation through a case: who, which
+// case, when; never the content. One entry per person and case every caseChannelAuditEvery, so the case screen's
+// refreshes do not flood the log.
+const caseChannelAuditEvery = 10 * time.Minute
+
+func (a *App) auditCaseChannelRead(orgID, userID, occID uuid.UUID) {
+	var n int64
+	a.DB.Model(&models.AuditLog{}).Where("organization_id = ? AND resource_type = ? AND resource_id = ? AND user_id = ? AND action = ? AND created_at >= ?",
+		orgID, "occurrence", occID, userID, models.AuditActionAccessed, time.Now().Add(-caseChannelAuditEvery)).Count(&n)
+	if n > 0 {
+		return
+	}
+	a.logAudit(orgID, userID, "occurrence", occID, models.AuditActionAccessed, nil, nil, map[string]any{"field": "whatsapp_channel", "new": "read"})
 }
 
 // serviceWindowOpen: the customer wrote on THIS account within 24 h, which is

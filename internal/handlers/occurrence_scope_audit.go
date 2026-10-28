@@ -269,6 +269,9 @@ func (a *App) SetOccurrenceScope(r *fastglue.Request) error {
 	if teamID == nil && unitID == nil {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "team_id or unit_id is required", nil, "")
 	}
+	if teamID != nil && a.isCommercialTeamID(orgID, *teamID) {
+		return r.SendErrorEnvelope(fasthttp.StatusUnprocessableEntity, errCommercialDestination, nil, "")
+	}
 	if !a.applyScope(orgID, userID, occ, teamID, unitID, "manual: "+strings.TrimSpace(req.Reason)) {
 		return r.SendErrorEnvelope(fasthttp.StatusConflict, "Nothing to regularize", nil, "")
 	}

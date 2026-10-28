@@ -39,6 +39,8 @@ type Department struct {
 	OrganizationID uuid.UUID `gorm:"type:uuid;index;not null;uniqueIndex:idx_departments_org_name,where:deleted_at IS NULL" json:"organization_id"`
 	Name           string    `gorm:"size:255;not null;uniqueIndex:idx_departments_org_name,where:deleted_at IS NULL" json:"name"`
 	Active         bool      `gorm:"default:true" json:"active"`
+	// Commercial marks a sales department: its teams cannot be the destination of a protocol.
+	Commercial bool `gorm:"not null;default:false" json:"commercial"`
 }
 
 func (Department) TableName() string { return "departments" }

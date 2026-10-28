@@ -10,6 +10,8 @@ import (
 type DepartmentRequest struct {
 	Name   string `json:"name"`
 	Active bool   `json:"active"`
+	// Commercial: a sales department; its teams are never a protocol destination.
+	Commercial bool `json:"commercial"`
 }
 
 // ListDepartments returns the org's departments. Same read-gate reasoning as ListUnits.
@@ -42,7 +44,7 @@ func (a *App) CreateDepartment(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "name is required", nil, "")
 	}
 
-	department := models.Department{OrganizationID: orgID, Name: req.Name, Active: req.Active}
+	department := models.Department{OrganizationID: orgID, Name: req.Name, Active: req.Active, Commercial: req.Commercial}
 	if err := a.DB.Create(&department).Error; err != nil {
 		if isUniqueNameViolation(err) {
 			return r.SendErrorEnvelope(fasthttp.StatusConflict, "A department with this name already exists", nil, "")
@@ -87,7 +89,7 @@ func (a *App) UpdateDepartment(r *fastglue.Request) error {
 	}
 
 	if err := a.DB.Model(department).Updates(map[string]any{
-		"name": req.Name, "active": req.Active,
+		"name": req.Name, "active": req.Active, "commercial": req.Commercial,
 	}).Error; err != nil {
 		if isUniqueNameViolation(err) {
 			return r.SendErrorEnvelope(fasthttp.StatusConflict, "A department with this name already exists", nil, "")

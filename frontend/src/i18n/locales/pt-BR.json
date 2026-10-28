@@ -2753,6 +2753,11 @@
     "loadModelsHint": "Informe a chave de API e clique em \"Carregar modelos\" para ver os modelos deste provedor."
   },
   "agentTransfers": {
+    "toastAssignedTitle": "Atendimento atribuído",
+    "toastAssignedBody": "Um atendimento foi atribuído a você",
+    "toastNewTitle": "Novo atendimento",
+    "toastNewBody": "{name} foi transferido para você",
+    "toastView": "Ver",
     "title": "Transferências",
     "subtitle": "Gerencie transferências de agentes e a fila",
     "waitingInQueue": "{count} aguardando na fila",
@@ -3310,6 +3315,8 @@
     "cnpj": "CNPJ"
   },
   "departments": {
+    "commercial": "Departamento comercial",
+    "commercialHint": "Equipes deste departamento não recebem protocolos; trabalham no CRM e no chat.",
     "title": "Departamentos",
     "subtitle": "Setores da empresa usados no cadastro de colaboradores, usuários e equipes",
     "cardTitle": "Departamentos cadastrados",
