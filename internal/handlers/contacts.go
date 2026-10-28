@@ -157,7 +157,9 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 		}
 	}
 
-	if statusParam != "" {
+	if statusParam == string(models.ContactStatusNew) {
+		query = a.whereAwaitingAttendance(query, orgID)
+	} else if statusParam != "" {
 		query = query.Where("contact_status = ?", statusParam)
 	}
 

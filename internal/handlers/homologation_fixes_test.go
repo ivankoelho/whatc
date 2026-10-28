@@ -248,3 +248,34 @@ func TestVendasProfile_HasNoProtocolPermissions(t *testing.T) {
 		}
 	}
 }
+
+// A SAC agent hands a customer to the sales team of a store: the picker lists the organization's active teams with
+// transfers:write, even though the teams list only returns the caller's own teams. Without it: refused. Other
+// organizations never appear.
+func TestListTransferTeams_NeedsTransfersWriteAndStaysInTheOrganization(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	other := testutil.CreateTestOrganization(t, app.DB)
+	sac := chatUser(t, app, org.ID, []string{"chat:read", "chat:write", "transfers:write"})
+	reader := chatUser(t, app, org.ID, []string{"chat:read", "transfers:read"})
+	createTestTeam(t, app, org.ID, sac.ID)
+	vendas := createTestTeam(t, app, org.ID, chatUser(t, app, org.ID, []string{"chat:read"}).ID)
+	createTestTeam(t, app, other.ID, chatUser(t, app, other.ID, []string{"chat:read"}).ID)
+
+	code, raw := chatDo(t, app.ListTransferTeams, org.ID, sac.ID, nil, nil, nil)
+	require.Equal(t, fasthttp.StatusOK, code)
+	d := decodeChat[struct {
+		Teams []struct {
+			ID uuid.UUID `json:"id"`
+		} `json:"teams"`
+	}](t, raw)
+	assert.Len(t, d.Teams, 2, "own team and the sales team, not the other organization's")
+	var ids []uuid.UUID
+	for _, tm := range d.Teams {
+		ids = append(ids, tm.ID)
+	}
+	assert.Contains(t, ids, vendas.ID)
+
+	code, _ = chatDo(t, app.ListTransferTeams, org.ID, reader.ID, nil, nil, nil)
+	assert.Equal(t, fasthttp.StatusForbidden, code)
+}

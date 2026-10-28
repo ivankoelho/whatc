@@ -165,7 +165,8 @@ async function fetchAgents() {
 
 async function fetchTeams() {
   try {
-    await teamsStore.fetchTeams()
+    if (authStore.hasPermission('teams', 'read')) await teamsStore.fetchTeams()
+    else await teamsStore.fetchTransferTeams()
     teams.value = teamsStore.teams.filter((t: Team) => t.is_active)
   } catch {
     teams.value = []

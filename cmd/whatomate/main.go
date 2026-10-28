@@ -1175,6 +1175,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.PUT("/api/chatbot/transfers/{id}/resume", app.ResumeFromTransfer)
 	g.PUT("/api/chatbot/transfers/{id}/assign", app.AssignAgentTransfer)
 	g.GET("/api/chatbot/transfers/agents", app.ListTransferAgents)
+	g.GET("/api/chatbot/transfers/teams", app.ListTransferTeams)
 	g.PUT("/api/chatbot/transfers/{id}/unassign", app.UnassignTransfer)
 
 	// Teams (admin/manager - access control in handler)

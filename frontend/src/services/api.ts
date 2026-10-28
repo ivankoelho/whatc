@@ -471,7 +471,10 @@ export const chatbotService = {
     api.put(`/chatbot/transfers/${id}/assign`, { agent_id: agentId, team_id: teamId }),
   // The people a conversation may be handed to. Needs transfers:write only (not users:read).
   listTransferAgents: () =>
-    api.get<{ data: { agents: { id: string; full_name: string; is_active: boolean; is_available: boolean; is_online: boolean }[] } }>('/chatbot/transfers/agents')
+    api.get<{ data: { agents: { id: string; full_name: string; is_active: boolean; is_available: boolean; is_online: boolean }[] } }>('/chatbot/transfers/agents'),
+  // The active teams a conversation may be handed to. Needs transfers:write only (not teams:read).
+  listTransferTeams: () =>
+    api.get<{ data: { teams: Pick<Team, 'id' | 'name' | 'is_active' | 'unit_id' | 'department_id' | 'assignment_strategy'>[] } }>('/chatbot/transfers/teams')
 }
 
 export interface CannedResponseButton {

@@ -558,13 +558,18 @@ async function loadAgentPicker() {
   if (authStore.hasPermission('users', 'read')) await usersStore.fetchUsers()
   else await usersStore.fetchAssignableAgents()
 }
+// The full teams list needs teams:read; handing a conversation over needs transfers:write.
+async function loadTransferTeams() {
+  if (authStore.hasPermission('teams', 'read')) await teamsStore.fetchTeams({ limit: 100 })
+  else await teamsStore.fetchTransferTeams()
+}
 function openTransferAgentDialog() {
   if (usersStore.users.length === 0) loadAgentPicker().catch(() => {})
   isTransferAgentDialogOpen.value = true
 }
 function openTransferTeamDialog() {
   // Fetch up to the backend's max page so all teams show, not just the first 50.
-  teamsStore.fetchTeams({ limit: 100 }).catch(() => {})
+  loadTransferTeams().catch(() => {})
   teamSearchQuery.value = ''
   isTransferTeamDialogOpen.value = true
 }
@@ -578,7 +583,7 @@ onMounted(async () => {
   }
 
   // Teams populate the "Transfer to team" picker in the conversation menu.
-  if (teamsStore.teams.length === 0) teamsStore.fetchTeams({ limit: 100 })
+  if (teamsStore.teams.length === 0) loadTransferTeams().catch(() => {})
 
   // Ensure auth session is restored
   if (!authStore.isAuthenticated) {

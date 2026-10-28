@@ -879,6 +879,35 @@ func (a *App) ListTransferAgents(r *fastglue.Request) error {
 	return r.SendEnvelope(map[string]any{"agents": out})
 }
 
+// TransferTeam is what the "transfer to team" picker needs and nothing more.
+type TransferTeam struct {
+	ID                 uuid.UUID                 `json:"id"`
+	Name               string                    `json:"name"`
+	IsActive           bool                      `json:"is_active"`
+	UnitID             *uuid.UUID                `json:"unit_id,omitempty"`
+	DepartmentID       *uuid.UUID                `json:"department_id,omitempty"`
+	AssignmentStrategy models.AssignmentStrategy `json:"assignment_strategy"`
+}
+
+// ListTransferTeams lists the active teams of the organization a conversation may be handed to. Like
+// ListTransferAgents it needs transfers:write, not teams:read: a SAC agent hands a customer to the sales team
+// of a store without being allowed to browse or manage the teams (which only list the caller's own teams).
+func (a *App) ListTransferTeams(r *fastglue.Request) error {
+	orgID, _, err := a.requireAuth(r, models.ResourceTransfers, models.ActionWrite)
+	if err != nil {
+		return nil
+	}
+	var teams []models.Team
+	if err := a.DB.Where("organization_id = ? AND is_active = ?", orgID, true).Order("name ASC").Find(&teams).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list teams", nil, "")
+	}
+	out := make([]TransferTeam, 0, len(teams))
+	for _, t := range teams {
+		out = append(out, TransferTeam{ID: t.ID, Name: t.Name, IsActive: t.IsActive, UnitID: t.UnitID, DepartmentID: t.DepartmentID, AssignmentStrategy: t.AssignmentStrategy})
+	}
+	return r.SendEnvelope(map[string]any{"teams": out})
+}
+
 // AssignAgentTransfer assigns a transfer to a specific agent
 func (a *App) AssignAgentTransfer(r *fastglue.Request) error {
 	orgID, userID, err := a.getOrgAndUserID(r)
