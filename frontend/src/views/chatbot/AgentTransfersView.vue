@@ -151,7 +151,10 @@ async function fetchTransfers() {
 
 async function fetchAgents() {
   try {
-    await usersStore.fetchUsers()
+    // The directory needs users:read; handing conversations over needs transfers:write. Use the list the person is
+    // allowed to read instead of failing for roles (SAC, Vendas) that can transfer but not browse users.
+    if (authStore.hasPermission('users', 'read')) await usersStore.fetchUsers()
+    else await usersStore.fetchAssignableAgents()
     agents.value = usersStore.users
       .filter((u) => u.is_active !== false)
       .map((u) => ({ id: u.id, full_name: u.full_name }))

@@ -245,7 +245,7 @@ func TestScan_WhatsAppMediaIsScanned(t *testing.T) {
 	app := newTestApp(t)
 	dropLeftoverMedia(t, app)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "media-reader", []string{"contacts:read"})
+	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "media-reader", []string{"contacts:read", "conversations:view_all"})
 	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
 	serve := func(m *models.Message) (int, string) {

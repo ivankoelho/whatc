@@ -553,8 +553,13 @@ function resetAgentPickerFilters() {
 
 // Openers: ensure the picker data is loaded even for users who can transfer
 // but were not covered by the on-mount fetch (which is gated on canAssign).
+// The directory needs users:read; handing a conversation over needs transfers:write.
+async function loadAgentPicker() {
+  if (authStore.hasPermission('users', 'read')) await usersStore.fetchUsers()
+  else await usersStore.fetchAssignableAgents()
+}
 function openTransferAgentDialog() {
-  if (usersStore.users.length === 0) usersStore.fetchUsers().catch(() => {})
+  if (usersStore.users.length === 0) loadAgentPicker().catch(() => {})
   isTransferAgentDialogOpen.value = true
 }
 function openTransferTeamDialog() {
@@ -591,7 +596,7 @@ onMounted(async () => {
 
   // Fetch users if can assign contacts
   if (canAssignContacts.value) {
-    usersStore.fetchUsers().catch(() => {
+    loadAgentPicker().catch(() => {
       // Silently fail if user list can't be loaded
     })
   }
@@ -1419,12 +1424,18 @@ async function transferToAgent(agentId: string) {
   isTransferring.value = true
   isTransferAgentDialogOpen.value = false
   try {
-    await chatbotService.createTransfer({
-      contact_id: contactsStore.currentContact.id,
-      whatsapp_account: (contactsStore.currentContact as any).whatsapp_account,
-      agent_id: agentId,
-      source: 'manual'
-    })
+    // A conversation that is already being attended is HANDED OVER (the active transfer moves to the new
+    // agent); only a conversation with no attendance gets a new transfer.
+    if (activeTransferId.value) {
+      await chatbotService.assignTransfer(activeTransferId.value, agentId)
+    } else {
+      await chatbotService.createTransfer({
+        contact_id: contactsStore.currentContact.id,
+        whatsapp_account: (contactsStore.currentContact as any).whatsapp_account,
+        agent_id: agentId,
+        source: 'manual'
+      })
+    }
     toast.success(t('chat.transferSuccess'), {
       description: t('chat.transferSuccessDesc')
     })
@@ -1444,12 +1455,18 @@ async function transferToTeam(teamId: string) {
   isTransferring.value = true
   isTransferTeamDialogOpen.value = false
   try {
-    await chatbotService.createTransfer({
-      contact_id: contactsStore.currentContact.id,
-      whatsapp_account: (contactsStore.currentContact as any).whatsapp_account,
-      team_id: teamId,
-      source: 'manual'
-    })
+    // Same rule as above: an active attendance is handed over to the team (its strategy picks an available
+    // agent, or the team's queue holds it), not duplicated.
+    if (activeTransferId.value) {
+      await chatbotService.assignTransfer(activeTransferId.value, null, teamId)
+    } else {
+      await chatbotService.createTransfer({
+        contact_id: contactsStore.currentContact.id,
+        whatsapp_account: (contactsStore.currentContact as any).whatsapp_account,
+        team_id: teamId,
+        source: 'manual'
+      })
+    }
     toast.success(t('chat.transferSuccess'), {
       description: t('chat.transferSuccessDesc')
     })
@@ -2236,11 +2253,11 @@ async function sendMediaMessage() {
                   <UserPlus class="mr-2 h-4 w-4" />
                   <span>{{ $t('chat.assignToAgent') }}</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem v-if="!activeTransferId" @click="openTransferAgentDialog" :disabled="isTransferring">
+                <DropdownMenuItem @click="openTransferAgentDialog" :disabled="isTransferring">
                   <UserX class="mr-2 h-4 w-4" />
                   <span>{{ $t('chat.transferToAgent') }}</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem v-if="!activeTransferId" @click="openTransferTeamDialog" :disabled="isTransferring">
+                <DropdownMenuItem @click="openTransferTeamDialog" :disabled="isTransferring">
                   <Users class="mr-2 h-4 w-4" />
                   <span>{{ $t('chat.transferToTeam') }}</span>
                 </DropdownMenuItem>

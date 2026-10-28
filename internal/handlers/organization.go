@@ -64,7 +64,7 @@ type OrganizationSettings struct {
 
 // GetOrganizationSettings returns the organization settings
 func (a *App) GetOrganizationSettings(r *fastglue.Request) error {
-	orgID, err := a.getOrgID(r)
+	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
 	}
@@ -125,6 +125,12 @@ func (a *App) GetOrganizationSettings(r *fastglue.Request) error {
 		}
 	}
 
+	// Everybody in the organization needs the display settings (masking, time zone, format); the Meta integration
+	// identifiers are for those who manage accounts.
+	if !a.HasPermission(userID, models.ResourceAccounts, models.ActionWrite, orgID) {
+		settings.MetaAppID, settings.MetaConfigID, settings.HasMetaAppSecret = "", "", false
+	}
+
 	return r.SendEnvelope(map[string]any{
 		"settings": settings,
 		"name":     org.Name,
@@ -133,9 +139,12 @@ func (a *App) GetOrganizationSettings(r *fastglue.Request) error {
 
 // UpdateOrganizationSettings updates the organization settings
 func (a *App) UpdateOrganizationSettings(r *fastglue.Request) error {
-	orgID, userID, err := a.getOrgAndUserID(r)
+	// Being logged in does not authorise changing the organization's configuration (privacy masking, time zone,
+	// name, calling): that is settings.general:write, whatever the body says. The Meta app credentials below also
+	// need accounts:write.
+	orgID, userID, err := a.requireAuth(r, models.ResourceSettingsGeneral, models.ActionWrite)
 	if err != nil {
-		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+		return nil
 	}
 
 	var req struct {
@@ -371,7 +380,9 @@ type OrganizationResponse struct {
 	CreatedAt string    `json:"created_at"`
 }
 
-// ListOrganizations returns all organizations (super admin or users with organizations:read)
+// ListOrganizations returns the organizations the caller may see: every one for a system (super) administrator,
+// and ONLY the caller's own for anybody else, whatever organizations:read says. The list is global data, so
+// a tenant's administrator or manager must never learn the names of the other tenants.
 func (a *App) ListOrganizations(r *fastglue.Request) error {
 	userID, ok := r.RequestCtx.UserValue("user_id").(uuid.UUID)
 	if !ok {
@@ -383,8 +394,16 @@ func (a *App) ListOrganizations(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Insufficient permissions", nil, "")
 	}
 
+	q := a.DB.Order("name ASC")
+	if !a.IsSuperAdmin(userID) {
+		own, oerr := a.getOrgID(r)
+		if oerr != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+		}
+		q = q.Where("id = ?", own)
+	}
 	var orgs []models.Organization
-	if err := a.DB.Order("name ASC").Find(&orgs).Error; err != nil {
+	if err := q.Find(&orgs).Error; err != nil {
 		a.Log.Error("Failed to list organizations", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list organizations", nil, "")
 	}
@@ -429,11 +448,15 @@ type CreateOrganizationRequest struct {
 	Name string `json:"name"`
 }
 
-// CreateOrganization creates a new organization
+// CreateOrganization creates a new organization. Creating a tenant is a platform operation: only a system
+// (super) administrator may do it; organizations:write alone does not make a tenant's administrator one.
 func (a *App) CreateOrganization(r *fastglue.Request) error {
 	_, userID, err := a.requireAuth(r, models.ResourceOrganizations, models.ActionWrite)
 	if err != nil {
 		return nil
+	}
+	if !a.IsSuperAdmin(userID) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Only system administrators can create organizations", nil, "")
 	}
 
 	var req CreateOrganizationRequest

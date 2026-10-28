@@ -26,6 +26,22 @@ func TeamProfiles() []TeamProfile {
 		return append(append([]string{}, base...), extra...)
 	}
 
+	without := func(keys []string, drop ...string) []string {
+		out := make([]string, 0, len(keys))
+		for _, k := range keys {
+			keep := true
+			for _, d := range drop {
+				if k == d {
+					keep = false
+				}
+			}
+			if keep {
+				out = append(out, k)
+			}
+		}
+		return out
+	}
+
 	return []TeamProfile{
 		{
 			Name:        "SAC",
@@ -35,7 +51,10 @@ func TeamProfiles() []TeamProfile {
 		{
 			Name:        "Vendas",
 			Description: "Vendedor da loja: atende o fluxo de vendas e abre oportunidades no CRM",
-			Permissions: with("contacts:read", "contacts:write", "tags:read", "templates:read", "sales_opportunities:read", "sales_opportunities:write"),
+			// Sellers work in the CRM, never in the internal protocols (those are for SAC, Jurídico, store supervisors
+			// and the Logística support): so the agent baseline's occurrences:* is taken out.
+			Permissions: without(with("contacts:read", "contacts:write", "tags:read", "templates:read", "sales_opportunities:read", "sales_opportunities:write"),
+				"occurrences:read", "occurrences:write"),
 		},
 		{
 			Name:        "Logística",

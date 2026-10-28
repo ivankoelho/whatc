@@ -4470,6 +4470,13 @@
     "permissionSentDesc": "The contact needs to accept the call permission on WhatsApp before you can call them. Try again after they accept."
   },
   "sales": {
+    "newOpportunity": "New opportunity",
+    "opportunityCreated": "Opportunity created",
+    "pickContactTitle": "For which customer?",
+    "pickContactHelp": "Pick a customer you serve. The opportunity is linked to them.",
+    "pickContactSearch": "Search by name or phone",
+    "pickContactEmpty": "None of your customers found. Receive the conversation in the chat to see it here.",
+    "pickContactFailed": "Could not load your customers. Try again.",
     "title": "CRM",
     "subtitle": "Track your sales opportunities from the funnel through to close",
     "tabMyWallet": "My wallet",

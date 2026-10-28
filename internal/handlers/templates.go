@@ -63,9 +63,9 @@ type TemplateResponse struct {
 
 // ListTemplates returns all templates for the organization
 func (a *App) ListTemplates(r *fastglue.Request) error {
-	orgID, err := a.getOrgID(r)
+	orgID, _, err := a.requireAuth(r, models.ResourceTemplates, models.ActionRead)
 	if err != nil {
-		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+		return nil
 	}
 
 	pg := parsePagination(r)

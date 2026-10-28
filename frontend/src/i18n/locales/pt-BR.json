@@ -4460,6 +4460,13 @@
   },
   "sales": {
     "title": "CRM",
+    "newOpportunity": "Nova oportunidade",
+    "opportunityCreated": "Oportunidade criada",
+    "pickContactTitle": "Para qual cliente?",
+    "pickContactHelp": "Escolha um cliente que você atende. A oportunidade fica associada a ele.",
+    "pickContactSearch": "Buscar por nome ou telefone",
+    "pickContactEmpty": "Nenhum cliente seu encontrado. Receba o atendimento pelo chat para vê-lo aqui.",
+    "pickContactFailed": "Não foi possível carregar seus clientes. Tente novamente.",
     "subtitle": "Acompanhe suas oportunidades de venda do funil ao fechamento",
     "tabMyWallet": "Minha carteira",
     "walletLoadFailed": "Falha ao carregar sua carteira. Tente novamente.",
