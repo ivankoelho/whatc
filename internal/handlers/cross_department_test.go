@@ -69,10 +69,10 @@ func newXDWorld(t *testing.T) *xdWorld {
 		return tm
 	}
 	w.team["SAC"], w.team["Log"] = w.teamSAC, w.teamPorto
-	w.team["Vendas"] = mkTeam("Vendas Porto", w.unitPorto)
+	w.team["Vendas"] = mkTeam("Balcão Porto", w.unitPorto)
 	w.team["SupLoja"] = mkTeam("Supervisão Porto", w.unitPorto)
 	w.team["SupSAC"] = mkTeam("Supervisão SAC", nil)
-	w.team["VendasOutra"] = mkTeam("Vendas Outra", w.unitOutra)
+	w.team["VendasOutra"] = mkTeam("Balcão Outra", w.unitOutra)
 
 	profileUser := func(profile, dept, who string) *models.User {
 		perms := profilePerms(t, profile)

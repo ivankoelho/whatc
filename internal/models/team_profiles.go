@@ -65,8 +65,8 @@ func TeamProfiles() []TeamProfile {
 		},
 		{
 			Name:        "Jurídico",
-			Description: "Trabalha os protocolos do jurídico: abre, acompanha e registra casos, consulta documentos e histórico e participa da discussão interna. Não atende conversas de WhatsApp nem usa o CRM comercial",
-			// Deliberately NOT built on the agent baseline: no chat (the WhatsApp conversations of the stores), no
+			Description: "Backoffice (não é por loja): trabalha os protocolos do jurídico: abre, acompanha e registra casos, consulta documentos e histórico e participa da discussão interna. Não atende conversas de WhatsApp nem usa o CRM comercial",
+			// Backoffice profile: not tied to a store or unit. Deliberately NOT built on the agent baseline: no chat (the WhatsApp conversations of the stores), no
 			// transfers, calls or sales funnel. Cases are scoped by team membership (occurrence_access.go), so each
 			// lawyer sees only the cases of the team(s) they belong to; occurrences:view_all is an explicit extra.
 			// contacts:read only finds the customer a case is opened for; it never opens a conversation.
