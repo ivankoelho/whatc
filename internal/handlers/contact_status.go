@@ -27,13 +27,24 @@ func (a *App) GetContactStatusCounts(r *fastglue.Request) error {
 
 	var newCount int64
 	if err := query.Model(&models.Contact{}).
-		Where("contact_status = ?", models.ContactStatusNew).
+		Scopes(func(q *gorm.DB) *gorm.DB { return a.whereAwaitingAttendance(q, orgID) }).
 		Count(&newCount).Error; err != nil {
 		a.Log.Error("Failed to count contacts by status", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to count contacts", nil, "")
 	}
 
 	return r.SendEnvelope(map[string]any{"new": newCount})
+}
+
+// whereAwaitingAttendance narrows to the customers whose "new" status still means somebody is waiting for a
+// person: they sit in an active attendance (queued or owned), or wrote within the WhatsApp service window.
+// "new" only ends when an agent replies, so a customer the bot served weeks ago, or who gave up, stays "new"
+// forever; counting it would show whoever logs in a pile of past contacts as if they had never been attended.
+func (a *App) whereAwaitingAttendance(q *gorm.DB, orgID uuid.UUID) *gorm.DB {
+	active := a.DB.Model(&models.AgentTransfer{}).Select("contact_id").
+		Where("organization_id = ? AND status = ?", orgID, models.TransferStatusActive)
+	return q.Where("contact_status = ?", models.ContactStatusNew).
+		Where("(id IN (?) OR last_inbound_at IS NULL OR last_inbound_at >= ?)", active, time.Now().Add(-24*time.Hour))
 }
 
 // UpdateContactStatusRequest is the body of PUT /contacts/{id}/status.

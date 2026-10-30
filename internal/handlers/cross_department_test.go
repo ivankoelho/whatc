@@ -69,13 +69,19 @@ func newXDWorld(t *testing.T) *xdWorld {
 		return tm
 	}
 	w.team["SAC"], w.team["Log"] = w.teamSAC, w.teamPorto
-	w.team["Vendas"] = mkTeam("Vendas Porto", w.unitPorto)
+	w.team["Vendas"] = mkTeam("Balcão Porto", w.unitPorto)
 	w.team["SupLoja"] = mkTeam("Supervisão Porto", w.unitPorto)
 	w.team["SupSAC"] = mkTeam("Supervisão SAC", nil)
-	w.team["VendasOutra"] = mkTeam("Vendas Outra", w.unitOutra)
+	w.team["VendasOutra"] = mkTeam("Balcão Outra", w.unitOutra)
 
 	profileUser := func(profile, dept, who string) *models.User {
-		role := testutil.CreateTestRoleWithKeys(t, db, org, profile+"-"+who+"-"+uuid.NewString()[:5], profilePerms(t, profile))
+		perms := profilePerms(t, profile)
+		if profile == "Vendas" {
+			// The shipped Vendas profile has no protocol access (it works in the CRM). These scenarios are about
+			// a seller an admin expressly authorized in protocols, so the two permissions are granted on top.
+			perms = append(append([]string{}, perms...), "occurrences:read", "occurrences:write")
+		}
+		role := testutil.CreateTestRoleWithKeys(t, db, org, profile+"-"+who+"-"+uuid.NewString()[:5], perms)
 		u := testutil.CreateTestUser(t, db, org, testutil.WithRoleID(&role.ID))
 		name := fmt.Sprintf("%s %s %s", profile, who, uuid.NewString()[:4])
 		require.NoError(t, db.Model(u).Updates(map[string]any{"full_name": name, "department_id": w.dept[dept].ID}).Error)

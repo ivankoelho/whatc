@@ -35,6 +35,7 @@ func TestUpdateContactName_RenamesForPermittedUser(t *testing.T) {
 		[]string{"chat:read", "chat:write", "contacts:read", "contacts.name:write"})
 	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	ownContact(t, app, contact, user)
 
 	req := testutil.NewJSONRequest(t, map[string]any{"name": "Maria da Silva"})
 	testutil.SetPathParam(req, "id", contact.ID.String())
@@ -57,6 +58,7 @@ func TestUpdateContactName_TouchesNothingElse(t *testing.T) {
 		[]string{"chat:read", "chat:write", "contacts:read", "contacts.name:write"})
 	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	ownContact(t, app, contact, user)
 
 	var before models.Contact
 	require.NoError(t, app.DB.First(&before, "id = ?", contact.ID).Error)
@@ -114,6 +116,7 @@ func TestUpdateContactName_RejectsMaskedValue(t *testing.T) {
 		[]string{"chat:read", "chat:write", "contacts:read", "contacts.name:write"})
 	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	ownContact(t, app, contact, user)
 
 	req := testutil.NewJSONRequest(t, map[string]any{"name": "*******1234"})
 	testutil.SetPathParam(req, "id", contact.ID.String())
@@ -132,6 +135,7 @@ func TestUpdateContactName_AllowsStarInRealName(t *testing.T) {
 		[]string{"chat:read", "chat:write", "contacts:read", "contacts.name:write"})
 	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	ownContact(t, app, contact, user)
 
 	req := testutil.NewJSONRequest(t, map[string]any{"name": "Ótica 5*"})
 	testutil.SetPathParam(req, "id", contact.ID.String())
@@ -163,6 +167,7 @@ func TestUpdateContactName_RejectsExactMaskedValue(t *testing.T) {
 	// true — the default fixture's phone number can carry hex letters from
 	// its uniqueness suffix and would flakily dodge the mask.
 	contact := testutil.CreateTestContactWith(t, app.DB, org.ID, testutil.WithPhoneNumber("+5511987654321"))
+	ownContact(t, app, contact, user)
 	require.NoError(t, app.DB.Model(contact).Update("profile_name", contact.PhoneNumber).Error)
 	masked := utils.MaskIfPhoneNumber(contact.PhoneNumber)
 	require.NotEqual(t, contact.PhoneNumber, masked, "fixture phone number must look like a phone number for this test to mean anything")
@@ -188,6 +193,7 @@ func TestUpdateContactName_RejectsTooLong(t *testing.T) {
 		[]string{"chat:read", "chat:write", "contacts:read", "contacts.name:write"})
 	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	ownContact(t, app, contact, user)
 
 	req := testutil.NewJSONRequest(t, map[string]any{"name": strings.Repeat("a", 300)})
 	testutil.SetPathParam(req, "id", contact.ID.String())
@@ -204,6 +210,7 @@ func TestUpdateContactName_RejectsEmpty(t *testing.T) {
 		[]string{"chat:read", "chat:write", "contacts:read", "contacts.name:write"})
 	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	ownContact(t, app, contact, user)
 
 	req := testutil.NewJSONRequest(t, map[string]any{"name": "   "})
 	testutil.SetPathParam(req, "id", contact.ID.String())

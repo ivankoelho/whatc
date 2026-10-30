@@ -844,6 +844,70 @@ func (a *App) ResumeFromTransfer(r *fastglue.Request) error {
 	})
 }
 
+// TransferAgent is the minimum a person needs to choose who to hand a conversation to.
+type TransferAgent struct {
+	ID          uuid.UUID `json:"id"`
+	FullName    string    `json:"full_name"`
+	IsActive    bool      `json:"is_active"`
+	IsAvailable bool      `json:"is_available"`
+	IsOnline    bool      `json:"is_online"`
+}
+
+// ListTransferAgents lists the people of the caller's organization that a conversation may be handed to. It needs
+// transfers:write (the permission to hand conversations over), NOT users:read: a SAC agent can transfer to a
+// seller without being allowed to browse the user directory. Only the fields of the picker are returned.
+func (a *App) ListTransferAgents(r *fastglue.Request) error {
+	orgID, _, err := a.requireAuth(r, models.ResourceTransfers, models.ActionWrite)
+	if err != nil {
+		return nil
+	}
+	var users []models.User
+	if err := a.DB.Joins("JOIN user_organizations ON user_organizations.user_id = users.id AND user_organizations.organization_id = ? AND user_organizations.deleted_at IS NULL", orgID).
+		Where("users.deleted_at IS NULL AND users.is_active = ?", true).Order("users.full_name ASC").Find(&users).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list agents", nil, "")
+	}
+	online := map[uuid.UUID]bool{}
+	if a.WSHub != nil {
+		for _, id := range a.WSHub.OnlineUserIDs(orgID) {
+			online[id] = true
+		}
+	}
+	out := make([]TransferAgent, 0, len(users))
+	for _, u := range users {
+		out = append(out, TransferAgent{ID: u.ID, FullName: u.FullName, IsActive: u.IsActive, IsAvailable: u.IsAvailable, IsOnline: online[u.ID]})
+	}
+	return r.SendEnvelope(map[string]any{"agents": out})
+}
+
+// TransferTeam is what the "transfer to team" picker needs and nothing more.
+type TransferTeam struct {
+	ID                 uuid.UUID                 `json:"id"`
+	Name               string                    `json:"name"`
+	IsActive           bool                      `json:"is_active"`
+	UnitID             *uuid.UUID                `json:"unit_id,omitempty"`
+	DepartmentID       *uuid.UUID                `json:"department_id,omitempty"`
+	AssignmentStrategy models.AssignmentStrategy `json:"assignment_strategy"`
+}
+
+// ListTransferTeams lists the active teams of the organization a conversation may be handed to. Like
+// ListTransferAgents it needs transfers:write, not teams:read: a SAC agent hands a customer to the sales team
+// of a store without being allowed to browse or manage the teams (which only list the caller's own teams).
+func (a *App) ListTransferTeams(r *fastglue.Request) error {
+	orgID, _, err := a.requireAuth(r, models.ResourceTransfers, models.ActionWrite)
+	if err != nil {
+		return nil
+	}
+	var teams []models.Team
+	if err := a.DB.Where("organization_id = ? AND is_active = ?", orgID, true).Order("name ASC").Find(&teams).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list teams", nil, "")
+	}
+	out := make([]TransferTeam, 0, len(teams))
+	for _, t := range teams {
+		out = append(out, TransferTeam{ID: t.ID, Name: t.Name, IsActive: t.IsActive, UnitID: t.UnitID, DepartmentID: t.DepartmentID, AssignmentStrategy: t.AssignmentStrategy})
+	}
+	return r.SendEnvelope(map[string]any{"teams": out})
+}
+
 // AssignAgentTransfer assigns a transfer to a specific agent
 func (a *App) AssignAgentTransfer(r *fastglue.Request) error {
 	orgID, userID, err := a.getOrgAndUserID(r)
@@ -944,6 +1008,12 @@ func (a *App) AssignAgentTransfer(r *fastglue.Request) error {
 		}
 	}
 
+	// Handing a conversation to a TEAM without naming an agent: the team's own strategy chooses an agent who can
+	// take it now (available and connected). If nobody can, it stays in the team's queue, visible to its members.
+	if req.TeamID != nil && *req.TeamID != "" && transfer.TeamID != nil && targetAgentID == nil && (req.AgentID == nil || *req.AgentID == "") && hasWriteAccess && a.Assigner != nil {
+		targetAgentID = a.Assigner.AssignToTeam(*transfer.TeamID, orgID, nil, assignment.ChatLoadCounter)
+	}
+
 	// Capture the previous agent before we overwrite — the unassign branch
 	// below needs it to decide whether the contact's relationship-manager
 	// pointer was pointing at the agent we're removing.
@@ -954,6 +1024,10 @@ func (a *App) AssignAgentTransfer(r *fastglue.Request) error {
 	updates := map[string]any{"agent_id": targetAgentID}
 	if req.TeamID != nil {
 		updates["team_id"] = transfer.TeamID
+	}
+	// Whoever hands the conversation over is recorded as its initiator and keeps read-only access while it is active.
+	if hasWriteAccess && (req.TeamID != nil || (req.AgentID != nil && *req.AgentID != "")) {
+		updates["transferred_by_user_id"] = userID
 	}
 	if targetAgentID != nil && transfer.SLA.PickedUpAt == nil {
 		a.UpdateSLAOnPickup(&transfer)

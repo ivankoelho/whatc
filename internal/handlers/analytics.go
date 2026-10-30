@@ -6,6 +6,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
+	"gorm.io/gorm"
 )
 
 // DashboardStats represents dashboard statistics
@@ -32,7 +33,7 @@ type RecentMessageResponse struct {
 
 // GetDashboardStats returns dashboard statistics for the organization
 func (a *App) GetDashboardStats(r *fastglue.Request) error {
-	orgID, err := a.getOrgID(r)
+	orgID, viewerID, err := a.getOrgAndUserID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
 	}
@@ -56,6 +57,13 @@ func (a *App) GetDashboardStats(r *fastglue.Request) error {
 		periodEnd = now
 	}
 
+	// Messages, contacts and chatbot sessions belong to a conversation: the totals and the recent messages cover only
+	// the conversations the caller may open (conversations:view_all keeps the whole organization). Campaigns are
+	// organization-level and stay unscoped.
+	scoped := func(model any, source string) *gorm.DB {
+		return a.scopeToVisibleConversations(a.DB.Model(model), source, orgID, viewerID)
+	}
+
 	// Calculate the previous period for comparison (same duration, before the current period)
 	periodDuration := periodEnd.Sub(periodStart)
 	previousPeriodStart := periodStart.Add(-periodDuration - time.Nanosecond)
@@ -63,11 +71,11 @@ func (a *App) GetDashboardStats(r *fastglue.Request) error {
 
 	// Get message counts for the selected period
 	var previousPeriodMessages, currentPeriodMessages int64
-	a.DB.Model(&models.Message{}).
+	scoped(&models.Message{}, "messages").
 		Where("organization_id = ? AND created_at >= ? AND created_at <= ?", orgID, previousPeriodStart, previousPeriodEnd).
 		Count(&previousPeriodMessages)
 
-	a.DB.Model(&models.Message{}).
+	scoped(&models.Message{}, "messages").
 		Where("organization_id = ? AND created_at >= ? AND created_at <= ?", orgID, periodStart, periodEnd).
 		Count(&currentPeriodMessages)
 
@@ -75,11 +83,11 @@ func (a *App) GetDashboardStats(r *fastglue.Request) error {
 
 	// Get contact counts for the selected period
 	var previousPeriodContacts, currentPeriodContacts int64
-	a.DB.Model(&models.Contact{}).
+	scoped(&models.Contact{}, "contacts").
 		Where("organization_id = ? AND created_at >= ? AND created_at <= ?", orgID, previousPeriodStart, previousPeriodEnd).
 		Count(&previousPeriodContacts)
 
-	a.DB.Model(&models.Contact{}).
+	scoped(&models.Contact{}, "contacts").
 		Where("organization_id = ? AND created_at >= ? AND created_at <= ?", orgID, periodStart, periodEnd).
 		Count(&currentPeriodContacts)
 
@@ -87,11 +95,11 @@ func (a *App) GetDashboardStats(r *fastglue.Request) error {
 
 	// Get chatbot session counts for the selected period
 	var previousPeriodSessions, currentPeriodSessions int64
-	a.DB.Model(&models.ChatbotSession{}).
+	scoped(&models.ChatbotSession{}, "sessions").
 		Where("organization_id = ? AND created_at >= ? AND created_at <= ?", orgID, previousPeriodStart, previousPeriodEnd).
 		Count(&previousPeriodSessions)
 
-	a.DB.Model(&models.ChatbotSession{}).
+	scoped(&models.ChatbotSession{}, "sessions").
 		Where("organization_id = ? AND created_at >= ? AND created_at <= ?", orgID, periodStart, periodEnd).
 		Count(&currentPeriodSessions)
 
@@ -122,7 +130,8 @@ func (a *App) GetDashboardStats(r *fastglue.Request) error {
 
 	// Get recent messages
 	var messages []models.Message
-	a.DB.Where("organization_id = ?", orgID).
+	a.scopeRecentMessages(a.DB.Model(&models.Message{}), orgID, viewerID).
+		Where("organization_id = ?", orgID).
 		Preload("Contact").
 		Order("created_at DESC").
 		Limit(5).

@@ -26,6 +26,22 @@ func TeamProfiles() []TeamProfile {
 		return append(append([]string{}, base...), extra...)
 	}
 
+	without := func(keys []string, drop ...string) []string {
+		out := make([]string, 0, len(keys))
+		for _, k := range keys {
+			keep := true
+			for _, d := range drop {
+				if k == d {
+					keep = false
+				}
+			}
+			if keep {
+				out = append(out, k)
+			}
+		}
+		return out
+	}
+
 	return []TeamProfile{
 		{
 			Name:        "SAC",
@@ -35,7 +51,10 @@ func TeamProfiles() []TeamProfile {
 		{
 			Name:        "Vendas",
 			Description: "Vendedor da loja: atende o fluxo de vendas e abre oportunidades no CRM",
-			Permissions: with("contacts:read", "contacts:write", "tags:read", "templates:read", "sales_opportunities:read", "sales_opportunities:write"),
+			// Sellers work in the CRM, never in the internal protocols (those are for SAC, Jurídico, store supervisors
+			// and the Logística support): so the agent baseline's occurrences:* is taken out.
+			Permissions: without(with("contacts:read", "contacts:write", "tags:read", "templates:read", "sales_opportunities:read", "sales_opportunities:write"),
+				"occurrences:read", "occurrences:write"),
 		},
 		{
 			Name:        "Logística",
@@ -43,6 +62,19 @@ func TeamProfiles() []TeamProfile {
 			// contacts:read lists the whole organization's (shared) contacts;
 			// contacts:write lets the agent register one that does not exist yet.
 			Permissions: with("contacts:read", "contacts:write", "tags:read", "templates:read"),
+		},
+		{
+			Name:        "Jurídico",
+			Description: "Backoffice (não é por loja): trabalha os protocolos do jurídico: abre, acompanha e registra casos, consulta documentos e histórico e participa da discussão interna. Não atende conversas de WhatsApp nem usa o CRM comercial",
+			// Backoffice profile: not tied to a store or unit. Deliberately NOT built on the agent baseline: no chat (the WhatsApp conversations of the stores), no
+			// transfers, calls or sales funnel. Cases are scoped by team membership (occurrence_access.go), so each
+			// lawyer sees only the cases of the team(s) they belong to; occurrences:view_all is an explicit extra.
+			// contacts:read only finds the customer a case is opened for; it never opens a conversation.
+			Permissions: []string{
+				"occurrences:read", "occurrences:write",
+				"team_chat:read", "team_chat:write",
+				"contacts:read",
+			},
 		},
 		{
 			Name:        "Supervisor de Loja",

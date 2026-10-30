@@ -1,12 +1,13 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { teamsService, type Team, type TeamMember } from '@/services/api'
+import { teamsService, chatbotService, type Team, type TeamMember } from '@/services/api'
 
 export interface CreateTeamData {
   name: string
   description?: string
   assignment_strategy?: 'round_robin' | 'load_balanced' | 'manual'
   per_agent_timeout_secs?: number
+  commercial?: boolean
   unit_id?: string
   department_id?: string
 }
@@ -17,6 +18,7 @@ export interface UpdateTeamData {
   assignment_strategy?: 'round_robin' | 'load_balanced' | 'manual'
   per_agent_timeout_secs?: number
   is_active?: boolean
+  commercial?: boolean
   unit_id?: string
   department_id?: string
 }
@@ -38,6 +40,24 @@ export const useTeamsStore = defineStore('teams', () => {
   const teams = ref<Team[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
+
+  // The teams a conversation may be handed to. Needs transfers:write, not teams:read: the teams list only returns
+  // the caller's own teams, which would leave a SAC agent unable to pick the sales team.
+  async function fetchTransferTeams(): Promise<void> {
+    loading.value = true
+    error.value = null
+    try {
+      const { data } = await chatbotService.listTransferTeams()
+      teams.value = (data.data?.teams ?? []).map(t => ({
+        ...t, description: '', per_agent_timeout_secs: 0, member_count: 0, created_at: '', updated_at: ''
+      }))
+    } catch (err: any) {
+      error.value = err.response?.data?.message || 'Failed to fetch teams'
+      throw err
+    } finally {
+      loading.value = false
+    }
+  }
 
   async function fetchTeams(params?: FetchTeamsParams): Promise<FetchTeamsResponse> {
     loading.value = true
@@ -153,6 +173,7 @@ export const useTeamsStore = defineStore('teams', () => {
     loading,
     error,
     fetchTeams,
+    fetchTransferTeams,
     createTeam,
     updateTeam,
     deleteTeam,

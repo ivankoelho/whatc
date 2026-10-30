@@ -16,6 +16,20 @@ type TeamRequest struct {
 	AssignmentStrategy  models.AssignmentStrategy `json:"assignment_strategy"` // round_robin, load_balanced, manual
 	PerAgentTimeoutSecs int                       `json:"per_agent_timeout_secs"`
 	IsActive            bool                      `json:"is_active"`
+	Commercial          bool                      `json:"commercial"`
+	UnitID              *string                   `json:"unit_id,omitempty"`
+	DepartmentID        *string                   `json:"department_id,omitempty"`
+}
+
+// UpdateTeamRequest is a PARTIAL update: a field that is absent is left as it is. Pointers tell "absent" from
+// "sent as zero", so an omitted is_active never deactivates a team and an omitted description never erases it.
+type UpdateTeamRequest struct {
+	Name                string                    `json:"name"`
+	Description         *string                   `json:"description"`
+	AssignmentStrategy  models.AssignmentStrategy `json:"assignment_strategy"`
+	PerAgentTimeoutSecs *int                      `json:"per_agent_timeout_secs"`
+	IsActive            *bool                     `json:"is_active"`
+	Commercial          *bool                     `json:"commercial"`
 	UnitID              *string                   `json:"unit_id,omitempty"`
 	DepartmentID        *string                   `json:"department_id,omitempty"`
 }
@@ -34,6 +48,7 @@ type TeamResponse struct {
 	AssignmentStrategy  models.AssignmentStrategy `json:"assignment_strategy"`
 	PerAgentTimeoutSecs int                       `json:"per_agent_timeout_secs"`
 	IsActive            bool                      `json:"is_active"`
+	Commercial          bool                      `json:"commercial"`
 	MemberCount         int                       `json:"member_count"`
 	Members             []TeamMemberResponse      `json:"members,omitempty"`
 	CreatedByID         *uuid.UUID                `json:"created_by_id,omitempty"`
@@ -176,6 +191,7 @@ func (a *App) CreateTeam(r *fastglue.Request) error {
 		AssignmentStrategy:  strategy,
 		PerAgentTimeoutSecs: req.PerAgentTimeoutSecs,
 		IsActive:            true,
+		Commercial:          req.Commercial,
 		CreatedByID:         &userID,
 		UpdatedByID:         &userID,
 	}
@@ -256,17 +272,24 @@ func (a *App) UpdateTeam(r *fastglue.Request) error {
 		}
 	}
 
-	var req TeamRequest
+	var req UpdateTeamRequest
 	if err := a.decodeRequest(r, &req); err != nil {
 		return nil
 	}
 
-	// Update fields
+	// Update fields (only those sent)
 	if req.Name != "" {
 		team.Name = req.Name
 	}
-	team.Description = req.Description
-	team.IsActive = req.IsActive
+	if req.Description != nil {
+		team.Description = *req.Description
+	}
+	if req.IsActive != nil {
+		team.IsActive = *req.IsActive
+	}
+	if req.Commercial != nil {
+		team.Commercial = *req.Commercial
+	}
 
 	if req.AssignmentStrategy != "" {
 		if req.AssignmentStrategy != models.AssignmentStrategyRoundRobin && req.AssignmentStrategy != models.AssignmentStrategyLoadBalanced && req.AssignmentStrategy != models.AssignmentStrategyManual {
@@ -274,7 +297,9 @@ func (a *App) UpdateTeam(r *fastglue.Request) error {
 		}
 		team.AssignmentStrategy = req.AssignmentStrategy
 	}
-	team.PerAgentTimeoutSecs = req.PerAgentTimeoutSecs
+	if req.PerAgentTimeoutSecs != nil {
+		team.PerAgentTimeoutSecs = *req.PerAgentTimeoutSecs
+	}
 
 	// Handle unit_id
 	if req.UnitID != nil {
@@ -603,6 +628,7 @@ func buildTeamResponse(team *models.Team, includeMembers bool) TeamResponse {
 		AssignmentStrategy:  team.AssignmentStrategy,
 		PerAgentTimeoutSecs: team.PerAgentTimeoutSecs,
 		IsActive:            team.IsActive,
+		Commercial:          team.Commercial,
 		MemberCount:         len(team.Members),
 		CreatedByID:         team.CreatedByID,
 		UpdatedByID:         team.UpdatedByID,

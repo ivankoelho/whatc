@@ -311,6 +311,9 @@ func TestHomologation_ConcurrentWork(t *testing.T) {
 // listedFor asks for the list in the person's OWN organization (a user of another organization never reaches ours).
 func (w *xdWorld) listedFor(t *testing.T, u *models.User, protocol string) bool {
 	code, raw := chatDo(t, w.app.ListOccurrences, u.OrganizationID, u.ID, nil, nil, map[string]string{"search": protocol})
+	if code == fasthttp.StatusForbidden { // a profile without protocol access sees no list at all
+		return false
+	}
 	require.Equal(t, fasthttp.StatusOK, code, string(raw))
 	return strings.Contains(string(raw), protocol)
 }

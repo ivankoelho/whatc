@@ -9,6 +9,7 @@ import { useUsersStore } from '@/stores/users'
 import { contactsService } from '@/services/api'
 import { toast } from 'vue-sonner'
 import router from '@/router'
+import { i18n } from '@/i18n'
 
 // Notification sound
 let notificationSound: HTMLAudioElement | null = null
@@ -516,11 +517,11 @@ class WebSocketService {
 
     if (isAssignedToMe) {
       const contactName = payload.contact_name || payload.phone_number
-      toast.info('New Transfer', {
-        description: `${contactName} has been transferred to ${isAssignedToMe ? 'you' : 'agent queue'}`,
+      toast.info(i18n.global.t('agentTransfers.toastNewTitle'), {
+        description: i18n.global.t('agentTransfers.toastNewBody', { name: contactName }),
         duration: 5000,
         action: {
-          label: 'View',
+          label: i18n.global.t('agentTransfers.toastView'),
           onClick: () => router.push('/chatbot/transfers')
         }
       })
@@ -558,11 +559,11 @@ class WebSocketService {
     // Notify if assigned to current user
     const currentUserId = authStore.user?.id
     if (payload.agent_id === currentUserId) {
-      toast.info('Transfer Assigned', {
-        description: 'A transfer has been assigned to you',
+      toast.info(i18n.global.t('agentTransfers.toastAssignedTitle'), {
+        description: i18n.global.t('agentTransfers.toastAssignedBody'),
         duration: 5000,
         action: {
-          label: 'View',
+          label: i18n.global.t('agentTransfers.toastView'),
           onClick: () => router.push('/chatbot/transfers')
         }
       })

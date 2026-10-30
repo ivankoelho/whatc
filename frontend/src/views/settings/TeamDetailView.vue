@@ -83,6 +83,7 @@ const form = ref({
   assignment_strategy: 'round_robin' as 'round_robin' | 'load_balanced' | 'manual',
   per_agent_timeout_secs: 0,
   is_active: true,
+  commercial: false,
   unit_id: NONE as string,
   department_id: NONE as string,
 })
@@ -158,6 +159,7 @@ function syncForm() {
     assignment_strategy: team.value.assignment_strategy,
     per_agent_timeout_secs: team.value.per_agent_timeout_secs,
     is_active: team.value.is_active,
+    commercial: !!team.value.commercial,
     unit_id: team.value.unit_id || NONE,
     department_id: team.value.department_id || NONE,
   }
@@ -182,6 +184,7 @@ async function save() {
         description: form.value.description,
         assignment_strategy: form.value.assignment_strategy,
         per_agent_timeout_secs: form.value.per_agent_timeout_secs,
+        commercial: form.value.commercial,
         unit_id: form.value.unit_id === NONE ? undefined : form.value.unit_id,
         department_id: form.value.department_id === NONE ? undefined : form.value.department_id,
       })
@@ -195,6 +198,7 @@ async function save() {
         assignment_strategy: form.value.assignment_strategy,
         per_agent_timeout_secs: form.value.per_agent_timeout_secs,
         is_active: form.value.is_active,
+        commercial: form.value.commercial,
         // '' clears the tag
         unit_id: form.value.unit_id === NONE ? '' : form.value.unit_id,
         department_id: form.value.department_id === NONE ? '' : form.value.department_id,
@@ -362,6 +366,11 @@ onMounted(async () => {
         <div class="flex items-center gap-2">
           <Switch :checked="form.is_active" @update:checked="form.is_active = $event" :disabled="!canWrite" />
           <Label class="text-xs">{{ $t('common.active', 'Active') }}</Label>
+        </div>
+        <div class="flex items-center gap-2">
+          <Switch :checked="form.commercial" data-testid="team-commercial" :disabled="!canWrite" @update:checked="form.commercial = $event" />
+          <Label class="text-xs">{{ $t('teams.commercial') }}</Label>
+          <span class="text-[11px] text-muted-foreground">{{ $t('teams.commercialHint') }}</span>
         </div>
       </CardContent>
     </Card>

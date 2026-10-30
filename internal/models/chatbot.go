@@ -19,11 +19,9 @@ type AgentAssignmentConfig struct {
 	AllowQueuePickup        bool `gorm:"column:allow_agent_queue_pickup;default:true" json:"allow_agent_queue_pickup"`                // Allow agents to pick transfers from queue
 	AssignToSameAgent       bool `gorm:"column:assign_to_same_agent;default:true" json:"assign_to_same_agent"`                        // Auto-assign transfers to contact's existing agent
 	CurrentConversationOnly bool `gorm:"column:agent_current_conversation_only;default:false" json:"agent_current_conversation_only"` // Agents see only current session messages
-	// StrictConversationVisibility gates per-agent conversation visibility.
-	// Default false: behaviour is unchanged from before this feature. When true,
-	// an assigned conversation is visible/actionable only by the assigned agent,
-	// team-scoped supervisors with conversations:view_team sharing a team with
-	// the assigned agent, plus users with conversations:view_all.
+	// StrictConversationVisibility is DEPRECATED and no longer read: conversation visibility is always strict
+	// (owner, team scope with conversations:view_team, the team the conversation sits in, conversations:view_all).
+	// The column and API field remain so existing clients keep working.
 	StrictConversationVisibility bool `gorm:"column:strict_conversation_visibility;default:false" json:"strict_conversation_visibility"`
 	// SignWithAgentName, when true, prefixes the agent's first name (in bold) to
 	// outgoing free-text and media captions sent to the customer, so the client

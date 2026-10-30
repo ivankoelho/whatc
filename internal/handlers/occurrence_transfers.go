@@ -201,6 +201,9 @@ func (a *App) ForwardOccurrence(r *fastglue.Request) error {
 	if !team.IsActive {
 		return r.SendErrorEnvelope(fasthttp.StatusUnprocessableEntity, "The destination team is inactive", nil, "")
 	}
+	if a.isCommercialTeam(orgID, &team) {
+		return r.SendErrorEnvelope(fasthttp.StatusUnprocessableEntity, errCommercialDestination, nil, "")
+	}
 	if occ.TeamID != nil && *occ.TeamID == team.ID {
 		return r.SendErrorEnvelope(fasthttp.StatusConflict, "The occurrence is already with this team", nil, "")
 	}
@@ -258,6 +261,9 @@ func (a *App) ReturnOccurrence(r *fastglue.Request) error {
 		var tm models.Team
 		if a.DB.Where("id = ? AND organization_id = ?", *teamID, orgID).First(&tm).Error != nil || !tm.IsActive {
 			return r.SendErrorEnvelope(fasthttp.StatusUnprocessableEntity, "The previous team no longer exists or is inactive; forward the occurrence to another team", nil, "")
+		}
+		if a.isCommercialTeam(orgID, &tm) {
+			return r.SendErrorEnvelope(fasthttp.StatusUnprocessableEntity, errCommercialDestination, nil, "")
 		}
 		team = &tm
 	}

@@ -307,7 +307,7 @@ const handleLogout = async () => {
         role="main"
       >
         <RouterView v-slot="{ Component, route: viewRoute }">
-          <Transition name="page" mode="out-in">
+          <Transition name="page">
             <component :is="Component" :key="viewRoute.meta.stableKey ? String(viewRoute.name) : viewRoute.path" />
           </Transition>
         </RouterView>

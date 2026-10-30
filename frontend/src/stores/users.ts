@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { usersService } from '@/services/api'
+import { usersService, chatbotService } from '@/services/api'
 
 export interface UserRole {
   id: string
@@ -90,6 +90,25 @@ export const useUsersStore = defineStore('users', () => {
       }
     } catch (err: any) {
       error.value = err.response?.data?.message || 'Failed to fetch users'
+      throw err
+    } finally {
+      loading.value = false
+    }
+  }
+
+  // For people who may hand conversations over but may not browse the user directory (users:read): the same
+  // list the pickers use, from the transfers endpoint. It fills `users` with the fields the pickers need.
+  async function fetchAssignableAgents(): Promise<void> {
+    loading.value = true
+    error.value = null
+    try {
+      const { data } = await chatbotService.listTransferAgents()
+      users.value = (data.data?.agents ?? []).map(a => ({
+        id: a.id, full_name: a.full_name, is_active: a.is_active, is_available: a.is_available, is_online: a.is_online,
+        email: '', organization_id: '', created_at: '', updated_at: ''
+      }))
+    } catch (err: any) {
+      error.value = err.response?.data?.message || 'Failed to fetch agents'
       throw err
     } finally {
       loading.value = false
@@ -187,6 +206,7 @@ export const useUsersStore = defineStore('users', () => {
     loading,
     error,
     fetchUsers,
+    fetchAssignableAgents,
     fetchUser,
     applyPresence,
     applyAvailability,

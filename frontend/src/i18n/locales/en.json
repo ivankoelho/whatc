@@ -1335,6 +1335,8 @@
     "noPermissionsSeeded": "No permissions available. Please check if permissions are seeded in the database."
   },
   "teams": {
+    "commercial": "Commercial team",
+    "commercialHint": "Does not receive protocols.",
     "unit": "Unit",
     "department": "Department",
     "placementHint": "Used by a flow transfer node set to the contact's registration.",
@@ -2764,6 +2766,11 @@
     "loadModelsHint": "Enter the API key and click \"Load models\" to see this provider's models."
   },
   "agentTransfers": {
+    "toastAssignedTitle": "Transfer assigned",
+    "toastAssignedBody": "A transfer has been assigned to you",
+    "toastNewTitle": "New transfer",
+    "toastNewBody": "{name} has been transferred to you",
+    "toastView": "View",
     "title": "Transfers",
     "subtitle": "Manage agent transfers and queue",
     "waitingInQueue": "{count} waiting in queue",
@@ -3321,6 +3328,8 @@
     "cnpj": "CNPJ"
   },
   "departments": {
+    "commercial": "Commercial department",
+    "commercialHint": "Teams in this department do not receive protocols; they work in the CRM and chat.",
     "title": "Departments",
     "subtitle": "Company sectors used when registering employees, users and teams",
     "cardTitle": "Registered departments",
@@ -4470,6 +4479,13 @@
     "permissionSentDesc": "The contact needs to accept the call permission on WhatsApp before you can call them. Try again after they accept."
   },
   "sales": {
+    "newOpportunity": "New opportunity",
+    "opportunityCreated": "Opportunity created",
+    "pickContactTitle": "For which customer?",
+    "pickContactHelp": "Pick a customer you serve. The opportunity is linked to them.",
+    "pickContactSearch": "Search by name or phone",
+    "pickContactEmpty": "None of your customers found. Receive the conversation in the chat to see it here.",
+    "pickContactFailed": "Could not load your customers. Try again.",
     "title": "CRM",
     "subtitle": "Track your sales opportunities from the funnel through to close",
     "tabMyWallet": "My wallet",

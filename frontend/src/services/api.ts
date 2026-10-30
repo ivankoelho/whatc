@@ -468,7 +468,13 @@ export const chatbotService = {
   pickNextTransfer: () => api.post('/chatbot/transfers/pick'),
   resumeTransfer: (id: string) => api.put(`/chatbot/transfers/${id}/resume`),
   assignTransfer: (id: string, agentId: string | null, teamId?: string | null) =>
-    api.put(`/chatbot/transfers/${id}/assign`, { agent_id: agentId, team_id: teamId })
+    api.put(`/chatbot/transfers/${id}/assign`, { agent_id: agentId, team_id: teamId }),
+  // The people a conversation may be handed to. Needs transfers:write only (not users:read).
+  listTransferAgents: () =>
+    api.get<{ data: { agents: { id: string; full_name: string; is_active: boolean; is_available: boolean; is_online: boolean }[] } }>('/chatbot/transfers/agents'),
+  // The active teams a conversation may be handed to. Needs transfers:write only (not teams:read).
+  listTransferTeams: () =>
+    api.get<{ data: { teams: Pick<Team, 'id' | 'name' | 'is_active' | 'unit_id' | 'department_id' | 'assignment_strategy'>[] } }>('/chatbot/transfers/teams')
 }
 
 export interface CannedResponseButton {
@@ -853,6 +859,8 @@ export interface Team {
   assignment_strategy: 'round_robin' | 'load_balanced' | 'manual'
   per_agent_timeout_secs: number
   is_active: boolean
+  // Sales team: never a protocol destination.
+  commercial?: boolean
   unit_id?: string
   department_id?: string
   member_count: number
@@ -1661,6 +1669,8 @@ export interface Department {
   id: string
   name: string
   active: boolean
+  // Sales department: its teams are never a protocol destination.
+  commercial?: boolean
 }
 
 export interface OccurrenceCategory {
@@ -2046,9 +2056,9 @@ export const unitsService = {
 
 export const departmentsService = {
   list: () => api.get<ApiEnvelope<{ departments: Department[] }>>('/departments'),
-  create: (data: { name: string; active: boolean }) =>
+  create: (data: { name: string; active: boolean; commercial?: boolean }) =>
     api.post<ApiEnvelope<Department>>('/departments', data),
-  update: (id: string, data: { name: string; active: boolean }) =>
+  update: (id: string, data: { name: string; active: boolean; commercial?: boolean }) =>
     api.put<ApiEnvelope<Department>>(`/departments/${id}`, data),
   delete: (id: string) => api.delete<ApiEnvelope<{ deleted: boolean }>>(`/departments/${id}`),
 }

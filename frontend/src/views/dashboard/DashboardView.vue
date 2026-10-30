@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import { GridLayout, GridItem } from 'grid-layout-plus'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -77,6 +78,7 @@ import { useAppToast } from '@/composables/useAppToast'
 const { success, error: showError } = useAppToast()
 const { t } = useI18n()
 const authStore = useAuthStore()
+const router = useRouter()
 
 // Permission checks
 const canCreateWidget = computed(() => authStore.hasPermission('analytics', 'write'))
@@ -125,6 +127,13 @@ const widgetForm = ref({
 // Selected shortcuts for shortcuts widget creation
 const selectedShortcuts = ref<string[]>([])
 
+// A shortcut is only offered when the destination would open for this person: same rule as the route guard.
+function canOpenShortcut(to: string): boolean {
+  const meta = router.resolve(to).meta
+  const permission = meta.permission as string | undefined
+  return !permission || authStore.hasPermission(permission, (meta.permissionAction as string | undefined) || 'read')
+}
+
 // Shortcut registry
 const SHORTCUT_REGISTRY = computed(() => ({
   chat: { label: t('dashboard.startChat'), to: '/chat', icon: MessageSquare, gradient: 'from-emerald-500 to-green-600' },
@@ -148,6 +157,10 @@ const SHORTCUT_REGISTRY = computed(() => ({
   customActions: { label: t('nav.customActions'), to: '/settings/custom-actions', icon: Zap, gradient: 'from-amber-500 to-orange-600' },
   sso: { label: t('nav.sso'), to: '/settings/sso', icon: ShieldCheck, gradient: 'from-emerald-500 to-teal-600' },
 }))
+
+const availableShortcuts = computed(() =>
+  Object.fromEntries(Object.entries(SHORTCUT_REGISTRY.value).filter(([, s]) => canOpenShortcut(s.to))) as typeof SHORTCUT_REGISTRY.value
+)
 
 // Color options
 const colorOptions = computed(() => [
@@ -1076,7 +1089,7 @@ onMounted(() => {
                 <div :class="['grid gap-3 pt-1', item.w >= 8 ? 'grid-cols-3' : 'grid-cols-2']">
                   <template v-for="key in (getWidgetById(item.i)!.config?.shortcuts || [])" :key="key">
                     <RouterLink
-                      v-if="SHORTCUT_REGISTRY[key as keyof typeof SHORTCUT_REGISTRY]"
+                      v-if="SHORTCUT_REGISTRY[key as keyof typeof SHORTCUT_REGISTRY] && canOpenShortcut(SHORTCUT_REGISTRY[key as keyof typeof SHORTCUT_REGISTRY].to)"
                       :to="SHORTCUT_REGISTRY[key as keyof typeof SHORTCUT_REGISTRY].to"
                       class="card-interactive flex flex-col items-center justify-center p-4 rounded-xl border border-white/[0.08] bg-white/[0.02] light:bg-gray-50 light:border-gray-200"
                     >
@@ -1229,7 +1242,7 @@ onMounted(() => {
             <Label class="text-white/70 light:text-gray-700">{{ $t('dashboard.selectShortcuts') }}</Label>
             <div class="space-y-2 max-h-64 overflow-y-auto pr-1">
               <label
-                v-for="(shortcut, key) in SHORTCUT_REGISTRY"
+                v-for="(shortcut, key) in availableShortcuts"
                 :key="key"
                 class="flex items-center gap-3 p-2 rounded-lg hover:bg-white/[0.04] light:hover:bg-gray-50 cursor-pointer"
               >

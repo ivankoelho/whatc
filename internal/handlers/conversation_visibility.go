@@ -22,20 +22,23 @@ type conversationAccess struct {
 // always wins, so a queued/closed/transferred conversation is never governed
 // by a stale carteira pointer.
 func (a *App) authorizeConversation(userID, orgID uuid.UUID, contact *models.Contact) conversationAccess {
-	settings, _ := a.getChatbotSettingsCached(orgID, "")
-
-	// Flag off (default): preserve today's behaviour exactly — contacts:read
-	// sees all, otherwise only own/assigned (the old assigned-contact scope).
-	if settings == nil || !settings.AgentAssignment.StrictConversationVisibility {
-		if a.HasPermission(userID, models.ResourceContacts, models.ActionRead, orgID) {
-			return conversationAccess{canView: true, canInteract: true}
-		}
-		ownerWins := settings != nil && settings.AgentAssignment.AwayReassignEnabled
-		ok := a.userOwnsContact(userID, orgID, contact, ownerWins)
-		return conversationAccess{canView: ok, canInteract: ok}
+	acc := a.authorizeConversationOwners(userID, orgID, contact)
+	if acc.canView {
+		return acc
 	}
+	// The person who handed the conversation over keeps following it (READ only) while the attendance is active:
+	// the SAC that sent a customer to Vendas can still see how it goes, but cannot answer in the seller's place.
+	if t, ok := a.activeTransferFor(orgID, contact.ID); ok && t.TransferredByUserID != nil && *t.TransferredByUserID == userID {
+		return conversationAccess{canView: true, canInteract: false}
+	}
+	return acc
+}
 
-	// Strict mode.
+// authorizeConversationOwners is the rule for who owns or supervises the conversation.
+func (a *App) authorizeConversationOwners(userID, orgID uuid.UUID, contact *models.Contact) conversationAccess {
+	// Strict visibility is the ONLY behaviour (least privilege). contacts:read lets a person find a customer in the
+	// directory; it never opens a conversation. A conversation is visible and actionable only to its owner, the
+	// owner's team scope (conversations:view_team), the team it sits in, and conversations:view_all.
 	if a.HasPermission(userID, models.ResourceConversations, models.ActionViewAll, orgID) {
 		return conversationAccess{canView: true, canInteract: true}
 	}
@@ -155,27 +158,7 @@ func (a *App) accountDefaultTeamID(orgID uuid.UUID, contact *models.Contact) *uu
 // canViewConversation is true — TestVisibilityScopeMatchesFunction guards that.
 // It is the single scope now used at every listing/read/action site.
 func (a *App) scopeVisibleConversations(query *gorm.DB, userID, orgID uuid.UUID) *gorm.DB {
-	settings, _ := a.getChatbotSettingsCached(orgID, "")
-
-	// Flag off: preserve the old assigned-contact scope exactly.
-	if settings == nil || !settings.AgentAssignment.StrictConversationVisibility {
-		if a.HasPermission(userID, models.ResourceContacts, models.ActionRead, orgID) {
-			return query
-		}
-		mine := a.DB.Model(&models.AgentTransfer{}).Select("contact_id").
-			Where("agent_id = ? AND organization_id = ? AND status = ?",
-				userID, orgID, models.TransferStatusActive)
-		if settings != nil && settings.AgentAssignment.AwayReassignEnabled {
-			// The SQL twin of userOwnsContact(ownerWins): the carteira does not open a
-			// conversation that an active attendance gave to another agent.
-			ownedByOther := a.DB.Model(&models.AgentTransfer{}).Select("contact_id").
-				Where("agent_id IS NOT NULL AND agent_id <> ? AND organization_id = ? AND status = ?",
-					userID, orgID, models.TransferStatusActive)
-			return query.Where("(assigned_user_id = ? AND id NOT IN (?)) OR id IN (?)", userID, ownedByOther, mine)
-		}
-		return query.Where("assigned_user_id = ? OR id IN (?)", userID, mine)
-	}
-
+	// Strict visibility only (see authorizeConversation).
 	// Strict: view_all sees everything.
 	if a.HasPermission(userID, models.ResourceConversations, models.ActionViewAll, orgID) {
 		return query
@@ -208,6 +191,10 @@ func (a *App) scopeVisibleConversations(query *gorm.DB, userID, orgID uuid.UUID)
 			Where("assigned_user_id IS NULL AND team_id IN (?)", myTeams)). // E: flow team mine
 		Or(a.DB.Where("id NOT IN (?)", activeSub).
 			Where("assigned_user_id IS NULL AND team_id IS NULL").Where(acctDefault, myTeams)) // F: account default mine
+
+	// G: I handed it over and it is still active: read only (the SQL twin of authorizeConversation's follower rule).
+	cond = cond.Or("id IN (?)", a.DB.Model(&models.AgentTransfer{}).Select("contact_id").
+		Where("organization_id = ? AND status = ? AND transferred_by_user_id = ?", orgID, models.TransferStatusActive, userID))
 
 	// view_team: the team-scoped analogues of A and D, gated by the permission.
 	// viewTeamScope = users who share a team with me (the SQL twin of

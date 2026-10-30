@@ -100,23 +100,11 @@ func TestVisibility_CarteiraDoesNotOpenAnotherAgentsConversation_WhenOn(t *testi
 	assert.True(t, e.canView(t, e.b, "carteira A, B owns it"), "the owner sees it")
 
 	assert.True(t, e.canView(t, e.a, "carteira A, no attendance"), "no attendance: the carteira rules")
-	assert.True(t, e.canView(t, e.a, "carteira A, waiting in the queue"), "nobody owns it yet")
+	assert.False(t, e.canView(t, e.a, "carteira A, waiting in the queue"), "an unrouted queue entry belongs to its queue, not to the carteira")
 	assert.True(t, e.canView(t, e.a, "carteira A, A owns it"))
 	assert.True(t, e.canView(t, e.a, "carteira A, B's attendance already closed"), "a closed attendance does not own anything")
 	assert.False(t, e.canView(t, e.a, "no carteira, B owns it"))
 	assert.True(t, e.canView(t, e.a, "carteira B, A owns it"), "owning the attendance is enough")
-}
-
-// Without the opt-in, the original rule stands exactly (organizations that did not
-// ask for the change keep what they had).
-func TestVisibility_CarteiraRuleIsUnchanged_WhenOff(t *testing.T) {
-	e := newCarteiraEnv(t, false)
-
-	assert.True(t, e.canView(t, e.a, "carteira A, B owns it"), "original behaviour: the carteira still opens it")
-	assert.True(t, e.canView(t, e.b, "carteira A, B owns it"))
-	assert.True(t, e.canView(t, e.a, "carteira A, no attendance"))
-	assert.False(t, e.canView(t, e.a, "no carteira, B owns it"))
-	assert.True(t, e.canView(t, e.a, "carteira B, A owns it"))
 }
 
 // The function and its SQL twin agree for both agents, with the option on and off.

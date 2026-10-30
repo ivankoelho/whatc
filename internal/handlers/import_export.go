@@ -229,16 +229,10 @@ func (a *App) ExportData(r *fastglue.Request) error {
 	// Build query
 	query := a.DB.Model(config.Model).Where("organization_id = ?", orgID)
 
-	// Visibility scoping for the contacts export. Unlike the read surfaces, the
-	// contacts export historically had NO visibility scope, so "flag off = legacy
-	// behaviour" means it must stay unscoped when strict visibility is off (a
-	// contacts:export holder still exports the whole org). Only under strict mode
-	// do we limit the export to conversations the user can view, via the single
-	// source of truth scopeVisibleConversations (view_all sees all).
+	// Visibility scoping for the contacts export: a person exports the customers whose conversations they may see
+	// (view_all exports everything), through the single source of truth scopeVisibleConversations.
 	if req.Table == "contacts" {
-		if settings, _ := a.getChatbotSettingsCached(orgID, ""); settings != nil && settings.AgentAssignment.StrictConversationVisibility {
-			query = a.scopeVisibleConversations(query, userID, orgID)
-		}
+		query = a.scopeVisibleConversations(query, userID, orgID)
 	}
 
 	// Apply filters
