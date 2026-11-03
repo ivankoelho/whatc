@@ -184,7 +184,8 @@ async function save() {
         description: form.value.description,
         assignment_strategy: form.value.assignment_strategy,
         per_agent_timeout_secs: form.value.per_agent_timeout_secs,
-        commercial: form.value.commercial,
+        // left out when off, so the server classifies a team named Vendas/Comercial by default
+        commercial: form.value.commercial || undefined,
         unit_id: form.value.unit_id === NONE ? undefined : form.value.unit_id,
         department_id: form.value.department_id === NONE ? undefined : form.value.department_id,
       })

@@ -74,7 +74,8 @@ func TestCommercialTeam_ClassifiedWithOrWithoutDepartment(t *testing.T) {
 		return code
 	}
 	assert.Equal(t, fasthttp.StatusUnprocessableEntity, create(mk("Loja Norte", nil, true)), "own flag, no department")
-	assert.Equal(t, fasthttp.StatusUnprocessableEntity, create(mk("Vendas Sul", nil, false)), "no department, named like sales")
+	// a team stored without the flag and without a department is NOT commercial: the name only decides at creation
+	assert.Equal(t, fasthttp.StatusOK, create(mk("Vendas Sul", nil, false)), "stored unflagged: the stored decision stands")
 	assert.Equal(t, fasthttp.StatusUnprocessableEntity, create(mk("Atendimento Loja", commDept, false)), "commercial department")
 	assert.Equal(t, fasthttp.StatusOK, create(mk("Jurídico", nil, false)), "backoffice without department is valid")
 	assert.Equal(t, fasthttp.StatusOK, create(mk("Pós-venda", nil, false)), "not a sales team")
@@ -117,4 +118,45 @@ func TestCreateOrganization_DoesNotAssociateTheSuperAdmin(t *testing.T) {
 	var n int64
 	app.DB.Model(&models.UserOrganization{}).Where("user_id = ? AND organization_id = ?", super.ID, created.ID).Count(&n)
 	assert.Zero(t, n, "no automatic membership")
+}
+
+// Created without an explicit flag, a team named like a sales team is commercial; an administrator can then turn it off
+// (or on) and the server keeps that decision.
+func TestCreateTeam_NamedLikeSalesIsCommercialByDefault_AndTheAdminCanOverride(t *testing.T) {
+	w := newXDWorld(t)
+	admin := chatUser(t, w.app, w.org.ID, []string{"teams:read", "teams:write"})
+	sac := w.u["SAC"]
+	create := func(teamID uuid.UUID) int {
+		c := testutil.CreateTestContact(t, w.app.DB, w.org.ID)
+		w.customerWrote(t, c.ID)
+		code, _ := chatDo(t, w.app.CreateOccurrence, sac.OrganizationID, sac.ID, map[string]any{"contact_id": c.ID.String(), "title": "x", "team_id": teamID.String()}, nil, nil)
+		return code
+	}
+	mk := func(name string, body map[string]any) uuid.UUID {
+		body["name"] = name
+		code, raw := chatDo(t, w.app.CreateTeam, w.org.ID, admin.ID, body, nil, nil)
+		require.Equal(t, fasthttp.StatusOK, code, string(raw))
+		var tm models.Team
+		require.NoError(t, w.app.DB.Where("organization_id = ? AND name = ?", w.org.ID, name).First(&tm).Error)
+		return tm.ID
+	}
+	vendas := mk("Vendas Centro", map[string]any{})
+	other := mk("Pós-venda Centro", map[string]any{})
+	explicit := mk("Vendas Especial", map[string]any{"commercial": false})
+	var t1 models.Team
+	require.NoError(t, w.app.DB.First(&t1, vendas).Error)
+	assert.True(t, t1.Commercial, "named like sales, created without the flag")
+	assert.Equal(t, fasthttp.StatusUnprocessableEntity, create(vendas))
+	assert.Equal(t, fasthttp.StatusOK, create(other), "not a sales name")
+	assert.Equal(t, fasthttp.StatusOK, create(explicit), "an explicit false at creation is taken as is")
+
+	// the administrator turns it off: it is accepted as a protocol destination and the decision stays
+	code, _ := chatDo(t, w.app.UpdateTeam, w.org.ID, admin.ID, map[string]any{"commercial": false}, map[string]string{"id": vendas.String()}, nil)
+	require.Equal(t, fasthttp.StatusOK, code)
+	assert.Equal(t, fasthttp.StatusOK, create(vendas))
+	// and an unrelated partial update does not bring the flag back
+	code, _ = chatDo(t, w.app.UpdateTeam, w.org.ID, admin.ID, map[string]any{"description": "x"}, map[string]string{"id": vendas.String()}, nil)
+	require.Equal(t, fasthttp.StatusOK, code)
+	require.NoError(t, w.app.DB.First(&t1, vendas).Error)
+	assert.False(t, t1.Commercial)
 }

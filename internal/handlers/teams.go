@@ -16,7 +16,9 @@ type TeamRequest struct {
 	AssignmentStrategy  models.AssignmentStrategy `json:"assignment_strategy"` // round_robin, load_balanced, manual
 	PerAgentTimeoutSecs int                       `json:"per_agent_timeout_secs"`
 	IsActive            bool                      `json:"is_active"`
-	Commercial          bool                      `json:"commercial"`
+	// Commercial: omitted on creation, a team named like a sales team (Vendas, Comercial) is created commercial; sent
+	// explicitly it is taken as is. Later changes always go through the update request.
+	Commercial *bool   `json:"commercial"`
 	UnitID              *string                   `json:"unit_id,omitempty"`
 	DepartmentID        *string                   `json:"department_id,omitempty"`
 }
@@ -184,6 +186,10 @@ func (a *App) CreateTeam(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid assignment strategy", nil, "")
 	}
 
+	commercial := commercialName(req.Name)
+	if req.Commercial != nil {
+		commercial = *req.Commercial
+	}
 	team := models.Team{
 		OrganizationID:      orgID,
 		Name:                req.Name,
@@ -191,7 +197,7 @@ func (a *App) CreateTeam(r *fastglue.Request) error {
 		AssignmentStrategy:  strategy,
 		PerAgentTimeoutSecs: req.PerAgentTimeoutSecs,
 		IsActive:            true,
-		Commercial:          req.Commercial,
+		Commercial:          commercial,
 		CreatedByID:         &userID,
 		UpdatedByID:         &userID,
 	}

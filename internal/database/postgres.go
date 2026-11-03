@@ -204,6 +204,10 @@ func RunMigrationWithProgress(db *gorm.DB, adminCfg *config.DefaultAdminConfig) 
 	// Silence GORM logging during migration
 	silentDB := db.Session(&gorm.Session{Logger: logger.Default.LogMode(logger.Silent)})
 
+	// Whether the "commercial" columns already existed before this boot: the name-based classification runs only
+	// when they are introduced, never again, so an administrator's later choice is not overridden at a restart.
+	commercialExisted := CommercialColumnsExist(db)
+
 	migrationModels := GetMigrationModels()
 	indexes := getIndexes()
 
@@ -294,8 +298,8 @@ func RunMigrationWithProgress(db *gorm.DB, adminCfg *config.DefaultAdminConfig) 
 		return err
 	}
 
-	// Mark the sales departments of organizations that have not classified any yet
-	if err := BackfillCommercialDepartments(silentDB); err != nil {
+	// Classify existing sales teams and departments by name, once, when the commercial flag is introduced
+	if err := ApplyCommercialBackfill(silentDB, commercialExisted); err != nil {
 		fmt.Println("Failed to backfill commercial departments")
 		return err
 	}
@@ -563,8 +567,26 @@ func MigrateUserOrganizations(db *gorm.DB) error {
 	`).Error
 }
 
+// CommercialColumnsExist reports whether teams.commercial and departments.commercial are already in the schema.
+// It must be read BEFORE AutoMigrate adds them.
+func CommercialColumnsExist(db *gorm.DB) bool {
+	m := db.Migrator()
+	return m.HasColumn(&models.Team{}, "commercial") && m.HasColumn(&models.Department{}, "commercial")
+}
+
+// ApplyCommercialBackfill classifies existing teams and departments named Vendas/Comercial as commercial, but only
+// in the boot that introduces the columns (existedBefore == false). Every later boot does nothing, so flipping the
+// flag off (or on) from the screens is never undone by a restart.
+func ApplyCommercialBackfill(db *gorm.DB, existedBefore bool) error {
+	if existedBefore {
+		return nil
+	}
+	return BackfillCommercialDepartments(db)
+}
+
 // BackfillCommercialDepartments flags the departments named Vendas/Comercial as commercial, only in
-// organizations where no department is flagged yet, so an administrator's later choice is not overridden.
+// organizations where no department is flagged yet, and the teams named alike. Call it through
+// ApplyCommercialBackfill: on its own it is NOT safe to run at every boot (it would redo the classification).
 func BackfillCommercialDepartments(db *gorm.DB) error {
 	// teams: the ones named like sales teams (the server also treats those as commercial when they have no department)
 	if err := db.Exec(`UPDATE teams SET commercial = true WHERE deleted_at IS NULL AND commercial = false AND (name ILIKE 'vendas%' OR name ILIKE 'comercial%')`).Error; err != nil {

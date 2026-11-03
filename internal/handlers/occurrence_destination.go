@@ -21,15 +21,15 @@ func (a *App) isCommercialTeam(orgID uuid.UUID, team *models.Team) bool {
 		return true
 	}
 	if team.DepartmentID == nil {
-		// no department to classify it: a team named like a sales team is one, so forgetting the flag is not an opening
-		return commercialName(team.Name)
+		return false
 	}
 	var n int64
 	a.DB.Model(&models.Department{}).Where("id = ? AND organization_id = ? AND commercial = ?", *team.DepartmentID, orgID, true).Count(&n)
 	return n > 0
 }
 
-// commercialName: Vendas / Comercial (and "Vendas Loja 1"...), ignoring case and accents on the first word.
+// commercialName: Vendas / Comercial (and "Vendas Loja 1"...), ignoring case. Used to classify a team when it is created
+// without an explicit flag; afterwards only the stored flag (or the department) decides, so an administrator can override it.
 func commercialName(name string) bool {
 	n := strings.ToLower(strings.TrimSpace(name))
 	return strings.HasPrefix(n, "vendas") || strings.HasPrefix(n, "venda ") || strings.HasPrefix(n, "comercial")
