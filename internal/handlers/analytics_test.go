@@ -132,7 +132,9 @@ func createTestTeamWithAgent(t *testing.T, app *handlers.App, orgID, userID uuid
 func TestApp_GetDashboardStats_Success(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("dash-stats")), testutil.WithPassword("password"))
+	// These totals are organization-wide, so the caller sees every conversation (conversations:view_all).
+	viewAll := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "viewall-dash-stats", []string{"conversations:view_all"})
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("dash-stats")), testutil.WithPassword("password"), testutil.WithRoleID(&viewAll.ID))
 
 	// Create test data within the current month
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
@@ -167,7 +169,9 @@ func TestApp_GetDashboardStats_Success(t *testing.T) {
 func TestApp_GetDashboardStats_WithDateFilters(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("dash-date")), testutil.WithPassword("password"))
+	// These totals are organization-wide, so the caller sees every conversation (conversations:view_all).
+	viewAll := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "viewall-dash-date", []string{"conversations:view_all"})
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("dash-date")), testutil.WithPassword("password"), testutil.WithRoleID(&viewAll.ID))
 
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
 

@@ -381,7 +381,7 @@ func TestMediaScanStatus_FollowsMediaVisibility(t *testing.T) {
 	app := newTestApp(t)
 	dropLeftoverMedia(t, app)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "media-reader", []string{"contacts:read"})
+	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "media-reader", []string{"contacts:read", "conversations:view_all"})
 	reader := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
 	mk := func(rel string, b []byte) *models.Message {
@@ -423,7 +423,7 @@ func TestMediaScanStatus_FollowsMediaVisibility(t *testing.T) {
 
 	// another organization sees nothing of it
 	other := newIsoWorld(t)
-	orole := testutil.CreateTestRoleWithKeys(t, app.DB, other.org.ID, "media-reader", []string{"contacts:read"})
+	orole := testutil.CreateTestRoleWithKeys(t, app.DB, other.org.ID, "media-reader", []string{"contacts:read", "conversations:view_all"})
 	foreign := testutil.CreateTestUser(t, app.DB, other.org.ID, testutil.WithRoleID(&orole.ID))
 	assert.Empty(t, ask(foreign, waiting.ID))
 }

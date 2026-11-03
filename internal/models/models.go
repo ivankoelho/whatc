@@ -185,6 +185,8 @@ type Team struct {
 	AssignmentStrategy  AssignmentStrategy `gorm:"size:50;default:'round_robin'" json:"assignment_strategy"` // round_robin, load_balanced, manual
 	PerAgentTimeoutSecs int                `gorm:"default:0" json:"per_agent_timeout_secs"`                  // 0 = use org/global default
 	IsActive            bool               `gorm:"default:true" json:"is_active"`
+	// Commercial marks a sales team: never a protocol destination (see also Department.Commercial).
+	Commercial  bool       `gorm:"not null;default:false" json:"commercial"`
 	CreatedByID         *uuid.UUID         `gorm:"type:uuid" json:"created_by_id,omitempty"`
 	UpdatedByID         *uuid.UUID         `gorm:"type:uuid" json:"updated_by_id,omitempty"`
 

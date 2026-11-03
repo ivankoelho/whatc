@@ -25,6 +25,10 @@ func (a *App) ReplyToOccurrence(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
+	// Writing to the customer's WhatsApp is the chat's permission: working a case does not include it.
+	if !a.HasPermission(userID, models.ResourceChat, models.ActionWrite, orgID) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You cannot send messages to the customer", nil, "")
+	}
 
 	occ, err := a.loadAuthorizedOccurrence(r, orgID, userID, true)
 	if err != nil {

@@ -1322,6 +1322,8 @@
     "noPermissionsSeeded": "Nenhuma permissão disponível. Verifique se as permissões foram inicializadas no banco de dados."
   },
   "teams": {
+    "commercial": "Equipe comercial",
+    "commercialHint": "Não recebe protocolos.",
     "unit": "Unidade",
     "department": "Departamento",
     "placementHint": "Usados pelo nó de transferência do fluxo configurado como cadastro do contato.",
@@ -2753,6 +2755,11 @@
     "loadModelsHint": "Informe a chave de API e clique em \"Carregar modelos\" para ver os modelos deste provedor."
   },
   "agentTransfers": {
+    "toastAssignedTitle": "Atendimento atribuído",
+    "toastAssignedBody": "Um atendimento foi atribuído a você",
+    "toastNewTitle": "Novo atendimento",
+    "toastNewBody": "{name} foi transferido para você",
+    "toastView": "Ver",
     "title": "Transferências",
     "subtitle": "Gerencie transferências de agentes e a fila",
     "waitingInQueue": "{count} aguardando na fila",
@@ -3310,6 +3317,8 @@
     "cnpj": "CNPJ"
   },
   "departments": {
+    "commercial": "Departamento comercial",
+    "commercialHint": "Equipes deste departamento não recebem protocolos; trabalham no CRM e no chat.",
     "title": "Departamentos",
     "subtitle": "Setores da empresa usados no cadastro de colaboradores, usuários e equipes",
     "cardTitle": "Departamentos cadastrados",
@@ -4460,6 +4469,13 @@
   },
   "sales": {
     "title": "CRM",
+    "newOpportunity": "Nova oportunidade",
+    "opportunityCreated": "Oportunidade criada",
+    "pickContactTitle": "Para qual cliente?",
+    "pickContactHelp": "Escolha um cliente que você atende. A oportunidade fica associada a ele.",
+    "pickContactSearch": "Buscar por nome ou telefone",
+    "pickContactEmpty": "Nenhum cliente seu encontrado. Receba o atendimento pelo chat para vê-lo aqui.",
+    "pickContactFailed": "Não foi possível carregar seus clientes. Tente novamente.",
     "subtitle": "Acompanhe suas oportunidades de venda do funil ao fechamento",
     "tabMyWallet": "Minha carteira",
     "walletLoadFailed": "Falha ao carregar sua carteira. Tente novamente.",

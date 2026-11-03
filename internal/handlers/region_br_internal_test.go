@@ -46,6 +46,14 @@ func TestBrazilStateByDDD_CoversAll27States(t *testing.T) {
 	assert.Len(t, seen, 27)
 }
 
+// viewAllViewer is a user who sees every conversation of the organization: the contacts widgets are conversation-bound,
+// so they are read as someone with conversations:view_all.
+func viewAllViewer(t *testing.T, app *App, orgID uuid.UUID) uuid.UUID {
+	t.Helper()
+	role := testutil.CreateTestRoleWithKeys(t, app.DB, orgID, "viewall-"+uuid.NewString()[:6], []string{"conversations:view_all"})
+	return testutil.CreateTestUser(t, app.DB, orgID, testutil.WithRoleID(&role.ID)).ID
+}
+
 func TestGetContactsByRegion_GroupsByStateFromThePhone(t *testing.T) {
 	app := newProcessorTestApp(t)
 	org, _ := createProcessorTestOrg(t, app)
@@ -68,7 +76,7 @@ func TestGetContactsByRegion_GroupsByStateFromThePhone(t *testing.T) {
 	require.NoError(t, app.DB.Delete(gone).Error)
 	add(other.ID, "5511988889999", now) // another organization
 
-	got := app.getContactsByRegion(org.ID, nil, start, end)
+	got := app.getContactsByRegion(org.ID, viewAllViewer(t, app, org.ID), nil, start, end)
 
 	counts := map[string]float64{}
 	for _, p := range got {
@@ -89,7 +97,7 @@ func TestGetGroupedData_RegionForContacts(t *testing.T) {
 	require.NoError(t, app.DB.Model(&models.Contact{}).Where("id = ?", c.ID).Update("last_message_at", now).Error)
 
 	w := models.Widget{DataSource: "contacts", GroupByField: "region", DisplayType: "chart", ChartType: "map"}
-	got := app.getGroupedData(org.ID, uuid.Nil, w, nil, now.Add(-time.Hour), now.Add(time.Hour))
+	got := app.getGroupedData(org.ID, viewAllViewer(t, app, org.ID), w, nil, now.Add(-time.Hour), now.Add(time.Hour))
 	require.Len(t, got, 1)
 	assert.Equal(t, "CE", got[0].Label)
 	assert.EqualValues(t, 1, got[0].Value)

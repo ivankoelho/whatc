@@ -248,7 +248,8 @@ func TestApp_AssignAgentTransfer_SelfAssignCannotStealFromAnotherAgent(t *testin
 	testutil.SetAuthContext(req, org.ID, thief.ID)
 	testutil.SetPathParam(req, "id", tr.ID.String())
 	require.NoError(t, app.AssignAgentTransfer(req))
-	assert.Equal(t, fasthttp.StatusConflict, testutil.GetResponseStatusCode(req))
+	// Someone who may not even see the attendance learns nothing about it: refused, and nothing moves.
+	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(req))
 
 	var got models.AgentTransfer
 	require.NoError(t, app.DB.First(&got, "id = ?", tr.ID).Error)
@@ -261,6 +262,9 @@ func TestApp_AssignAgentTransfer_ConcurrentSelfAssignOneWinner(t *testing.T) {
 	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
 	tr := createTestTransfer(t, app, org.ID, contact.ID, account.Name, models.TransferStatusActive, nil)
+	// The attendance waits in a team queue; the competing agents are all members of that team.
+	team := createTeamWithMember(t, app, org.ID, createTestAgent(t, app, org.ID).ID)
+	require.NoError(t, app.DB.Model(tr).Update("team_id", team.ID).Error)
 
 	const n = 8
 	var wg sync.WaitGroup
@@ -268,6 +272,7 @@ func TestApp_AssignAgentTransfer_ConcurrentSelfAssignOneWinner(t *testing.T) {
 	start := make(chan struct{})
 	for range n {
 		ag := createTestAgent(t, app, org.ID)
+		require.NoError(t, app.DB.Create(&models.TeamMember{BaseModel: models.BaseModel{ID: uuid.New()}, TeamID: team.ID, UserID: ag.ID, Role: models.TeamRoleAgent}).Error)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -279,7 +284,7 @@ func TestApp_AssignAgentTransfer_ConcurrentSelfAssignOneWinner(t *testing.T) {
 			switch testutil.GetResponseStatusCode(req) {
 			case fasthttp.StatusOK:
 				ok.Add(1)
-			case fasthttp.StatusConflict:
+			case fasthttp.StatusConflict, fasthttp.StatusForbidden: // lost the race: 409 at the swap, or 403 once the colleague owns it
 				conflict.Add(1)
 			default:
 				t.Errorf("unexpected status %d", testutil.GetResponseStatusCode(req))

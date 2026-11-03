@@ -70,6 +70,11 @@ func (a *App) ListRoles(r *fastglue.Request) error {
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
 	}
+	// The role list (with every permission) is for those who manage roles, or who must pick one for a user.
+	if !a.HasPermission(userID, models.ResourceRoles, models.ActionRead, orgID) &&
+		!a.HasPermission(userID, models.ResourceUsers, models.ActionWrite, orgID) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Insufficient permissions", nil, "")
+	}
 
 	pg := parsePagination(r)
 	search := string(r.RequestCtx.QueryArgs().Peek("search"))

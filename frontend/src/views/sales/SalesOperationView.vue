@@ -12,7 +12,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Skeleton } from '@/components/ui/skeleton'
 import { PageHeader, DataTable, ErrorState, DeleteConfirmDialog, DateRangePicker, type Column } from '@/components/shared'
-import { TrendingUp, Briefcase, Target, CheckCircle2, XCircle, Percent, AlertTriangle, Trash2, Pencil, Columns3, List, Store, UserRound, X, LayoutDashboard } from 'lucide-vue-next'
+import { Plus, TrendingUp, Briefcase, Target, CheckCircle2, XCircle, Percent, AlertTriangle, Trash2, Pencil, Columns3, List, Store, UserRound, X, LayoutDashboard } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { useDateRange } from '@/composables/useDateRange'
 import { salesOpportunitiesService } from '@/services/api'
@@ -25,6 +25,8 @@ import { Doughnut } from '@/lib/charts'
 import SalesOpportunityBoard from '@/components/sales/SalesOpportunityBoard.vue'
 import LoseSalesOpportunityDialog from '@/components/sales/LoseSalesOpportunityDialog.vue'
 import SalesOpportunityDetailsDialog from '@/components/sales/SalesOpportunityDetailsDialog.vue'
+import PickContactForOpportunityDialog from '@/components/sales/PickContactForOpportunityDialog.vue'
+import CreateSalesOpportunityDialog from '@/components/sales/CreateSalesOpportunityDialog.vue'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -40,6 +42,22 @@ const activeTab = computed<CrmTab>({
   set: (tab) => { router.replace({ query: { ...route.query, tab } }) },
 })
 const boardRef = ref<InstanceType<typeof SalesOpportunityBoard> | null>(null)
+
+// "Nova oportunidade" from the CRM itself (no protocol, no conversation panel needed): pick one of the customers the
+// backend lets this person serve, then fill the same form the chat panel uses.
+const canCreateOpportunity = computed(() => authStore.hasPermission('sales_opportunities', 'write'))
+const pickContactOpen = ref(false)
+const createOpportunityOpen = ref(false)
+const opportunityContactId = ref('')
+function onContactPicked(contactId: string) {
+  opportunityContactId.value = contactId
+  createOpportunityOpen.value = true
+}
+function onOpportunityCreated() {
+  toast.success(t('sales.opportunityCreated'))
+  boardRef.value?.refresh()
+  fetchSummary()
+}
 
 // One sales screen for everyone (it replaced "Minha Operação" + "Dashboard de
 // Vendas"). The backend scopes every request to what the user may see —
@@ -399,6 +417,9 @@ onMounted(() => {
           <X class="mr-1 h-3.5 w-3.5" aria-hidden="true" />{{ $t('common.clear') }}
         </Button>
         </template>
+          <Button v-if="canCreateOpportunity" size="sm" class="h-9 text-[13px]" @click="pickContactOpen = true">
+            <Plus class="mr-1 h-3.5 w-3.5" aria-hidden="true" />{{ $t('sales.newOpportunity') }}
+          </Button>
           <!-- The period only drives the Painel's numbers. -->
           <DateRangePicker
             v-if="activeTab === 'dashboard'"
@@ -411,6 +432,8 @@ onMounted(() => {
           </div>
         </template>
       </PageHeader>
+      <PickContactForOpportunityDialog v-model:open="pickContactOpen" @select="onContactPicked" />
+      <CreateSalesOpportunityDialog v-model:open="createOpportunityOpen" :contact-id="opportunityContactId" @created="onOpportunityCreated" />
 
 
       <!-- Painel: indicators and value distribution only -->

@@ -1796,6 +1796,7 @@ func TestApp_UpdateContact_PersistsCPFCNPJ(t *testing.T) {
 		[]string{"chat:read", "chat:write", "contacts:read", "contacts:write"})
 	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	ownContact(t, app, contact, user)
 
 	req := testutil.NewJSONRequest(t, map[string]any{"cpf_cnpj": "037.138.295-51"})
 	testutil.SetPathParam(req, "id", contact.ID.String())

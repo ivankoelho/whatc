@@ -51,6 +51,9 @@ func (a *App) ListForwardTargets(r *fastglue.Request) error {
 	}
 	out := make([]forwardTarget, 0, len(teams))
 	for _, t := range teams {
+		if a.isCommercialTeam(orgID, &t) {
+			continue // sales teams are never offered as a protocol destination
+		}
 		ft := forwardTarget{ID: t.ID, Name: t.Name, UnitID: t.UnitID}
 		if t.UnitID != nil {
 			ft.UnitName = units[*t.UnitID]

@@ -1006,24 +1006,24 @@ func (a *App) executeWidgetQuery(orgID, viewerID uuid.UUID, widget models.Widget
 
 	switch widget.DataSource {
 	case "messages":
-		currentValue = a.queryMessages(orgID, widget.Metric, widget.Field, filters, periodStart, periodEnd)
-		previousValue = a.queryMessages(orgID, widget.Metric, widget.Field, filters, previousPeriodStart, previousPeriodEnd)
+		currentValue = a.queryMessages(orgID, viewerID, widget.Metric, widget.Field, filters, periodStart, periodEnd)
+		previousValue = a.queryMessages(orgID, viewerID, widget.Metric, widget.Field, filters, previousPeriodStart, previousPeriodEnd)
 
 	case "contacts":
-		currentValue = a.queryContacts(orgID, widget.Metric, filters, periodStart, periodEnd)
-		previousValue = a.queryContacts(orgID, widget.Metric, filters, previousPeriodStart, previousPeriodEnd)
+		currentValue = a.queryContacts(orgID, viewerID, widget.Metric, filters, periodStart, periodEnd)
+		previousValue = a.queryContacts(orgID, viewerID, widget.Metric, filters, previousPeriodStart, previousPeriodEnd)
 
 	case "campaigns":
 		currentValue = a.queryCampaigns(orgID, widget.Metric, filters, periodStart, periodEnd)
 		previousValue = a.queryCampaigns(orgID, widget.Metric, filters, previousPeriodStart, previousPeriodEnd)
 
 	case "transfers":
-		currentValue = a.queryTransfers(orgID, widget.Metric, widget.Field, filters, periodStart, periodEnd)
-		previousValue = a.queryTransfers(orgID, widget.Metric, widget.Field, filters, previousPeriodStart, previousPeriodEnd)
+		currentValue = a.queryTransfers(orgID, viewerID, widget.Metric, widget.Field, filters, periodStart, periodEnd)
+		previousValue = a.queryTransfers(orgID, viewerID, widget.Metric, widget.Field, filters, previousPeriodStart, previousPeriodEnd)
 
 	case "sessions":
-		currentValue = a.querySessions(orgID, widget.Metric, filters, periodStart, periodEnd)
-		previousValue = a.querySessions(orgID, widget.Metric, filters, previousPeriodStart, previousPeriodEnd)
+		currentValue = a.querySessions(orgID, viewerID, widget.Metric, filters, periodStart, periodEnd)
+		previousValue = a.querySessions(orgID, viewerID, widget.Metric, filters, previousPeriodStart, previousPeriodEnd)
 
 	case "occurrences":
 		currentValue = a.queryOccurrences(orgID, viewerID, widget.Metric, widget.Field, filters, periodStart, periodEnd)
@@ -1058,8 +1058,9 @@ func (a *App) executeWidgetQuery(orgID, viewerID uuid.UUID, widget models.Widget
 }
 
 // Query helper functions for each data source
-func (a *App) queryMessages(orgID uuid.UUID, metric, field string, filters []FilterInput, start, end time.Time) float64 {
+func (a *App) queryMessages(orgID, viewerID uuid.UUID, metric, field string, filters []FilterInput, start, end time.Time) float64 {
 	query := a.DB.Model(&models.Message{}).Where("organization_id = ? AND created_at >= ? AND created_at <= ?", orgID, start, end)
+	query = a.scopeToVisibleConversations(query, "messages", orgID, viewerID)
 
 	// Apply filters
 	for _, f := range filters {
@@ -1089,9 +1090,10 @@ func (a *App) queryMessages(orgID uuid.UUID, metric, field string, filters []Fil
 	return result
 }
 
-func (a *App) queryContacts(orgID uuid.UUID, _ string, filters []FilterInput, start, end time.Time) float64 {
+func (a *App) queryContacts(orgID, viewerID uuid.UUID, _ string, filters []FilterInput, start, end time.Time) float64 {
 	// Filter by last_message_at to get "active" contacts with recent activity
 	query := a.DB.Model(&models.Contact{}).Where("organization_id = ? AND last_message_at >= ? AND last_message_at <= ?", orgID, start, end)
+	query = a.scopeToVisibleConversations(query, "contacts", orgID, viewerID)
 
 	for _, f := range filters {
 		query = applyFilter("contacts", query, f)
@@ -1114,8 +1116,9 @@ func (a *App) queryCampaigns(orgID uuid.UUID, _ string, filters []FilterInput, s
 	return float64(count)
 }
 
-func (a *App) queryTransfers(orgID uuid.UUID, metric, field string, filters []FilterInput, start, end time.Time) float64 {
+func (a *App) queryTransfers(orgID, viewerID uuid.UUID, metric, field string, filters []FilterInput, start, end time.Time) float64 {
 	query := a.DB.Model(&models.AgentTransfer{}).Where("organization_id = ? AND transferred_at >= ? AND transferred_at <= ?", orgID, start, end)
+	query = a.scopeToVisibleConversations(query, "transfers", orgID, viewerID)
 
 	for _, f := range filters {
 		query = applyFilter("transfers", query, f)
@@ -1139,8 +1142,9 @@ func (a *App) queryTransfers(orgID uuid.UUID, metric, field string, filters []Fi
 	return result
 }
 
-func (a *App) querySessions(orgID uuid.UUID, _ string, filters []FilterInput, start, end time.Time) float64 {
+func (a *App) querySessions(orgID, viewerID uuid.UUID, _ string, filters []FilterInput, start, end time.Time) float64 {
 	query := a.DB.Model(&models.ChatbotSession{}).Where("organization_id = ? AND created_at >= ? AND created_at <= ?", orgID, start, end)
+	query = a.scopeToVisibleConversations(query, "sessions", orgID, viewerID)
 
 	for _, f := range filters {
 		query = applyFilter("sessions", query, f)
@@ -1298,6 +1302,7 @@ func (a *App) getChartData(orgID, viewerID uuid.UUID, widget models.Widget, filt
 
 	args := []any{orgID, start, end}
 	query += a.occurrenceScopeSQL(widget.DataSource, orgID, viewerID, "id")
+	query += a.conversationScopeSQL(widget.DataSource, orgID, viewerID, "")
 	query, args = appendFilterSQL(widget.DataSource, query, args, filters)
 
 	query += fmt.Sprintf(" GROUP BY DATE_TRUNC('day', %s) ORDER BY date ASC", dateField)
@@ -1441,7 +1446,7 @@ func (a *App) getGroupedData(orgID, viewerID uuid.UUID, widget models.Widget, fi
 
 	// region is derived from the phone number, not stored, so it has its own query.
 	if widget.DataSource == "contacts" && widget.GroupByField == "region" {
-		return a.getContactsByRegion(orgID, filters, start, end)
+		return a.getContactsByRegion(orgID, viewerID, filters, start, end)
 	}
 
 	tableName, dateField, ok := resolveDataSourceTable(widget.DataSource)
@@ -1475,6 +1480,7 @@ func (a *App) getGroupedData(orgID, viewerID uuid.UUID, widget models.Widget, fi
 
 	args := []any{orgID, start, end}
 	query += a.occurrenceScopeSQL(widget.DataSource, orgID, viewerID, "id")
+	query += a.conversationScopeSQL(widget.DataSource, orgID, viewerID, "")
 	query, args = appendFilterSQL(widget.DataSource, query, args, filters)
 
 	query += fmt.Sprintf(" GROUP BY %s ORDER BY value DESC", widget.GroupByField)
@@ -1508,11 +1514,12 @@ func (a *App) getGroupedData(orgID, viewerID uuid.UUID, widget models.Widget, fi
 // well-formed BR number) is counted under "OUTROS". The period uses the same
 // date field as every other contacts widget (last_message_at), so the numbers
 // agree with the rest of the dashboard.
-func (a *App) getContactsByRegion(orgID uuid.UUID, filters []FilterInput, start, end time.Time) []DataPoint {
+func (a *App) getContactsByRegion(orgID, viewerID uuid.UUID, filters []FilterInput, start, end time.Time) []DataPoint {
 	inner := `SELECT regexp_replace(phone_number, 'D', '', 'g') AS digits
 		FROM contacts
 		WHERE organization_id = ? AND deleted_at IS NULL AND last_message_at >= ? AND last_message_at <= ?`
 	args := []any{orgID, start, end}
+	inner += a.conversationScopeSQL("contacts", orgID, viewerID, "")
 	inner, args = appendFilterSQL("contacts", inner, args, filters)
 
 	// The pattern mirrors brazilNumber in region_br.go; keep the two in sync.
@@ -1610,6 +1617,7 @@ func (a *App) getGroupedTimeSeriesData(orgID, viewerID uuid.UUID, widget models.
 
 	args := []any{orgID, start, end}
 	query += a.occurrenceScopeSQL(widget.DataSource, orgID, viewerID, "id")
+	query += a.conversationScopeSQL(widget.DataSource, orgID, viewerID, "")
 	query, args = appendFilterSQL(widget.DataSource, query, args, filters)
 
 	query += fmt.Sprintf(" GROUP BY DATE_TRUNC('day', %s), %s ORDER BY date ASC", dateField, widget.GroupByField)
@@ -1842,6 +1850,9 @@ var tableQuerySQL = map[string]struct{ base, orderBy string }{
 	},
 }
 
+// tableScopeAlias is the table alias tableQuerySQL gives each conversation-bound source (contacts is unaliased).
+var tableScopeAlias = map[string]string{"messages": "m.", "transfers": "t.", "sessions": "s."}
+
 // getTableRows returns the last 10 rows for a table widget based on the data source.
 func (a *App) getTableRows(orgID, viewerID uuid.UUID, widget models.Widget, filters []FilterInput, periodStart, periodEnd time.Time) []TableRow {
 	sql, ok := tableQuerySQL[widget.DataSource]
@@ -1852,6 +1863,7 @@ func (a *App) getTableRows(orgID, viewerID uuid.UUID, widget models.Widget, filt
 	query := sql.base
 	args := []any{orgID, periodStart, periodEnd}
 	query += a.occurrenceScopeSQL(widget.DataSource, orgID, viewerID, "o.id")
+	query += a.conversationScopeSQL(widget.DataSource, orgID, viewerID, tableScopeAlias[widget.DataSource])
 	query, args = appendFilterSQL(widget.DataSource, query, args, filters)
 	query += sql.orderBy
 

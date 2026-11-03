@@ -24,6 +24,17 @@ GET /api/analytics/dashboard
 | `account_id` | string | Filter by WhatsApp account |
 | `period` | string | Time period: `today`, `week`, `month`, `year` |
 
+### Visibility scope
+
+The counters and `recent_messages` cover only the conversations the caller may open, the same rule the chat uses:
+the caller's own attendances and carteira, the team queues of the caller's teams, what the caller forwarded and
+still follows (read only), and, with `conversations:view_team`, the attendances and carteiras of team-mates.
+Users with `conversations:view_all` see the whole organization. A user who can open no conversation receives zeros
+and an empty `recent_messages`. `campaigns` are organization-level and are not narrowed.
+
+The same scope applies to dashboard widgets over the `messages`, `contacts`, `transfers` and `sessions` data sources
+(numbers, tables, charts, groupings and time series).
+
 ### Response
 
 ```json

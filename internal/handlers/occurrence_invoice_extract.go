@@ -281,7 +281,7 @@ func (a *App) ExtractOccurrenceInvoice(r *fastglue.Request) error {
 			return r.SendEnvelope(out)
 		}
 		if res.Infected {
-			return r.SendErrorEnvelope(fasthttp.StatusUnprocessableEntity, "This file was blocked: malware was detected", nil, "")
+			return r.SendErrorEnvelope(fasthttp.StatusUnprocessableEntity, "Arquivo bloqueado: foi detectado um vírus ou código malicioso", nil, "")
 		}
 	}
 
