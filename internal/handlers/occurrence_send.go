@@ -66,16 +66,16 @@ func (a *App) SendOccurrenceProtocol(r *fastglue.Request) error {
 	}
 
 	contact := occ.Contact
-	if !serviceWindowOpen(contact) {
-		return r.SendErrorEnvelope(fasthttp.StatusUnprocessableEntity,
-			"The 24-hour service window is closed; only templates can be sent", nil, "")
-	}
-
 	var account models.WhatsAppAccount
 	if err := a.DB.Where("organization_id = ? AND name = ?", orgID, contact.WhatsAppAccount).
 		First(&account).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest,
 			"WhatsApp account not found for this contact", nil, "")
+	}
+	// Direct Send lets Meta carry free text outside the window.
+	if !serviceWindowOpen(contact) && !account.DirectSendEnabled {
+		return r.SendErrorEnvelope(fasthttp.StatusUnprocessableEntity,
+			"The 24-hour service window is closed; only templates can be sent", nil, "")
 	}
 
 	body := customMessage

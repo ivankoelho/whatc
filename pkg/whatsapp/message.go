@@ -25,6 +25,16 @@ func truncateLabel(s string, max int) string {
 
 // SendTextMessage sends a text message to a recipient with optional reply context
 func (c *Client) SendTextMessage(ctx context.Context, account *Account, rcpt Recipient, text string, replyToMsgID ...string) (string, error) {
+	return c.sendText(ctx, account, rcpt, text, "", replyToMsgID...)
+}
+
+// SendDirectTextMessage sends free text outside the 24h window via Meta's Direct
+// Send: category ("utility") replaces the template; Meta matches or creates one.
+func (c *Client) SendDirectTextMessage(ctx context.Context, account *Account, rcpt Recipient, text, category string) (string, error) {
+	return c.sendText(ctx, account, rcpt, text, category)
+}
+
+func (c *Client) sendText(ctx context.Context, account *Account, rcpt Recipient, text, category string, replyToMsgID ...string) (string, error) {
 	payload := map[string]any{
 		"messaging_product": "whatsapp",
 		"recipient_type":    "individual",
@@ -35,6 +45,9 @@ func (c *Client) SendTextMessage(ctx context.Context, account *Account, rcpt Rec
 		},
 	}
 	rcpt.SetOnPayload(payload)
+	if category != "" {
+		payload["category"] = category
+	}
 
 	// Add reply context if provided
 	if len(replyToMsgID) > 0 && replyToMsgID[0] != "" {

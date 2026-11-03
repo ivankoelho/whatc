@@ -211,6 +211,7 @@ export interface WhatsAppAccountUpdatePayload {
   is_default_outgoing?: boolean
   auto_read_receipt?: boolean
   business_calling_enabled?: boolean
+  direct_send_enabled?: boolean
   default_team_id?: string | null
 }
 
