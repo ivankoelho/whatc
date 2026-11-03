@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/mail"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 // UserRequest represents the request body for creating/updating a user.
@@ -47,6 +49,36 @@ func parseSuperAdminField(r *fastglue.Request) *bool {
 		return nil
 	}
 	return f.IsSuperAdmin
+}
+
+// refuseSuperAdminTarget writes a 403 and returns true when targetID is a super
+// admin and the actor is neither that super admin nor a super admin themselves.
+// A super admin holds authority over every organization, so users:write or
+// organizations:assign in one org must never reach their account, role or
+// memberships (DEF-R4-001). The target's own flag decides, not the org it is
+// listed in: guests are covered as well as home members.
+func (a *App) refuseSuperAdminTarget(r *fastglue.Request, actorID, targetID uuid.UUID) bool {
+	if actorID == targetID {
+		return false
+	}
+	var target models.User
+	if err := a.DB.Select("id", "is_super_admin").First(&target, "id = ?", targetID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false // nothing to protect; the handler reports the 404
+		}
+		// Fail closed: without knowing the target, nothing may proceed.
+		a.Log.Error("Failed to check super admin target", "error", err, "target_id", targetID)
+		_ = r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to verify target user", nil, "")
+		return true
+	}
+	if !target.IsSuperAdmin {
+		return false
+	}
+	if a.IsSuperAdmin(actorID) {
+		return false
+	}
+	_ = r.SendErrorEnvelope(fasthttp.StatusForbidden, "Only super admins can change a super admin account", nil, "")
+	return true
 }
 
 // UserResponse represents the response for a user (without sensitive data)
@@ -339,6 +371,11 @@ func (a *App) CreateUser(r *fastglue.Request) error {
 	// Check for soft-deleted user with same email and restore them
 	var softDeleted models.User
 	if err := a.DB.Unscoped().Where("email = ? AND deleted_at IS NOT NULL", req.Email).First(&softDeleted).Error; err == nil {
+		// A deleted super admin cannot be revived (new password, new org) by
+		// someone who is not a super admin.
+		if softDeleted.IsSuperAdmin && !a.IsSuperAdmin(userID) {
+			return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Only super admins can change a super admin account", nil, "")
+		}
 		// Restore the soft-deleted user with new details
 		if err := a.DB.Unscoped().Model(&softDeleted).Updates(map[string]any{
 			"deleted_at":      nil,
@@ -473,6 +510,10 @@ func (a *App) UpdateUser(r *fastglue.Request) error {
 		}
 	}
 
+	if a.refuseSuperAdminTarget(r, currentUserID, id) {
+		return nil
+	}
+
 	// Snapshot before changes for audit log diff.
 	oldSnap := userAuditSnapshot(&user)
 
@@ -519,12 +560,6 @@ func (a *App) UpdateUser(r *fastglue.Request) error {
 	}
 
 	// Native user: full update
-	// Credentials of a super admin can only be changed by a super admin (or
-	// themselves): otherwise users:write in their home org is a takeover of a
-	// principal with authority over every org.
-	if user.IsSuperAdmin && currentUserID != id && (req.Email != "" || req.Password != "") && !a.IsSuperAdmin(currentUserID) {
-		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Only super admins can change a super admin's credentials", nil, "")
-	}
 	if req.Email != "" {
 		if _, err := mail.ParseAddress(req.Email); err != nil {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid email format", nil, "")
@@ -665,6 +700,10 @@ func (a *App) DeleteUser(r *fastglue.Request) error {
 		Preload("Role").
 		First(&user).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "User not found", nil, "")
+	}
+
+	if a.refuseSuperAdminTarget(r, currentUserID, id) {
+		return nil
 	}
 
 	isMember := user.OrganizationID != orgID
