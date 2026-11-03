@@ -618,6 +618,11 @@ func (a *App) AddOrganizationMember(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "user_id or email is required", nil, "")
 	}
 
+	// Adding (or reviving) a membership rewrites its role.
+	if a.refuseSuperAdminTarget(r, actorID, targetUser.ID) {
+		return nil
+	}
+
 	// Look up the membership including soft-deleted rows: idx_user_org carries no
 	// deleted_at predicate, so a previously removed member's row blocks Create and
 	// has to be revived instead.
@@ -698,6 +703,9 @@ func (a *App) RemoveOrganizationMember(r *fastglue.Request) error {
 	if targetUserID == userID {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Cannot remove yourself from the organization", nil, "")
 	}
+	if a.refuseSuperAdminTarget(r, userID, targetUserID) {
+		return nil
+	}
 
 	result := a.DB.Where("user_id = ? AND organization_id = ?", targetUserID, orgID).
 		Delete(&models.UserOrganization{})
@@ -742,6 +750,9 @@ func (a *App) UpdateOrganizationMemberRole(r *fastglue.Request) error {
 
 	if req.RoleID == uuid.Nil {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "role_id is required", nil, "")
+	}
+	if a.refuseSuperAdminTarget(r, actorID, targetUserID) {
+		return nil
 	}
 
 	// Validate role exists and belongs to org
