@@ -63,9 +63,16 @@ type TemplateResponse struct {
 
 // ListTemplates returns all templates for the organization
 func (a *App) ListTemplates(r *fastglue.Request) error {
-	orgID, _, err := a.requireAuth(r, models.ResourceTemplates, models.ActionRead)
+	// The list is for whoever manages templates (templates:read) and for whoever sends messages (chat:write): the chat's
+	// template picker needs it to answer a customer outside the 24-hour window, and sending a template needs no templates
+	// permission. Everyone else (a read-only chat user, an analyst) is refused.
+	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
-		return nil
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+	if !a.HasPermission(userID, models.ResourceTemplates, models.ActionRead, orgID) &&
+		!a.HasPermission(userID, models.ResourceChat, models.ActionWrite, orgID) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Insufficient permissions", nil, "")
 	}
 
 	pg := parsePagination(r)
