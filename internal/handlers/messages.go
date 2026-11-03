@@ -243,6 +243,9 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 
 		switch req.Type {
 		case models.MessageTypeText:
+			if req.Account.DirectSendEnabled && !serviceWindowOpen(req.Contact) {
+				return a.WhatsApp.SendDirectTextMessage(sendCtx, waAccount, rcpt, signedContent, "utility")
+			}
 			return a.WhatsApp.SendTextMessage(sendCtx, waAccount, rcpt, signedContent, replyToMsgID)
 
 		case models.MessageTypeImage, models.MessageTypeVideo, models.MessageTypeAudio, models.MessageTypeDocument:

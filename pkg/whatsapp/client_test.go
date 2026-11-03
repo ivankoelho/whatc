@@ -476,3 +476,31 @@ func (t *testServerTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	testReq.URL.Host = t.serverURL[7:] // Remove "http://"
 	return http.DefaultTransport.RoundTrip(testReq)
 }
+
+func TestClient_SendDirectTextMessage_SetsCategory(t *testing.T) {
+	t.Parallel()
+
+	var body map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body = nil
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		_, _ = w.Write([]byte(`{"messages":[{"id":"wamid.1"}]}`))
+	}))
+	defer server.Close()
+
+	client := whatsapp.NewWithTimeout(testutil.NopLogger(), 5*time.Second)
+	client.HTTPClient = &http.Client{Transport: &testServerTransport{serverURL: server.URL}}
+
+	id, err := client.SendDirectTextMessage(testutil.TestContext(t), testAccount(server.URL),
+		whatsapp.Recipient{Phone: "1234567890"}, "oi", "utility")
+	require.NoError(t, err)
+	assert.Equal(t, "wamid.1", id)
+	assert.Equal(t, "utility", body["category"])
+	assert.Equal(t, "text", body["type"])
+
+	// The regular send must never carry a category.
+	_, err = client.SendTextMessage(testutil.TestContext(t), testAccount(server.URL),
+		whatsapp.Recipient{Phone: "1234567890"}, "oi")
+	require.NoError(t, err)
+	assert.NotContains(t, body, "category")
+}

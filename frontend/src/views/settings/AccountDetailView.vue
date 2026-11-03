@@ -62,6 +62,7 @@ interface WhatsAppAccount {
   auto_read_receipt: boolean
   default_team_id?: string | null
   business_calling_enabled: boolean
+  direct_send_enabled?: boolean
   status: string
   has_access_token: boolean
   has_app_secret: boolean
@@ -125,6 +126,7 @@ const form = ref({
   is_default_outgoing: false,
   auto_read_receipt: false,
   business_calling_enabled: false,
+  direct_send_enabled: false,
   default_team_id: null as string | null,
 })
 
@@ -171,6 +173,7 @@ function syncForm() {
     is_default_outgoing: account.value.is_default_outgoing,
     auto_read_receipt: account.value.auto_read_receipt,
     business_calling_enabled: account.value.business_calling_enabled ?? false,
+    direct_send_enabled: account.value.direct_send_enabled ?? false,
     default_team_id: account.value.default_team_id ?? null,
   }
 }
@@ -458,6 +461,15 @@ onMounted(async () => {
               </p>
             </div>
             <Switch :checked="form.business_calling_enabled" @update:checked="form.business_calling_enabled = $event" :disabled="!canWrite" />
+          </div>
+          <div class="flex items-start justify-between gap-3">
+            <div class="space-y-0.5">
+              <Label class="text-xs">{{ $t('accounts.directSendEnabled', 'Direct Send enabled') }}</Label>
+              <p class="text-[11px] text-muted-foreground">
+                {{ $t('accounts.directSendEnabledDesc', 'Enable only if Meta says this number qualifies for Direct Send. Outside the 24h window, free-text replies are sent as utility messages without a template.') }}
+              </p>
+            </div>
+            <Switch :checked="form.direct_send_enabled" @update:checked="form.direct_send_enabled = $event" :disabled="!canWrite" />
           </div>
           <div class="space-y-1.5">
             <Label class="text-xs">{{ $t('accounts.defaultTeam') }}</Label>
