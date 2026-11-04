@@ -221,6 +221,11 @@ func runServer(args []string) {
 			lo.Fatal("Sales opportunity permissions backfill failed", "error", err)
 		}
 
+		// Settling a customer send of unknown outcome is its own permission (additive, once per organization).
+		if err := database.BackfillResolveUncertainSendPermission(db, lo); err != nil {
+			lo.Error("Failed to backfill occurrences:resolve_send", "error", err)
+		}
+
 		// Same window: supervising cases became its own permission. Grant it to
 		// whoever could (conversations:view_all), THEN narrow the untouched preset.
 		if err := database.BackfillOccurrenceViewAll(db, lo); err != nil {
@@ -1007,6 +1012,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/occurrences/{id}/send-protocol", app.SendOccurrenceProtocol)
 	g.GET("/api/occurrences/{id}/protocol-sends", app.GetOccurrenceProtocolSendByKey)
 	g.GET("/api/occurrences/{id}/protocol-sends/{send_id}", app.GetOccurrenceProtocolSend)
+	g.POST("/api/occurrences/{id}/protocol-sends/{send_id}/resolve", app.ResolveOccurrenceProtocolSend)
 	g.POST("/api/occurrences/{id}/reply", app.ReplyToOccurrence)
 	g.GET("/api/occurrences/{id}/documents", app.ListOccurrenceDocuments)
 	g.POST("/api/occurrences/{id}/documents", app.CreateOccurrenceDocument)

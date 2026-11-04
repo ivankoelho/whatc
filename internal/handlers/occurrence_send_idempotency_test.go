@@ -513,6 +513,15 @@ func TestSendState_Get_AuthorizationAndIsolation(t *testing.T) {
 	assert.Equal(t, fasthttp.StatusBadRequest, code)
 }
 
+// newCase makes another case of the same contact and agent: the open-send rule is per case.
+func (w *msgWorld) newCase(t *testing.T) *models.Occurrence {
+	t.Helper()
+	occ := models.Occurrence{OrganizationID: w.org.ID, ContactID: w.contact.ID, Title: "Outro " + uuid.NewString()[:6], StageID: w.occ.StageID,
+		OpenedByUserID: w.agent.ID, AssignedUserID: &w.agent.ID}
+	require.NoError(t, w.app.CreateOccurrenceForTest(&occ))
+	return &occ
+}
+
 // --- retention ------------------------------------------------------------------------------------
 
 func TestSendIdempotency_Retention_90Days_OnlyTerminalRecords(t *testing.T) {
@@ -520,11 +529,24 @@ func TestSendIdempotency_Retention_90Days_OnlyTerminalRecords(t *testing.T) {
 	now := time.Now()
 	old := now.Add(-91 * 24 * time.Hour)
 	recent := now.Add(-89 * 24 * time.Hour)
+	// One open send per case is enforced by the database, so every row of the table below gets its own case.
 	mk := func(state string, finished, reconciled *time.Time, claimed time.Time) uuid.UUID {
 		id := uuid.New()
+		occ := w.newCase(t)
 		require.NoError(t, w.app.DB.Create(&models.OccurrenceSendIntent{ID: id, OrganizationID: w.org.ID, IdempotencyKey: uuid.New().String(),
-			OccurrenceID: w.occ.ID, UserID: w.agent.ID, Kind: models.SendIntentKindProtocol, RequestHash: "h", State: state,
+			OccurrenceID: occ.ID, UserID: w.agent.ID, Kind: models.SendIntentKindProtocol, RequestHash: "h", State: state,
 			MessageID: uuid.New(), ClaimedAt: claimed, FinishedAt: finished, ReconciledAt: reconciled}).Error)
+		return id
+	}
+	// Settled by a person: retention counts from the decision, not from the first answer.
+	mkResolved := func(resolvedAt time.Time) uuid.UUID {
+		id := uuid.New()
+		occ := w.newCase(t)
+		by := w.agent.ID
+		require.NoError(t, w.app.DB.Create(&models.OccurrenceSendIntent{ID: id, OrganizationID: w.org.ID, IdempotencyKey: uuid.New().String(),
+			OccurrenceID: occ.ID, UserID: w.agent.ID, Kind: models.SendIntentKindProtocol, RequestHash: "h", State: models.SendIntentSent,
+			MessageID: uuid.New(), ClaimedAt: old, FinishedAt: &resolvedAt, ReconciledAt: &resolvedAt, ResolvedByID: &by, ResolvedAt: &resolvedAt,
+			ResolutionOutcome: models.SendResolutionDelivered, ResolutionNote: "the customer answered"}).Error)
 		return id
 	}
 	oldSent := mk(models.SendIntentSent, &old, &old, old)
@@ -532,19 +554,20 @@ func TestSendIdempotency_Retention_90Days_OnlyTerminalRecords(t *testing.T) {
 	recentSent := mk(models.SendIntentSent, &recent, &recent, recent)
 	oldProcessing := mk(models.SendIntentProcessing, nil, nil, old)
 	oldUncertainOpen := mk(models.SendIntentUncertain, &old, nil, old)
-	oldUncertainReconciled := mk(models.SendIntentUncertain, &old, &old, old)
-	recentUncertainReconciled := mk(models.SendIntentUncertain, &recent, &recent, recent)
+	oldResolvedLongAgo := mkResolved(old)
+	// finished long ago as uncertain, settled by a person only 10 days ago: kept (counted from the decision).
+	resolvedRecently := mkResolved(now.Add(-10 * 24 * time.Hour))
 
 	w.app.PurgeSendIntents(now)
 	left := map[uuid.UUID]bool{}
 	for _, r := range w.intents(t) {
 		left[r.ID] = true
 	}
-	for _, id := range []uuid.UUID{oldSent, oldFailed, oldUncertainReconciled} {
-		assert.False(t, left[id], "terminal and older than 90 days: removed")
+	for _, id := range []uuid.UUID{oldSent, oldFailed, oldResolvedLongAgo} {
+		assert.False(t, left[id], "settled and older than 90 days: removed")
 	}
 	for name, id := range map[string]uuid.UUID{"recent sent": recentSent, "old processing": oldProcessing,
-		"old uncertain, never reconciled": oldUncertainOpen, "recent reconciled uncertain": recentUncertainReconciled} {
+		"old uncertain, never settled": oldUncertainOpen, "settled by a person 10 days ago": resolvedRecently} {
 		assert.True(t, left[id], name+": kept")
 	}
 	assert.EqualValues(t, 0, w.app.PurgeSendIntents(now), "a second pass removes nothing")
@@ -724,8 +747,9 @@ func TestSendIdempotency_Retention_NeverRemovesWhatStillNeedsReconciling(t *test
 	w := newMsgWorld(t)
 	mk := func(state string) uuid.UUID {
 		id := uuid.New()
+		occ := w.newCase(t) // one open send per case
 		require.NoError(t, w.app.DB.Create(&models.OccurrenceSendIntent{ID: id, OrganizationID: w.org.ID, IdempotencyKey: uuid.New().String(),
-			OccurrenceID: w.occ.ID, UserID: w.agent.ID, Kind: models.SendIntentKindProtocol, RequestHash: "h", State: state,
+			OccurrenceID: occ.ID, UserID: w.agent.ID, Kind: models.SendIntentKindProtocol, RequestHash: "h", State: state,
 			MessageID: uuid.New(), ClaimedAt: time.Now().Add(-time.Hour)}).Error)
 		return id
 	}

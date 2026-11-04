@@ -408,7 +408,7 @@ func TestSendProtocol_ResultWriteFailureDoesNotHideAMessageThatWentOut(t *testin
 
 // Many simultaneous sends: each produces exactly one message and its two records;
 // nothing is lost or doubled.
-func TestSendProtocol_ConcurrentSendsAreEachRecordedOnce(t *testing.T) {
+func TestSendProtocol_ConcurrentSendsOnOneCase_NeverOverlap(t *testing.T) {
 	w := newMsgWorld(t)
 	const n = 8
 	var wg sync.WaitGroup
@@ -426,24 +426,23 @@ func TestSendProtocol_ConcurrentSendsAreEachRecordedOnce(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
+	// One case, one send at a time: a request either got through (200) or found another send open (409).
+	sent := 0
 	for i, c := range codes {
-		assert.Equal(t, fasthttp.StatusOK, c, "request %d", i)
-	}
-	var msgs int64
-	require.NoError(t, w.app.DB.Model(&models.Message{}).Where("contact_id = ? AND direction = ?", w.contact.ID, models.DirectionOutgoing).Count(&msgs).Error)
-	assert.EqualValues(t, n, msgs)
-	rows := auditRows(t, w.app.DB, w.occ.ID)
-	assert.Len(t, rows, 2*n)
-	seen := map[string]int{}
-	for _, r := range rows {
-		if changeOf(t, r, "result") == "sent" {
-			seen[fmt.Sprint(changeOf(t, r, "content"))]++
+		assert.Contains(t, []int{fasthttp.StatusOK, fasthttp.StatusConflict}, c, "request %d", i)
+		if c == fasthttp.StatusOK {
+			sent++
 		}
 	}
-	assert.Len(t, seen, n, "each distinct send has its own result record")
-	for c, k := range seen {
-		assert.Equal(t, 1, k, c)
-	}
+	require.GreaterOrEqual(t, sent, 1)
+	var msgs int64
+	require.NoError(t, w.app.DB.Model(&models.Message{}).Where("contact_id = ? AND direction = ?", w.contact.ID, models.DirectionOutgoing).Count(&msgs).Error)
+	assert.EqualValues(t, sent, msgs, "exactly one message per accepted request, none for a refused one")
+	rows := auditRows(t, w.app.DB, w.occ.ID)
+	assert.Len(t, rows, 2*sent, "a refused request leaves no attempt record: nothing was started")
+	var open int64
+	require.NoError(t, w.app.DB.Model(&models.OccurrenceSendIntent{}).Where("occurrence_id = ? AND state IN ?", w.occ.ID, []string{"processing", "uncertain"}).Count(&open).Error)
+	assert.LessOrEqual(t, open, int64(1))
 }
 
 // Under load the refusals stay refusals: no unauthorized request slips through.

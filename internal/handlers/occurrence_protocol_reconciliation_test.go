@@ -271,11 +271,11 @@ func TestProtocolSend_RepeatedRequestIsASecondMessage(t *testing.T) {
 	assert.Len(t, sent, 2, "each request has its own send_id, so each can be told apart in the trail")
 }
 
-// The risk, shown rather than hidden: when the provider answers too late, the first
-// message HAS been delivered; sending again delivers a second one. The system's part is
-// to say so ("check before sending again"), to record it as uncertain and never to
-// repeat it on its own.
-func TestProtocolSend_LateProviderAnswer_ASecondSendDuplicates(t *testing.T) {
+// When the provider answers too late the first message HAS been delivered. What used to be a risk left to
+// the person ("check before sending again") is now closed by the server: while that send is uncertain the case
+// accepts no other send, from anyone, with any key or text. The system still says "uncertain", still never
+// repeats it on its own, and a person settles it after checking the conversation.
+func TestProtocolSend_LateProviderAnswer_ASecondSendIsRefusedWhileUncertain(t *testing.T) {
 	w := newMsgWorld(t)
 	w.shortTimeoutClient(150 * time.Millisecond)
 	w.m.mu.Lock()
@@ -291,23 +291,24 @@ func TestProtocolSend_LateProviderAnswer_ASecondSendDuplicates(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 	assert.Equal(t, 1, w.mockHas("resposta tardia"))
 
-	// A person who ignores the warning and sends again duplicates it.
+	// A person who ignores the warning and sends again, with a new key and even the same text, is refused.
 	w.m.mu.Lock()
 	w.m.delay = 0
 	w.m.mu.Unlock()
 	w.shortTimeoutClient(2 * time.Second)
-	code, _ = w.sendText(t, w.agent, "resposta tardia")
-	require.Equal(t, fasthttp.StatusOK, code)
-	assert.Equal(t, 2, w.mockHas("resposta tardia"), "two copies reached the customer")
+	code, env = w.sendText(t, w.agent, "resposta tardia")
+	require.Equal(t, fasthttp.StatusConflict, code)
+	assert.Equal(t, "send_pending", env.ErrorType)
+	assert.Equal(t, 1, w.mockHas("resposta tardia"), "no second copy reached the customer")
 
-	// Both are in the trail, one as uncertain, one as sent.
+	// The trail has the one send, as uncertain.
 	got := map[any]int{}
 	for _, r := range auditRows(t, w.app.DB, w.occ.ID) {
 		if changeOf(t, r, "result") != "attempted" {
 			got[changeOf(t, r, "result")]++
 		}
 	}
-	assert.Equal(t, map[any]int{"uncertain": 1, "sent": 1}, got)
+	assert.Equal(t, map[any]int{"uncertain": 1}, got)
 }
 
 // withOrg fills the organization into the report's query. GORM would rewrite the "?" of a

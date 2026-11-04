@@ -100,7 +100,7 @@ func (a *App) SendOccurrenceProtocol(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to record the send; nothing was sent", nil, errTypeSendRecordFailed)
 	}
 	if !claimed {
-		return a.answerExistingIntent(r, intent, occ, userID, hashProtocolRequest(identity))
+		return a.answerExistingIntent(r, intent, occ, userID, key, hashProtocolRequest(identity))
 	}
 	sendID, messageID := intent.ID, intent.MessageID
 

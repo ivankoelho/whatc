@@ -15,6 +15,12 @@ const (
 	SendIntentUncertain  = "uncertain"
 )
 
+// Outcomes a person can settle an uncertain send with, after checking the conversation.
+const (
+	SendResolutionDelivered    = "delivered"
+	SendResolutionNotDelivered = "not_delivered"
+)
+
 // SendIntentKindProtocol is the only kind today: the protocol message sent to a customer.
 const SendIntentKindProtocol = "protocol"
 
@@ -45,6 +51,13 @@ type OccurrenceSendIntent struct {
 	// same answer back. Response holds ids, state and text of the answer, never the customer's text.
 	HTTPStatus int   `json:"http_status"`
 	Response   JSONB `gorm:"type:jsonb" json:"-"`
+
+	// Set only when a person settled an uncertain send (resolve endpoint): who, when, the outcome they
+	// stated and why. The state moves to sent or failed, which frees the open-send index.
+	ResolvedByID      *uuid.UUID `gorm:"type:uuid" json:"resolved_by_id,omitempty"`
+	ResolvedAt        *time.Time `json:"resolved_at,omitempty"`
+	ResolutionOutcome string     `gorm:"size:16" json:"resolution_outcome,omitempty"`
+	ResolutionNote    string     `gorm:"size:1000" json:"resolution_note,omitempty"`
 
 	ClaimedAt    time.Time  `gorm:"not null;index:idx_send_intent_pending,where:state = 'processing'" json:"claimed_at"`
 	FinishedAt   *time.Time `json:"finished_at,omitempty"`

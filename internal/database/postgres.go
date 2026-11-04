@@ -249,6 +249,13 @@ func RunMigrationWithProgress(db *gorm.DB, adminCfg *config.DefaultAdminConfig) 
 		currentStep++
 	}
 
+	// One open customer send per case. Never auto-fixes data, and unlike the transfer index it STOPS the
+	// migration when duplicates exist: leaving the protection off silently is the failure to avoid.
+	if err := EnsureOpenSendIntentUniqueness(silentDB); err != nil {
+		fmt.Printf("\n  \033[31m✗ Open send index failed\033[0m\n\n")
+		return err
+	}
+
 	// One active transfer per contact. Never auto-fixes data: with duplicates
 	// present the index is skipped and the offending rows are reported.
 	if _, dups, err := EnsureActiveTransferUniqueness(silentDB); err != nil {
@@ -469,6 +476,9 @@ func CreateIndexes(db *gorm.DB) error {
 		if err := db.Exec(idx).Error; err != nil {
 			return fmt.Errorf("failed to create index: %w", err)
 		}
+	}
+	if err := EnsureOpenSendIntentUniqueness(db); err != nil {
+		return err
 	}
 	if _, dups, err := EnsureActiveTransferUniqueness(db); err != nil {
 		return err

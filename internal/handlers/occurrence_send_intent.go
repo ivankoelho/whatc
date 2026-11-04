@@ -5,14 +5,17 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/audit"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
@@ -48,6 +51,13 @@ const (
 	// the interface never reuses one. processing and unreconciled uncertain rows are never purged.
 	SendIntentRetention = 90 * 24 * time.Hour
 
+	// sendIntentUncertainRecheckWindow bounds only HOW LONG the background loop keeps re-reading an unsettled
+	// uncertain send (the provider's own confirmation arrives within hours). It never bounds the protection:
+	// the send stays open, the case stays blocked, the record is kept, and a person can still settle it.
+	sendIntentUncertainRecheckWindow = 72 * time.Hour
+	sendIntentBatch                  = 200
+	sendIntentMaxBatches             = 5
+
 	sendIntentReconcileEvery = 30 * time.Second
 	sendIntentPurgeEvery     = time.Hour
 
@@ -55,6 +65,9 @@ const (
 	errTypeIdempotencyKeyInvalid  = "idempotency_key_invalid"
 	errTypeIdempotencyKeyReused   = "idempotency_key_reused"
 	errTypeSendNotFound           = "send_not_found"
+	errTypeSendPending            = "send_pending"
+	errTypeResolutionInvalid      = "resolution_invalid"
+	errTypeSendNotUncertain       = "send_not_uncertain"
 
 	protocolResultProcessing = models.SendIntentProcessing
 )
@@ -94,31 +107,56 @@ func hashProtocolRequest(id protocolRequestIdentity) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// claimSendIntent tries to take the key. claimed is true for exactly one caller per key; everyone
-// else gets the existing row. The INSERT ... ON CONFLICT DO NOTHING is the atomic step: two
-// simultaneous requests cannot both insert.
+// claimSendIntent tries to take the key AND the case. claimed is true for exactly one caller per key and
+// one send per case at a time; everyone else gets the row that is in the way:
+//   - the row with the same key (a repeat of the same request), or
+//   - the case's open row (processing, or uncertain until a person settles it) under ANOTHER key: nobody
+//     may send to this customer from this case while a send may be in flight or delivered.
+//
+// The INSERT ... ON CONFLICT DO NOTHING is the atomic step. It carries no conflict target on purpose: the
+// unique key index (organization, key) and the partial unique index uq_send_intent_open (organization, case,
+// kind where open) are both enforced by the database, so two simultaneous requests cannot both insert,
+// whatever their keys, users, devices or servers. A stale "processing" row that is in the way is reconciled
+// from the evidence first (it may have ended): that never sends and never frees an uncertain one.
 func (a *App) claimSendIntent(orgID, userID uuid.UUID, occ *models.Occurrence, key, hash string) (*models.OccurrenceSendIntent, bool, error) {
-	now := time.Now()
-	intent := &models.OccurrenceSendIntent{
-		ID: uuid.New(), OrganizationID: orgID, IdempotencyKey: key, OccurrenceID: occ.ID, UserID: userID,
-		Kind: models.SendIntentKindProtocol, RequestHash: hash, State: models.SendIntentProcessing,
-		MessageID: uuid.New(), ClaimedAt: now,
+	for attempt := 0; attempt < 3; attempt++ {
+		now := time.Now()
+		intent := &models.OccurrenceSendIntent{
+			ID: uuid.New(), OrganizationID: orgID, IdempotencyKey: key, OccurrenceID: occ.ID, UserID: userID,
+			Kind: models.SendIntentKindProtocol, RequestHash: hash, State: models.SendIntentProcessing,
+			MessageID: uuid.New(), ClaimedAt: now,
+		}
+		res := a.DB.Clauses(clause.OnConflict{DoNothing: true}).Create(intent)
+		if res.Error != nil {
+			return nil, false, res.Error
+		}
+		if res.RowsAffected == 1 {
+			return intent, true, nil
+		}
+		var existing models.OccurrenceSendIntent
+		err := a.DB.Where("organization_id = ? AND idempotency_key = ?", orgID, key).First(&existing).Error
+		if err == nil {
+			return &existing, false, nil // the same key: the caller answers from it
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, false, err
+		}
+		// Not the key: the case's open send is in the way.
+		err = a.DB.Where("organization_id = ? AND occurrence_id = ? AND kind = ? AND state IN ?",
+			orgID, occ.ID, models.SendIntentKindProtocol, []string{models.SendIntentProcessing, models.SendIntentUncertain}).
+			First(&existing).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			continue // it closed between the two statements: try to take the case again
+		}
+		if err != nil {
+			return nil, false, err
+		}
+		if a.reconcileSendIntent(&existing, time.Now()) && existing.State != models.SendIntentProcessing && existing.State != models.SendIntentUncertain {
+			continue // reconciliation settled it: the case may be free now
+		}
+		return &existing, false, nil
 	}
-	res := a.DB.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "organization_id"}, {Name: "idempotency_key"}},
-		DoNothing: true,
-	}).Create(intent)
-	if res.Error != nil {
-		return nil, false, res.Error
-	}
-	if res.RowsAffected == 1 {
-		return intent, true, nil
-	}
-	var existing models.OccurrenceSendIntent
-	if err := a.DB.Where("organization_id = ? AND idempotency_key = ?", orgID, key).First(&existing).Error; err != nil {
-		return nil, false, err
-	}
-	return &existing, false, nil
+	return nil, false, fmt.Errorf("could not take the case for a send after several attempts")
 }
 
 // intentOutcome is the data of an answer: the same fields whatever the result.
@@ -182,7 +220,10 @@ func sendStoredAnswer(r *fastglue.Request, status int, envelope models.JSONB, re
 }
 
 // answerExistingIntent answers a request whose key is already taken. It never sends anything.
-func (a *App) answerExistingIntent(r *fastglue.Request, intent *models.OccurrenceSendIntent, occ *models.Occurrence, userID uuid.UUID, hash string) error {
+func (a *App) answerExistingIntent(r *fastglue.Request, intent *models.OccurrenceSendIntent, occ *models.Occurrence, userID uuid.UUID, key, hash string) error {
+	if intent.IdempotencyKey != key {
+		return a.answerSendPending(r, intent, occ, userID)
+	}
 	if intent.OccurrenceID != occ.ID || intent.UserID != userID || intent.RequestHash != hash || intent.Kind != models.SendIntentKindProtocol {
 		return r.SendErrorEnvelope(fasthttp.StatusConflict,
 			"This Idempotency-Key was already used for a different request; use a new key for a new send", nil, errTypeIdempotencyKeyReused)
@@ -199,6 +240,27 @@ func (a *App) answerExistingIntent(r *fastglue.Request, intent *models.Occurrenc
 	default:
 		return sendStoredAnswer(r, intent.HTTPStatus, intent.Response, true)
 	}
+}
+
+// answerSendPending refuses a new send because the case already has an open one under another key. It says
+// what the page needs to show the state and to ask about it (send_id, state) and whether the caller started
+// it; it never reveals who did, what was sent or anything of another organization (the row is the case's own,
+// found by organization and case). Nothing is sent.
+func (a *App) answerSendPending(r *fastglue.Request, open *models.OccurrenceSendIntent, occ *models.Occurrence, userID uuid.UUID) error {
+	return r.SendJSON(fasthttp.StatusConflict, map[string]any{
+		"status":     "error",
+		"message":    "This case already has a customer send that is not settled yet; nothing was sent. Check the conversation and wait for its result",
+		"error_type": errTypeSendPending,
+		"data": map[string]any{
+			"result":     "pending",
+			"sent":       false,
+			"confirmed":  false,
+			"send_id":    open.ID.String(),
+			"state":      open.State,
+			"own":        open.UserID == userID,
+			"claimed_at": open.ClaimedAt,
+		},
+	})
 }
 
 // --- reconciliation -----------------------------------------------------------------------
@@ -291,30 +353,48 @@ func (a *App) reconcileSendIntent(intent *models.OccurrenceSendIntent, now time.
 	return true
 }
 
-// ReconcileSendIntents settles the claims whose owner vanished and re-checks the open uncertain
-// ones. Safe in several processes: every change is a conditional UPDATE.
+// ReconcileSendIntents settles the claims whose owner vanished and re-checks the recent unsettled uncertain
+// ones. The two are separate queries on purpose: an old uncertain row can never keep a newer stale "processing"
+// claim waiting, whatever their number. Safe in several processes: every change is a conditional UPDATE.
 func (a *App) ReconcileSendIntents(now time.Time) int {
-	var open []models.OccurrenceSendIntent
-	a.DB.Where("(state = ? AND claimed_at <= ?) OR (state = ? AND reconciled_at IS NULL)",
-		models.SendIntentProcessing, now.Add(-sendIntentStaleAfter), models.SendIntentUncertain).
-		Order("claimed_at").Limit(200).Find(&open)
 	n := 0
-	for i := range open {
-		if a.reconcileSendIntent(&open[i], now) {
+	// 1. Stale processing claims, oldest first (partial index idx_send_intent_pending).
+	for i := 0; i < sendIntentMaxBatches; i++ {
+		var stale []models.OccurrenceSendIntent
+		a.DB.Where("state = ? AND claimed_at <= ?", models.SendIntentProcessing, now.Add(-sendIntentStaleAfter)).
+			Order("claimed_at").Limit(sendIntentBatch).Find(&stale)
+		changed := 0
+		for j := range stale {
+			if a.reconcileSendIntent(&stale[j], now) {
+				changed++
+			}
+		}
+		n += changed
+		if len(stale) < sendIntentBatch || changed == 0 {
+			break
+		}
+	}
+	// 2. Unsettled uncertain ones, only for the recheck window, newest first (a provider confirmation is most
+	// likely for the most recent). Older ones are left alone, still open and still blocking, until a person settles them.
+	var uncertain []models.OccurrenceSendIntent
+	a.DB.Where("state = ? AND reconciled_at IS NULL AND finished_at > ?", models.SendIntentUncertain, now.Add(-sendIntentUncertainRecheckWindow)).
+		Order("finished_at DESC").Limit(sendIntentBatch).Find(&uncertain)
+	for i := range uncertain {
+		if a.reconcileSendIntent(&uncertain[i], now) {
 			n++
 		}
 	}
 	return n
 }
 
-// PurgeSendIntents applies the retention rule and returns how many rows it removed: only
-// finished intents (sent, failed) older than SendIntentRetention, and uncertain ones that were
-// reconciled that long ago. processing and unreconciled uncertain are never removed.
+// PurgeSendIntents applies the retention rule and returns how many rows it removed: only settled intents
+// (sent, failed), 90 days after they were settled (by the provider's answer, by reconciliation or by a
+// person). processing and uncertain are never removed: an uncertain row is the record that keeps the case
+// protected until somebody settles it.
 func (a *App) PurgeSendIntents(now time.Time) int64 {
 	cutoff := now.Add(-SendIntentRetention)
-	res := a.DB.Where(
-		"(state IN ? AND finished_at < ?) OR (state = ? AND reconciled_at IS NOT NULL AND reconciled_at < ?)",
-		[]string{models.SendIntentSent, models.SendIntentFailed}, cutoff, models.SendIntentUncertain, cutoff,
+	res := a.DB.Where("state IN ? AND COALESCE(resolved_at, finished_at) < ?",
+		[]string{models.SendIntentSent, models.SendIntentFailed}, cutoff,
 	).Delete(&models.OccurrenceSendIntent{})
 	if res.Error != nil {
 		a.Log.Error("Failed to purge send intents", "error", res.Error)
@@ -365,7 +445,7 @@ func (a *App) GetOccurrenceProtocolSend(r *fastglue.Request) error {
 	if err := a.DB.Where("id = ? AND organization_id = ? AND occurrence_id = ?", sendID, orgID, occ.ID).First(&intent).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Send not found", nil, errTypeSendNotFound)
 	}
-	return a.answerSendState(r, &intent, occ)
+	return a.answerSendState(r, &intent, occ, userID)
 }
 
 // GetOccurrenceProtocolSendByKey asks the same question with the Idempotency-Key, for a caller that
@@ -382,6 +462,17 @@ func (a *App) GetOccurrenceProtocolSendByKey(r *fastglue.Request) error {
 	if !ok {
 		return nil
 	}
+	if string(r.RequestCtx.QueryArgs().Peek("open")) == "true" {
+		// The case's open send, whoever started it, on any device: so the screen can say there is one
+		// without trying to send. Same authorization as sending; nothing of another case or organization.
+		var open models.OccurrenceSendIntent
+		if err := a.DB.Where("organization_id = ? AND occurrence_id = ? AND kind = ? AND state IN ?",
+			orgID, occ.ID, models.SendIntentKindProtocol, []string{models.SendIntentProcessing, models.SendIntentUncertain}).
+			Order("claimed_at DESC").First(&open).Error; err != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Send not found", nil, errTypeSendNotFound)
+		}
+		return a.answerSendState(r, &open, occ, userID)
+	}
 	key, err := uuid.Parse(strings.TrimSpace(string(r.RequestCtx.QueryArgs().Peek("idempotency_key"))))
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "The idempotency_key must be a UUID", nil, errTypeIdempotencyKeyInvalid)
@@ -390,7 +481,7 @@ func (a *App) GetOccurrenceProtocolSendByKey(r *fastglue.Request) error {
 	if err := a.DB.Where("organization_id = ? AND idempotency_key = ? AND occurrence_id = ?", orgID, key.String(), occ.ID).First(&intent).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Send not found", nil, errTypeSendNotFound)
 	}
-	return a.answerSendState(r, &intent, occ)
+	return a.answerSendState(r, &intent, occ, userID)
 }
 
 // answerSendState reconciles (read-only evidence, never a send) and describes one send.
@@ -398,7 +489,7 @@ func (a *App) GetOccurrenceProtocolSendByKey(r *fastglue.Request) error {
 // "confirmed" means the OUTCOME OF THE OPERATION is known, not that the customer received the
 // message: sent -> sent=true, confirmed=true; failed (proven not sent) -> sent=false, confirmed=true;
 // uncertain or processing -> sent=false, confirmed=false.
-func (a *App) answerSendState(r *fastglue.Request, intentPtr *models.OccurrenceSendIntent, occ *models.Occurrence) error {
+func (a *App) answerSendState(r *fastglue.Request, intentPtr *models.OccurrenceSendIntent, occ *models.Occurrence, userID uuid.UUID) error {
 	intent := *intentPtr
 	a.reconcileSendIntent(&intent, time.Now())
 
@@ -410,8 +501,116 @@ func (a *App) answerSendState(r *fastglue.Request, intentPtr *models.OccurrenceS
 	data["claimed_at"] = intent.ClaimedAt
 	data["finished_at"] = intent.FinishedAt
 	data["reconciled_at"] = intent.ReconciledAt
+	data["own"] = intent.UserID == userID
+	if intent.ResolvedAt != nil { // settled by a person: say so, never who
+		data["resolved_by_person"] = true
+		data["resolved_at"] = intent.ResolvedAt
+		data["resolution_outcome"] = intent.ResolutionOutcome
+	}
 	if intent.State == models.SendIntentProcessing {
 		data["detail"] = fmt.Sprintf("in progress; it is reconciled from the records after %s without an answer", sendIntentStaleAfter)
 	}
 	return r.SendEnvelope(data)
+}
+
+// --- settling an uncertain send -----------------------------------------------------------
+
+// ResolveSendRequest is what a person states after checking the conversation with the customer.
+type ResolveSendRequest struct {
+	Outcome             string `json:"outcome"` // delivered | not_delivered
+	Note                string `json:"note"`    // why: what the conversation showed
+	ConversationChecked bool   `json:"conversation_checked"`
+}
+
+const (
+	resolveNoteMin = 10
+	resolveNoteMax = 1000
+)
+
+var errSendAlreadySettled = errors.New("send already settled")
+
+// ResolveOccurrenceProtocolSend settles an uncertain send by a person's decision, after they checked the
+// conversation. It sends NOTHING: it records who decided what and why, moves the send to sent (delivered) or
+// failed (not_delivered) and so frees the case. The decision, the new state and the audit entry are one
+// transaction, so it cannot be half done. It is the only way out of uncertain without the provider's own
+// confirmation, it is not undone through the interface, and a later correction is a new audited action.
+//
+// It needs its own permission (occurrences:resolve_send), independent of occurrences:write and
+// chat:write, AND the scope to see the case: a supervisor settles only what is under their management.
+func (a *App) ResolveOccurrenceProtocolSend(r *fastglue.Request) error {
+	orgID, userID, err := a.requireAuth(r, models.ResourceOccurrences, models.ActionResolveSend)
+	if err != nil {
+		return nil
+	}
+	occ, _, err := a.loadOccurrenceWithAccess(r, orgID, userID, false)
+	if err != nil {
+		return nil
+	}
+	sendID, err := parsePathUUID(r, "send_id", "send")
+	if err != nil {
+		return nil
+	}
+	var req ResolveSendRequest
+	if err := r.Decode(&req, "json"); err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid request body", nil, "")
+	}
+	note := strings.TrimSpace(req.Note)
+	if req.Outcome != models.SendResolutionDelivered && req.Outcome != models.SendResolutionNotDelivered {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "outcome must be delivered or not_delivered", nil, errTypeResolutionInvalid)
+	}
+	if !req.ConversationChecked {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Confirm that you checked the conversation with the customer", nil, errTypeResolutionInvalid)
+	}
+	if n := len([]rune(note)); n < resolveNoteMin || n > resolveNoteMax {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest,
+			fmt.Sprintf("Say what the conversation showed (%d to %d characters)", resolveNoteMin, resolveNoteMax), nil, errTypeResolutionInvalid)
+	}
+
+	var intent models.OccurrenceSendIntent
+	if err := a.DB.Where("id = ? AND organization_id = ? AND occurrence_id = ?", sendID, orgID, occ.ID).First(&intent).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Send not found", nil, errTypeSendNotFound)
+	}
+	// What the provider's own evidence says wins over a person's reading: settle it from the records first.
+	a.reconcileSendIntent(&intent, time.Now())
+	if intent.State != models.SendIntentUncertain {
+		return r.SendErrorEnvelope(fasthttp.StatusConflict, "This send is not waiting to be settled (state: "+intent.State+")", nil, errTypeSendNotUncertain)
+	}
+
+	target := models.SendIntentSent
+	if req.Outcome == models.SendResolutionNotDelivered {
+		target = models.SendIntentFailed
+	}
+	now := time.Now()
+	status, env := intentAnswer(&intent, occ.ProtocolNumber, target, fasthttp.StatusBadGateway, "Settled by a person: the message was not delivered", "")
+	err = a.DB.Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&models.OccurrenceSendIntent{}).
+			Where("id = ? AND state = ?", intent.ID, models.SendIntentUncertain).
+			Updates(map[string]any{
+				"state": target, "http_status": status, "response": env, "finished_at": now, "reconciled_at": now,
+				"resolved_by_id": userID, "resolved_at": now, "resolution_outcome": req.Outcome, "resolution_note": note,
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected != 1 {
+			return errSendAlreadySettled
+		}
+		field := func(name string, value any) map[string]any {
+			return map[string]any{"field": name, "old_value": nil, "new_value": value}
+		}
+		return audit.LogAuditTx(tx, orgID, userID, audit.GetUserName(tx, userID), protocolSendAuditType, occ.ID, models.AuditActionUpdated,
+			field("kind", "protocol"), field("send_id", intent.ID.String()), field("protocol_number", occ.ProtocolNumber),
+			field("result", "resolved_"+req.Outcome), field("outcome", req.Outcome), field("note", note),
+			field("conversation_checked", true), field("previous_state", models.SendIntentUncertain), field("message_id", intent.MessageID.String()))
+	})
+	if errors.Is(err, errSendAlreadySettled) {
+		return r.SendErrorEnvelope(fasthttp.StatusConflict, "This send was settled by someone else just now", nil, errTypeSendNotUncertain)
+	}
+	if err != nil {
+		a.Log.Error("Failed to settle the send", "error", err, "send_id", intent.ID, "occurrence", occ.ID)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to record the decision; nothing was changed", nil, "")
+	}
+	a.Log.Info("Uncertain send settled by a person", "send_id", intent.ID, "occurrence", occ.ID, "user_id", userID, "outcome", req.Outcome)
+	a.DB.Where("id = ?", intent.ID).First(&intent)
+	return a.answerSendState(r, &intent, occ, userID)
 }
