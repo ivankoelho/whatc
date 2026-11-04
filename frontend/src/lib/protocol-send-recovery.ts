@@ -85,11 +85,15 @@ export type SendState = 'processing' | 'sent' | 'failed' | 'uncertain'
 // from a proxy or load balancer (502/503/504 while the backend restarts, an upstream reset): such a
 // page says nothing about whether the backend claimed the key or reached the provider. The record
 // stays, and the page asks the server instead of sending again.
-export function answerClosesIntention(e: unknown): boolean {
+export function answerClosesIntention(e: unknown, isRetry = false): boolean {
   const r = (e as { response?: { status?: number; data?: any } } | null | undefined)?.response
   if (!r) return false
   const body = r.data
   if (typeof body?.data?.send_id === 'string' && body.data.send_id) return true
+  // A refusal (4xx) only proves the FIRST request under a key never started a send. On a retry it proves
+  // only that THIS request was refused (409 after the contact data changed, 429, 401/403 after the access
+  // or session changed): what became of the earlier one is still unknown, so the intention stays open.
+  if (isRetry) return false
   const status = r.status ?? 0
   return status >= 400 && status < 500 && body && typeof body === 'object' && body.status === 'error'
 }

@@ -133,7 +133,10 @@ export const useOccurrencesStore = defineStore('occurrences', () => {
     // A record that is still here is an unresolved intention. A different text must not take a new key
     // over it: that would be a second message while the first may be in flight or delivered.
     if (rec && rec.textHash !== h) throw new ProtocolSendPendingError()
-    if (!rec) rec = { key: crypto.randomUUID(), textHash: h, savedAt: Date.now() }
+    // A record that exists means this POST repeats an earlier request under the same key. The clock of the
+    // in-flight grace restarts with every request: the new one may still be on its way.
+    const isRetry = !!rec
+    rec = rec ? { ...rec, savedAt: Date.now() } : { key: crypto.randomUUID(), textHash: h, savedAt: Date.now() }
     keepRecord(occurrenceId, rec) // before the request: a refresh mid-flight must still find the key
     try {
       const res = await occurrencesService.sendProtocol(occurrenceId, message, rec.key)
@@ -141,7 +144,7 @@ export const useOccurrencesStore = defineStore('occurrences', () => {
       else dropRecord(occurrenceId)
       return res.data
     } catch (e: any) {
-      if (answerClosesIntention(e)) dropRecord(occurrenceId) // only the application's own answer ends the intention (not a proxy 5xx, not a timeout)
+      if (answerClosesIntention(e, isRetry)) dropRecord(occurrenceId) // only the application's own conclusive answer ends the intention (not a proxy 5xx, a timeout, or a refusal of a retry)
       throw e
     }
   }
@@ -150,6 +153,10 @@ export const useOccurrencesStore = defineStore('occurrences', () => {
   async function getProtocolSend(occurrenceId: string, sendId: string) {
     return (await occurrencesService.getProtocolSend(occurrenceId, sendId)).data.data
   }
+
+  // Is there a send of this case whose outcome this browser has not seen close? The record is the truth:
+  // it is dropped only by a conclusive answer, so the screens ask it instead of re-deriving it from an error.
+  const hasPendingProtocolSend = (occurrenceId: string) => !!currentRecord(occurrenceId)
 
   // What happened to the send this browser started for this case and did not see finish.
   // null = nothing pending. Read-only: it only ever asks, never creates a send.
@@ -220,6 +227,6 @@ export const useOccurrencesStore = defineStore('occurrences', () => {
     occurrences, total, contactOccurrences, stages, events, isLoading,
     fetchStages, stageColor, fetchOccurrences, fetchColumn, fetchContactOccurrences, fetchEvents,
     createOccurrence, changeStage, moveStage, addNote, reply, sendProtocol,
-    previewRegistrationMessage, sendRegistrationMessage, getProtocolSend, recoverProtocolSend, clear,
+    previewRegistrationMessage, sendRegistrationMessage, getProtocolSend, recoverProtocolSend, hasPendingProtocolSend, clear,
   }
 })

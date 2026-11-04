@@ -75,6 +75,8 @@ If `uq_send_intent_key` is missing, do **not** release the flow: without the UNI
 ## What the browser treats as an answer (frontend rules)
 
 - Only the application's own answer **closes** an intention (the browser forgets the key): a body that carries the `send_id` (sent, failed or uncertain are answers about that send), or an application error envelope (`status: "error"`) with a 4xx status (key missing or invalid, not allowed, not found, key reused, closed window).
+- A 4xx envelope closes the intention only on the **first** request under a key. On a **retry** it proves only that the retry was refused (409 after the contact data changed, 429, 401/403 after the session or access changed), not what became of the earlier request; the key stays and the page asks the server. Only a body with the `send_id`, or the server answering `sent`/`failed` to the state query, closes it.
+- Every request under a key restarts the 60 s in-flight grace (`savedAt` is renewed), because the newest request may still be on its way.
 - Anything else is **no answer**: a timeout, a lost connection, and also a 5xx (or an envelope-less 4xx such as 413/429) from a proxy or load balancer, for example 502/503/504 while the backend restarts. The key is kept and the page asks the server (by `send_id` or by key); it does not send again.
 - While an intention is unresolved, the form does not accept a **different text** for the same case: it does not mint a second key (that would be a second message while the first may be in flight or delivered). The text is locked and the page shows the pending state until the server says `sent` or `failed`.
 

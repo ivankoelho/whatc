@@ -237,3 +237,107 @@ describe('protocol send: proxy 5xx, timeout and edited text', () => {
     expect(keyOf(1)).not.toBe(keyOf(0))
   })
 })
+
+// Regression for the second review of PR 143 (M1 and L1).
+describe('protocol send: a refusal of a RETRY does not close an unresolved intention', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    org.value = 'org-1'
+    user.value = { id: 'user-1' }
+    sendProtocol.mockReset()
+    getProtocolSend.mockReset()
+    getProtocolSendByKey.mockReset()
+    vi.useRealTimers()
+    setActivePinia(createPinia())
+  })
+  const refusal = (status: number, error_type = '') => ({ response: { status, data: { status: 'error', message: 'refused', error_type } } })
+  const rec = () => JSON.parse(localStorage.getItem(recordStorageKey(scope()))!)
+
+  it('the reported scenario: timeout, recovery fails, contact data changes, retry gets 409, the key survives and no new send is possible', async () => {
+    sendProtocol.mockRejectedValueOnce({ code: 'ECONNABORTED' }).mockRejectedValueOnce(refusal(409, 'idempotency_key_reused'))
+    const s = useOccurrencesStore()
+    await expect(s.sendRegistrationMessage('o1', 'oi')).rejects.toBeTruthy() // timeout, the server may have sent
+    getProtocolSendByKey.mockRejectedValue(new Error('Network Error'))
+    await expect(s.recoverProtocolSend('o1')).rejects.toBeTruthy() // recovery inconclusive: the button would be free
+    await expect(s.sendRegistrationMessage('o1', 'oi')).rejects.toBeTruthy() // webhook changed the BSUID: 409
+    expect(s.hasPendingProtocolSend('o1')).toBe(true)
+    // the next click is still the SAME intention
+    sendProtocol.mockRejectedValueOnce({ code: 'ECONNABORTED' })
+    await expect(s.sendRegistrationMessage('o1', 'oi')).rejects.toBeTruthy()
+    expect(keyOf(2)).toBe(keyOf(0))
+    expect(keyOf(1)).toBe(keyOf(0))
+  })
+
+  for (const [status, type] of [[401, ''], [403, ''], [404, ''], [409, 'idempotency_key_reused'], [429, '']] as const) {
+    it(`a ${status} on a retry of an unresolved key keeps the record, the key and the lock on other text`, async () => {
+      sendProtocol.mockRejectedValueOnce({ code: 'ECONNABORTED' }).mockRejectedValueOnce(refusal(status, type))
+      const s = useOccurrencesStore()
+      await expect(s.sendRegistrationMessage('o1', 'oi')).rejects.toBeTruthy()
+      await expect(s.sendRegistrationMessage('o1', 'oi')).rejects.toBeTruthy()
+      expect(s.hasPendingProtocolSend('o1')).toBe(true)
+      expect(rec().key).toBe(keyOf(0))
+      await expect(s.sendRegistrationMessage('o1', 'outro')).rejects.toMatchObject({ name: 'ProtocolSendPendingError' })
+      expect(sendProtocol).toHaveBeenCalledTimes(2)
+    })
+  }
+
+  it('the same refusal on the FIRST request under a key still closes it (nothing was started)', async () => {
+    for (const [status, type] of [[403, ''], [409, 'idempotency_key_reused'], [429, '']] as const) {
+      localStorage.clear()
+      setActivePinia(createPinia())
+      sendProtocol.mockReset()
+      sendProtocol.mockRejectedValueOnce(refusal(status, type)).mockResolvedValueOnce(post(200, 'sent'))
+      const s = useOccurrencesStore()
+      await expect(s.sendRegistrationMessage('o1', 'oi')).rejects.toBeTruthy()
+      expect(s.hasPendingProtocolSend('o1')).toBe(false)
+      await s.sendRegistrationMessage('o1', 'outro texto') // free to edit and send a new intention
+      expect(keyOf(1)).not.toBe(keyOf(0))
+    }
+  })
+
+  it('a conclusive answer on the retry (the stored result carries the send_id) closes the intention and frees the next one', async () => {
+    sendProtocol
+      .mockRejectedValueOnce({ code: 'ECONNABORTED' })
+      .mockRejectedValueOnce({ response: { status: 502, data: { status: 'error', data: { result: 'failed', send_id: 's1' } } } })
+      .mockResolvedValueOnce(post(200, 'sent', 's2'))
+    const s = useOccurrencesStore()
+    await expect(s.sendRegistrationMessage('o1', 'oi')).rejects.toBeTruthy()
+    await expect(s.sendRegistrationMessage('o1', 'oi')).rejects.toBeTruthy()
+    expect(s.hasPendingProtocolSend('o1')).toBe(false)
+    await s.sendRegistrationMessage('o1', 'texto editado')
+    expect(keyOf(2)).not.toBe(keyOf(0))
+  })
+
+  it('the server saying failed (recovery) frees the edit after a refused retry', async () => {
+    sendProtocol.mockRejectedValueOnce({ code: 'ECONNABORTED' }).mockRejectedValueOnce(refusal(409, 'idempotency_key_reused')).mockResolvedValueOnce(post(200, 'sent', 's2'))
+    const s = useOccurrencesStore()
+    await expect(s.sendRegistrationMessage('o1', 'oi')).rejects.toBeTruthy()
+    await expect(s.sendRegistrationMessage('o1', 'oi')).rejects.toBeTruthy()
+    getProtocolSendByKey.mockResolvedValue(state('failed', 's1'))
+    expect(await s.recoverProtocolSend('o1')).toBe('failed')
+    await s.sendRegistrationMessage('o1', 'editado')
+    expect(keyOf(2)).not.toBe(keyOf(0))
+  })
+
+  it('L1: a retry renews savedAt, so the 60 s grace counts from the latest request; the record does not expire early', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-04T12:00:00Z'))
+    sendProtocol.mockRejectedValue({ code: 'ECONNABORTED' })
+    const s = useOccurrencesStore()
+    await expect(s.sendRegistrationMessage('o1', 'oi')).rejects.toBeTruthy()
+    const first = rec().savedAt
+    vi.setSystemTime(new Date('2026-11-04T12:05:00Z')) // five minutes later, a retry
+    await expect(s.sendRegistrationMessage('o1', 'oi')).rejects.toBeTruthy()
+    expect(rec().savedAt).toBeGreaterThan(first)
+    expect(rec().key).toBe(keyOf(0))
+    // 10 s after the retry the server still has no claim: still "in progress", the key is NOT released
+    vi.setSystemTime(new Date('2026-11-04T12:05:10Z'))
+    getProtocolSendByKey.mockRejectedValue({ response: { status: 404 } })
+    expect(await s.recoverProtocolSend('o1')).toBe('processing')
+    expect(s.hasPendingProtocolSend('o1')).toBe(true)
+    // and once the grace after the LAST request has passed, it is released
+    vi.setSystemTime(new Date(Date.parse('2026-11-04T12:05:00Z') + IN_FLIGHT_GRACE_MS + 1000))
+    expect(await s.recoverProtocolSend('o1')).toBeNull()
+    vi.useRealTimers()
+  })
+})

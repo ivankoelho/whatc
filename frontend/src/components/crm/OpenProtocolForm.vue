@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
-import { answerClosesIntention } from '@/lib/protocol-send-recovery'
 import { selectableOptions } from '@/lib/placement-options'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
@@ -388,7 +387,7 @@ async function sendSuggestedMessage() {
       }
     }
   } catch (e) {
-    if (!answerClosesIntention(e) && result.value) {
+    if (store.hasPendingProtocolSend(protocolId) && result.value) {
       // No conclusive answer (timeout, lost connection, proxy 5xx, another send of this case pending): the
       // message may be in flight or delivered. Ask the server and keep the key; never offer a second send
       // (editing the text and sending again would be one) until the server says how it ended.
