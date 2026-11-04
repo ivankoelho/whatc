@@ -4,7 +4,7 @@ import { toast } from 'vue-sonner'
 import { i18n } from '@/i18n'
 import { sendOutcome, type SendOutcome } from '@/lib/occurrence-customer-messaging'
 import { useAuthStore } from '@/stores/auth'
-import { loadRecord, saveRecord, clearRecord, recordStorageKey, textHash, IN_FLIGHT_GRACE_MS, type SendIntentRecord, type RecoveryScope, type SendState } from '@/lib/protocol-send-recovery'
+import { loadRecord, saveRecord, clearRecord, recordStorageKey, textHash, answerClosesIntention, ProtocolSendPendingError, IN_FLIGHT_GRACE_MS, type SendIntentRecord, type RecoveryScope, type SendState } from '@/lib/protocol-send-recovery'
 import { occurrencesService, occurrenceProcessesService, type Occurrence, type OccurrenceStage, type OccurrenceEvent, type OccurrenceDocumentInput } from '@/services/api'
 
 export const useOccurrencesStore = defineStore('occurrences', () => {
@@ -130,7 +130,10 @@ export const useOccurrencesStore = defineStore('occurrences', () => {
   async function postProtocol(occurrenceId: string, message: string | undefined) {
     const h = textHash(message)
     let rec = currentRecord(occurrenceId)
-    if (!rec || rec.textHash !== h) rec = { key: crypto.randomUUID(), textHash: h, savedAt: Date.now() }
+    // A record that is still here is an unresolved intention. A different text must not take a new key
+    // over it: that would be a second message while the first may be in flight or delivered.
+    if (rec && rec.textHash !== h) throw new ProtocolSendPendingError()
+    if (!rec) rec = { key: crypto.randomUUID(), textHash: h, savedAt: Date.now() }
     keepRecord(occurrenceId, rec) // before the request: a refresh mid-flight must still find the key
     try {
       const res = await occurrencesService.sendProtocol(occurrenceId, message, rec.key)
@@ -138,7 +141,7 @@ export const useOccurrencesStore = defineStore('occurrences', () => {
       else dropRecord(occurrenceId)
       return res.data
     } catch (e: any) {
-      if (e?.response) dropRecord(occurrenceId) // the server answered: the intention is over
+      if (answerClosesIntention(e)) dropRecord(occurrenceId) // only the application's own answer ends the intention (not a proxy 5xx, not a timeout)
       throw e
     }
   }

@@ -4,7 +4,7 @@ Endpoints (all need `occurrences:write`, `chat:write` and a valid tie to the cas
 
 - `POST /api/occurrences/{id}/send-protocol`: header `Idempotency-Key: <uuid>` is **required** (400 `idempotency_key_required` / `idempotency_key_invalid`). Body `{ "message"?: string }`.
 - `GET /api/occurrences/{id}/protocol-sends/{send_id}`: state of one send.
-- `GET /api/occurrences/{id}/protocol-sends?idempotency_key=<uuid>`: the same, for a caller that never saw the answer and does not know the `send_id`. Read-only; never claims the key, never sends. 404 = the server holds no claim for the key (the request never arrived or is still in flight): it is **not** proof that nothing was sent until a request in flight has ended (the server gives up on the provider after 30 s).
+- `GET /api/occurrences/{id}/protocol-sends?idempotency_key=<uuid>`: the same, for a caller that never saw the answer and does not know the `send_id`. It never claims the key and never sends. It is not strictly a pure read: asking about a stale `processing` claim (older than 2 minutes) reconciles it from the evidence (moves the state forward, never sends). 404 = the server holds no claim for the key (the request never arrived or is still in flight): it is **not** proof that nothing was sent until a request in flight has ended (the server gives up on the provider after 30 s).
 
 ## Answers
 
@@ -21,7 +21,7 @@ Every answer carries `send_id` and `message_id`. A repeat of the same request an
 
 ## Retention and expiry
 
-- `sent` and `failed` records are kept 90 days after they finish; `uncertain` records 90 days after they were reconciled. `processing` and `uncertain` not yet reconciled are **never** removed.
+- `sent` and `failed` records are kept 90 days after they finish. `processing` is never removed. An `uncertain` record is removed only after it is reconciled; with the evidence available today an `uncertain` send with no provider message id is never settled by the system, so such records are **kept indefinitely** (a known limit, not a promise of removal after 90 days).
 - **After the record is removed the key is unknown**: repeating the same key later is read as a new intention and **sends again**. Keys are single-use by contract; the interface never reuses the key of a finished intention, and the browser drops its own record long before 90 days (24 h).
 - A claim stuck in `processing` for more than 2 minutes is reconciled from the audit trail and the message row. With insufficient evidence it becomes `uncertain`; the key is never released and nothing is resent. A missing local record is never read as proof that the provider did not receive the request.
 
@@ -71,3 +71,13 @@ SELECT indexname FROM pg_indexes WHERE tablename = 'occurrence_send_intents' ORD
 If `uq_send_intent_key` is missing, do **not** release the flow: without the UNIQUE index two requests with the same key can both send.
 
 **Rollback.** Going back to the previous binary (and frontend) does not require removing the table: the old code ignores it. **Do not drop the table or delete rows as part of a rollback**: the rows are the record of which keys were already used (and, for `uncertain`, of sends that may have reached the customer); removing them frees the keys and a repeated request would send again. Drop it only by a separate, explicit decision once no new-version client can still repeat a key. Rolling back backend and frontend together is the same coordination as deploying them.
+
+## What the browser treats as an answer (frontend rules)
+
+- Only the application's own answer **closes** an intention (the browser forgets the key): a body that carries the `send_id` (sent, failed or uncertain are answers about that send), or an application error envelope (`status: "error"`) with a 4xx status (key missing or invalid, not allowed, not found, key reused, closed window).
+- Anything else is **no answer**: a timeout, a lost connection, and also a 5xx (or an envelope-less 4xx such as 413/429) from a proxy or load balancer, for example 502/503/504 while the backend restarts. The key is kept and the page asks the server (by `send_id` or by key); it does not send again.
+- While an intention is unresolved, the form does not accept a **different text** for the same case: it does not mint a second key (that would be a second message while the first may be in flight or delivered). The text is locked and the page shows the pending state until the server says `sent` or `failed`.
+
+## Compatibility note
+
+`chat:write` is now also required on the other customer-sending endpoints (`SendMessage`, `SendMediaMessage`, `SendReaction`, `SendTemplateMessage`). Integrations or roles that sent without it now get 403. Review roles and API keys before the deploy.

@@ -173,3 +173,67 @@ describe('protocol send: recovery after refresh', () => {
     expect(Object.keys(JSON.parse(raw)).sort()).toEqual(['key', 'savedAt', 'sendId', 'textHash'])
   })
 })
+
+// Regression for the review of PR 143 (findings 1 and 2).
+describe('protocol send: proxy 5xx, timeout and edited text', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    org.value = 'org-1'
+    user.value = { id: 'user-1' }
+    sendProtocol.mockReset()
+    getProtocolSend.mockReset()
+    getProtocolSendByKey.mockReset()
+    vi.useRealTimers()
+    setActivePinia(createPinia())
+  })
+  const proxy502 = { response: { status: 502, data: '<html>502 Bad Gateway</html>' } }
+
+  it('a proxy 502 mid-send: the record survives, a refresh asks by key and posts nothing', async () => {
+    sendProtocol.mockRejectedValue(proxy502)
+    await expect(useOccurrencesStore().sendRegistrationMessage('o1', 'oi')).rejects.toBeTruthy()
+    expect(localStorage.getItem(recordStorageKey(scope()))).not.toBeNull()
+    refresh()
+    getProtocolSendByKey.mockResolvedValue(state('uncertain', 'send-7'))
+    expect(await useOccurrencesStore().recoverProtocolSend('o1')).toBe('uncertain')
+    expect(getProtocolSendByKey).toHaveBeenCalledWith('o1', keyOf(0))
+    expect(sendProtocol).toHaveBeenCalledTimes(1)
+  })
+
+  it('after the proxy 502 the server had in fact sent it: recovery reports sent and the record is forgotten', async () => {
+    sendProtocol.mockRejectedValue(proxy502)
+    await expect(useOccurrencesStore().sendRegistrationMessage('o1', 'oi')).rejects.toBeTruthy()
+    getProtocolSendByKey.mockResolvedValue(state('sent', 'send-7'))
+    expect(await useOccurrencesStore().recoverProtocolSend('o1')).toBe('sent')
+    expect(localStorage.getItem(recordStorageKey(scope()))).toBeNull()
+  })
+
+  it('timeout, then edit the text and send: refused before any POST; the original key stays', async () => {
+    sendProtocol.mockRejectedValue({ code: 'ECONNABORTED' })
+    const s = useOccurrencesStore()
+    await expect(s.sendRegistrationMessage('o1', 'original')).rejects.toBeTruthy()
+    await expect(s.sendRegistrationMessage('o1', 'editado')).rejects.toMatchObject({ name: 'ProtocolSendPendingError' })
+    expect(sendProtocol).toHaveBeenCalledTimes(1)
+    refresh() // even after a refresh the pending record blocks an edited text
+    await expect(useOccurrencesStore().sendRegistrationMessage('o1', 'editado')).rejects.toMatchObject({ name: 'ProtocolSendPendingError' })
+    expect(sendProtocol).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(localStorage.getItem(recordStorageKey(scope()))!).key).toBe(keyOf(0))
+  })
+
+  it('once the server says failed, the edited text is a new intention with a new key', async () => {
+    sendProtocol.mockRejectedValueOnce({ code: 'ECONNABORTED' }).mockResolvedValueOnce(post(200, 'sent', 'send-2'))
+    const s = useOccurrencesStore()
+    await expect(s.sendRegistrationMessage('o1', 'original')).rejects.toBeTruthy()
+    getProtocolSendByKey.mockResolvedValue(state('failed', 'send-1'))
+    expect(await s.recoverProtocolSend('o1')).toBe('failed')
+    await s.sendRegistrationMessage('o1', 'editado')
+    expect(keyOf(1)).not.toBe(keyOf(0))
+  })
+
+  it('repeat after a conclusive 200: a new intention with a new key', async () => {
+    sendProtocol.mockResolvedValue(post(200, 'sent'))
+    const s = useOccurrencesStore()
+    await s.sendRegistrationMessage('o1', 'oi')
+    await s.sendRegistrationMessage('o1', 'oi')
+    expect(keyOf(1)).not.toBe(keyOf(0))
+  })
+})

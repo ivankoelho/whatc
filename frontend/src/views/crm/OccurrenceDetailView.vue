@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { answerClosesIntention } from '@/lib/protocol-send-recovery'
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -273,7 +274,7 @@ async function sendProtocol() {
       toast.success(t('occurrences.protocolSent'))
     }
   } catch (e: any) {
-    if (!e?.response) void checkPendingSend() // no answer at all: ask what became of it
+    if (!answerClosesIntention(e)) void checkPendingSend() // no conclusive answer (timeout, proxy 5xx, another send pending): ask what became of it
     if (e?.response?.status === 422) {
       toast.error(t('chat.sendProtocolWindowClosed'))
     } else {

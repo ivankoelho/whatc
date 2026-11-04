@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
+import { answerClosesIntention } from '@/lib/protocol-send-recovery'
 import { selectableOptions } from '@/lib/placement-options'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
@@ -387,6 +388,26 @@ async function sendSuggestedMessage() {
       }
     }
   } catch (e) {
+    if (!answerClosesIntention(e) && result.value) {
+      // No conclusive answer (timeout, lost connection, proxy 5xx, another send of this case pending): the
+      // message may be in flight or delivered. Ask the server and keep the key; never offer a second send
+      // (editing the text and sending again would be one) until the server says how it ended.
+      const state = await store.recoverProtocolSend(protocolId).catch(() => 'uncertain' as const)
+      if (state === 'sent') {
+        result.value = { ...current, sent: true }
+        return
+      }
+      if (state === 'failed') {
+        result.value = { ...current, sent: null }
+        toast.error(t('occurrences.protocolSendFailed'))
+        return
+      }
+      if (state !== null) {
+        result.value = { ...current, sent: null, uncertain: true }
+        toast.warning(t('occurrences.protocolSendUncertain'))
+        return
+      }
+    }
     toast.error(getErrorMessage(e, t('occurrences.protocolSendFailed')))
   } finally {
     sendingMessage.value = false
@@ -418,7 +439,7 @@ function goToProtocol() {
         <!-- Review before sending. After a closed 24h window (sent === false) keep the text copyable for a template. -->
         <div v-if="result.sent !== true" class="space-y-2 text-left">
           <Label>{{ t('occurrences.suggestedMessageLabel') }}</Label>
-          <Textarea v-model="suggestedMessage" :rows="8" :maxlength="4096" :disabled="sendingMessage" />
+          <Textarea v-model="suggestedMessage" :rows="8" :maxlength="4096" :disabled="sendingMessage || !!result.uncertain" />
           <p v-if="result.sent === null && unresolvedTokens.length" class="text-xs text-amber-600" role="status">
             {{ t('occurrences.unresolvedPlaceholdersNotice', { tokens: unresolvedTokens.join(', ') }) }}
           </p>

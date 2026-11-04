@@ -76,3 +76,29 @@ export function clearRecord(s: RecoveryScope) {
 
 // The server's word for a send, as the state query returns it.
 export type SendState = 'processing' | 'sent' | 'failed' | 'uncertain'
+
+// Did the page get an answer that CLOSES the intention? Only the application's own words do:
+// - a body that carries the send_id (sent / failed / uncertain are all answers about THAT send), or
+// - an application error envelope in the 4xx range (key missing, not allowed, not found, key reused,
+//   closed window): the request was refused before anything was sent under this key.
+// Everything else is "no answer" for this purpose: a timeout, a dropped connection, and also a 5xx
+// from a proxy or load balancer (502/503/504 while the backend restarts, an upstream reset): such a
+// page says nothing about whether the backend claimed the key or reached the provider. The record
+// stays, and the page asks the server instead of sending again.
+export function answerClosesIntention(e: unknown): boolean {
+  const r = (e as { response?: { status?: number; data?: any } } | null | undefined)?.response
+  if (!r) return false
+  const body = r.data
+  if (typeof body?.data?.send_id === 'string' && body.data.send_id) return true
+  const status = r.status ?? 0
+  return status >= 400 && status < 500 && body && typeof body === 'object' && body.status === 'error'
+}
+
+// A different text while an earlier send of this case is still unresolved. Raised instead of minting a
+// second key: that would send a second message while the first may be in flight or delivered.
+export class ProtocolSendPendingError extends Error {
+  constructor() {
+    super('A protocol send for this case is still unresolved')
+    this.name = 'ProtocolSendPendingError'
+  }
+}

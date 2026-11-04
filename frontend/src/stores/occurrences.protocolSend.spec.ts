@@ -92,20 +92,107 @@ describe('protocol send: one Idempotency-Key per intention', () => {
     expect(keyOf(1)).toBe(keyOf(0))
   })
 
-  it('after the server refused (an answer), the next try is a new intention', async () => {
-    sendProtocol.mockRejectedValueOnce({ response: { status: 502, data: {} } }).mockResolvedValueOnce(answer(200, 'sent'))
+  it('after the application refused (its own error envelope), the next try is a new intention', async () => {
+    sendProtocol.mockRejectedValueOnce({ response: { status: 403, data: { status: 'error', message: 'no' } } }).mockResolvedValueOnce(answer(200, 'sent'))
     const s = useOccurrencesStore()
     await expect(s.sendRegistrationMessage('o1', 'oi')).rejects.toBeTruthy()
     await s.sendRegistrationMessage('o1', 'oi')
     expect(keyOf(1)).not.toBe(keyOf(0))
   })
 
-  it('a different text or case is a different intention', async () => {
+  it('a different case is a different intention', async () => {
     sendProtocol.mockResolvedValue(answer(202, 'uncertain'))
     const s = useOccurrencesStore()
     await s.sendRegistrationMessage('o1', 'oi')
-    await s.sendRegistrationMessage('o1', 'outro')
     await s.sendRegistrationMessage('o2', 'oi')
-    expect(new Set([keyOf(0), keyOf(1), keyOf(2)]).size).toBe(3)
+    expect(keyOf(0)).not.toBe(keyOf(1))
+  })
+
+  it('a different text is a new intention once the earlier one is resolved', async () => {
+    sendProtocol.mockResolvedValue(answer(200, 'sent'))
+    const s = useOccurrencesStore()
+    await s.sendRegistrationMessage('o1', 'oi')
+    await s.sendRegistrationMessage('o1', 'outro')
+    expect(keyOf(1)).not.toBe(keyOf(0))
+  })
+})
+
+// Regression for the review of PR 143 (findings 1 and 2).
+describe('protocol send: an answer that does not close the intention keeps the key', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    sendProtocol.mockReset()
+  })
+  const proxy = (status: number, data: unknown = '<html>bad gateway</html>') => ({ response: { status, data } })
+
+  for (const status of [502, 503, 504]) {
+    it(`a proxy ${status} (no application envelope) keeps the key: the retry is the SAME send`, async () => {
+      sendProtocol.mockRejectedValueOnce(proxy(status)).mockResolvedValueOnce(answer(200, 'sent'))
+      const s = useOccurrencesStore()
+      await expect(s.sendRegistrationMessage('o1', 'oi')).rejects.toBeTruthy()
+      await s.sendRegistrationMessage('o1', 'oi')
+      expect(sendProtocol.mock.calls[1][2]).toBe(sendProtocol.mock.calls[0][2])
+    })
+  }
+
+  it('a 5xx with an empty or JSON body without our envelope also keeps the key', async () => {
+    sendProtocol.mockRejectedValueOnce(proxy(502, {})).mockResolvedValueOnce(answer(200, 'sent'))
+    const s = useOccurrencesStore()
+    await expect(s.sendRegistrationMessage('o1', 'oi')).rejects.toBeTruthy()
+    await s.sendRegistrationMessage('o1', 'oi')
+    expect(sendProtocol.mock.calls[1][2]).toBe(sendProtocol.mock.calls[0][2])
+  })
+
+  it('a timeout (no response) keeps the key', async () => {
+    sendProtocol.mockRejectedValueOnce({ code: 'ECONNABORTED' }).mockResolvedValueOnce(answer(200, 'sent'))
+    const s = useOccurrencesStore()
+    await expect(s.sendRegistrationMessage('o1', 'oi')).rejects.toBeTruthy()
+    await s.sendRegistrationMessage('o1', 'oi')
+    expect(sendProtocol.mock.calls[1][2]).toBe(sendProtocol.mock.calls[0][2])
+  })
+
+  it('the application own proven failure (502 carrying the send_id) closes the intention', async () => {
+    sendProtocol
+      .mockRejectedValueOnce({ response: { status: 502, data: { status: 'error', data: { result: 'failed', send_id: 's1' } } } })
+      .mockResolvedValueOnce(answer(200, 'sent'))
+    const s = useOccurrencesStore()
+    await expect(s.sendRegistrationMessage('o1', 'oi')).rejects.toBeTruthy()
+    await s.sendRegistrationMessage('o1', 'oi')
+    expect(sendProtocol.mock.calls[1][2]).not.toBe(sendProtocol.mock.calls[0][2])
+  })
+
+  it('a proxy 4xx (413, 429: no application envelope) does not close the intention either', async () => {
+    sendProtocol.mockRejectedValueOnce(proxy(429)).mockResolvedValueOnce(answer(200, 'sent'))
+    const s = useOccurrencesStore()
+    await expect(s.sendRegistrationMessage('o1', 'oi')).rejects.toBeTruthy()
+    await s.sendRegistrationMessage('o1', 'oi')
+    expect(sendProtocol.mock.calls[1][2]).toBe(sendProtocol.mock.calls[0][2])
+  })
+
+  it('editing the text while the first send is unresolved does NOT mint a second key (nothing is posted)', async () => {
+    sendProtocol.mockRejectedValueOnce({ code: 'ECONNABORTED' })
+    const s = useOccurrencesStore()
+    await expect(s.sendRegistrationMessage('o1', 'texto original')).rejects.toBeTruthy()
+    await expect(s.sendRegistrationMessage('o1', 'texto editado')).rejects.toMatchObject({ name: 'ProtocolSendPendingError' })
+    expect(sendProtocol).toHaveBeenCalledTimes(1)
+  })
+
+  it('editing the text while the first send is pending (202) does not post either', async () => {
+    sendProtocol.mockResolvedValueOnce(answer(202, 'uncertain'))
+    const s = useOccurrencesStore()
+    await s.sendRegistrationMessage('o1', 'texto original')
+    await expect(s.sendRegistrationMessage('o1', 'texto editado')).rejects.toMatchObject({ name: 'ProtocolSendPendingError' })
+    expect(sendProtocol).toHaveBeenCalledTimes(1)
+  })
+
+  it('same text after the inconclusive try reuses the key, and a conclusive answer then frees the next intention', async () => {
+    sendProtocol.mockRejectedValueOnce(proxy(504)).mockResolvedValueOnce(answer(200, 'sent')).mockResolvedValueOnce(answer(200, 'sent'))
+    const s = useOccurrencesStore()
+    await expect(s.sendRegistrationMessage('o1', 'oi')).rejects.toBeTruthy()
+    await s.sendRegistrationMessage('o1', 'oi')
+    await s.sendRegistrationMessage('o1', 'outro texto')
+    const k = (i: number) => sendProtocol.mock.calls[i][2]
+    expect(k(1)).toBe(k(0))
+    expect(k(2)).not.toBe(k(0))
   })
 })
