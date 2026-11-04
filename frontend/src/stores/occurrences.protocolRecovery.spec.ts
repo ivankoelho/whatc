@@ -8,11 +8,15 @@ import { ref } from 'vue'
 const sendProtocol = vi.fn()
 const getProtocolSend = vi.fn()
 const getProtocolSendByKey = vi.fn()
+const getOpenProtocolSend = vi.fn()
+const resolveProtocolSend = vi.fn()
 vi.mock('@/services/api', () => ({
   occurrencesService: {
     sendProtocol: (...a: unknown[]) => sendProtocol(...a),
     getProtocolSend: (...a: unknown[]) => getProtocolSend(...a),
     getProtocolSendByKey: (...a: unknown[]) => getProtocolSendByKey(...a),
+    getOpenProtocolSend: (...a: unknown[]) => getOpenProtocolSend(...a),
+    resolveProtocolSend: (...a: unknown[]) => resolveProtocolSend(...a),
     listEvents: vi.fn(async () => ({ data: { data: { events: [] } } })),
   },
   occurrenceProcessesService: {},
@@ -37,6 +41,8 @@ const state = (s: string, id = 'send-1') => ({ data: { data: { state: s, send_id
 const keyOf = (n: number) => sendProtocol.mock.calls[n][2] as string
 // A refresh: a brand new store (memory gone), the same browser storage.
 const refresh = () => setActivePinia(createPinia())
+// The application's own 404: the server holds no claim for that send or key.
+const sendNotFound = { response: { status: 404, data: { status: 'error', error_type: 'send_not_found' } } }
 const scope = (userId = 'user-1', organizationId = 'org-1', occurrenceId = 'o1') => ({ organizationId, userId, occurrenceId })
 
 describe('protocol send: recovery after refresh', () => {
@@ -148,7 +154,7 @@ describe('protocol send: recovery after refresh', () => {
     sendProtocol.mockRejectedValue(new Error('Network Error'))
     await expect(useOccurrencesStore().sendRegistrationMessage('o1', 'oi')).rejects.toBeTruthy()
     refresh()
-    getProtocolSendByKey.mockRejectedValue({ response: { status: 404 } })
+    getProtocolSendByKey.mockRejectedValue(sendNotFound)
     expect(await useOccurrencesStore().recoverProtocolSend('o1')).toBe('processing')
     vi.setSystemTime(Date.now() + IN_FLIGHT_GRACE_MS + 1000)
     expect(await useOccurrencesStore().recoverProtocolSend('o1')).toBeNull()
@@ -332,12 +338,98 @@ describe('protocol send: a refusal of a RETRY does not close an unresolved inten
     expect(rec().key).toBe(keyOf(0))
     // 10 s after the retry the server still has no claim: still "in progress", the key is NOT released
     vi.setSystemTime(new Date('2026-11-04T12:05:10Z'))
-    getProtocolSendByKey.mockRejectedValue({ response: { status: 404 } })
+    getProtocolSendByKey.mockRejectedValue(sendNotFound)
     expect(await s.recoverProtocolSend('o1')).toBe('processing')
     expect(s.hasPendingProtocolSend('o1')).toBe(true)
     // and once the grace after the LAST request has passed, it is released
     vi.setSystemTime(new Date(Date.parse('2026-11-04T12:05:00Z') + IN_FLIGHT_GRACE_MS + 1000))
     expect(await s.recoverProtocolSend('o1')).toBeNull()
     vi.useRealTimers()
+  })
+})
+
+// Regression for the third review of PR 143 (404 and TTL) and for the server-side guard.
+describe('protocol send: what a 404 means, the memory copy, and the case-level open send', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    org.value = 'org-1'
+    user.value = { id: 'user-1' }
+    sendProtocol.mockReset()
+    getProtocolSend.mockReset()
+    getProtocolSendByKey.mockReset()
+    getOpenProtocolSend.mockReset()
+    resolveProtocolSend.mockReset()
+    vi.useRealTimers()
+    setActivePinia(createPinia())
+  })
+
+  it('a 404 that is NOT send_not_found (case gone, unknown route) keeps the record and concludes nothing', async () => {
+    sendProtocol.mockRejectedValue({ code: 'ECONNABORTED' })
+    const s = useOccurrencesStore()
+    await expect(s.sendRegistrationMessage('o1', 'oi')).rejects.toBeTruthy()
+    getProtocolSendByKey.mockRejectedValue({ response: { status: 404, data: { status: 'error', message: 'Contact not found' } } })
+    await expect(s.recoverProtocolSend('o1')).rejects.toBeTruthy()
+    expect(s.hasPendingProtocolSend('o1')).toBe(true)
+  })
+
+  it('also when the send_id is already known: a 404 with no application body does not release it', async () => {
+    sendProtocol.mockResolvedValue(post(202, 'uncertain', 'send-9'))
+    const s = useOccurrencesStore()
+    await s.sendRegistrationMessage('o2', 'oi')
+    getProtocolSend.mockRejectedValue({ response: { status: 404 } }) // a proxy 404 with no body
+    await expect(s.recoverProtocolSend('o2')).rejects.toBeTruthy()
+    expect(s.hasPendingProtocolSend('o2')).toBe(true)
+  })
+
+  it('the application send_not_found with a known send_id still forgets it (the server has no such send)', async () => {
+    sendProtocol.mockResolvedValue(post(202, 'uncertain', 'send-9'))
+    const s = useOccurrencesStore()
+    await s.sendRegistrationMessage('o1', 'oi')
+    getProtocolSend.mockRejectedValue(sendNotFound)
+    expect(await s.recoverProtocolSend('o1')).toBeNull()
+    expect(s.hasPendingProtocolSend('o1')).toBe(false)
+  })
+
+  it('the copy in memory obeys the 24 h too: a tab left open for days forgets a send the storage forgot', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-04T12:00:00Z'))
+    sendProtocol.mockRejectedValue({ code: 'ECONNABORTED' })
+    const s = useOccurrencesStore()
+    await expect(s.sendRegistrationMessage('o1', 'oi')).rejects.toBeTruthy()
+    expect(s.hasPendingProtocolSend('o1')).toBe(true)
+    localStorage.clear() // the storage lost it (another tab, the user, the browser)
+    vi.setSystemTime(new Date('2026-11-04T12:00:00Z').getTime() + RECOVERY_TTL_MS - 1000)
+    expect(s.hasPendingProtocolSend('o1')).toBe(true)
+    vi.setSystemTime(new Date('2026-11-04T12:00:00Z').getTime() + RECOVERY_TTL_MS + 1000)
+    expect(s.hasPendingProtocolSend('o1')).toBe(false)
+    vi.useRealTimers()
+  })
+
+  it('send_pending on a NEW intention: the key was never used, so the intention is closed and nothing stays pending here', async () => {
+    sendProtocol.mockRejectedValueOnce({ response: { status: 409, data: { status: 'error', error_type: 'send_pending', data: { send_id: 'other', state: 'uncertain', own: false } } } })
+    const s = useOccurrencesStore()
+    await expect(s.sendRegistrationMessage('o1', 'oi')).rejects.toBeTruthy()
+    expect(s.hasPendingProtocolSend('o1')).toBe(false)
+  })
+
+  it('asks for the open send of the case: found, none, and any other failure is not read as none', async () => {
+    const s = useOccurrencesStore()
+    getOpenProtocolSend.mockResolvedValueOnce({ data: { data: { state: 'uncertain', send_id: 's7', own: false } } })
+    expect(await s.getOpenProtocolSend('o1')).toEqual({ state: 'uncertain', sendId: 's7', own: false })
+    getOpenProtocolSend.mockRejectedValueOnce(sendNotFound)
+    expect(await s.getOpenProtocolSend('o1')).toBeNull()
+    getOpenProtocolSend.mockRejectedValueOnce({ response: { status: 500 } })
+    await expect(s.getOpenProtocolSend('o1')).rejects.toBeTruthy()
+  })
+
+  it('settling a send forgets the browser record and posts nothing to send', async () => {
+    sendProtocol.mockResolvedValue(post(202, 'uncertain', 's1'))
+    const s = useOccurrencesStore()
+    await s.sendRegistrationMessage('o1', 'oi')
+    resolveProtocolSend.mockResolvedValue({ data: { data: { state: 'sent', send_id: 's1' } } })
+    await s.resolveProtocolSend('o1', 's1', { outcome: 'delivered', conversation_checked: true, note: 'o cliente respondeu' })
+    expect(resolveProtocolSend).toHaveBeenCalledWith('o1', 's1', { outcome: 'delivered', conversation_checked: true, note: 'o cliente respondeu' })
+    expect(s.hasPendingProtocolSend('o1')).toBe(false)
+    expect(sendProtocol).toHaveBeenCalledTimes(1)
   })
 })

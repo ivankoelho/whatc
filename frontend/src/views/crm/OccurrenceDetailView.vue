@@ -17,6 +17,8 @@ import OccurrenceWhatsAppCard from '@/components/crm/OccurrenceWhatsAppCard.vue'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import ResolveSendDialog from '@/components/crm/ResolveSendDialog.vue'
+import { isSendPending } from '@/lib/protocol-send-recovery'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
@@ -103,6 +105,11 @@ const isSendingProtocol = ref(false)
 // 202). It is recovered by ASKING the server; nothing here ever sends. While it is processing or
 // uncertain the send button stays off, so it cannot be repeated by accident.
 const pendingSend = ref<'processing' | 'uncertain' | null>(null)
+// The case's open send as the SERVER knows it (any person, any device): its id is what a person settles, and
+// `own` tells whether this person started it.
+const openSend = ref<{ state: 'processing' | 'uncertain'; sendId: string; own: boolean } | null>(null)
+const resolveOpen = ref(false)
+const canResolveSend = computed(() => authStore.hasPermission('occurrences', 'resolve_send'))
 let recheckTimer: ReturnType<typeof setTimeout> | undefined
 let rechecks = 0
 
@@ -119,7 +126,20 @@ async function checkPendingSend() {
     } else {
       pendingSend.value = state
     }
-    if (state === 'processing' && rechecks++ < 12) recheckTimer = setTimeout(checkPendingSend, 10_000)
+    // What this browser remembers is one source; the case's open send on the server is the other, and the only
+    // one that sees a send started by another person or device. Ask it whenever this browser knows nothing, or
+    // something is still open (to learn which send a person would settle).
+    if (state === null || state === 'processing' || state === 'uncertain') {
+      try {
+        openSend.value = await store.getOpenProtocolSend(occurrenceId.value)
+      } catch {
+        openSend.value = null
+      }
+      if (state === null) pendingSend.value = openSend.value?.state ?? null
+    } else {
+      openSend.value = null
+    }
+    if (pendingSend.value === 'processing' && rechecks++ < 12) recheckTimer = setTimeout(checkPendingSend, 10_000)
   } catch {
     // Could not ask (offline, not allowed): the record stays and the next visit asks again.
   }
@@ -273,6 +293,13 @@ async function sendProtocol() {
       toast.success(t('occurrences.protocolSent'))
     }
   } catch (e: any) {
+    if (isSendPending(e)) {
+      // The server refused: another message of this case is not settled yet (maybe started by somebody else).
+      // Nothing was sent; show it and what to do, not a failure.
+      toast.warning(t('occurrences.protocolSendPendingOther'))
+      void checkPendingSend()
+      return
+    }
     if (store.hasPendingProtocolSend(occurrenceId.value)) void checkPendingSend() // no conclusive answer (timeout, proxy 5xx, another send pending): ask what became of it
     if (e?.response?.status === 422) {
       toast.error(t('chat.sendProtocolWindowClosed'))
@@ -426,9 +453,16 @@ onUnmounted(() => {
       <template v-if="occurrence">
       <div class="mx-auto w-full max-w-[1600px] space-y-6" data-testid="unified-case">
 
-        <p v-if="pendingSend" class="rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm" role="status" data-testid="protocol-send-pending">
-          {{ pendingSend === 'processing' ? $t('occurrences.protocolSendProcessing') : $t('occurrences.protocolSendUncertain') }}
-        </p>
+        <div v-if="pendingSend" class="flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm" role="status" data-testid="protocol-send-pending">
+          <p>
+            <template v-if="openSend && !openSend.own">{{ $t('occurrences.protocolSendOpenByOther') }}</template>
+            <template v-else>{{ pendingSend === 'processing' ? $t('occurrences.protocolSendProcessing') : $t('occurrences.protocolSendUncertain') }}</template>
+          </p>
+          <Button v-if="canResolveSend && openSend && openSend.state === 'uncertain'" size="sm" variant="outline" data-testid="resolve-send-open" @click="resolveOpen = true">
+            {{ $t('occurrences.resolveSend.button') }}
+          </Button>
+        </div>
+        <ResolveSendDialog v-if="openSend" v-model:open="resolveOpen" :occurrence-id="occurrenceId" :send-id="openSend.sendId" @resolved="() => { pendingSend = null; openSend = null }" />
 
         <!-- 1. Operational strip: what it is, whose it is, how urgent -->
         <section id="case-summary" class="scroll-mt-4 rounded-lg border bg-card px-4 py-3" data-testid="case-strip">

@@ -106,3 +106,17 @@ export class ProtocolSendPendingError extends Error {
     this.name = 'ProtocolSendPendingError'
   }
 }
+
+// The server's answer "this case already has a customer send that is not settled": somebody else (or another
+// device of the same person) holds the case. It says nothing about the key of THIS request, which was never used.
+export function isSendPending(e: unknown): boolean {
+  const r = (e as { response?: { status?: number; data?: any } } | null | undefined)?.response
+  return r?.status === 409 && r?.data?.error_type === 'send_pending'
+}
+
+// 404 with the application's "send not found": the server holds no claim for that send or key. Any OTHER 404
+// (case or contact gone, a route a proxy or an older backend does not know) says nothing about the send.
+export function isSendNotFound(e: unknown): boolean {
+  const r = (e as { response?: { status?: number; data?: any } } | null | undefined)?.response
+  return r?.status === 404 && r?.data?.error_type === 'send_not_found'
+}

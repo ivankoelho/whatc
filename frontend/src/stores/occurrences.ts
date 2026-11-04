@@ -4,7 +4,7 @@ import { toast } from 'vue-sonner'
 import { i18n } from '@/i18n'
 import { sendOutcome, type SendOutcome } from '@/lib/occurrence-customer-messaging'
 import { useAuthStore } from '@/stores/auth'
-import { loadRecord, saveRecord, clearRecord, recordStorageKey, textHash, answerClosesIntention, ProtocolSendPendingError, IN_FLIGHT_GRACE_MS, type SendIntentRecord, type RecoveryScope, type SendState } from '@/lib/protocol-send-recovery'
+import { loadRecord, saveRecord, clearRecord, recordStorageKey, textHash, answerClosesIntention, isSendNotFound, ProtocolSendPendingError, IN_FLIGHT_GRACE_MS, RECOVERY_TTL_MS, type SendIntentRecord, type RecoveryScope, type SendState } from '@/lib/protocol-send-recovery'
 import { occurrencesService, occurrenceProcessesService, type Occurrence, type OccurrenceStage, type OccurrenceEvent, type OccurrenceDocumentInput } from '@/services/api'
 
 export const useOccurrencesStore = defineStore('occurrences', () => {
@@ -117,7 +117,19 @@ export const useOccurrencesStore = defineStore('occurrences', () => {
   const auth = useAuthStore()
   const mem = new Map<string, SendIntentRecord>()
   const scopeOf = (occurrenceId: string): RecoveryScope => ({ organizationId: auth.organizationId, userId: auth.user?.id ?? '', occurrenceId })
-  const currentRecord = (occurrenceId: string) => loadRecord(scopeOf(occurrenceId)) ?? mem.get(recordStorageKey(scopeOf(occurrenceId))) ?? null
+  // The copy in memory obeys the same 24 h as the one in the browser storage: a tab left open for days must not
+  // go on holding a send that the storage already forgot.
+  function currentRecord(occurrenceId: string): SendIntentRecord | null {
+    const stored = loadRecord(scopeOf(occurrenceId))
+    if (stored) return stored
+    const k = recordStorageKey(scopeOf(occurrenceId))
+    const m = mem.get(k)
+    if (m && Date.now() - m.savedAt > RECOVERY_TTL_MS) {
+      mem.delete(k)
+      return null
+    }
+    return m ?? null
+  }
   function keepRecord(occurrenceId: string, rec: SendIntentRecord) {
     mem.set(recordStorageKey(scopeOf(occurrenceId)), rec)
     saveRecord(scopeOf(occurrenceId), rec)
@@ -158,6 +170,25 @@ export const useOccurrencesStore = defineStore('occurrences', () => {
   // it is dropped only by a conclusive answer, so the screens ask it instead of re-deriving it from an error.
   const hasPendingProtocolSend = (occurrenceId: string) => !!currentRecord(occurrenceId)
 
+  // The case's open send (whoever started it, on any device), or null. Never sends anything.
+  async function getOpenProtocolSend(occurrenceId: string): Promise<{ state: 'processing' | 'uncertain'; sendId: string; own: boolean } | null> {
+    try {
+      const d = (await occurrencesService.getOpenProtocolSend(occurrenceId)).data.data
+      return { state: d.state, sendId: d.send_id, own: !!d.own }
+    } catch (e: any) {
+      if (isSendNotFound(e)) return null
+      throw e
+    }
+  }
+
+  // A person settles an uncertain send after checking the conversation. Sends nothing; the record of the browser is
+  // forgotten because the outcome is now known.
+  async function resolveProtocolSend(occurrenceId: string, sendId: string, body: { outcome: 'delivered' | 'not_delivered'; conversation_checked: boolean; note: string }) {
+    const d = (await occurrencesService.resolveProtocolSend(occurrenceId, sendId, body)).data.data
+    dropRecord(occurrenceId)
+    return d
+  }
+
   // What happened to the send this browser started for this case and did not see finish.
   // null = nothing pending. Read-only: it only ever asks, never creates a send.
   async function recoverProtocolSend(occurrenceId: string): Promise<SendState | null> {
@@ -171,7 +202,9 @@ export const useOccurrencesStore = defineStore('occurrences', () => {
       if (data.state === 'sent' || data.state === 'failed') dropRecord(occurrenceId)
       return data.state
     } catch (e: any) {
-      if (e?.response?.status !== 404) throw e // no answer or not allowed: keep the record, say nothing false
+      // Only the application's own "send not found" means "no claim". Any other failure (no answer, not allowed, a
+      // 404 for the case or the route) says nothing about the send: keep the record, say nothing false.
+      if (!isSendNotFound(e)) throw e
       // No claim for the key. A request may still be on its way: until it cannot be, it is "in progress".
       if (!rec.sendId && Date.now() - rec.savedAt < IN_FLIGHT_GRACE_MS) return 'processing'
       dropRecord(occurrenceId)
@@ -227,6 +260,6 @@ export const useOccurrencesStore = defineStore('occurrences', () => {
     occurrences, total, contactOccurrences, stages, events, isLoading,
     fetchStages, stageColor, fetchOccurrences, fetchColumn, fetchContactOccurrences, fetchEvents,
     createOccurrence, changeStage, moveStage, addNote, reply, sendProtocol,
-    previewRegistrationMessage, sendRegistrationMessage, getProtocolSend, recoverProtocolSend, hasPendingProtocolSend, clear,
+    previewRegistrationMessage, sendRegistrationMessage, getProtocolSend, recoverProtocolSend, hasPendingProtocolSend, getOpenProtocolSend, resolveProtocolSend, clear,
   }
 })

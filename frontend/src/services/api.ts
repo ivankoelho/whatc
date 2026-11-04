@@ -1843,6 +1843,14 @@ export const occurrencesService = {
   getProtocolSend: (id: string, sendId: string) =>
     api.get<ApiEnvelope<{ state: 'processing' | 'sent' | 'failed' | 'uncertain'; sent: boolean; confirmed: boolean; send_id: string; message_id: string }>>(
       `/occurrences/${id}/protocol-sends/${sendId}`),
+  // The case's open send (processing, or uncertain until a person settles it), whoever started it and on
+  // whichever device. 404 send_not_found = none. Never sends anything.
+  getOpenProtocolSend: (id: string) =>
+    api.get<ApiEnvelope<{ state: 'processing' | 'uncertain'; send_id: string; own?: boolean }>>(
+      `/occurrences/${id}/protocol-sends`, { params: { open: true } }),
+  // A person settles an uncertain send after checking the conversation. Sends nothing.
+  resolveProtocolSend: (id: string, sendId: string, body: { outcome: 'delivered' | 'not_delivered'; conversation_checked: boolean; note: string }) =>
+    api.post<ApiEnvelope<{ state: 'sent' | 'failed'; send_id: string }>>(`/occurrences/${id}/protocol-sends/${sendId}/resolve`, body),
   // Permanent hard delete, restricted to super admins server-side.
   delete: (id: string) => api.delete<ApiEnvelope<{ deleted: boolean }>>(`/occurrences/${id}`),
   listForContact: (contactId: string) =>
