@@ -473,6 +473,7 @@ func runServer(args []string) {
 	// Customer communications of forwarded cases (templates via the case's logistics account)
 	notifierCtx, notifierCancel := context.WithCancel(context.Background())
 	go app.StartOccurrenceNotifier(notifierCtx)
+	go app.StartSendIntentReconciler(notifierCtx)
 
 	// Start presence reaper (sweeps every 10s; grace is 60s)
 	presenceCtx, presenceCancel := context.WithCancel(context.Background())
@@ -1004,6 +1005,8 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/occurrences/{id}/export", app.ExportOccurrence)
 	g.POST("/api/occurrences/{id}/events", app.CreateOccurrenceEvent)
 	g.POST("/api/occurrences/{id}/send-protocol", app.SendOccurrenceProtocol)
+	g.GET("/api/occurrences/{id}/protocol-sends", app.GetOccurrenceProtocolSendByKey)
+	g.GET("/api/occurrences/{id}/protocol-sends/{send_id}", app.GetOccurrenceProtocolSend)
 	g.POST("/api/occurrences/{id}/reply", app.ReplyToOccurrence)
 	g.GET("/api/occurrences/{id}/documents", app.ListOccurrenceDocuments)
 	g.POST("/api/occurrences/{id}/documents", app.CreateOccurrenceDocument)

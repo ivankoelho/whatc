@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,11 +21,16 @@ import (
 // mockWhatsAppServer creates a mock WhatsApp API server for testing.
 // It handles various endpoints and returns configurable responses.
 type mockWhatsAppServer struct {
+	mu            sync.Mutex    // guards appends to sentMessages and delay
+	delay         time.Duration // held back AFTER accepting a message (late answer)
 	server        *httptest.Server
 	sentMessages  []map[string]any
 	uploadedMedia []map[string]any
 	returnError   bool
 	errorMessage  string
+	failStatus    int    // when set, every send is answered with this status ...
+	failCode      int    // ... and this Meta error code ...
+	failRaw       string // ... or this raw body instead
 	nextMessageID string
 	nextMediaID   string
 }
@@ -66,6 +72,18 @@ func newMockWhatsAppServer() *mockWhatsAppServer {
 }
 
 func (m *mockWhatsAppServer) handleMessages(w http.ResponseWriter, r *http.Request) {
+	m.mu.Lock()
+	status, code, raw := m.failStatus, m.failCode, m.failRaw
+	m.mu.Unlock()
+	if status != 0 { // a chosen answer: HTTP status, Meta error code, or a raw (non-Meta) body
+		w.WriteHeader(status)
+		if raw != "" {
+			_, _ = w.Write([]byte(raw))
+		} else {
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"message": "chosen answer", "code": code}})
+		}
+		return
+	}
 	if m.returnError {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -83,7 +101,15 @@ func (m *mockWhatsAppServer) handleMessages(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	m.mu.Lock() // concurrent sends reach the server on their own goroutines
 	m.sentMessages = append(m.sentMessages, body)
+	delay := m.delay
+	m.mu.Unlock()
+	// The message is already accepted (and recorded) when the answer is held back:
+	// a client that gives up meanwhile cannot know it went through.
+	if delay > 0 {
+		time.Sleep(delay)
+	}
 
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]any{

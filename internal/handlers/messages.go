@@ -36,6 +36,11 @@ type OutgoingMessageRequest struct {
 	Account *models.WhatsAppAccount
 	Contact *models.Contact
 
+	// MessageID is optional: a caller that must record the message before it is
+	// sent (so the record can later be matched to the message row) assigns the id.
+	// uuid.Nil lets the message get its own.
+	MessageID uuid.UUID
+
 	// Message type determines which fields are used
 	Type models.MessageType // text, image, video, audio, document, interactive, template
 
@@ -415,8 +420,12 @@ func (a *App) toWhatsAppAccount(account *models.WhatsAppAccount) *whatsapp.Accou
 
 // createOutgoingMessage creates a Message model from the request
 func (a *App) createOutgoingMessage(req OutgoingMessageRequest, opts MessageSendOptions) *models.Message {
+	id := req.MessageID
+	if id == uuid.Nil {
+		id = uuid.New()
+	}
 	msg := &models.Message{
-		BaseModel:       models.BaseModel{ID: uuid.New()},
+		BaseModel:       models.BaseModel{ID: id},
 		OrganizationID:  req.Account.OrganizationID,
 		WhatsAppAccount: req.Account.Name,
 		ContactID:       req.Contact.ID,
@@ -876,6 +885,9 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+	if !a.requireChatWrite(r, orgID, userID) {
+		return nil
 	}
 
 	var req SendTemplateMessageRequest

@@ -2885,6 +2885,8 @@
     "stageChangeFailed": "Failed to update stage",
     "protocolSent": "Protocol sent",
     "protocolSendFailed": "Failed to send protocol",
+    "protocolSendUncertain": "WhatsApp did not confirm the message and it may have been delivered. Check the conversation before sending it again.",
+    "protocolSendProcessing": "The protocol send is still in progress. Wait for the confirmation before sending it again.",
     "contactLabel": "Contact",
     "priorityLabel": "Priority",
     "assigneeLabel": "Assignee",

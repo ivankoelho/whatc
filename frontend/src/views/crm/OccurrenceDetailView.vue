@@ -32,6 +32,7 @@ import { useAuthStore } from '@/stores/auth'
 import { wsService } from '@/services/websocket'
 import { formatDateTime, formatCivilDate } from '@/lib/utils'
 import { getErrorMessage } from '@/lib/api-utils'
+import { canSendProtocol } from '@/lib/occurrence-customer-messaging'
 import {
   ClipboardList,
   Send,
@@ -97,6 +98,32 @@ const occurrence = ref<Occurrence | null>(null)
 const isLoading = ref(true)
 const isNotFound = ref(false)
 const isSendingProtocol = ref(false)
+
+// A protocol send this browser started for this case and did not see finish (refresh, lost answer,
+// 202). It is recovered by ASKING the server; nothing here ever sends. While it is processing or
+// uncertain the send button stays off, so it cannot be repeated by accident.
+const pendingSend = ref<'processing' | 'uncertain' | null>(null)
+let recheckTimer: ReturnType<typeof setTimeout> | undefined
+let rechecks = 0
+
+async function checkPendingSend() {
+  clearTimeout(recheckTimer)
+  try {
+    const state = await store.recoverProtocolSend(occurrenceId.value)
+    if (state === 'sent') {
+      pendingSend.value = null
+      toast.success(t('occurrences.protocolSent'))
+    } else if (state === 'failed') {
+      pendingSend.value = null
+      toast.error(t('occurrences.protocolSendFailed'))
+    } else {
+      pendingSend.value = state
+    }
+    if (state === 'processing' && rechecks++ < 12) recheckTimer = setTimeout(checkPendingSend, 10_000)
+  } catch {
+    // Could not ask (offline, not allowed): the record stays and the next visit asks again.
+  }
+}
 // "Responder ao cliente": text SENT to the contact via WhatsApp (unlike newNoteContent,
 // which is internal). The stage-message picker prefills this ref.
 const replyContent = ref('')
@@ -236,9 +263,17 @@ async function sendProtocol() {
   if (!occurrence.value) return
   isSendingProtocol.value = true
   try {
-    await store.sendProtocol(occurrence.value.id)
-    toast.success(t('occurrences.protocolSent'))
+    const outcome = await store.sendProtocol(occurrence.value.id)
+    if (outcome === 'uncertain') {
+      // 202: the provider did not confirm it and it may have been delivered. Not a success, and
+      // not a plain failure either: it says so and does not invite sending it again.
+      toast.warning(t('occurrences.protocolSendUncertain'))
+      pendingSend.value = 'uncertain'
+    } else {
+      toast.success(t('occurrences.protocolSent'))
+    }
   } catch (e: any) {
+    if (!e?.response) void checkPendingSend() // no answer at all: ask what became of it
     if (e?.response?.status === 422) {
       toast.error(t('chat.sendProtocolWindowClosed'))
     } else {
@@ -318,6 +353,7 @@ onMounted(async () => {
     usersStore.users.length === 0 ? usersStore.fetchUsers().catch(() => {}) : Promise.resolve(),
   ])
 
+  void checkPendingSend()
   unsubscribeOccurrenceChanged = wsService.onOccurrenceChanged(handleOccurrenceChanged)
   unsubscribeOccurrenceEventCreated = wsService.onOccurrenceEventCreated(handleOccurrenceEventCreated)
   await nextTick()
@@ -325,6 +361,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  clearTimeout(recheckTimer)
   unsubscribeOccurrenceChanged?.()
   unsubscribeOccurrenceEventCreated?.()
 })
@@ -371,7 +408,7 @@ onUnmounted(() => {
             <UserPlus v-else class="h-4 w-4 mr-2" />
             {{ $t('occurrences.claim') }}
           </Button>
-          <Button size="sm" :disabled="isSendingProtocol" @click="sendProtocol">
+          <Button v-if="canSendProtocol(occurrence.can)" size="sm" :disabled="isSendingProtocol || !!pendingSend" data-testid="send-protocol" @click="sendProtocol">
             <Loader2 v-if="isSendingProtocol" class="h-4 w-4 mr-2 animate-spin" />
             <Send v-else class="h-4 w-4 mr-2" />
             {{ $t('chat.sendProtocol') }}
@@ -388,6 +425,10 @@ onUnmounted(() => {
 
       <template v-if="occurrence">
       <div class="mx-auto w-full max-w-[1600px] space-y-6" data-testid="unified-case">
+
+        <p v-if="pendingSend" class="rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm" role="status" data-testid="protocol-send-pending">
+          {{ pendingSend === 'processing' ? $t('occurrences.protocolSendProcessing') : $t('occurrences.protocolSendUncertain') }}
+        </p>
 
         <!-- 1. Operational strip: what it is, whose it is, how urgent -->
         <section id="case-summary" class="scroll-mt-4 rounded-lg border bg-card px-4 py-3" data-testid="case-strip">

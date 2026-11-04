@@ -233,7 +233,7 @@ func TestSendUsage_OccurrenceReplyAndProtocolCarryTheOccurrence(t *testing.T) {
 	proto := testutil.NewJSONRequest(t, nil)
 	testutil.SetAuthContext(proto, f.org.ID, user.ID)
 	testutil.SetPathParam(proto, "id", occ.ID.String())
-	require.NoError(t, f.app.SendOccurrenceProtocol(proto))
+	require.NoError(t, f.app.SendOccurrenceProtocol(withKey(proto)))
 	require.Equal(t, 200, testutil.GetResponseStatusCode(proto))
 	f.app.WaitForBackgroundTasks()
 

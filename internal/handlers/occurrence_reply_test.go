@@ -244,7 +244,7 @@ func TestSendOccurrenceProtocol_IsSystemMessage(t *testing.T) {
 	req := testutil.NewJSONRequest(t, nil)
 	testutil.SetAuthContext(req, org.ID, agent.ID)
 	testutil.SetPathParam(req, "id", occ.ID.String())
-	require.NoError(t, app.SendOccurrenceProtocol(req))
+	require.NoError(t, app.SendOccurrenceProtocol(withKey(req)))
 	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
 	app.WaitForBackgroundTasks()
 

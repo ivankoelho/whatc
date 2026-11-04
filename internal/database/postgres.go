@@ -139,6 +139,7 @@ func GetMigrationModels() []MigrationModel {
 		{"OccurrenceChannelConfig", &models.OccurrenceChannelConfig{}},
 		{"OccurrenceNotification", &models.OccurrenceNotification{}},
 		{"OccurrenceNotificationAttempt", &models.OccurrenceNotificationAttempt{}},
+		{"OccurrenceSendIntent", &models.OccurrenceSendIntent{}},
 		{"OccurrenceCategory", &models.OccurrenceCategory{}},
 		{"OccurrenceWhatHappened", &models.OccurrenceWhatHappened{}},
 		{"OccurrenceSLAPolicy", &models.OccurrenceSLAPolicy{}},

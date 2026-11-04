@@ -2874,6 +2874,8 @@
     "stageChangeFailed": "Falha ao atualizar a etapa",
     "protocolSent": "Protocolo enviado",
     "protocolSendFailed": "Falha ao enviar o protocolo",
+    "protocolSendUncertain": "O WhatsApp não confirmou a mensagem e ela pode ter sido entregue. Confira a conversa antes de enviar de novo.",
+    "protocolSendProcessing": "O envio do protocolo ainda está em andamento. Aguarde a confirmação antes de enviar de novo.",
     "contactLabel": "Contato",
     "priorityLabel": "Prioridade",
     "assigneeLabel": "Responsável",

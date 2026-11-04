@@ -2,6 +2,9 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { toast } from 'vue-sonner'
 import { i18n } from '@/i18n'
+import { sendOutcome, type SendOutcome } from '@/lib/occurrence-customer-messaging'
+import { useAuthStore } from '@/stores/auth'
+import { loadRecord, saveRecord, clearRecord, recordStorageKey, textHash, IN_FLIGHT_GRACE_MS, type SendIntentRecord, type RecoveryScope, type SendState } from '@/lib/protocol-send-recovery'
 import { occurrencesService, occurrenceProcessesService, type Occurrence, type OccurrenceStage, type OccurrenceEvent, type OccurrenceDocumentInput } from '@/services/api'
 
 export const useOccurrencesStore = defineStore('occurrences', () => {
@@ -96,13 +99,73 @@ export const useOccurrencesStore = defineStore('occurrences', () => {
   // false = the 24h service window is closed (HTTP 422): an expected outcome the
   // UI shows plainly (spec 16/17), not an error to throw past the caller.
   // An empty message makes the backend send the legacy protocol text.
-  async function sendRegistrationMessage(occurrenceId: string, message: string): Promise<boolean> {
+  // 'uncertain' = the provider did not confirm it (HTTP 202): it may have been delivered, so it
+  // is neither a success nor a failure, and it is never sent again from here.
+  async function sendRegistrationMessage(occurrenceId: string, message: string): Promise<'sent' | 'window_closed' | 'uncertain'> {
     try {
-      await occurrencesService.sendProtocol(occurrenceId, message.trim() || undefined)
-      return true
+      return sendOutcome(await postProtocol(occurrenceId, message.trim() || undefined))
     } catch (e: any) {
-      if (e?.response?.status === 422) return false
+      if (e?.response?.status === 422) return 'window_closed'
       throw e
+    }
+  }
+
+  // One key per intention. It is kept (in memory AND in the browser, scoped by organization, user and
+  // case) while the outcome is unknown: no answer at all, or 202. A double click, a retry, a refresh or
+  // coming back later then ask about the SAME send instead of making a second one. Any answer that
+  // closes the intention (sent, refused) drops it, and the next click is a new intention, new key.
+  const auth = useAuthStore()
+  const mem = new Map<string, SendIntentRecord>()
+  const scopeOf = (occurrenceId: string): RecoveryScope => ({ organizationId: auth.organizationId, userId: auth.user?.id ?? '', occurrenceId })
+  const currentRecord = (occurrenceId: string) => loadRecord(scopeOf(occurrenceId)) ?? mem.get(recordStorageKey(scopeOf(occurrenceId))) ?? null
+  function keepRecord(occurrenceId: string, rec: SendIntentRecord) {
+    mem.set(recordStorageKey(scopeOf(occurrenceId)), rec)
+    saveRecord(scopeOf(occurrenceId), rec)
+  }
+  function dropRecord(occurrenceId: string) {
+    mem.delete(recordStorageKey(scopeOf(occurrenceId)))
+    clearRecord(scopeOf(occurrenceId))
+  }
+
+  async function postProtocol(occurrenceId: string, message: string | undefined) {
+    const h = textHash(message)
+    let rec = currentRecord(occurrenceId)
+    if (!rec || rec.textHash !== h) rec = { key: crypto.randomUUID(), textHash: h, savedAt: Date.now() }
+    keepRecord(occurrenceId, rec) // before the request: a refresh mid-flight must still find the key
+    try {
+      const res = await occurrencesService.sendProtocol(occurrenceId, message, rec.key)
+      if (res.status === 202) keepRecord(occurrenceId, { ...rec, sendId: res.data?.data?.send_id ?? rec.sendId })
+      else dropRecord(occurrenceId)
+      return res.data
+    } catch (e: any) {
+      if (e?.response) dropRecord(occurrenceId) // the server answered: the intention is over
+      throw e
+    }
+  }
+
+  // Asks the server what became of a send (after a refresh, a timeout or a lost answer).
+  async function getProtocolSend(occurrenceId: string, sendId: string) {
+    return (await occurrencesService.getProtocolSend(occurrenceId, sendId)).data.data
+  }
+
+  // What happened to the send this browser started for this case and did not see finish.
+  // null = nothing pending. Read-only: it only ever asks, never creates a send.
+  async function recoverProtocolSend(occurrenceId: string): Promise<SendState | null> {
+    const rec = currentRecord(occurrenceId)
+    if (!rec) return null
+    try {
+      const data = rec.sendId
+        ? await getProtocolSend(occurrenceId, rec.sendId)
+        : (await occurrencesService.getProtocolSendByKey(occurrenceId, rec.key)).data.data
+      if (!rec.sendId) keepRecord(occurrenceId, { ...rec, sendId: data.send_id })
+      if (data.state === 'sent' || data.state === 'failed') dropRecord(occurrenceId)
+      return data.state
+    } catch (e: any) {
+      if (e?.response?.status !== 404) throw e // no answer or not allowed: keep the record, say nothing false
+      // No claim for the key. A request may still be on its way: until it cannot be, it is "in progress".
+      if (!rec.sendId && Date.now() - rec.savedAt < IN_FLIGHT_GRACE_MS) return 'processing'
+      dropRecord(occurrenceId)
+      return null
     }
   }
 
@@ -137,9 +200,10 @@ export const useOccurrencesStore = defineStore('occurrences', () => {
     return true
   }
 
-  async function sendProtocol(occurrenceId: string) {
-    await occurrencesService.sendProtocol(occurrenceId)
+  async function sendProtocol(occurrenceId: string): Promise<SendOutcome> {
+    const body = await postProtocol(occurrenceId, undefined)
     await fetchEvents(occurrenceId)
+    return sendOutcome(body)
   }
 
   function clear() {
@@ -153,6 +217,6 @@ export const useOccurrencesStore = defineStore('occurrences', () => {
     occurrences, total, contactOccurrences, stages, events, isLoading,
     fetchStages, stageColor, fetchOccurrences, fetchColumn, fetchContactOccurrences, fetchEvents,
     createOccurrence, changeStage, moveStage, addNote, reply, sendProtocol,
-    previewRegistrationMessage, sendRegistrationMessage, clear,
+    previewRegistrationMessage, sendRegistrationMessage, getProtocolSend, recoverProtocolSend, clear,
   }
 })
