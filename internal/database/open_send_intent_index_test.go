@@ -46,7 +46,7 @@ func TestEnsureOpenSendIntentUniqueness_ReportsDuplicatesStopsAndChangesNothing(
 	assert.Equal(t, 2, d.OpenCount)
 	assert.Equal(t, []uuid.UUID{older, newer}, d.SendIDs, "listed oldest first")
 	assert.Contains(t, err.Error(), occID.String())
-	assert.Contains(t, err.Error(), "nothing was changed")
+	assert.Contains(t, err.Error(), "NOTHING was deleted or changed")
 
 	var rows int64
 	require.NoError(t, db.Model(&models.OccurrenceSendIntent{}).Where("organization_id = ?", org.ID).Count(&rows).Error)
@@ -96,7 +96,30 @@ func TestBackfillResolveSend_GrantsAdminManagerAndSupervisorsOnly(t *testing.T) 
 	assert.ElementsMatch(t, before, roleKeys(t, db, admin.ID))
 }
 
-func TestBackfillResolveSend_SkipsAnOrganizationWhereARoleAlreadyHoldsIt(t *testing.T) {
+// The guard is the admin and manager system roles: when either already holds it the organization is left alone (a
+// new organization, or one already served).
+func TestBackfillResolveSend_SkipsAnOrganizationWhoseAdminOrManagerAlreadyHoldsIt(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	cleanAll(t, db)
+	require.NoError(t, database.SeedPermissionsAndRoles(db))
+
+	org := testutil.CreateTestOrganization(t, db)
+	var perm models.Permission
+	require.NoError(t, db.Where("resource = ? AND action = ?", models.ResourceOccurrences, models.ActionResolveSend).First(&perm).Error)
+	admin := testutil.CreateTestRoleExact(t, db, org.ID, "admin", true, false, []models.Permission{perm})
+	manager := testutil.CreateTestRoleExact(t, db, org.ID, "manager", true, false, nil)
+	supSAC := testutil.CreateTestRoleExact(t, db, org.ID, "Supervisor de SAC", false, false, nil)
+
+	require.NoError(t, database.BackfillResolveUncertainSendPermission(db, testLog()))
+
+	assert.Contains(t, roleKeys(t, db, admin.ID), "occurrences:resolve_send")
+	assert.NotContains(t, roleKeys(t, db, manager.ID), "occurrences:resolve_send", "served already: left alone")
+	assert.NotContains(t, roleKeys(t, db, supSAC.ID), "occurrences:resolve_send")
+}
+
+// A role somebody made by hand and gave the permission does not stop the intended roles from receiving it: only the
+// system roles count as "already served". (The previous guard skipped the whole organization.)
+func TestBackfillResolveSend_AHandMadeRoleDoesNotBlockTheIntendedRoles(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	cleanAll(t, db)
 	require.NoError(t, database.SeedPermissionsAndRoles(db))
@@ -107,8 +130,91 @@ func TestBackfillResolveSend_SkipsAnOrganizationWhereARoleAlreadyHoldsIt(t *test
 
 	require.NoError(t, database.BackfillResolveUncertainSendPermission(db, testLog()))
 
-	assert.NotContains(t, roleKeys(t, db, admin.ID), "occurrences:resolve_send", "an administrator's choice is not overruled")
-	assert.Contains(t, roleKeys(t, db, custom.ID), "occurrences:resolve_send")
+	assert.Contains(t, roleKeys(t, db, admin.ID), "occurrences:resolve_send")
+	assert.Contains(t, roleKeys(t, db, custom.ID), "occurrences:resolve_send", "the hand-made grant is untouched")
+}
+
+// The ordering the review found: the seed recreates a missing preset WITH the permission before the backfill runs.
+// Admin and manager must still be granted.
+func TestBackfillResolveSend_APresetRecreatedByTheSeedDoesNotBlockAdminAndManager(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	cleanAll(t, db)
+	require.NoError(t, database.SeedPermissionsAndRoles(db))
+
+	org := testutil.CreateTestOrganization(t, db)
+	admin := testutil.CreateTestRoleExact(t, db, org.ID, "admin", true, false, nil)
+	manager := testutil.CreateTestRoleExact(t, db, org.ID, "manager", true, false, nil)
+	// The seed of the presets (it runs before the backfill in the migration) creates the missing ones with the permission.
+	require.NoError(t, database.SeedTeamProfilesForOrg(db, org.ID))
+	var sup models.CustomRole
+	require.NoError(t, db.Where("organization_id = ? AND name = ?", org.ID, "Supervisor de SAC").First(&sup).Error)
+	require.Contains(t, roleKeys(t, db, sup.ID), "occurrences:resolve_send", "precondition: the recreated preset carries it")
+
+	require.NoError(t, database.BackfillResolveUncertainSendPermission(db, testLog()))
+
+	assert.Contains(t, roleKeys(t, db, admin.ID), "occurrences:resolve_send")
+	assert.Contains(t, roleKeys(t, db, manager.ID), "occurrences:resolve_send")
+	// and the profiles that are not meant to have it still do not
+	for _, name := range []string{"SAC", "Vendas", "Logística", "Jurídico"} {
+		var r models.CustomRole
+		if err := db.Where("organization_id = ? AND name = ?", org.ID, name).First(&r).Error; err == nil {
+			assert.NotContains(t, roleKeys(t, db, r.ID), "occurrences:resolve_send", name)
+		}
+	}
+}
+
+// What an administrator's removal does, exactly as documented: removing it from a supervisor preset (or a custom
+// role) is never undone; removing it from BOTH admin and manager is undone at the next -migrate (the data cannot
+// tell "never granted" from "removed on purpose").
+func TestBackfillResolveSend_WhatAnAdministratorRemovalDoes_AsDocumented(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	cleanAll(t, db)
+	require.NoError(t, database.SeedPermissionsAndRoles(db))
+
+	org := testutil.CreateTestOrganization(t, db)
+	admin := testutil.CreateTestRoleExact(t, db, org.ID, "admin", true, false, nil)
+	manager := testutil.CreateTestRoleExact(t, db, org.ID, "manager", true, false, nil)
+	supStore := testutil.CreateTestRoleExact(t, db, org.ID, "Supervisor de Loja", false, false, nil)
+	require.NoError(t, database.BackfillResolveUncertainSendPermission(db, testLog()))
+	require.Contains(t, roleKeys(t, db, supStore.ID), "occurrences:resolve_send")
+
+	// removed from a supervisor preset only: not undone
+	require.NoError(t, db.Exec("DELETE FROM role_permissions WHERE custom_role_id = ? AND permission_id = (SELECT id FROM permissions WHERE resource = 'occurrences' AND action = 'resolve_send')", supStore.ID).Error)
+	require.NoError(t, database.BackfillResolveUncertainSendPermission(db, testLog()))
+	assert.NotContains(t, roleKeys(t, db, supStore.ID), "occurrences:resolve_send", "a supervisor removal is respected")
+
+	// removed from BOTH admin and manager: granted again (documented limit)
+	for _, id := range []any{admin.ID, manager.ID} {
+		require.NoError(t, db.Exec("DELETE FROM role_permissions WHERE custom_role_id = ? AND permission_id = (SELECT id FROM permissions WHERE resource = 'occurrences' AND action = 'resolve_send')", id).Error)
+	}
+	require.NoError(t, database.BackfillResolveUncertainSendPermission(db, testLog()))
+	assert.Contains(t, roleKeys(t, db, admin.ID), "occurrences:resolve_send")
+	assert.Contains(t, roleKeys(t, db, manager.ID), "occurrences:resolve_send")
+}
+
+// Two boots at once cannot fail on a duplicate link.
+func TestBackfillResolveSend_ConcurrentRuns_DoNotFail(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	cleanAll(t, db)
+	require.NoError(t, database.SeedPermissionsAndRoles(db))
+	org := testutil.CreateTestOrganization(t, db)
+	admin := testutil.CreateTestRoleExact(t, db, org.ID, "admin", true, false, nil)
+	testutil.CreateTestRoleExact(t, db, org.ID, "manager", true, false, nil)
+
+	errs := make(chan error, 6)
+	for i := 0; i < 6; i++ {
+		go func() { errs <- database.BackfillResolveUncertainSendPermission(db, testLog()) }()
+	}
+	for i := 0; i < 6; i++ {
+		assert.NoError(t, <-errs)
+	}
+	n := 0
+	for _, k := range roleKeys(t, db, admin.ID) {
+		if k == "occurrences:resolve_send" {
+			n++
+		}
+	}
+	assert.Equal(t, 1, n, "granted once")
 }
 
 // The name fits the column of the permissions table (no schema change) and the catalog knows it.

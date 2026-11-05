@@ -24,6 +24,39 @@ const createOpenSendIntentIndexSQL = `CREATE UNIQUE INDEX IF NOT EXISTS ` + Open
 // createUncertainRecheckIndexSQL serves the background re-check of recent unsettled uncertain sends.
 const createUncertainRecheckIndexSQL = `CREATE INDEX IF NOT EXISTS idx_send_intent_uncertain_recheck ON occurrence_send_intents (finished_at) WHERE state = 'uncertain' AND reconciled_at IS NULL`
 
+// VerifyOpenSendIntentGuard says whether the protection that keeps a case at one open customer send is really in
+// the database: the index exists, is UNIQUE, is VALID (a failed CREATE INDEX CONCURRENTLY leaves an invalid one),
+// is on exactly (organization_id, occurrence_id, kind) and its predicate covers both open states. nil = the
+// protection is there. Anything else is an operational error that says what to do. Read-only.
+func VerifyOpenSendIntentGuard(db *gorm.DB) error {
+	var row struct {
+		Def     string
+		Unique  bool
+		Valid   bool
+		Ready   bool
+		Partial bool
+	}
+	err := db.Raw(`SELECT pg_get_indexdef(i.indexrelid) AS def, i.indisunique AS "unique", i.indisvalid AS valid,
+		i.indisready AS ready, (i.indpred IS NOT NULL) AS partial
+		FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
+		JOIN pg_class t ON t.oid = i.indrelid AND t.relname = 'occurrence_send_intents'
+		WHERE c.relname = ?`, OpenSendIntentIndexName).Scan(&row).Error
+	if err != nil {
+		return fmt.Errorf("could not check the open-send index: %w", err)
+	}
+	fix := " Run the migration (whatomate server -migrate); nothing is sent from cases until the protection is in place."
+	switch {
+	case row.Def == "":
+		return fmt.Errorf("the index %s is missing.%s", OpenSendIntentIndexName, fix)
+	case !row.Unique || !row.Valid || !row.Ready:
+		return fmt.Errorf("the index %s exists but is not a valid unique index (unique=%v valid=%v ready=%v).%s", OpenSendIntentIndexName, row.Unique, row.Valid, row.Ready, fix)
+	case !row.Partial || !strings.Contains(row.Def, "(organization_id, occurrence_id, kind)") ||
+		!strings.Contains(row.Def, "processing") || !strings.Contains(row.Def, "uncertain"):
+		return fmt.Errorf("the index %s does not have the expected definition (%s).%s", OpenSendIntentIndexName, row.Def, fix)
+	}
+	return nil
+}
+
 // OpenSendIntentDuplicate is one case that already has more than one open send: data that blocks the index.
 type OpenSendIntentDuplicate struct {
 	OrganizationID uuid.UUID
@@ -96,8 +129,12 @@ func FormatOpenSendIntentDuplicates(dups []OpenSendIntentDuplicate) string {
 type OpenSendIntentDuplicatesError struct{ Duplicates []OpenSendIntentDuplicate }
 
 func (e *OpenSendIntentDuplicatesError) Error() string {
-	return fmt.Sprintf("%s NOT created: %d case(s) have more than one open customer send (nothing was changed). "+
-		"Settle each one after checking the conversation, then run the migration again:\n%s",
+	return fmt.Sprintf("%s NOT created: %d case(s) have more than one open customer send. NOTHING was deleted or changed, "+
+		"and every other migration step (schema, permissions, roles, backfills) already completed.\n%s"+
+		"What to do: start the server WITHOUT -migrate (customer sends from cases stay refused while the protection is "+
+		"missing; everything else works), then settle each listed send as a person who holds occurrences:resolve_send "+
+		"(POST /api/occurrences/{occurrence}/protocol-sends/{send}/resolve, after checking the conversation; a send still "+
+		"'processing' is settled by the reconciliation within minutes), and run the migration again.",
 		OpenSendIntentIndexName, len(e.Duplicates), FormatOpenSendIntentDuplicates(e.Duplicates))
 }
 

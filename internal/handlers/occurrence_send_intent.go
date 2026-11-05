@@ -8,10 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/audit"
+	"github.com/shridarpatil/whatomate/internal/database"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -71,6 +73,89 @@ const (
 
 	protocolResultProcessing = models.SendIntentProcessing
 )
+
+// Fencing. The owner of a send may call the provider only AFTER it moved its row, atomically in the database,
+// from "never dispatched" to "dispatched" (dispatchSendIntent), and only until the deadline stored with that move,
+// which is enforced as the deadline of the provider call itself. So anybody who finds the row stale can tell, from
+// the database alone, whether the owner can still produce the effect on the customer:
+//   - never dispatched and stale: the owner cannot send any more, whatever it does when it wakes up (its own
+//     compare-and-set will fail), so the send is proven not sent and the row is fenced to failed;
+//   - dispatched: the owner may still be calling the provider until its deadline (plus a margin for clock skew
+//     between servers); only after that can it no longer START a send, and the row is settled from the evidence.
+// What no software can revoke is a request the owner already handed to the network before the deadline: the
+// provider may still process it, which is why a send that ends without an answer stays "uncertain" and why the
+// margin exists. See the contract ("Fencing").
+var (
+	// sendIntentDispatchWindow is how long after the dispatch the owner may still call the provider. Longer than
+	// the 30 s client timeout, so a normal send is never cut by it.
+	sendIntentDispatchWindow = 40 * time.Second
+	// sendIntentSkewMargin covers the clock difference between application servers (the deadline is computed by
+	// the database and enforced against each server's own clock) and the provider's own queueing.
+	sendIntentSkewMargin = 30 * time.Second
+)
+
+// sendHooks lets a test stop the owner at the two instants that matter. Always nil outside tests.
+var sendHooks struct{ beforeDispatch, afterDispatch func() }
+
+// errSendFenced: somebody fenced the row before the owner reached the point of no return. Nothing was sent.
+var errSendFenced = errors.New("the send was fenced before it reached the provider")
+
+// dispatchSendIntent is the owner's point of no return. It returns the deadline until which the provider may be
+// called, ok=false when the row is not "processing and never dispatched" any more (fenced by reconciliation),
+// and an error when the database could not say (nothing may be sent then either).
+func (a *App) dispatchSendIntent(intent *models.OccurrenceSendIntent) (deadline time.Time, ok bool, err error) {
+	if h := sendHooks.beforeDispatch; h != nil {
+		h()
+	}
+	res := a.DB.Raw(`UPDATE occurrence_send_intents
+		SET dispatched_at = NOW(), dispatch_deadline = NOW() + make_interval(secs => ?), updated_at = NOW()
+		WHERE id = ? AND state = ? AND dispatched_at IS NULL
+		RETURNING dispatch_deadline`, sendIntentDispatchWindow.Seconds(), intent.ID, models.SendIntentProcessing).Scan(&deadline)
+	if res.Error != nil {
+		return time.Time{}, false, res.Error
+	}
+	if res.RowsAffected != 1 {
+		return time.Time{}, false, nil
+	}
+	if h := sendHooks.afterDispatch; h != nil {
+		h()
+	}
+	return deadline, true, nil
+}
+
+// errTypeSendGuardUnavailable: the database protection that keeps a case at one open send is missing or invalid.
+const errTypeSendGuardUnavailable = "send_guard_unavailable"
+
+// sendGuardCache remembers the last check of the open-send index. A good answer is kept a few minutes, a bad one
+// only seconds, so a server whose migration was just run recovers by itself, without a restart.
+type sendGuardCache struct {
+	mu        sync.Mutex
+	checkedAt time.Time
+	err       error
+}
+
+var (
+	sendGuardOKFor  = 5 * time.Minute
+	sendGuardBadFor = 10 * time.Second
+)
+
+// openSendGuardReady is nil when the protection is in the database. Without it, the same customer could be sent
+// to twice from one case, so the send is refused (fail closed) instead of falling back to the old behaviour.
+func (a *App) openSendGuardReady() error {
+	c := &a.sendGuard
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	ttl := sendGuardBadFor
+	if c.err == nil {
+		ttl = sendGuardOKFor
+	}
+	if !c.checkedAt.IsZero() && time.Since(c.checkedAt) < ttl {
+		return c.err
+	}
+	c.err = database.VerifyOpenSendIntentGuard(a.DB)
+	c.checkedAt = time.Now()
+	return c.err
+}
 
 // requireIdempotencyKey reads and validates the header. It writes the 400 itself.
 func requireIdempotencyKey(r *fastglue.Request) (string, bool) {
@@ -306,10 +391,28 @@ func providerAccepted(ev sentEvidence) bool {
 
 // reconcileSendIntent settles an intent from the evidence in the local records. It only ever moves
 // a claim FORWARD (processing -> sent | failed | uncertain, or uncertain -> sent when the provider
-// itself later confirmed it), never frees a key and never sends. Returns true when it changed it.
+// itself later confirmed it), never frees a key and never sends. A claim whose owner never dispatched is
+// FENCED to failed (proven not sent); one that was dispatched is touched only after the owner's deadline plus
+// the skew margin. Returns true when it changed it.
 func (a *App) reconcileSendIntent(intent *models.OccurrenceSendIntent, now time.Time) bool {
+	fence := false
 	switch {
-	case intent.State == models.SendIntentProcessing && now.Sub(intent.ClaimedAt) >= sendIntentStaleAfter:
+	case intent.State == models.SendIntentProcessing && intent.DispatchedAt == nil:
+		// The owner never reached the point of no return. After the wait it is fenced: whatever it does when it
+		// wakes up, its own dispatch will find the row moved and send nothing.
+		if now.Sub(intent.ClaimedAt) < sendIntentStaleAfter {
+			return false
+		}
+		fence = true
+	case intent.State == models.SendIntentProcessing:
+		// Dispatched: the owner may still be calling the provider until its deadline (plus the skew margin).
+		deadline := intent.DispatchedAt.Add(sendIntentDispatchWindow)
+		if intent.DispatchDeadline != nil {
+			deadline = *intent.DispatchDeadline
+		}
+		if now.Before(deadline.Add(sendIntentSkewMargin)) {
+			return false
+		}
 	case intent.State == models.SendIntentUncertain && intent.ReconciledAt == nil:
 	default:
 		return false
@@ -317,6 +420,21 @@ func (a *App) reconcileSendIntent(intent *models.OccurrenceSendIntent, now time.
 	ev := a.sendEvidence(intent)
 	var occ models.Occurrence
 	_ = a.DB.Select("id", "protocol_number").Where("id = ?", intent.OccurrenceID).First(&occ).Error
+
+	if fence {
+		status, env := intentAnswer(intent, occ.ProtocolNumber, models.SendIntentFailed, fasthttp.StatusBadGateway,
+			"The send was abandoned before it reached the provider; nothing was sent", "")
+		res := a.DB.Model(&models.OccurrenceSendIntent{}).
+			Where("id = ? AND state = ? AND dispatched_at IS NULL", intent.ID, models.SendIntentProcessing).
+			Updates(map[string]any{"state": models.SendIntentFailed, "http_status": status, "response": env, "finished_at": now, "reconciled_at": now})
+		if res.Error != nil || res.RowsAffected != 1 {
+			a.DB.Where("id = ?", intent.ID).First(intent) // the owner dispatched meanwhile: it is not abandoned
+			return false
+		}
+		a.Log.Info("Send intent fenced: the owner never reached the provider", "send_id", intent.ID)
+		a.DB.Where("id = ?", intent.ID).First(intent)
+		return true
+	}
 
 	target := ""
 	switch {
@@ -361,7 +479,9 @@ func (a *App) ReconcileSendIntents(now time.Time) int {
 	// 1. Stale processing claims, oldest first (partial index idx_send_intent_pending).
 	for i := 0; i < sendIntentMaxBatches; i++ {
 		var stale []models.OccurrenceSendIntent
-		a.DB.Where("state = ? AND claimed_at <= ?", models.SendIntentProcessing, now.Add(-sendIntentStaleAfter)).
+		// Never dispatched: after the wait. Dispatched: after the owner deadline plus the skew margin.
+		a.DB.Where("state = ? AND ((dispatched_at IS NULL AND claimed_at <= ?) OR (dispatched_at IS NOT NULL AND dispatch_deadline <= ?))",
+			models.SendIntentProcessing, now.Add(-sendIntentStaleAfter), now.Add(-sendIntentSkewMargin)).
 			Order("claimed_at").Limit(sendIntentBatch).Find(&stale)
 		changed := 0
 		for j := range stale {

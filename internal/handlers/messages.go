@@ -127,6 +127,12 @@ type MessageSendOptions struct {
 	// the error, after the message row was updated. Lets a caller that needs the
 	// outcome (not only the stored status) reuse this sender instead of a copy.
 	OnResult func(wamid string, err error)
+
+	// BeforeSend, when set, runs after the message row exists and immediately before the provider is called. It
+	// is the point of no return of a send that must be fenced (the protocol send): it returns the context the
+	// provider call must use (carrying the deadline the owner is allowed to send until) or an error, in which case
+	// NOTHING is sent: the message row is marked failed and the error is returned to the caller.
+	BeforeSend func(ctx context.Context) (context.Context, context.CancelFunc, error)
 }
 
 // DefaultSendOptions returns options suitable for agent UI sends
@@ -325,6 +331,19 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 		default:
 			return "", fmt.Errorf("unsupported message type: %s", req.Type)
 		}
+	}
+
+	// 2b. The point of no return, for a send that must be fenced.
+	if opts.BeforeSend != nil {
+		sendCtx, cancel, err := opts.BeforeSend(ctx)
+		if err != nil {
+			a.DB.Model(&models.Message{}).Where("id = ?", msg.ID).Updates(map[string]any{
+				"status": models.MessageStatusFailed, "error_message": whatsapp.PublicErrorText(err),
+			})
+			return nil, err
+		}
+		defer cancel()
+		ctx = sendCtx
 	}
 
 	// 3. Execute send (async or sync)

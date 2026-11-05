@@ -301,6 +301,19 @@ func runServer(args []string) {
 		if _, _, err := database.EncryptChatbotAIKeys(db, cfg.App.EncryptionKey, lo); err != nil {
 			lo.Fatal("AI API key encryption failed", "error", err)
 		}
+
+		// LAST step: the one-open-send index. If existing data would break it, the migration stops HERE, after
+		// everything else (schema, permissions, roles, backfills) is in place, and says what to do. Nothing is
+		// deleted or changed to make it fit.
+		if err := database.EnsureOpenSendIntentUniqueness(db); err != nil {
+			lo.Fatal("Open-send index failed", "error", err)
+		}
+	}
+
+	// Without the index nothing can stop two people sending to one customer from one case at the same time, so
+	// customer sends from cases are REFUSED until it is there (see handlers.App.openSendGuardReady). Say so loudly.
+	if err := database.VerifyOpenSendIntentGuard(db); err != nil {
+		lo.Error("Customer sends from cases are DISABLED: "+err.Error(), "error", err)
 	}
 
 	// Connect to Redis

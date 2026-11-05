@@ -59,6 +59,15 @@ type OccurrenceSendIntent struct {
 	ResolutionOutcome string     `gorm:"size:16" json:"resolution_outcome,omitempty"`
 	ResolutionNote    string     `gorm:"size:1000" json:"resolution_note,omitempty"`
 
+	// Fencing of the owner's effect on the customer. The owner may call the provider ONLY after it atomically
+	// moved this row from "never dispatched" to "dispatched" (a compare-and-set in the database), and only
+	// until DispatchDeadline (enforced as the deadline of the provider call itself). Anyone who finds the row
+	// stale can therefore tell, from the database alone, whether the owner can still produce the effect:
+	// never dispatched -> the owner can never send (the row is fenced); dispatched -> it cannot send after the
+	// deadline. See the contract ("Fencing").
+	DispatchedAt     *time.Time `json:"dispatched_at,omitempty"`
+	DispatchDeadline *time.Time `json:"dispatch_deadline,omitempty"`
+
 	ClaimedAt    time.Time  `gorm:"not null;index:idx_send_intent_pending,where:state = 'processing'" json:"claimed_at"`
 	FinishedAt   *time.Time `json:"finished_at,omitempty"`
 	ReconciledAt *time.Time `json:"reconciled_at,omitempty"`

@@ -89,6 +89,9 @@ export function answerClosesIntention(e: unknown, isRetry = false): boolean {
   const r = (e as { response?: { status?: number; data?: any } } | null | undefined)?.response
   if (!r) return false
   const body = r.data
+  // The server refused to start the send at all because its own protection is not in place (503): nothing was
+  // claimed, no key was used, nothing was sent.
+  if (body?.error_type === "send_guard_unavailable") return true
   if (typeof body?.data?.send_id === 'string' && body.data.send_id) return true
   // A refusal (4xx) only proves the FIRST request under a key never started a send. On a retry it proves
   // only that THIS request was refused (409 after the contact data changed, 429, 401/403 after the access

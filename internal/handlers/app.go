@@ -28,6 +28,8 @@ import (
 
 // App holds all dependencies for handlers
 type App struct {
+	// sendGuard caches whether the open-send index is in place (see openSendGuardReady).
+	sendGuard sendGuardCache
 	Config            *config.Config
 	DB                *gorm.DB
 	Redis             *redis.Client

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -58,6 +59,14 @@ func (a *App) SendOccurrenceProtocol(r *fastglue.Request) error {
 	key, ok := requireIdempotencyKey(r)
 	if !ok {
 		return nil
+	}
+
+	// Fail closed: without the database protection (one open send per case) nothing is sent, and nothing is claimed.
+	if gerr := a.openSendGuardReady(); gerr != nil {
+		a.Log.Error("Customer send refused: the open-send protection is not in place", "error", gerr, "occurrence", occ.ID)
+		return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable,
+			"Customer sends from cases are unavailable: the database protection against sending twice is not in place. Nothing was sent. An administrator must run the migration (-migrate).",
+			nil, errTypeSendGuardUnavailable)
 	}
 
 	// The body is optional: no body keeps the legacy text. A present body must
@@ -148,6 +157,19 @@ func (a *App) SendOccurrenceProtocol(r *fastglue.Request) error {
 	opts := DefaultSendOptions()
 	opts.Async = false // the answer and the record must tell what really happened
 	opts.OnResult = func(_ string, e error) { sendErr = e }
+	// The point of no return: until the row is moved to "dispatched" nothing may reach the customer, and the
+	// provider call carries the deadline stored with that move (see "Fencing" in the intent file).
+	opts.BeforeSend = func(ctx context.Context) (context.Context, context.CancelFunc, error) {
+		deadline, ok, derr := a.dispatchSendIntent(intent)
+		if derr != nil {
+			return nil, nil, derr
+		}
+		if !ok {
+			return nil, nil, errSendFenced
+		}
+		sctx, cancel := context.WithDeadline(ctx, deadline)
+		return sctx, cancel, nil
+	}
 	_, err = a.SendOutgoingMessage(context.Background(), OutgoingMessageRequest{
 		MessageID: messageID,
 		Account:   account,
@@ -156,6 +178,17 @@ func (a *App) SendOccurrenceProtocol(r *fastglue.Request) error {
 		Content:   body,
 		Origin:    usage.Origin{ActorType: usage.ActorAgent, ActorUserID: &userID, OccurrenceID: &occ.ID, Detail: "occurrence_protocol"},
 	}, opts)
+	if errors.Is(err, errSendFenced) {
+		// Somebody fenced the claim while this request was stalled before the provider: nothing was sent, nothing
+		// will be, and the row already says so. Answer from the row (the owner's own close would be a no-op).
+		a.Log.Warn("The send was fenced before it reached the provider", "occurrence", occ.ID, "send_id", sendID)
+		recordResult(protocolResultFailed, err)
+		var row models.OccurrenceSendIntent
+		if a.DB.Where("id = ?", sendID).First(&row).Error == nil && row.State != models.SendIntentProcessing {
+			return sendStoredAnswer(r, row.HTTPStatus, row.Response, false)
+		}
+		return answer(protocolResultFailed, fasthttp.StatusBadGateway, "The send was abandoned before it reached the provider; nothing was sent", "")
+	}
 	if err != nil {
 		// Before the provider was reached (ownership, the message row): nothing was sent.
 		a.Log.Error("Failed to send protocol", "error", err, "occurrence", occ.ID)

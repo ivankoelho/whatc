@@ -54,6 +54,11 @@ func SetupTestDB(t *testing.T) *gorm.DB {
 			testDBInitErr = fmt.Errorf("failed to create indexes: %w", err)
 			return
 		}
+		// The one-open-send index is the last step of the migration (not part of CreateIndexes).
+		if err := database.EnsureOpenSendIntentUniqueness(testDB); err != nil {
+			testDBInitErr = fmt.Errorf("failed to create the open-send index: %w", err)
+			return
+		}
 
 		// Clean up any existing data before tests start
 		if os.Getenv("TEST_DB_KEEP") != "1" { // homologation phases keep the data of the previous phase

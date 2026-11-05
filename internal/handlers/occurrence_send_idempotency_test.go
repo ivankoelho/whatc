@@ -83,12 +83,14 @@ func (w *msgWorld) providerTotal() int {
 	return len(w.m.sentMessages)
 }
 
-// abandon turns a finished intent into a claim whose owner vanished 3 minutes ago.
+// abandon turns a finished intent into a claim whose owner vanished `age` ago (after it dispatched).
 func (w *msgWorld) abandon(t *testing.T, sendID string, age time.Duration) {
 	t.Helper()
 	require.NoError(t, w.app.DB.Model(&models.OccurrenceSendIntent{}).Where("id = ?", sendID).Updates(map[string]any{
 		"state": models.SendIntentProcessing, "http_status": 0, "response": nil, "finished_at": nil, "reconciled_at": nil,
 		"claimed_at": time.Now().Add(-age),
+		// The owner dispatched when it claimed (as a real send does), so the whole fencing clock ages with it.
+		"dispatched_at": time.Now().Add(-age), "dispatch_deadline": time.Now().Add(-age + 40*time.Second),
 	}).Error)
 }
 
@@ -334,14 +336,14 @@ func TestSendIdempotency_FreshClaimIsLeftAlone_StaleClaimIsReconciledAfterTwoMin
 	require.Equal(t, fasthttp.StatusOK, first.code)
 	sendID := first.env.Data["send_id"].(string)
 
-	w.abandon(t, sendID, 90*time.Second)   // under 2 minutes: the owner may still be working
+	w.abandon(t, sendID, 30*time.Second)   // dispatched 30 s ago: the owner may still be calling the provider (deadline 40 s + 30 s margin)
 	w.app.ReconcileSendIntents(time.Now()) // the sweep is global: judge only this claim
 	assert.Equal(t, models.SendIntentProcessing, w.intents(t)[0].State)
 	a := w.sendKeyed(t, w.agent, w.occ, key, map[string]string{"message": "reivindicacao"})
 	assert.Equal(t, fasthttp.StatusAccepted, a.code, "still reported as in progress")
 	assert.Equal(t, "processing", a.env.Data["result"])
 
-	w.abandon(t, sendID, 3*time.Minute) // past 2 minutes: recovery starts
+	w.abandon(t, sendID, 3*time.Minute) // past the owner deadline and the margin: recovery starts
 	w.app.ReconcileSendIntents(time.Now())
 	got := w.intents(t)[0]
 	assert.Equal(t, models.SendIntentSent, got.State, "the trail's result row says it was sent")

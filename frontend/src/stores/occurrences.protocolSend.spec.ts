@@ -196,3 +196,26 @@ describe('protocol send: an answer that does not close the intention keeps the k
     expect(k(2)).not.toBe(k(0))
   })
 })
+
+describe("protocol send: the server refuses because its protection is missing", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    sendProtocol.mockReset()
+  })
+
+  it("503 send_guard_unavailable closes the intention (nothing was claimed or sent) and does not stay pending", async () => {
+    sendProtocol.mockRejectedValueOnce({ response: { status: 503, data: { status: "error", error_type: "send_guard_unavailable", message: "unavailable" } } }).mockResolvedValueOnce(answer(200, "sent"))
+    const s = useOccurrencesStore()
+    await expect(s.sendRegistrationMessage("o1", "oi")).rejects.toBeTruthy()
+    expect(s.hasPendingProtocolSend("o1")).toBe(false)
+    await s.sendRegistrationMessage("o1", "oi")
+    expect(sendProtocol.mock.calls[1][2]).not.toBe(sendProtocol.mock.calls[0][2])
+  })
+
+  it("any other 503 (a proxy) still keeps the key", async () => {
+    sendProtocol.mockRejectedValueOnce({ response: { status: 503, data: "<html>busy</html>" } })
+    const s = useOccurrencesStore()
+    await expect(s.sendRegistrationMessage("o1", "oi")).rejects.toBeTruthy()
+    expect(s.hasPendingProtocolSend("o1")).toBe(true)
+  })
+})
