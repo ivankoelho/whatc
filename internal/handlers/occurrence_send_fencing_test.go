@@ -230,9 +230,11 @@ func TestFencing_ProviderEvidenceStillBeatsAPerson_AfterAPausedOwner(t *testing.
 // database, exactly one of them wins, never both and never neither.
 func TestFencing_DispatchAndFence_RaceForRealInTheDatabase_ExactlyOneWins(t *testing.T) {
 	w := newMsgWorld(t)
-	const rounds = 120
-	dispatchedWins, fencedWins := 0, 0
-	for i := 0; i < rounds; i++ {
+	// Rounds are run until BOTH outcomes have been seen enough times (or a generous cap is reached), so the test
+	// proves the race is real on this machine instead of assuming it: the property is checked in EVERY round.
+	const wantEach, maxRounds = 5, 800
+	dispatchedWins, fencedWins, rounds := 0, 0, 0
+	for ; rounds < maxRounds && (dispatchedWins < wantEach || fencedWins < wantEach); rounds++ {
 		id := uuid.New()
 		require.NoError(t, w.app.DB.Create(&models.OccurrenceSendIntent{ID: id, OrganizationID: w.org.ID, IdempotencyKey: uuid.NewString(),
 			OccurrenceID: uuid.New(), UserID: w.agent.ID, Kind: models.SendIntentKindProtocol, RequestHash: "h", State: models.SendIntentProcessing,
@@ -263,16 +265,17 @@ func TestFencing_DispatchAndFence_RaceForRealInTheDatabase_ExactlyOneWins(t *tes
 		require.NoError(t, w.app.DB.First(&row, "id = ?", id).Error)
 		if dispatched {
 			dispatchedWins++
-			assert.Equal(t, models.SendIntentProcessing, string(row.State), "round %d: dispatched, so it cannot also have been fenced", i)
-			assert.NotNil(t, row.DispatchedAt, "round %d", i)
+			assert.Equal(t, models.SendIntentProcessing, string(row.State), "round %d: dispatched, so it cannot also have been fenced", rounds)
+			assert.NotNil(t, row.DispatchedAt, "round %d", rounds)
 		} else {
 			fencedWins++
-			assert.Equal(t, models.SendIntentFailed, string(row.State), "round %d: not dispatched, so it was fenced", i)
-			assert.Nil(t, row.DispatchedAt, "round %d", i)
+			assert.Equal(t, models.SendIntentFailed, string(row.State), "round %d: not dispatched, so it was fenced", rounds)
+			assert.Nil(t, row.DispatchedAt, "round %d", rounds)
 		}
 	}
-	t.Logf("dispatch won %d, fence won %d of %d real races", dispatchedWins, fencedWins, rounds)
-	assert.Equal(t, rounds, dispatchedWins+fencedWins)
+	t.Logf("dispatch won %d, fence won %d, in %d real races", dispatchedWins, fencedWins, rounds)
+	assert.GreaterOrEqual(t, dispatchedWins, wantEach, "the owner's dispatch must be seen winning")
+	assert.GreaterOrEqual(t, fencedWins, wantEach, "the fence must be seen winning")
 }
 
 // 5. Two dispatches of the same row: only the first passes (a request cannot be sent twice from one claim).
@@ -449,6 +452,12 @@ func TestFencing_Preflight_StopsTheRequestWhenTheDatabaseSaysTheDeadlineIsPast(t
 	assert.Equal(t, 0, w.providerTotal(), "the request was never made")
 	assert.Equal(t, 0, w.mockHas("barrada na ultima checagem"))
 	assert.Equal(t, "failed", got.env.Data["result"], "the preflight refusal is a proven 'not sent'")
+	assert.Contains(t, got.env.Message, "cancelled before it was handed to the provider", "it says what happened: no request was made")
+	assert.NotContains(t, got.env.Message, "did not accept", "the provider was never asked, so it did not refuse anything")
+	w.m.mu.Lock()
+	requests := w.m.requestCount
+	w.m.mu.Unlock()
+	assert.Equal(t, 0, requests, "not one HTTP request reached the provider's server")
 	assert.Equal(t, models.SendIntentFailed, string(w.lastIntent(t).State))
 	assert.EqualValues(t, 0, w.openIntents(t, w.occ))
 }

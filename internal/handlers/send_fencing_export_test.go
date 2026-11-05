@@ -44,3 +44,12 @@ func (a *App) PreflightForTest(id uuid.UUID, started time.Time) error {
 // SetOpenSendGuardVerifierForTest replaces the check of the open-send index (nil restores the real one), so a test can
 // break the protection on a database of its own without touching the shared test database.
 func (a *App) SetOpenSendGuardVerifierForTest(f func(tx *gorm.DB) error) { a.verifyOpenSendGuard = f }
+
+// SetDBClockForTest replaces the read of the database clock (nil restores the real one).
+func (a *App) SetDBClockForTest(f func() (time.Time, error)) { a.dbClockForTest = f }
+
+// RunReconcileCycleForTest is one pass of the background loop; it reports whether it ran (false = skipped).
+func (a *App) RunReconcileCycleForTest() bool {
+	var last time.Time
+	return a.reconcileCycle(&last)
+}

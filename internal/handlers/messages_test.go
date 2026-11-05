@@ -31,6 +31,7 @@ type mockWhatsAppServer struct {
 	failStatus    int    // when set, every send is answered with this status ...
 	failCode      int    // ... and this Meta error code ...
 	failRaw       string // ... or this raw body instead
+	requestCount  int    // every HTTP request that reached this server, of any kind
 	nextMessageID string
 	nextMediaID   string
 }
@@ -44,6 +45,9 @@ func newMockWhatsAppServer() *mockWhatsAppServer {
 	}
 
 	m.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		m.mu.Lock()
+		m.requestCount++
+		m.mu.Unlock()
 		// Check authorization
 		auth := r.Header.Get("Authorization")
 		if auth != "Bearer test-token" {

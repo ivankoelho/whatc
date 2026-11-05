@@ -101,7 +101,7 @@ func (a *App) SendOccurrenceProtocol(r *fastglue.Request) error {
 		// Fail closed: the protection (one open send per case) is not in the database, so nothing is claimed or sent.
 		a.Log.Error("Customer send refused: the open-send protection is not in place", "error", err, "occurrence", occ.ID)
 		return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable,
-			"Customer sends from cases are unavailable: the database protection against sending twice is not in place. Nothing was sent. An administrator must run the migration (-migrate).",
+			"Customer sends from cases are unavailable: the database protection against sending twice is not in place. Nothing was sent. An administrator must run the migration (-migrate); if it reports an invalid or wrong index, follow what it says.",
 			nil, errTypeSendGuardUnavailable)
 	}
 	if err != nil {
@@ -213,6 +213,11 @@ func (a *App) SendOccurrenceProtocol(r *fastglue.Request) error {
 			return answer(protocolResultUncertain, fasthttp.StatusAccepted, "", "")
 		}
 		recordResult(protocolResultFailed, sendErr)
+		var refused *preflightRefusal
+		if errors.As(sendErr, &refused) {
+			// The last check refused it: no request was made, so the provider neither accepted nor refused anything.
+			return answer(protocolResultFailed, fasthttp.StatusBadGateway, "The send was cancelled before it was handed to the provider; nothing was sent", "")
+		}
 		return answer(protocolResultFailed, fasthttp.StatusBadGateway, "The provider did not accept the message", "")
 	}
 	recordResult(protocolResultSent, nil)

@@ -183,3 +183,62 @@ func TestVerifyOpenSendIntentGuard_Present_Absent_AndWrong(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "valid=false")
 }
+
+// M-A of the last review: CREATE UNIQUE INDEX IF NOT EXISTS only looks at the NAME, so an invalid or wrong index with
+// that name used to make the migration "succeed" while the protection stayed off. Now the migration verifies what is
+// there, fails, touches nothing, and says exactly what to do; after that the same migration creates it correctly.
+func TestEnsureOpenSendIntentUniqueness_AnExistingWrongIndexFailsTheMigration_AndSaysHowToFixIt(t *testing.T) {
+	db := testutil.ScratchDatabase(t)
+	require.NoError(t, db.AutoMigrate(&models.OccurrenceSendIntent{}))
+	name := database.OpenSendIntentIndexName
+	for label, ddl := range map[string]string{
+		"not unique":       `CREATE INDEX ` + name + ` ON occurrence_send_intents (organization_id, occurrence_id, kind) WHERE state IN ('processing', 'uncertain')`,
+		"covers one state": `CREATE UNIQUE INDEX ` + name + ` ON occurrence_send_intents (organization_id, occurrence_id, kind) WHERE state = 'processing'`,
+		"other columns":    `CREATE UNIQUE INDEX ` + name + ` ON occurrence_send_intents (occurrence_id, kind) WHERE state IN ('processing', 'uncertain')`,
+		"not partial":      `CREATE UNIQUE INDEX ` + name + ` ON occurrence_send_intents (organization_id, occurrence_id, kind)`,
+	} {
+		t.Run(label, func(t *testing.T) {
+			require.NoError(t, db.Exec("DROP INDEX IF EXISTS "+name).Error)
+			require.NoError(t, db.Exec(ddl).Error)
+			before := indexDef(t, db)
+
+			err := database.EnsureOpenSendIntentUniqueness(db)
+			require.Error(t, err, "the migration must not report success while the protection is off")
+			var ie *database.OpenSendIntentIndexError
+			require.True(t, errors.As(err, &ie))
+			assert.Contains(t, err.Error(), "DROP INDEX "+name)
+			assert.Contains(t, err.Error(), "does not touch an existing index")
+			assert.Equal(t, before, indexDef(t, db), "the existing index was left exactly as it was")
+
+			// The documented fix works: drop it, run the migration again, and the protection is there and valid.
+			require.NoError(t, db.Exec("DROP INDEX "+name).Error)
+			require.NoError(t, database.EnsureOpenSendIntentUniqueness(db))
+			require.NoError(t, database.VerifyOpenSendIntentGuard(db))
+		})
+	}
+
+	t.Run("invalid", func(t *testing.T) {
+		require.NoError(t, db.Exec("DROP INDEX IF EXISTS "+name).Error)
+		require.NoError(t, database.EnsureOpenSendIntentUniqueness(db))
+		require.NoError(t, db.Exec(fmt.Sprintf(`UPDATE pg_index SET indisvalid = false WHERE indexrelid = '%s'::regclass`, name)).Error)
+		err := database.EnsureOpenSendIntentUniqueness(db)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "valid=false")
+		assert.Contains(t, err.Error(), "DROP INDEX "+name)
+	})
+
+	t.Run("a correct index is left alone and the call is idempotent", func(t *testing.T) {
+		require.NoError(t, db.Exec("DROP INDEX IF EXISTS "+name).Error)
+		require.NoError(t, database.EnsureOpenSendIntentUniqueness(db))
+		def := indexDef(t, db)
+		require.NoError(t, database.EnsureOpenSendIntentUniqueness(db))
+		assert.Equal(t, def, indexDef(t, db))
+	})
+}
+
+func indexDef(t *testing.T, db *gorm.DB) string {
+	t.Helper()
+	var def string
+	require.NoError(t, db.Raw("SELECT pg_get_indexdef(c.oid) FROM pg_class c WHERE c.relname = ?", database.OpenSendIntentIndexName).Scan(&def).Error)
+	return def
+}

@@ -44,7 +44,7 @@ func VerifyOpenSendIntentGuard(db *gorm.DB) error {
 	if err != nil {
 		return fmt.Errorf("could not check the open-send index: %w", err)
 	}
-	fix := " Run the migration (whatomate server -migrate); nothing is sent from cases until the protection is in place."
+	fix := " Run the migration (whatomate server -migrate); nothing is sent from cases until the protection is in place. If the migration reports that an existing index is not the protection, follow what it says."
 	switch {
 	case row.Def == "":
 		return fmt.Errorf("the index %s is missing.%s", OpenSendIntentIndexName, fix)
@@ -138,6 +138,19 @@ func (e *OpenSendIntentDuplicatesError) Error() string {
 		OpenSendIntentIndexName, len(e.Duplicates), FormatOpenSendIntentDuplicates(e.Duplicates))
 }
 
+// OpenSendIntentIndexError: an index named uq_send_intent_open exists but is not the protection (not unique, not
+// valid, other columns, a predicate that misses an open state). CREATE UNIQUE INDEX IF NOT EXISTS only looks at the
+// name, so it would "succeed" and leave the protection off. The migration never touches an existing index: it stops
+// and says exactly what to do.
+type OpenSendIntentIndexError struct{ Cause error }
+
+func (e *OpenSendIntentIndexError) Error() string {
+	return fmt.Sprintf("%s exists but is not the protection the system needs, and the migration does not touch an existing index: %v\n"+
+		"What to do: DROP INDEX %s; (an index only, no data is involved) and run the migration again, which creates it correctly. "+
+		"Customer sends from cases stay refused until then.", OpenSendIntentIndexName, e.Cause, OpenSendIntentIndexName)
+}
+func (e *OpenSendIntentIndexError) Unwrap() error { return e.Cause }
+
 // EnsureOpenSendIntentUniqueness creates the index when the data allows it. With duplicates it creates
 // nothing, changes nothing and returns *OpenSendIntentDuplicatesError, so the migration stops loudly
 // instead of leaving the protection off. Idempotent.
@@ -154,6 +167,10 @@ func EnsureOpenSendIntentUniqueness(db *gorm.DB) error {
 	}
 	if err := db.Exec(createOpenSendIntentIndexSQL).Error; err != nil {
 		return fmt.Errorf("failed to create %s: %w", OpenSendIntentIndexName, err)
+	}
+	// "IF NOT EXISTS" matches the NAME only: confirm that what is there is really the protection.
+	if verr := VerifyOpenSendIntentGuard(db); verr != nil {
+		return &OpenSendIntentIndexError{Cause: verr}
 	}
 	if err := db.Exec(createUncertainRecheckIndexSQL).Error; err != nil {
 		return fmt.Errorf("failed to create the uncertain re-check index: %w", err)

@@ -126,6 +126,12 @@ func (a *App) dispatchSendIntent(intent *models.OccurrenceSendIntent) (deadline,
 	return deadline, started, true, nil
 }
 
+// preflightRefusal: the last check before the request refused it. No request was made.
+type preflightRefusal struct{ cause error }
+
+func (e *preflightRefusal) Error() string { return e.cause.Error() }
+func (e *preflightRefusal) Unwrap() error { return e.cause }
+
 // errPastDispatchDeadline: the owner's time to call the provider is over (or the row is not "processing and
 // dispatched" any more).
 var errPastDispatchDeadline = errors.New("the owner's deadline to call the provider has passed or the send was fenced")
@@ -137,30 +143,49 @@ var errPastDispatchDeadline = errors.New("the owner's deadline to call the provi
 // (see "Fencing" in the contract): a process frozen right after it returns can still write later.
 func (a *App) preflightSendIntent(ctx context.Context, id uuid.UUID, started time.Time) error {
 	if time.Since(started) >= sendIntentDispatchWindow {
-		return errPastDispatchDeadline
+		return &preflightRefusal{cause: errPastDispatchDeadline}
 	}
 	var n int64
 	err := a.DB.WithContext(ctx).Model(&models.OccurrenceSendIntent{}).
 		Where("id = ? AND state = ? AND dispatched_at IS NOT NULL AND dispatch_deadline > NOW()", id, models.SendIntentProcessing).
 		Count(&n).Error
 	if err != nil {
-		return fmt.Errorf("could not confirm that the send is still allowed: %w", err)
+		return &preflightRefusal{cause: fmt.Errorf("could not confirm that the send is still allowed: %w", err)}
 	}
 	if n != 1 {
-		return errPastDispatchDeadline
+		return &preflightRefusal{cause: errPastDispatchDeadline}
 	}
 	return nil
 }
 
 // dbNow is the DATABASE's clock. Everything that decides whether a dispatched owner can still send (the deadline
 // and the margin after it) is judged on this one clock, so no agreement between the wall clocks of several
-// application servers is needed. It falls back to the local clock only if the database cannot answer.
-func (a *App) dbNow() time.Time {
-	var t time.Time
-	if err := a.DB.Raw("SELECT NOW()").Scan(&t).Error; err != nil || t.IsZero() {
-		return time.Now()
+// application servers is needed. There is NO fallback to the local clock: when the database cannot answer, the
+// caller does not judge (see reconcileByDBClock): a decision that frees or settles a send must never be taken on a
+// clock the deadline was not measured on.
+func (a *App) dbNow() (time.Time, error) {
+	if a.dbClockForTest != nil {
+		return a.dbClockForTest()
 	}
-	return t
+	var t time.Time
+	if err := a.DB.Raw("SELECT NOW()").Scan(&t).Error; err != nil {
+		return time.Time{}, fmt.Errorf("could not read the database clock: %w", err)
+	}
+	if t.IsZero() {
+		return time.Time{}, errors.New("could not read the database clock: empty answer")
+	}
+	return t, nil
+}
+
+// reconcileByDBClock reconciles one row on the database's clock. When the clock cannot be read it does NOTHING (the
+// row stays as it is, which is the safe side: still open) and reports false.
+func (a *App) reconcileByDBClock(intent *models.OccurrenceSendIntent) bool {
+	now, err := a.dbNow()
+	if err != nil {
+		a.Log.Warn("Send intent not reconciled: the database clock could not be read", "error", err, "send_id", intent.ID)
+		return false
+	}
+	return a.reconcileSendIntent(intent, now)
 }
 
 // errTypeSendGuardUnavailable: the database protection that keeps a case at one open send is missing or invalid.
@@ -278,7 +303,7 @@ func (a *App) claimSendIntent(orgID, userID uuid.UUID, occ *models.Occurrence, k
 		if err != nil {
 			return nil, false, err
 		}
-		if a.reconcileSendIntent(&existing, a.dbNow()) && existing.State != models.SendIntentProcessing && existing.State != models.SendIntentUncertain {
+		if a.reconcileByDBClock(&existing) && existing.State != models.SendIntentProcessing && existing.State != models.SendIntentUncertain {
 			continue // reconciliation settled it: the case may be free now
 		}
 		return &existing, false, nil
@@ -355,7 +380,7 @@ func (a *App) answerExistingIntent(r *fastglue.Request, intent *models.Occurrenc
 		return r.SendErrorEnvelope(fasthttp.StatusConflict,
 			"This Idempotency-Key was already used for a different request; use a new key for a new send", nil, errTypeIdempotencyKeyReused)
 	}
-	a.reconcileSendIntent(intent, a.dbNow())
+	a.reconcileByDBClock(intent)
 	switch intent.State {
 	case models.SendIntentProcessing:
 		r.RequestCtx.Response.Header.Set(headerIdempotentReplay, "true")
@@ -565,18 +590,30 @@ func (a *App) PurgeSendIntents(now time.Time) int64 {
 	return res.RowsAffected
 }
 
+// reconcileCycle is one pass of the background loop. If the database clock cannot be read the whole pass is skipped
+// (and says so): reconciling or purging on the local clock could free or settle a send whose owner can still call
+// the provider. It reports whether it ran.
+func (a *App) reconcileCycle(lastPurge *time.Time) bool {
+	now, err := a.dbNow()
+	if err != nil {
+		a.Log.Warn("Send intent reconciliation skipped: the database clock could not be read", "error", err)
+		return false
+	}
+	a.ReconcileSendIntents(now)
+	if now.Sub(*lastPurge) >= sendIntentPurgeEvery {
+		a.PurgeSendIntents(now)
+		*lastPurge = now
+	}
+	return true
+}
+
 // StartSendIntentReconciler runs the reconciliation and the retention until ctx ends.
 func (a *App) StartSendIntentReconciler(ctx context.Context) {
 	t := time.NewTicker(sendIntentReconcileEvery)
 	defer t.Stop()
 	var lastPurge time.Time
 	for {
-		now := a.dbNow()
-		a.ReconcileSendIntents(now)
-		if now.Sub(lastPurge) >= sendIntentPurgeEvery {
-			a.PurgeSendIntents(now)
-			lastPurge = now
-		}
+		a.reconcileCycle(&lastPurge)
 		select {
 		case <-ctx.Done():
 			return
@@ -653,7 +690,7 @@ func (a *App) GetOccurrenceProtocolSendByKey(r *fastglue.Request) error {
 // uncertain or processing -> sent=false, confirmed=false.
 func (a *App) answerSendState(r *fastglue.Request, intentPtr *models.OccurrenceSendIntent, occ *models.Occurrence, userID uuid.UUID) error {
 	intent := *intentPtr
-	a.reconcileSendIntent(&intent, a.dbNow())
+	a.reconcileByDBClock(&intent)
 
 	var msgStatus string
 	a.DB.Model(&models.Message{}).Select("status").Where("id = ?", intent.MessageID).Scan(&msgStatus)
@@ -733,7 +770,12 @@ func (a *App) ResolveOccurrenceProtocolSend(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Send not found", nil, errTypeSendNotFound)
 	}
 	// What the provider's own evidence says wins over a person's reading: settle it from the records first.
-	a.reconcileSendIntent(&intent, a.dbNow())
+	now0, cerr := a.dbNow()
+	if cerr != nil {
+		a.Log.Error("Cannot settle the send: the database clock could not be read", "error", cerr, "send_id", intent.ID)
+		return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "The database could not be reached just now; nothing was changed. Try again", nil, "")
+	}
+	a.reconcileSendIntent(&intent, now0)
 	if intent.State != models.SendIntentUncertain {
 		return r.SendErrorEnvelope(fasthttp.StatusConflict, "This send is not waiting to be settled (state: "+intent.State+")", nil, errTypeSendNotUncertain)
 	}

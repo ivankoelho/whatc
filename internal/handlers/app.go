@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
@@ -30,6 +31,8 @@ import (
 type App struct {
 	// verifyOpenSendGuard replaces the check of the open-send index (tests only; nil = database.VerifyOpenSendIntentGuard).
 	verifyOpenSendGuard func(tx *gorm.DB) error
+	// dbClockForTest replaces the read of the database clock (tests only; nil = SELECT NOW()).
+	dbClockForTest func() (time.Time, error)
 	Config            *config.Config
 	DB                *gorm.DB
 	Redis             *redis.Client
