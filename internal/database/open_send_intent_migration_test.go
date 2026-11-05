@@ -207,7 +207,14 @@ func TestEnsureOpenSendIntentUniqueness_AnExistingWrongIndexFailsTheMigration_An
 		"an extra key column":               `CREATE UNIQUE INDEX ` + name + ` ON occurrence_send_intents (organization_id, occurrence_id, kind, user_id) WHERE state IN ('processing', 'uncertain')`,
 		"an included column":                `CREATE UNIQUE INDEX ` + name + ` ON occurrence_send_intents (organization_id, occurrence_id, kind) INCLUDE (user_id) WHERE state IN ('processing', 'uncertain')`,
 		"an expression instead of a column": `CREATE UNIQUE INDEX ` + name + ` ON occurrence_send_intents (organization_id, occurrence_id, lower(kind)) WHERE state IN ('processing', 'uncertain')`,
-		"a hash index on a subset":          `CREATE INDEX ` + name + ` ON occurrence_send_intents USING hash (occurrence_id) WHERE state IN ('processing', 'uncertain')`,
+		// The six predicates the last independent review created: unique, valid, partial, right columns, and no protection.
+		"two constants compared":        `CREATE UNIQUE INDEX ` + name + ` ON occurrence_send_intents (organization_id, occurrence_id, kind) WHERE 'processing' = 'uncertain'`,
+		"two booleans compared":         `CREATE UNIQUE INDEX ` + name + ` ON occurrence_send_intents (organization_id, occurrence_id, kind) WHERE (state = 'processing') = (state = 'uncertain')`,
+		"two arrays compared":           `CREATE UNIQUE INDEX ` + name + ` ON occurrence_send_intents (organization_id, occurrence_id, kind) WHERE ARRAY['processing', 'uncertain']::text[] = ARRAY[state, state]::text[]`,
+		"the column inside the array":   `CREATE UNIQUE INDEX ` + name + ` ON occurrence_send_intents (organization_id, occurrence_id, kind) WHERE 'processing' = ANY (ARRAY[state, 'uncertain'])`,
+		"booleans, constants first":     `CREATE UNIQUE INDEX ` + name + ` ON occurrence_send_intents (organization_id, occurrence_id, kind) WHERE ('processing' = state) = ('uncertain' = state)`,
+		"the other column in the array": `CREATE UNIQUE INDEX ` + name + ` ON occurrence_send_intents (organization_id, occurrence_id, kind) WHERE 'uncertain' = ANY (ARRAY['processing', state])`,
+		"a hash index on a subset":      `CREATE INDEX ` + name + ` ON occurrence_send_intents USING hash (occurrence_id) WHERE state IN ('processing', 'uncertain')`,
 	} {
 		t.Run(label, func(t *testing.T) {
 			require.NoError(t, db.Exec("DROP INDEX IF EXISTS "+name).Error)
@@ -291,4 +298,57 @@ func TestVerifyOpenSendIntentGuard_TheIndexTheMigrationCreatesPasses(t *testing.
 	require.NoError(t, database.VerifyOpenSendIntentGuard(db))
 	require.NoError(t, database.EnsureOpenSendIntentUniqueness(db))
 	require.NoError(t, database.VerifyOpenSendIntentGuard(db))
+}
+
+// L-1 of the last review: when the reserved name is held by something that is NOT an index, the message must say what
+// it found and must not send the operator to DROP INDEX (which fails with "is not an index"). It fails closed, and the
+// migration never touches the object.
+func TestEnsureOpenSendIntentUniqueness_ANameHeldByANonIndexObject_SaysSoAndTouchesNothing(t *testing.T) {
+	name := database.OpenSendIntentIndexName
+	for label, c := range map[string]struct{ ddl, kind, drop string }{
+		"a sequence": {"CREATE SEQUENCE " + name, "sequence", "DROP SEQUENCE " + name},
+		"a table":    {"CREATE TABLE " + name + " (id int)", "table", "DROP TABLE " + name},
+		"a view":     {"CREATE VIEW " + name + " AS SELECT 1 AS x", "view", "DROP VIEW " + name},
+	} {
+		t.Run(label, func(t *testing.T) {
+			db := testutil.ScratchDatabase(t)
+			require.NoError(t, db.AutoMigrate(&models.OccurrenceSendIntent{}))
+			require.NoError(t, db.Exec(c.ddl).Error)
+
+			err := database.EnsureOpenSendIntentUniqueness(db)
+			require.Error(t, err, "the migration must not report success while the protection is off")
+			var taken *database.OpenSendIntentNameTakenError
+			require.True(t, errors.As(err, &taken))
+			assert.False(t, taken.IsIdx)
+			assert.Contains(t, err.Error(), c.kind)
+			assert.Contains(t, err.Error(), "NOT an index")
+			assert.NotContains(t, err.Error(), "DROP INDEX "+name, "DROP INDEX does not apply to this object")
+			// The guard (what every claim runs) refuses, and says the same.
+			gerr := database.VerifyOpenSendIntentGuard(db)
+			require.Error(t, gerr)
+			assert.Contains(t, gerr.Error(), c.kind)
+			// Nothing was touched: the object is still there and no index was created under another form.
+			var n int64
+			require.NoError(t, db.Raw("SELECT COUNT(*) FROM pg_class WHERE relname = ?", name).Scan(&n).Error)
+			assert.EqualValues(t, 1, n)
+			// Dropping it with ITS OWN statement (what the message tells the operator) lets the migration finish.
+			require.NoError(t, db.Exec(c.drop).Error)
+			require.NoError(t, database.EnsureOpenSendIntentUniqueness(db))
+			require.NoError(t, database.VerifyOpenSendIntentGuard(db))
+		})
+	}
+
+	t.Run("an index of ANOTHER table", func(t *testing.T) {
+		db := testutil.ScratchDatabase(t)
+		require.NoError(t, db.AutoMigrate(&models.OccurrenceSendIntent{}))
+		require.NoError(t, db.Exec("CREATE TABLE zz_other (id int)").Error)
+		require.NoError(t, db.Exec("CREATE INDEX "+name+" ON zz_other (id)").Error)
+		err := database.EnsureOpenSendIntentUniqueness(db)
+		require.Error(t, err)
+		var taken *database.OpenSendIntentNameTakenError
+		require.True(t, errors.As(err, &taken))
+		assert.True(t, taken.IsIdx, "here DROP INDEX is the right statement")
+		assert.Contains(t, err.Error(), "zz_other")
+		assert.Contains(t, err.Error(), "DROP INDEX "+name)
+	})
 }
