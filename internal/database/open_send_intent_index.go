@@ -106,15 +106,37 @@ func VerifyOpenSendIntentGuard(db *gorm.DB) error {
 	return nil
 }
 
+// constraintBehindIndexName returns the UNIQUE, PRIMARY KEY or EXCLUDE constraint that owns the index of the reserved
+// name in the current schema (the table it is on and its name), or empty strings. Foreign keys are not considered: they
+// only DEPEND on a unique index, they do not own it.
+func constraintBehindIndexName(db *gorm.DB) (table, name string) {
+	var r struct{ Tbl, Name string }
+	_ = db.Raw(`SELECT t.relname::text AS tbl, con.conname::text AS name
+		FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+		JOIN pg_constraint con ON con.conindid = c.oid AND con.contype IN ('p', 'u', 'x')
+		JOIN pg_class t ON t.oid = con.conrelid
+		WHERE c.relname = ? AND n.nspname = current_schema() LIMIT 1`, OpenSendIntentIndexName).Scan(&r).Error
+	return r.Tbl, r.Name
+}
+
 // OpenSendIntentNameTakenError: the name reserved for the index is held by an object of the current schema that is not
 // the index of occurrence_send_intents (a sequence, a table, a view, ... or an index of ANOTHER table). The migration
 // never touches it, and "DROP INDEX" is the right advice only when the object really is an index.
 type OpenSendIntentNameTakenError struct {
 	Kind  string // human name of the object: "sequence", "table", "index of the table x", ...
 	IsIdx bool
+	// When that index belongs to a constraint, DROP INDEX is refused (2BP01): the constraint has to be dropped.
+	ConstraintTable, ConstraintName string
 }
 
 func (e *OpenSendIntentNameTakenError) Error() string {
+	if e.IsIdx && e.ConstraintName != "" {
+		return fmt.Sprintf("the name %s is held by an %s, and that index belongs to the constraint %s of the table %s, so the protection cannot be created under it. "+
+			"The migration does not touch it. DROP INDEX does not apply: Postgres refuses it (2BP01) because the constraint needs the index. "+
+			"Check what the constraint is for; if it is not needed, from psql as the owner of the table: SET lock_timeout = '5s'; ALTER TABLE %s DROP CONSTRAINT %s; "+
+			"and run the migration again. Customer sends from cases are refused (503) until then.",
+			OpenSendIntentIndexName, e.Kind, e.ConstraintName, e.ConstraintTable, e.ConstraintTable, e.ConstraintName)
+	}
 	if e.IsIdx {
 		return fmt.Sprintf("the name %s is held by an %s, so the protection cannot be created under it. The migration does not touch it. "+
 			"Check what it is for; if it is not needed, from psql as its owner: SET lock_timeout = '5s'; DROP INDEX %s; and run the migration again. "+
@@ -142,7 +164,8 @@ func objectWithTheIndexName(db *gorm.DB) *OpenSendIntentNameTakenError {
 	kinds := map[string]string{"r": "table", "p": "partitioned table", "S": "sequence", "v": "view", "m": "materialized view",
 		"c": "composite type", "f": "foreign table", "t": "TOAST table"}
 	if o.Relkind == "i" || o.Relkind == "I" {
-		return &OpenSendIntentNameTakenError{Kind: "index of the table " + o.Tbl, IsIdx: true}
+		ct, cn := constraintBehindIndexName(db)
+		return &OpenSendIntentNameTakenError{Kind: "index of the table " + o.Tbl, IsIdx: true, ConstraintTable: ct, ConstraintName: cn}
 	}
 	k, ok := kinds[o.Relkind]
 	if !ok {
@@ -236,16 +259,28 @@ func (e *OpenSendIntentDuplicatesError) Error() string {
 // valid, other columns, a predicate that misses an open state). CREATE UNIQUE INDEX IF NOT EXISTS only looks at the
 // name, so it would "succeed" and leave the protection off. The migration never touches an existing index: it stops
 // and says exactly what to do.
-type OpenSendIntentIndexError struct{ Cause error }
+type OpenSendIntentIndexError struct {
+	Cause error
+	// When the index is the one behind a UNIQUE, PRIMARY KEY or EXCLUDE constraint, Postgres refuses DROP INDEX (2BP01):
+	// the constraint has to be dropped instead.
+	ConstraintTable, ConstraintName string
+}
 
 func (e *OpenSendIntentIndexError) Error() string {
+	drop := fmt.Sprintf("DROP INDEX %s;", OpenSendIntentIndexName)
+	what := "(an index only, no data is involved)"
+	if e.ConstraintName != "" {
+		drop = fmt.Sprintf("ALTER TABLE %s DROP CONSTRAINT %s;", e.ConstraintTable, e.ConstraintName)
+		what = fmt.Sprintf("(this index belongs to the constraint %s, so DROP INDEX is refused by Postgres with 2BP01 and the constraint has to be dropped instead; "+
+			"no row is deleted)", e.ConstraintName)
+	}
 	return fmt.Sprintf("%s exists but is not the protection the system needs, and the migration does not touch an existing index: %v\n"+
-		"What to do, from psql, as the owner of the table: SET lock_timeout = '5s'; DROP INDEX %s; (an index only, no data is involved) "+
-		"and run the migration again, which creates it correctly. DROP INDEX waits for an exclusive lock on occurrence_send_intents, "+
+		"What to do, from psql, as the owner of the table: SET lock_timeout = '5s'; %s %s "+
+		"and run the migration again, which creates it correctly. The statement waits for an exclusive lock on the table, "+
 		"and while it waits every other access to that table queues behind it: that is what the lock_timeout is for (if it times out, "+
 		"try again when no long transaction is open). DROP INDEX CONCURRENTLY does not lock the table for long but cannot run inside a "+
 		"transaction block and, if cancelled, leaves an INVALID index behind that must be dropped as well. "+
-		"Customer sends from cases are refused (503) until the migration has run; nothing else is affected.", OpenSendIntentIndexName, e.Cause, OpenSendIntentIndexName)
+		"Customer sends from cases are refused (503) until the migration has run; nothing else is affected.", OpenSendIntentIndexName, e.Cause, drop, what)
 }
 func (e *OpenSendIntentIndexError) Unwrap() error { return e.Cause }
 
@@ -272,7 +307,8 @@ func EnsureOpenSendIntentUniqueness(db *gorm.DB) error {
 		if errors.As(verr, &taken) {
 			return verr
 		}
-		return &OpenSendIntentIndexError{Cause: verr}
+		ct, cn := constraintBehindIndexName(db)
+		return &OpenSendIntentIndexError{Cause: verr, ConstraintTable: ct, ConstraintName: cn}
 	}
 	if err := db.Exec(createUncertainRecheckIndexSQL).Error; err != nil {
 		return fmt.Errorf("failed to create the uncertain re-check index: %w", err)

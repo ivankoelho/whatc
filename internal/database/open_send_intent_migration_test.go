@@ -352,3 +352,88 @@ func TestEnsureOpenSendIntentUniqueness_ANameHeldByANonIndexObject_SaysSoAndTouc
 		assert.Contains(t, err.Error(), "DROP INDEX "+name)
 	})
 }
+
+// LOW-1 of the last review: when the index of the reserved name belongs to a UNIQUE / PRIMARY KEY constraint, Postgres
+// refuses DROP INDEX (2BP01), so the message must send the operator to ALTER TABLE ... DROP CONSTRAINT instead. The
+// plain index of another table keeps the DROP INDEX advice.
+func TestEnsureOpenSendIntentUniqueness_AnIndexThatBelongsToAConstraint_PointsToDropConstraint(t *testing.T) {
+	name := database.OpenSendIntentIndexName
+
+	t.Run("a UNIQUE constraint of ANOTHER table", func(t *testing.T) {
+		db := testutil.ScratchDatabase(t)
+		require.NoError(t, db.AutoMigrate(&models.OccurrenceSendIntent{}))
+		require.NoError(t, db.Exec("CREATE TABLE zz_other2 (id int)").Error)
+		require.NoError(t, db.Exec("ALTER TABLE zz_other2 ADD CONSTRAINT "+name+" UNIQUE (id)").Error)
+
+		// Postgres itself refuses what a plain DROP INDEX advice would have asked for.
+		dropErr := db.Exec("DROP INDEX " + name).Error
+		require.Error(t, dropErr)
+		assert.Contains(t, dropErr.Error(), "2BP01")
+
+		err := database.EnsureOpenSendIntentUniqueness(db)
+		require.Error(t, err)
+		var taken *database.OpenSendIntentNameTakenError
+		require.True(t, errors.As(err, &taken))
+		assert.True(t, taken.IsIdx)
+		assert.Equal(t, "zz_other2", taken.ConstraintTable)
+		assert.Equal(t, name, taken.ConstraintName)
+		assert.Contains(t, err.Error(), "ALTER TABLE zz_other2 DROP CONSTRAINT "+name)
+		assert.Contains(t, err.Error(), "2BP01")
+		assert.NotContains(t, err.Error(), "SET lock_timeout = '5s'; DROP INDEX", "DROP INDEX is not the statement for a constraint")
+		assert.Contains(t, err.Error(), "lock_timeout")
+
+		// The advised statement works, and then the migration finishes.
+		require.NoError(t, db.Exec("ALTER TABLE zz_other2 DROP CONSTRAINT "+name).Error)
+		require.NoError(t, database.EnsureOpenSendIntentUniqueness(db))
+		require.NoError(t, database.VerifyOpenSendIntentGuard(db))
+	})
+
+	t.Run("a PRIMARY KEY of another table", func(t *testing.T) {
+		db := testutil.ScratchDatabase(t)
+		require.NoError(t, db.AutoMigrate(&models.OccurrenceSendIntent{}))
+		require.NoError(t, db.Exec("CREATE TABLE zz_other3 (id int)").Error)
+		require.NoError(t, db.Exec("ALTER TABLE zz_other3 ADD CONSTRAINT "+name+" PRIMARY KEY (id)").Error)
+		err := database.EnsureOpenSendIntentUniqueness(db)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "ALTER TABLE zz_other3 DROP CONSTRAINT "+name)
+		require.NoError(t, db.Exec("ALTER TABLE zz_other3 DROP CONSTRAINT "+name).Error)
+		require.NoError(t, database.EnsureOpenSendIntentUniqueness(db))
+	})
+
+	t.Run("a UNIQUE constraint on the right table, not partial (the wrong-index path)", func(t *testing.T) {
+		db := testutil.ScratchDatabase(t)
+		require.NoError(t, db.AutoMigrate(&models.OccurrenceSendIntent{}))
+		require.NoError(t, db.Exec("ALTER TABLE occurrence_send_intents ADD CONSTRAINT "+name+" UNIQUE (organization_id, occurrence_id, kind)").Error)
+		before := indexDef(t, db)
+
+		err := database.EnsureOpenSendIntentUniqueness(db)
+		require.Error(t, err)
+		var ie *database.OpenSendIntentIndexError
+		require.True(t, errors.As(err, &ie))
+		assert.Equal(t, "occurrence_send_intents", ie.ConstraintTable)
+		assert.Equal(t, name, ie.ConstraintName)
+		assert.Contains(t, err.Error(), "ALTER TABLE occurrence_send_intents DROP CONSTRAINT "+name)
+		assert.NotContains(t, err.Error(), "SET lock_timeout = '5s'; DROP INDEX")
+		assert.Equal(t, before, indexDef(t, db), "the existing index was left exactly as it was")
+
+		require.NoError(t, db.Exec("ALTER TABLE occurrence_send_intents DROP CONSTRAINT "+name).Error)
+		require.NoError(t, database.EnsureOpenSendIntentUniqueness(db))
+		require.NoError(t, database.VerifyOpenSendIntentGuard(db))
+	})
+
+	t.Run("a plain index of another table keeps the DROP INDEX advice", func(t *testing.T) {
+		db := testutil.ScratchDatabase(t)
+		require.NoError(t, db.AutoMigrate(&models.OccurrenceSendIntent{}))
+		require.NoError(t, db.Exec("CREATE TABLE zz_other4 (id int)").Error)
+		require.NoError(t, db.Exec("CREATE INDEX "+name+" ON zz_other4 (id)").Error)
+		err := database.EnsureOpenSendIntentUniqueness(db)
+		require.Error(t, err)
+		var taken *database.OpenSendIntentNameTakenError
+		require.True(t, errors.As(err, &taken))
+		assert.Empty(t, taken.ConstraintName)
+		assert.Contains(t, err.Error(), "DROP INDEX "+name)
+		assert.NotContains(t, err.Error(), "DROP CONSTRAINT")
+		require.NoError(t, db.Exec("DROP INDEX "+name).Error)
+		require.NoError(t, database.EnsureOpenSendIntentUniqueness(db))
+	})
+}

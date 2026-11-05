@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -153,4 +154,48 @@ func TestSendGuard_TheCheckRunsInsideTheClaimTransaction_AndARefusalRollsItBack(
 	assert.True(t, sawRowInTx)
 	assert.Empty(t, w.intents(t), "rolled back")
 	assert.Equal(t, 0, w.providerTotal())
+}
+
+// The reserved name held by something that is NOT an index (or by the index of a constraint of another table): the
+// claim is refused with 503, nothing is claimed or sent, and the cause the guard reports is the "name taken" error,
+// not a generic "missing". The response is the same fixed operational answer in every case; the specific cause is
+// what the operator reads in the log.
+func TestSendGuard_TheNameHeldByAnotherObject_IsRefusedFailClosed(t *testing.T) {
+	cases := map[string]struct{ ddl, fix string }{
+		"a sequence":                    {"CREATE SEQUENCE uq_send_intent_open", "DROP SEQUENCE uq_send_intent_open"},
+		"a table":                       {"CREATE TABLE uq_send_intent_open (id int)", "DROP TABLE uq_send_intent_open"},
+		"a view":                        {"CREATE VIEW uq_send_intent_open AS SELECT 1 AS x", "DROP VIEW uq_send_intent_open"},
+		"a UNIQUE constraint elsewhere": {"CREATE TABLE zz_elsewhere (id int); ALTER TABLE zz_elsewhere ADD CONSTRAINT uq_send_intent_open UNIQUE (id)", "ALTER TABLE zz_elsewhere DROP CONSTRAINT uq_send_intent_open"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			w := newMsgWorld(t)
+			db := testutil.ScratchDatabase(t)
+			require.NoError(t, db.AutoMigrate(&models.OccurrenceSendIntent{}))
+			require.NoError(t, db.Exec(c.ddl).Error)
+			var last error
+			w.app.SetOpenSendGuardVerifierForTest(func(_ *gorm.DB) error {
+				last = database.VerifyOpenSendIntentGuard(db)
+				return last
+			})
+			defer w.app.SetOpenSendGuardVerifierForTest(nil)
+
+			a := w.sendKeyed(t, w.agent, w.occ, uuid.NewString(), map[string]string{"message": "nome ocupado"})
+			assert.Equal(t, fasthttp.StatusServiceUnavailable, a.code)
+			assert.Equal(t, "send_guard_unavailable", a.env.ErrorType)
+			assert.Contains(t, a.env.Message, "Nothing was sent")
+			assert.Equal(t, 0, w.providerTotal(), "nothing reached the customer")
+			assert.Empty(t, w.intents(t), "the claim was rolled back")
+
+			var taken *database.OpenSendIntentNameTakenError
+			require.True(t, errors.As(last, &taken), "the guard reported the name as taken: %v", last)
+			require.NoError(t, db.Exec(c.fix).Error) // the statement of the object's own kind, as the message says
+			require.NoError(t, database.EnsureOpenSendIntentUniqueness(db))
+
+			// With the protection in place the same App sends again.
+			ok := w.sendKeyed(t, w.agent, w.occ, uuid.NewString(), map[string]string{"message": "depois de liberar o nome"})
+			assert.Equal(t, fasthttp.StatusOK, ok.code)
+			assert.Equal(t, 1, w.providerTotal())
+		})
+	}
 }
