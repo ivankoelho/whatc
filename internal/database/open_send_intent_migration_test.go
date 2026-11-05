@@ -437,3 +437,36 @@ func TestEnsureOpenSendIntentUniqueness_AnIndexThatBelongsToAConstraint_PointsTo
 		require.NoError(t, database.EnsureOpenSendIntentUniqueness(db))
 	})
 }
+
+// L1/L2 of the review of 12b2fa68: the statement printed for the operator must work when pasted into psql even when the
+// table that owns the constraint needs quoting, and the constraint path must not talk about DROP INDEX CONCURRENTLY
+// (which does not apply to an index owned by a constraint) and must warn about what dropping the constraint costs.
+func TestEnsureOpenSendIntentUniqueness_ConstraintAdvice_QuotesTheTableAndDropsTheIndexAdvice(t *testing.T) {
+	name := database.OpenSendIntentIndexName
+	db := testutil.ScratchDatabase(t)
+	require.NoError(t, db.AutoMigrate(&models.OccurrenceSendIntent{}))
+	require.NoError(t, db.Exec(`CREATE TABLE "Zz-Other Quoted" (id int)`).Error)
+	require.NoError(t, db.Exec(`ALTER TABLE "Zz-Other Quoted" ADD CONSTRAINT ` + name + ` UNIQUE (id)`).Error)
+
+	err := database.EnsureOpenSendIntentUniqueness(db)
+	require.Error(t, err)
+	want := `ALTER TABLE "Zz-Other Quoted" DROP CONSTRAINT ` + name
+	assert.Contains(t, err.Error(), want)
+	assert.NotContains(t, err.Error(), "CONCURRENTLY")
+	assert.Contains(t, err.Error(), "foreign key")
+	assert.Contains(t, err.Error(), "integrity")
+
+	// The statement exactly as printed works, and then the migration finishes.
+	require.NoError(t, db.Exec(want).Error)
+	require.NoError(t, database.EnsureOpenSendIntentUniqueness(db))
+	require.NoError(t, database.VerifyOpenSendIntentGuard(db))
+
+	// The wrong-index path of a plain (non-constraint) index keeps its advice, CONCURRENTLY included.
+	db2 := testutil.ScratchDatabase(t)
+	require.NoError(t, db2.AutoMigrate(&models.OccurrenceSendIntent{}))
+	require.NoError(t, db2.Exec("CREATE UNIQUE INDEX "+name+" ON occurrence_send_intents (organization_id, occurrence_id, kind)").Error)
+	err = database.EnsureOpenSendIntentUniqueness(db2)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "DROP INDEX "+name)
+	assert.Contains(t, err.Error(), "CONCURRENTLY")
+}

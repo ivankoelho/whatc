@@ -119,6 +119,18 @@ func constraintBehindIndexName(db *gorm.DB) (table, name string) {
 	return r.Tbl, r.Name
 }
 
+var plainIdentRe = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
+
+// quoteIdentForAdvice renders a catalog name so that the statement printed for the operator works when pasted into psql:
+// a name made only of lower-case letters, digits and underscores is left as it is, anything else (capitals, hyphens,
+// spaces, quotes) is double-quoted with embedded quotes doubled.
+func quoteIdentForAdvice(s string) string {
+	if plainIdentRe.MatchString(s) {
+		return s
+	}
+	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
+}
+
 // OpenSendIntentNameTakenError: the name reserved for the index is held by an object of the current schema that is not
 // the index of occurrence_send_intents (a sequence, a table, a view, ... or an index of ANOTHER table). The migration
 // never touches it, and "DROP INDEX" is the right advice only when the object really is an index.
@@ -133,9 +145,11 @@ func (e *OpenSendIntentNameTakenError) Error() string {
 	if e.IsIdx && e.ConstraintName != "" {
 		return fmt.Sprintf("the name %s is held by an %s, and that index belongs to the constraint %s of the table %s, so the protection cannot be created under it. "+
 			"The migration does not touch it. DROP INDEX does not apply: Postgres refuses it (2BP01) because the constraint needs the index. "+
-			"Check what the constraint is for; if it is not needed, from psql as the owner of the table: SET lock_timeout = '5s'; ALTER TABLE %s DROP CONSTRAINT %s; "+
+			"Check what the constraint is for: dropping a PRIMARY KEY or UNIQUE constraint of another table removes that table's integrity guarantee, and the statement "+
+			"fails (it has no CASCADE) while a foreign key depends on it. If it is not needed, from psql as the owner of the table: SET lock_timeout = '5s'; ALTER TABLE %s DROP CONSTRAINT %s; "+
 			"and run the migration again. Customer sends from cases are refused (503) until then.",
-			OpenSendIntentIndexName, e.Kind, e.ConstraintName, e.ConstraintTable, e.ConstraintTable, e.ConstraintName)
+			OpenSendIntentIndexName, e.Kind, e.ConstraintName, e.ConstraintTable,
+			quoteIdentForAdvice(e.ConstraintTable), quoteIdentForAdvice(e.ConstraintName))
 	}
 	if e.IsIdx {
 		return fmt.Sprintf("the name %s is held by an %s, so the protection cannot be created under it. The migration does not touch it. "+
@@ -269,18 +283,21 @@ type OpenSendIntentIndexError struct {
 func (e *OpenSendIntentIndexError) Error() string {
 	drop := fmt.Sprintf("DROP INDEX %s;", OpenSendIntentIndexName)
 	what := "(an index only, no data is involved)"
+	concurrently := "DROP INDEX CONCURRENTLY does not lock the table for long but cannot run inside a " +
+		"transaction block and, if cancelled, leaves an INVALID index behind that must be dropped as well. "
 	if e.ConstraintName != "" {
-		drop = fmt.Sprintf("ALTER TABLE %s DROP CONSTRAINT %s;", e.ConstraintTable, e.ConstraintName)
+		drop = fmt.Sprintf("ALTER TABLE %s DROP CONSTRAINT %s;", quoteIdentForAdvice(e.ConstraintTable), quoteIdentForAdvice(e.ConstraintName))
 		what = fmt.Sprintf("(this index belongs to the constraint %s, so DROP INDEX is refused by Postgres with 2BP01 and the constraint has to be dropped instead; "+
-			"no row is deleted)", e.ConstraintName)
+			"no row is deleted by the statement, but dropping a PRIMARY KEY or UNIQUE constraint removes the integrity guarantee it gave, "+
+			"and the statement fails, without CASCADE, while a foreign key depends on it)", e.ConstraintName)
+		concurrently = "" // DROP INDEX, with or without CONCURRENTLY, does not apply to an index owned by a constraint
 	}
 	return fmt.Sprintf("%s exists but is not the protection the system needs, and the migration does not touch an existing index: %v\n"+
 		"What to do, from psql, as the owner of the table: SET lock_timeout = '5s'; %s %s "+
 		"and run the migration again, which creates it correctly. The statement waits for an exclusive lock on the table, "+
 		"and while it waits every other access to that table queues behind it: that is what the lock_timeout is for (if it times out, "+
-		"try again when no long transaction is open). DROP INDEX CONCURRENTLY does not lock the table for long but cannot run inside a "+
-		"transaction block and, if cancelled, leaves an INVALID index behind that must be dropped as well. "+
-		"Customer sends from cases are refused (503) until the migration has run; nothing else is affected.", OpenSendIntentIndexName, e.Cause, drop, what)
+		"try again when no long transaction is open). %s"+
+		"Customer sends from cases are refused (503) until the migration has run; nothing else is affected.", OpenSendIntentIndexName, e.Cause, drop, what, concurrently)
 }
 func (e *OpenSendIntentIndexError) Unwrap() error { return e.Cause }
 
