@@ -119,15 +119,11 @@ func constraintBehindIndexName(db *gorm.DB) (table, name string) {
 	return r.Tbl, r.Name
 }
 
-var plainIdentRe = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
-
-// quoteIdentForAdvice renders a catalog name so that the statement printed for the operator works when pasted into psql:
-// a name made only of lower-case letters, digits and underscores is left as it is, anything else (capitals, hyphens,
-// spaces, quotes) is double-quoted with embedded quotes doubled.
+// quoteIdentForAdvice renders a catalog name so that the statement printed for the operator works when pasted into psql.
+// It ALWAYS double-quotes, with embedded quotes doubled: a plain lower-case name needs no quotes, but one that is a
+// reserved SQL word (user, order, group, ...) does, and quoting a plain name changes nothing, so there is no list of
+// keywords to keep in sync with Postgres.
 func quoteIdentForAdvice(s string) string {
-	if plainIdentRe.MatchString(s) {
-		return s
-	}
 	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
 }
 
@@ -145,7 +141,7 @@ func (e *OpenSendIntentNameTakenError) Error() string {
 	if e.IsIdx && e.ConstraintName != "" {
 		return fmt.Sprintf("the name %s is held by an %s, and that index belongs to the constraint %s of the table %s, so the protection cannot be created under it. "+
 			"The migration does not touch it. DROP INDEX does not apply: Postgres refuses it (2BP01) because the constraint needs the index. "+
-			"Check what the constraint is for: dropping a PRIMARY KEY or UNIQUE constraint of another table removes that table's integrity guarantee, and the statement "+
+			"Check what the constraint is for: dropping a PRIMARY KEY, UNIQUE or EXCLUDE constraint of another table removes that table's integrity guarantee, and the statement "+
 			"fails (it has no CASCADE) while a foreign key depends on it. If it is not needed, from psql as the owner of the table: SET lock_timeout = '5s'; ALTER TABLE %s DROP CONSTRAINT %s; "+
 			"and run the migration again. Customer sends from cases are refused (503) until then.",
 			OpenSendIntentIndexName, e.Kind, e.ConstraintName, e.ConstraintTable,
@@ -288,7 +284,7 @@ func (e *OpenSendIntentIndexError) Error() string {
 	if e.ConstraintName != "" {
 		drop = fmt.Sprintf("ALTER TABLE %s DROP CONSTRAINT %s;", quoteIdentForAdvice(e.ConstraintTable), quoteIdentForAdvice(e.ConstraintName))
 		what = fmt.Sprintf("(this index belongs to the constraint %s, so DROP INDEX is refused by Postgres with 2BP01 and the constraint has to be dropped instead; "+
-			"no row is deleted by the statement, but dropping a PRIMARY KEY or UNIQUE constraint removes the integrity guarantee it gave, "+
+			"no row is deleted by the statement, but dropping a PRIMARY KEY, UNIQUE or EXCLUDE constraint removes the integrity guarantee it gave, "+
 			"and the statement fails, without CASCADE, while a foreign key depends on it)", e.ConstraintName)
 		concurrently = "" // DROP INDEX, with or without CONCURRENTLY, does not apply to an index owned by a constraint
 	}

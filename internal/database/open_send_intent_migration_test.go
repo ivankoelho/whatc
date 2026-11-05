@@ -377,7 +377,7 @@ func TestEnsureOpenSendIntentUniqueness_AnIndexThatBelongsToAConstraint_PointsTo
 		assert.True(t, taken.IsIdx)
 		assert.Equal(t, "zz_other2", taken.ConstraintTable)
 		assert.Equal(t, name, taken.ConstraintName)
-		assert.Contains(t, err.Error(), "ALTER TABLE zz_other2 DROP CONSTRAINT "+name)
+		assert.Contains(t, err.Error(), `ALTER TABLE "zz_other2" DROP CONSTRAINT "`+name+`"`)
 		assert.Contains(t, err.Error(), "2BP01")
 		assert.NotContains(t, err.Error(), "SET lock_timeout = '5s'; DROP INDEX", "DROP INDEX is not the statement for a constraint")
 		assert.Contains(t, err.Error(), "lock_timeout")
@@ -395,7 +395,7 @@ func TestEnsureOpenSendIntentUniqueness_AnIndexThatBelongsToAConstraint_PointsTo
 		require.NoError(t, db.Exec("ALTER TABLE zz_other3 ADD CONSTRAINT "+name+" PRIMARY KEY (id)").Error)
 		err := database.EnsureOpenSendIntentUniqueness(db)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "ALTER TABLE zz_other3 DROP CONSTRAINT "+name)
+		assert.Contains(t, err.Error(), `ALTER TABLE "zz_other3" DROP CONSTRAINT "`+name+`"`)
 		require.NoError(t, db.Exec("ALTER TABLE zz_other3 DROP CONSTRAINT "+name).Error)
 		require.NoError(t, database.EnsureOpenSendIntentUniqueness(db))
 	})
@@ -412,7 +412,7 @@ func TestEnsureOpenSendIntentUniqueness_AnIndexThatBelongsToAConstraint_PointsTo
 		require.True(t, errors.As(err, &ie))
 		assert.Equal(t, "occurrence_send_intents", ie.ConstraintTable)
 		assert.Equal(t, name, ie.ConstraintName)
-		assert.Contains(t, err.Error(), "ALTER TABLE occurrence_send_intents DROP CONSTRAINT "+name)
+		assert.Contains(t, err.Error(), `ALTER TABLE "occurrence_send_intents" DROP CONSTRAINT "`+name+`"`)
 		assert.NotContains(t, err.Error(), "SET lock_timeout = '5s'; DROP INDEX")
 		assert.Equal(t, before, indexDef(t, db), "the existing index was left exactly as it was")
 
@@ -443,29 +443,37 @@ func TestEnsureOpenSendIntentUniqueness_AnIndexThatBelongsToAConstraint_PointsTo
 // (which does not apply to an index owned by a constraint) and must warn about what dropping the constraint costs.
 func TestEnsureOpenSendIntentUniqueness_ConstraintAdvice_QuotesTheTableAndDropsTheIndexAdvice(t *testing.T) {
 	name := database.OpenSendIntentIndexName
-	db := testutil.ScratchDatabase(t)
-	require.NoError(t, db.AutoMigrate(&models.OccurrenceSendIntent{}))
-	require.NoError(t, db.Exec(`CREATE TABLE "Zz-Other Quoted" (id int)`).Error)
-	require.NoError(t, db.Exec(`ALTER TABLE "Zz-Other Quoted" ADD CONSTRAINT ` + name + ` UNIQUE (id)`).Error)
+	// The table that owns the constraint: one that needs quoting (capitals, hyphen, space) and plain lower-case names
+	// that are RESERVED SQL words, which fail unquoted (`ALTER TABLE user ...` is a syntax error).
+	for _, table := range []string{"Zz-Other Quoted", "user", "order", "group"} {
+		t.Run(table, func(t *testing.T) {
+			db := testutil.ScratchDatabase(t)
+			require.NoError(t, db.AutoMigrate(&models.OccurrenceSendIntent{}))
+			quoted := `"` + table + `"`
+			require.NoError(t, db.Exec(`CREATE TABLE `+quoted+` (id int)`).Error)
+			require.NoError(t, db.Exec(`ALTER TABLE `+quoted+` ADD CONSTRAINT `+name+` UNIQUE (id)`).Error)
 
-	err := database.EnsureOpenSendIntentUniqueness(db)
-	require.Error(t, err)
-	want := `ALTER TABLE "Zz-Other Quoted" DROP CONSTRAINT ` + name
-	assert.Contains(t, err.Error(), want)
-	assert.NotContains(t, err.Error(), "CONCURRENTLY")
-	assert.Contains(t, err.Error(), "foreign key")
-	assert.Contains(t, err.Error(), "integrity")
+			err := database.EnsureOpenSendIntentUniqueness(db)
+			require.Error(t, err)
+			want := `ALTER TABLE ` + quoted + ` DROP CONSTRAINT "` + name + `"`
+			assert.Contains(t, err.Error(), want)
+			assert.NotContains(t, err.Error(), "CONCURRENTLY")
+			assert.Contains(t, err.Error(), "foreign key")
+			assert.Contains(t, err.Error(), "integrity")
+			assert.Contains(t, err.Error(), "EXCLUDE")
 
-	// The statement exactly as printed works, and then the migration finishes.
-	require.NoError(t, db.Exec(want).Error)
-	require.NoError(t, database.EnsureOpenSendIntentUniqueness(db))
-	require.NoError(t, database.VerifyOpenSendIntentGuard(db))
+			// The statement exactly as printed works, and then the migration finishes.
+			require.NoError(t, db.Exec(want).Error)
+			require.NoError(t, database.EnsureOpenSendIntentUniqueness(db))
+			require.NoError(t, database.VerifyOpenSendIntentGuard(db))
+		})
+	}
 
 	// The wrong-index path of a plain (non-constraint) index keeps its advice, CONCURRENTLY included.
 	db2 := testutil.ScratchDatabase(t)
 	require.NoError(t, db2.AutoMigrate(&models.OccurrenceSendIntent{}))
 	require.NoError(t, db2.Exec("CREATE UNIQUE INDEX "+name+" ON occurrence_send_intents (organization_id, occurrence_id, kind)").Error)
-	err = database.EnsureOpenSendIntentUniqueness(db2)
+	err := database.EnsureOpenSendIntentUniqueness(db2)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "DROP INDEX "+name)
 	assert.Contains(t, err.Error(), "CONCURRENTLY")

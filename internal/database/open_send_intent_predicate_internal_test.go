@@ -55,3 +55,20 @@ func TestOpenSendIntentPredicateOK(t *testing.T) {
 		assert.False(t, openSendIntentPredicateOK(p), name)
 	}
 }
+
+// The advice printed for the operator always double-quotes a catalog name (embedded quotes doubled), so a name that is a
+// reserved SQL word (user, order, ...) or needs quoting (capitals, hyphen, space, accents) still works when pasted.
+func TestQuoteIdentForAdvice(t *testing.T) {
+	cases := map[string]string{
+		"uq_send_intent_open": `"uq_send_intent_open"`,
+		"user":                `"user"`,
+		"order":               `"order"`,
+		"Zz-Other Quoted":     `"Zz-Other Quoted"`,
+		`a"b`:                 `"a""b"`,
+		"café":                `"café"`,
+		"1abc":                `"1abc"`,
+	}
+	for in, want := range cases {
+		assert.Equal(t, want, quoteIdentForAdvice(in), in)
+	}
+}
