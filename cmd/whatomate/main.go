@@ -223,7 +223,8 @@ func runServer(args []string) {
 
 		// Settling a customer send of unknown outcome is its own permission (additive, once per organization).
 		if err := database.BackfillResolveUncertainSendPermission(db, lo); err != nil {
-			lo.Error("Failed to backfill occurrences:resolve_send", "error", err)
+			// Not optional: without it nobody may settle an uncertain send, which the index step's own recovery needs.
+			lo.Fatal("Resolve-send permission backfill failed", "error", err)
 		}
 
 		// Same window: supervising cases became its own permission. Grant it to
@@ -311,7 +312,7 @@ func runServer(args []string) {
 	}
 
 	// Without the index nothing can stop two people sending to one customer from one case at the same time, so
-	// customer sends from cases are REFUSED until it is there (see handlers.App.openSendGuardReady). Say so loudly.
+	// customer sends from cases are REFUSED until it is there (see claimSendIntent: the check runs inside every new claim). Say so loudly.
 	if err := database.VerifyOpenSendIntentGuard(db); err != nil {
 		lo.Error("Customer sends from cases are DISABLED: "+err.Error(), "error", err)
 	}

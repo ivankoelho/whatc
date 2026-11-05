@@ -69,6 +69,18 @@ func (c *Client) getBaseURL() string {
 }
 
 // doRequest performs an HTTP request to the Meta API
+// preflightKey carries an optional check that runs immediately before a request is handed to the HTTP client.
+type preflightKey struct{}
+
+// WithPreflight returns a context whose requests are checked, as late as this package can, right before they are
+// handed to the HTTP client: if the check returns an error the request is NOT made and the error is classified as
+// "never sent" (so the caller may record a proven failure). It narrows, and does not remove, the gap between the
+// caller's last verification and the write on the network: nothing here can stop a process that is frozen after the
+// check returns.
+func WithPreflight(ctx context.Context, check func(context.Context) error) context.Context {
+	return context.WithValue(ctx, preflightKey{}, check)
+}
+
 func (c *Client) doRequest(ctx context.Context, method, url string, body any, accessToken string) ([]byte, error) {
 	var reqBody io.Reader
 	var jsonBody []byte
@@ -92,6 +104,12 @@ func (c *Client) doRequest(ctx context.Context, method, url string, body any, ac
 
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Content-Type", "application/json")
+
+	if check, ok := ctx.Value(preflightKey{}).(func(context.Context) error); ok && check != nil {
+		if err := check(ctx); err != nil {
+			return nil, NewNotSentError(fmt.Errorf("the request was not made: %w", err))
+		}
+	}
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {

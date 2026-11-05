@@ -193,9 +193,18 @@ func (a *App) agentNamePrefix(userID uuid.UUID) string {
 	return "*" + first + ":*\n"
 }
 
+// ErrBeforeSendNeedsSync: a send with a BeforeSend point of no return cannot be asynchronous.
+var ErrBeforeSendNeedsSync = errors.New("BeforeSend requires a synchronous send (Async=false)")
+
 // SendOutgoingMessage is the unified method for sending all types of WhatsApp messages.
 // It handles: text, media (image/video/audio/document), interactive (buttons/list/cta_url), and template messages.
 func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageRequest, opts MessageSendOptions) (*models.Message, error) {
+	// A fenced send must stay in this goroutine: the deadline BeforeSend returns is the deadline of the provider call.
+	// The async branch would call the provider in a goroutine with its own context and silently drop it.
+	if opts.BeforeSend != nil && opts.Async {
+		return nil, ErrBeforeSendNeedsSync
+	}
+
 	// 0. Ownership gate for human sends: claim the attendance (or open one)
 	// BEFORE anything is created or sent, so the loser of a race, or an agent
 	// writing into another agent's conversation, never reaches the customer.
@@ -337,9 +346,9 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 	if opts.BeforeSend != nil {
 		sendCtx, cancel, err := opts.BeforeSend(ctx)
 		if err != nil {
-			a.DB.Model(&models.Message{}).Where("id = ?", msg.ID).Updates(map[string]any{
-				"status": models.MessageStatusFailed, "error_message": whatsapp.PublicErrorText(err),
-			})
+			// Nothing reached the provider and nothing will: close the message row, the usage ledger entry
+			// (pending since the row was created) and tell the viewers, exactly as any send that did not leave.
+			a.finalizeMessageSend(msg, req, opts, "", err)
 			return nil, err
 		}
 		defer cancel()

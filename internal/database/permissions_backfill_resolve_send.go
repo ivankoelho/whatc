@@ -32,8 +32,8 @@ func BackfillResolveUncertainSendPermission(db *gorm.DB, lo logf.Logger) error {
 		return fmt.Errorf("failed to look up occurrences:resolve_send: %w", err)
 	}
 	if seeded == 0 {
-		lo.Warn("Resolve uncertain send backfill: permission not seeded yet, did nothing")
-		return nil
+		// Doing nothing here would leave the system with nobody allowed to settle an uncertain send, silently.
+		return fmt.Errorf("the permission occurrences:resolve_send is not seeded: run the permission seed before this backfill")
 	}
 	res := db.Exec(`
 		INSERT INTO role_permissions (custom_role_id, permission_id)

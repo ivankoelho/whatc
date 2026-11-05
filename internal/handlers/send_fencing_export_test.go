@@ -1,10 +1,12 @@
 package handlers
 
 import (
+	"context"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"gorm.io/gorm"
 )
 
 // Test-only access to the fencing clock and to the two instants at which a test may stop the owner of a send.
@@ -25,20 +27,20 @@ func SetSendHooksForTest(before, after func()) (restore func()) {
 
 // DispatchSendIntentForTest is the owner's point of no return, called on its own.
 func (a *App) DispatchSendIntentForTest(id uuid.UUID) (bool, error) {
-	_, ok, err := a.dispatchSendIntent(&models.OccurrenceSendIntent{ID: id})
+	_, _, ok, err := a.dispatchSendIntent(&models.OccurrenceSendIntent{ID: id})
 	return ok, err
 }
 
-// SetSendGuardTTLForTest changes how long a good / bad check of the open-send index is remembered.
-func SetSendGuardTTLForTest(ok, bad time.Duration) (restore func()) {
-	o, b := sendGuardOKFor, sendGuardBadFor
-	sendGuardOKFor, sendGuardBadFor = ok, bad
-	return func() { sendGuardOKFor, sendGuardBadFor = o, b }
+// ReconcileCopyForTest runs the reconciliation of ONE row on the copy the caller holds (which may be stale).
+func (a *App) ReconcileCopyForTest(intent *models.OccurrenceSendIntent, now time.Time) bool {
+	return a.reconcileSendIntent(intent, now)
 }
 
-// ResetSendGuardForTest forgets the remembered check.
-func (a *App) ResetSendGuardForTest() {
-	a.sendGuard.mu.Lock()
-	a.sendGuard.checkedAt, a.sendGuard.err = time.Time{}, nil
-	a.sendGuard.mu.Unlock()
+// PreflightForTest is the check that runs right before the provider request is handed to the HTTP client.
+func (a *App) PreflightForTest(id uuid.UUID, started time.Time) error {
+	return a.preflightSendIntent(context.Background(), id, started)
 }
+
+// SetOpenSendGuardVerifierForTest replaces the check of the open-send index (nil restores the real one), so a test can
+// break the protection on a database of its own without touching the shared test database.
+func (a *App) SetOpenSendGuardVerifierForTest(f func(tx *gorm.DB) error) { a.verifyOpenSendGuard = f }

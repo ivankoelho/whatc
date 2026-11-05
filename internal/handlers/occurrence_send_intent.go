@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -103,58 +102,83 @@ var errSendFenced = errors.New("the send was fenced before it reached the provid
 // dispatchSendIntent is the owner's point of no return. It returns the deadline until which the provider may be
 // called, ok=false when the row is not "processing and never dispatched" any more (fenced by reconciliation),
 // and an error when the database could not say (nothing may be sent then either).
-func (a *App) dispatchSendIntent(intent *models.OccurrenceSendIntent) (deadline time.Time, ok bool, err error) {
+func (a *App) dispatchSendIntent(intent *models.OccurrenceSendIntent) (deadline, started time.Time, ok bool, err error) {
 	if h := sendHooks.beforeDispatch; h != nil {
 		h()
 	}
+	// The process's own monotonic clock starts BEFORE the statement is sent, so the local expiry (started + window)
+	// can never be later than the database's (its NOW() is taken after this instant): the owner's own timer is
+	// conservative, and needs no agreement between this server's wall clock and the database's.
+	started = time.Now()
 	res := a.DB.Raw(`UPDATE occurrence_send_intents
 		SET dispatched_at = NOW(), dispatch_deadline = NOW() + make_interval(secs => ?), updated_at = NOW()
 		WHERE id = ? AND state = ? AND dispatched_at IS NULL
 		RETURNING dispatch_deadline`, sendIntentDispatchWindow.Seconds(), intent.ID, models.SendIntentProcessing).Scan(&deadline)
 	if res.Error != nil {
-		return time.Time{}, false, res.Error
+		return time.Time{}, time.Time{}, false, res.Error
 	}
 	if res.RowsAffected != 1 {
-		return time.Time{}, false, nil
+		return time.Time{}, time.Time{}, false, nil
 	}
 	if h := sendHooks.afterDispatch; h != nil {
 		h()
 	}
-	return deadline, true, nil
+	return deadline, started, true, nil
+}
+
+// errPastDispatchDeadline: the owner's time to call the provider is over (or the row is not "processing and
+// dispatched" any more).
+var errPastDispatchDeadline = errors.New("the owner's deadline to call the provider has passed or the send was fenced")
+
+// preflightSendIntent runs immediately before the provider request is handed to the HTTP client. It asks the
+// DATABASE, with the database's own clock, whether this row is still processing, dispatched and inside its
+// deadline, and checks the process's monotonic timer too. A refusal means the request is not made, which is
+// provably not sent. It narrows, and does not remove, the gap between this check and the write on the network
+// (see "Fencing" in the contract): a process frozen right after it returns can still write later.
+func (a *App) preflightSendIntent(ctx context.Context, id uuid.UUID, started time.Time) error {
+	if time.Since(started) >= sendIntentDispatchWindow {
+		return errPastDispatchDeadline
+	}
+	var n int64
+	err := a.DB.WithContext(ctx).Model(&models.OccurrenceSendIntent{}).
+		Where("id = ? AND state = ? AND dispatched_at IS NOT NULL AND dispatch_deadline > NOW()", id, models.SendIntentProcessing).
+		Count(&n).Error
+	if err != nil {
+		return fmt.Errorf("could not confirm that the send is still allowed: %w", err)
+	}
+	if n != 1 {
+		return errPastDispatchDeadline
+	}
+	return nil
+}
+
+// dbNow is the DATABASE's clock. Everything that decides whether a dispatched owner can still send (the deadline
+// and the margin after it) is judged on this one clock, so no agreement between the wall clocks of several
+// application servers is needed. It falls back to the local clock only if the database cannot answer.
+func (a *App) dbNow() time.Time {
+	var t time.Time
+	if err := a.DB.Raw("SELECT NOW()").Scan(&t).Error; err != nil || t.IsZero() {
+		return time.Now()
+	}
+	return t
 }
 
 // errTypeSendGuardUnavailable: the database protection that keeps a case at one open send is missing or invalid.
 const errTypeSendGuardUnavailable = "send_guard_unavailable"
 
-// sendGuardCache remembers the last check of the open-send index. A good answer is kept a few minutes, a bad one
-// only seconds, so a server whose migration was just run recovers by itself, without a restart.
-type sendGuardCache struct {
-	mu        sync.Mutex
-	checkedAt time.Time
-	err       error
-}
+// guardUnavailableError: the protection could not be confirmed INSIDE the claim, so nothing was claimed.
+type guardUnavailableError struct{ cause error }
 
-var (
-	sendGuardOKFor  = 5 * time.Minute
-	sendGuardBadFor = 10 * time.Second
-)
+func (e *guardUnavailableError) Error() string { return e.cause.Error() }
+func (e *guardUnavailableError) Unwrap() error { return e.cause }
 
-// openSendGuardReady is nil when the protection is in the database. Without it, the same customer could be sent
-// to twice from one case, so the send is refused (fail closed) instead of falling back to the old behaviour.
-func (a *App) openSendGuardReady() error {
-	c := &a.sendGuard
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	ttl := sendGuardBadFor
-	if c.err == nil {
-		ttl = sendGuardOKFor
+// checkOpenSendGuard confirms, on the connection of the claim transaction, that the open-send index is really in
+// the database. There is NO cache: every new claim is checked, inside the same transaction as its INSERT.
+func (a *App) checkOpenSendGuard(tx *gorm.DB) error {
+	if a.verifyOpenSendGuard != nil {
+		return a.verifyOpenSendGuard(tx)
 	}
-	if !c.checkedAt.IsZero() && time.Since(c.checkedAt) < ttl {
-		return c.err
-	}
-	c.err = database.VerifyOpenSendIntentGuard(a.DB)
-	c.checkedAt = time.Now()
-	return c.err
+	return database.VerifyOpenSendIntentGuard(tx)
 }
 
 // requireIdempotencyKey reads and validates the header. It writes the 400 itself.
@@ -211,15 +235,33 @@ func (a *App) claimSendIntent(orgID, userID uuid.UUID, occ *models.Occurrence, k
 			Kind: models.SendIntentKindProtocol, RequestHash: hash, State: models.SendIntentProcessing,
 			MessageID: uuid.New(), ClaimedAt: now,
 		}
-		res := a.DB.Clauses(clause.OnConflict{DoNothing: true}).Create(intent)
-		if res.Error != nil {
-			return nil, false, res.Error
+		claimed := false
+		// The INSERT and the check of the protection are ONE transaction. Once the INSERT has run this transaction
+		// holds a lock on the table that DROP INDEX must wait for, so an index that is there when it is checked
+		// (after the INSERT) stays there until the claim is committed: a claim can only be committed under the
+		// protection, never in the gap between a check and the INSERT. If the protection is missing the INSERT is
+		// rolled back and nothing was claimed. A repeat of an existing key inserts nothing and needs no check.
+		err := a.DB.Transaction(func(tx *gorm.DB) error {
+			res := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(intent)
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected == 1 {
+				if gerr := a.checkOpenSendGuard(tx); gerr != nil {
+					return &guardUnavailableError{cause: gerr}
+				}
+				claimed = true
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, false, err
 		}
-		if res.RowsAffected == 1 {
+		if claimed {
 			return intent, true, nil
 		}
 		var existing models.OccurrenceSendIntent
-		err := a.DB.Where("organization_id = ? AND idempotency_key = ?", orgID, key).First(&existing).Error
+		err = a.DB.Where("organization_id = ? AND idempotency_key = ?", orgID, key).First(&existing).Error
 		if err == nil {
 			return &existing, false, nil // the same key: the caller answers from it
 		}
@@ -236,7 +278,7 @@ func (a *App) claimSendIntent(orgID, userID uuid.UUID, occ *models.Occurrence, k
 		if err != nil {
 			return nil, false, err
 		}
-		if a.reconcileSendIntent(&existing, time.Now()) && existing.State != models.SendIntentProcessing && existing.State != models.SendIntentUncertain {
+		if a.reconcileSendIntent(&existing, a.dbNow()) && existing.State != models.SendIntentProcessing && existing.State != models.SendIntentUncertain {
 			continue // reconciliation settled it: the case may be free now
 		}
 		return &existing, false, nil
@@ -313,7 +355,7 @@ func (a *App) answerExistingIntent(r *fastglue.Request, intent *models.Occurrenc
 		return r.SendErrorEnvelope(fasthttp.StatusConflict,
 			"This Idempotency-Key was already used for a different request; use a new key for a new send", nil, errTypeIdempotencyKeyReused)
 	}
-	a.reconcileSendIntent(intent, time.Now())
+	a.reconcileSendIntent(intent, a.dbNow())
 	switch intent.State {
 	case models.SendIntentProcessing:
 		r.RequestCtx.Response.Header.Set(headerIdempotentReplay, "true")
@@ -529,7 +571,7 @@ func (a *App) StartSendIntentReconciler(ctx context.Context) {
 	defer t.Stop()
 	var lastPurge time.Time
 	for {
-		now := time.Now()
+		now := a.dbNow()
 		a.ReconcileSendIntents(now)
 		if now.Sub(lastPurge) >= sendIntentPurgeEvery {
 			a.PurgeSendIntents(now)
@@ -611,7 +653,7 @@ func (a *App) GetOccurrenceProtocolSendByKey(r *fastglue.Request) error {
 // uncertain or processing -> sent=false, confirmed=false.
 func (a *App) answerSendState(r *fastglue.Request, intentPtr *models.OccurrenceSendIntent, occ *models.Occurrence, userID uuid.UUID) error {
 	intent := *intentPtr
-	a.reconcileSendIntent(&intent, time.Now())
+	a.reconcileSendIntent(&intent, a.dbNow())
 
 	var msgStatus string
 	a.DB.Model(&models.Message{}).Select("status").Where("id = ?", intent.MessageID).Scan(&msgStatus)
@@ -628,7 +670,7 @@ func (a *App) answerSendState(r *fastglue.Request, intentPtr *models.OccurrenceS
 		data["resolution_outcome"] = intent.ResolutionOutcome
 	}
 	if intent.State == models.SendIntentProcessing {
-		data["detail"] = fmt.Sprintf("in progress; it is reconciled from the records after %s without an answer", sendIntentStaleAfter)
+		data["detail"] = fmt.Sprintf("in progress; the owner has until its deadline (%s after it dispatched) plus a margin, and after that it is reconciled from the records", sendIntentDispatchWindow)
 	}
 	return r.SendEnvelope(data)
 }
@@ -691,7 +733,7 @@ func (a *App) ResolveOccurrenceProtocolSend(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Send not found", nil, errTypeSendNotFound)
 	}
 	// What the provider's own evidence says wins over a person's reading: settle it from the records first.
-	a.reconcileSendIntent(&intent, time.Now())
+	a.reconcileSendIntent(&intent, a.dbNow())
 	if intent.State != models.SendIntentUncertain {
 		return r.SendErrorEnvelope(fasthttp.StatusConflict, "This send is not waiting to be settled (state: "+intent.State+")", nil, errTypeSendNotUncertain)
 	}

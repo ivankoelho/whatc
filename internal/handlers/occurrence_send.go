@@ -61,14 +61,6 @@ func (a *App) SendOccurrenceProtocol(r *fastglue.Request) error {
 		return nil
 	}
 
-	// Fail closed: without the database protection (one open send per case) nothing is sent, and nothing is claimed.
-	if gerr := a.openSendGuardReady(); gerr != nil {
-		a.Log.Error("Customer send refused: the open-send protection is not in place", "error", gerr, "occurrence", occ.ID)
-		return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable,
-			"Customer sends from cases are unavailable: the database protection against sending twice is not in place. Nothing was sent. An administrator must run the migration (-migrate).",
-			nil, errTypeSendGuardUnavailable)
-	}
-
 	// The body is optional: no body keeps the legacy text. A present body must
 	// be valid JSON.
 	var customMessage string
@@ -104,6 +96,14 @@ func (a *App) SendOccurrenceProtocol(r *fastglue.Request) error {
 	// Claim the key. Exactly one request per key gets past this point; every other one only
 	// reads the row and answers from it: nothing below runs for them.
 	intent, claimed, err := a.claimSendIntent(orgID, userID, occ, key, hashProtocolRequest(identity))
+	var guardErr *guardUnavailableError
+	if errors.As(err, &guardErr) {
+		// Fail closed: the protection (one open send per case) is not in the database, so nothing is claimed or sent.
+		a.Log.Error("Customer send refused: the open-send protection is not in place", "error", err, "occurrence", occ.ID)
+		return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable,
+			"Customer sends from cases are unavailable: the database protection against sending twice is not in place. Nothing was sent. An administrator must run the migration (-migrate).",
+			nil, errTypeSendGuardUnavailable)
+	}
 	if err != nil {
 		a.Log.Error("Failed to claim the send intent", "error", err, "occurrence", occ.ID)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to record the send; nothing was sent", nil, errTypeSendRecordFailed)
@@ -160,15 +160,20 @@ func (a *App) SendOccurrenceProtocol(r *fastglue.Request) error {
 	// The point of no return: until the row is moved to "dispatched" nothing may reach the customer, and the
 	// provider call carries the deadline stored with that move (see "Fencing" in the intent file).
 	opts.BeforeSend = func(ctx context.Context) (context.Context, context.CancelFunc, error) {
-		deadline, ok, derr := a.dispatchSendIntent(intent)
+		deadline, started, ok, derr := a.dispatchSendIntent(intent)
 		if derr != nil {
 			return nil, nil, derr
 		}
 		if !ok {
 			return nil, nil, errSendFenced
 		}
-		sctx, cancel := context.WithDeadline(ctx, deadline)
-		return sctx, cancel, nil
+		// Two deadlines, the earlier wins: the database's (as a wall-clock instant, so a process that was suspended
+		// finds it already past) and this process's own monotonic timer started before the dispatch. Then a check
+		// in the database, with its clock, runs immediately before the request is handed to the HTTP client.
+		dbCtx, cancelDB := context.WithDeadline(ctx, deadline)
+		localCtx, cancelLocal := context.WithDeadline(dbCtx, started.Add(sendIntentDispatchWindow))
+		sctx := whatsapp.WithPreflight(localCtx, func(c context.Context) error { return a.preflightSendIntent(c, intent.ID, started) })
+		return sctx, func() { cancelLocal(); cancelDB() }, nil
 	}
 	_, err = a.SendOutgoingMessage(context.Background(), OutgoingMessageRequest{
 		MessageID: messageID,

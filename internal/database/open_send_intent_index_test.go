@@ -231,3 +231,13 @@ func TestResolveSendPermission_FitsTheExistingColumn(t *testing.T) {
 	assert.Contains(t, models.SystemRolePermissions()["manager"], "occurrences:resolve_send")
 	assert.NotContains(t, models.SystemRolePermissions()["agent"], "occurrences:resolve_send")
 }
+
+// The backfill must not skip silently when the permission is not seeded: that would leave nobody allowed to settle an
+// uncertain send, with the migration reporting success. It fails, and the migration stops before the index step.
+func TestBackfillResolveSend_PermissionNotSeeded_IsAnErrorNotASilentSkip(t *testing.T) {
+	db := testutil.ScratchDatabase(t)
+	require.NoError(t, db.AutoMigrate(&models.Permission{}))
+	err := database.BackfillResolveUncertainSendPermission(db, testLog())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not seeded")
+}
