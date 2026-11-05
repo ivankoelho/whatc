@@ -230,11 +230,12 @@ func TestFencing_ProviderEvidenceStillBeatsAPerson_AfterAPausedOwner(t *testing.
 // database, exactly one of them wins, never both and never neither.
 func TestFencing_DispatchAndFence_RaceForRealInTheDatabase_ExactlyOneWins(t *testing.T) {
 	w := newMsgWorld(t)
-	// Rounds are run until BOTH outcomes have been seen enough times (or a generous cap is reached), so the test
-	// proves the race is real on this machine instead of assuming it: the property is checked in EVERY round.
-	const wantEach, maxRounds = 5, 800
+	// At least minRounds rounds are run, and then more until BOTH outcomes have been seen enough times (or a generous
+	// cap is reached), so the test proves the race is real on this machine instead of assuming it. The property is
+	// checked in EVERY round.
+	const minRounds, wantEach, maxRounds = 120, 5, 800
 	dispatchedWins, fencedWins, rounds := 0, 0, 0
-	for ; rounds < maxRounds && (dispatchedWins < wantEach || fencedWins < wantEach); rounds++ {
+	for ; rounds < maxRounds && (rounds < minRounds || dispatchedWins < wantEach || fencedWins < wantEach); rounds++ {
 		id := uuid.New()
 		require.NoError(t, w.app.DB.Create(&models.OccurrenceSendIntent{ID: id, OrganizationID: w.org.ID, IdempotencyKey: uuid.NewString(),
 			OccurrenceID: uuid.New(), UserID: w.agent.ID, Kind: models.SendIntentKindProtocol, RequestHash: "h", State: models.SendIntentProcessing,
@@ -276,6 +277,7 @@ func TestFencing_DispatchAndFence_RaceForRealInTheDatabase_ExactlyOneWins(t *tes
 	t.Logf("dispatch won %d, fence won %d, in %d real races", dispatchedWins, fencedWins, rounds)
 	assert.GreaterOrEqual(t, dispatchedWins, wantEach, "the owner's dispatch must be seen winning")
 	assert.GreaterOrEqual(t, fencedWins, wantEach, "the fence must be seen winning")
+	assert.GreaterOrEqual(t, rounds, minRounds)
 }
 
 // 5. Two dispatches of the same row: only the first passes (a request cannot be sent twice from one claim).

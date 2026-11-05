@@ -67,6 +67,9 @@ func TestSendGuard_IndexInvalidOrWrong_TheSendIsRefused(t *testing.T) {
 		"covers one state": `CREATE UNIQUE INDEX uq_send_intent_open ON occurrence_send_intents (organization_id, occurrence_id, kind) WHERE state = 'processing'`,
 		"other columns":    `CREATE UNIQUE INDEX uq_send_intent_open ON occurrence_send_intents (occurrence_id, kind) WHERE state IN ('processing', 'uncertain')`,
 		"not partial":      `CREATE UNIQUE INDEX uq_send_intent_open ON occurrence_send_intents (organization_id, occurrence_id, kind)`,
+		"NOT IN of both":   `CREATE UNIQUE INDEX uq_send_intent_open ON occurrence_send_intents (organization_id, occurrence_id, kind) WHERE state NOT IN ('processing', 'uncertain')`,
+		"OR on a column":   `CREATE UNIQUE INDEX uq_send_intent_open ON occurrence_send_intents (organization_id, occurrence_id, kind) WHERE state = 'processing' OR kind = 'uncertain'`,
+		"time condition":   `CREATE UNIQUE INDEX uq_send_intent_open ON occurrence_send_intents (organization_id, occurrence_id, kind) WHERE state IN ('processing', 'uncertain') AND claimed_at < '2000-01-01'`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			g.drop(t)

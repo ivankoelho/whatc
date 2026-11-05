@@ -196,6 +196,18 @@ func TestEnsureOpenSendIntentUniqueness_AnExistingWrongIndexFailsTheMigration_An
 		"covers one state": `CREATE UNIQUE INDEX ` + name + ` ON occurrence_send_intents (organization_id, occurrence_id, kind) WHERE state = 'processing'`,
 		"other columns":    `CREATE UNIQUE INDEX ` + name + ` ON occurrence_send_intents (occurrence_id, kind) WHERE state IN ('processing', 'uncertain')`,
 		"not partial":      `CREATE UNIQUE INDEX ` + name + ` ON occurrence_send_intents (organization_id, occurrence_id, kind)`,
+		// The shapes the previous substring check let through (found by the independent review): unique, valid, partial,
+		// on the right columns, and still NOT the protection.
+		"NOT IN of both states":             `CREATE UNIQUE INDEX ` + name + ` ON occurrence_send_intents (organization_id, occurrence_id, kind) WHERE state NOT IN ('processing', 'uncertain')`,
+		"OR on another column":              `CREATE UNIQUE INDEX ` + name + ` ON occurrence_send_intents (organization_id, occurrence_id, kind) WHERE state = 'processing' OR kind = 'uncertain'`,
+		"IN plus a time condition":          `CREATE UNIQUE INDEX ` + name + ` ON occurrence_send_intents (organization_id, occurrence_id, kind) WHERE state IN ('processing', 'uncertain') AND claimed_at < '2000-01-01'`,
+		"both states written as OR":         `CREATE UNIQUE INDEX ` + name + ` ON occurrence_send_intents (organization_id, occurrence_id, kind) WHERE state = 'processing' OR state = 'uncertain'`,
+		"a third state":                     `CREATE UNIQUE INDEX ` + name + ` ON occurrence_send_intents (organization_id, occurrence_id, kind) WHERE state IN ('processing', 'uncertain', 'sent')`,
+		"columns in another order":          `CREATE UNIQUE INDEX ` + name + ` ON occurrence_send_intents (occurrence_id, organization_id, kind) WHERE state IN ('processing', 'uncertain')`,
+		"an extra key column":               `CREATE UNIQUE INDEX ` + name + ` ON occurrence_send_intents (organization_id, occurrence_id, kind, user_id) WHERE state IN ('processing', 'uncertain')`,
+		"an included column":                `CREATE UNIQUE INDEX ` + name + ` ON occurrence_send_intents (organization_id, occurrence_id, kind) INCLUDE (user_id) WHERE state IN ('processing', 'uncertain')`,
+		"an expression instead of a column": `CREATE UNIQUE INDEX ` + name + ` ON occurrence_send_intents (organization_id, occurrence_id, lower(kind)) WHERE state IN ('processing', 'uncertain')`,
+		"a hash index on a subset":          `CREATE INDEX ` + name + ` ON occurrence_send_intents USING hash (occurrence_id) WHERE state IN ('processing', 'uncertain')`,
 	} {
 		t.Run(label, func(t *testing.T) {
 			require.NoError(t, db.Exec("DROP INDEX IF EXISTS "+name).Error)
@@ -207,6 +219,7 @@ func TestEnsureOpenSendIntentUniqueness_AnExistingWrongIndexFailsTheMigration_An
 			var ie *database.OpenSendIntentIndexError
 			require.True(t, errors.As(err, &ie))
 			assert.Contains(t, err.Error(), "DROP INDEX "+name)
+			assert.Contains(t, err.Error(), "lock_timeout", "the procedure carries the lock cautions")
 			assert.Contains(t, err.Error(), "does not touch an existing index")
 			assert.Equal(t, before, indexDef(t, db), "the existing index was left exactly as it was")
 
@@ -241,4 +254,41 @@ func indexDef(t *testing.T, db *gorm.DB) string {
 	var def string
 	require.NoError(t, db.Raw("SELECT pg_get_indexdef(c.oid) FROM pg_class c WHERE c.relname = ?", database.OpenSendIntentIndexName).Scan(&def).Error)
 	return def
+}
+
+// L-1 of the last review: the check looks at the table of the CURRENT schema only. A table of the same name with a
+// perfect index in another schema must not satisfy it, and the migration must create the real one and leave the
+// other alone.
+func TestVerifyOpenSendIntentGuard_AnIndexInAnotherSchemaCountsForNothing(t *testing.T) {
+	db := testutil.ScratchDatabase(t)
+	require.NoError(t, db.AutoMigrate(&models.OccurrenceSendIntent{}))
+	require.NoError(t, db.Exec("CREATE SCHEMA other_sch").Error)
+	require.NoError(t, db.Exec("CREATE TABLE other_sch.occurrence_send_intents (organization_id uuid, occurrence_id uuid, kind text, state text)").Error)
+	require.NoError(t, db.Exec("CREATE UNIQUE INDEX "+database.OpenSendIntentIndexName+" ON other_sch.occurrence_send_intents (organization_id, occurrence_id, kind) WHERE state IN ('processing', 'uncertain')").Error)
+
+	var cur string
+	require.NoError(t, db.Raw("SELECT current_schema()").Scan(&cur).Error)
+	require.Equal(t, "public", cur)
+
+	err := database.VerifyOpenSendIntentGuard(db)
+	require.Error(t, err, "the perfect index of the other schema must not satisfy the guard")
+	assert.Contains(t, err.Error(), "is missing")
+
+	require.NoError(t, database.EnsureOpenSendIntentUniqueness(db))
+	require.NoError(t, database.VerifyOpenSendIntentGuard(db))
+	var inPublic, inOther int64
+	require.NoError(t, db.Raw("SELECT COUNT(*) FROM pg_indexes WHERE schemaname = 'public' AND indexname = ?", database.OpenSendIntentIndexName).Scan(&inPublic).Error)
+	require.NoError(t, db.Raw("SELECT COUNT(*) FROM pg_indexes WHERE schemaname = 'other_sch' AND indexname = ?", database.OpenSendIntentIndexName).Scan(&inOther).Error)
+	assert.EqualValues(t, 1, inPublic, "the real one was created where the table is")
+	assert.EqualValues(t, 1, inOther, "and the other schema was left alone")
+}
+
+// The check of the structure, with the index the migration itself creates: it passes, and so does the second pass.
+func TestVerifyOpenSendIntentGuard_TheIndexTheMigrationCreatesPasses(t *testing.T) {
+	db := testutil.ScratchDatabase(t)
+	require.NoError(t, db.AutoMigrate(&models.OccurrenceSendIntent{}))
+	require.NoError(t, database.EnsureOpenSendIntentUniqueness(db))
+	require.NoError(t, database.VerifyOpenSendIntentGuard(db))
+	require.NoError(t, database.EnsureOpenSendIntentUniqueness(db))
+	require.NoError(t, database.VerifyOpenSendIntentGuard(db))
 }

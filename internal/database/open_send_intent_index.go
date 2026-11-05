@@ -2,6 +2,7 @@ package database
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -24,23 +25,67 @@ const createOpenSendIntentIndexSQL = `CREATE UNIQUE INDEX IF NOT EXISTS ` + Open
 // createUncertainRecheckIndexSQL serves the background re-check of recent unsettled uncertain sends.
 const createUncertainRecheckIndexSQL = `CREATE INDEX IF NOT EXISTS idx_send_intent_uncertain_recheck ON occurrence_send_intents (finished_at) WHERE state = 'uncertain' AND reconciled_at IS NULL`
 
+// The predicate of the protection is "state is processing or uncertain", and nothing else. The catalog renders it
+// differently between Postgres versions (casts, ANY (ARRAY[...]), parentheses), so it is not compared as text: the
+// string literals in it must be EXACTLY {processing, uncertain}, and once the literals, the casts to a character type
+// and the tokens of "state = ANY (ARRAY[...])" are taken out, NOTHING may remain: no NOT, no <>, no OR/AND, no other
+// column, no other operator, no function.
+var (
+	predLiteral = regexp.MustCompile(`'(?:[^']|'')*'`)
+	predCast    = regexp.MustCompile(`::(?:character varying|character|varchar|bpchar|text|name)(?:\[\])?`)
+	predTokens  = strings.NewReplacer("ARRAY", "", "ANY", "", "state", "", "=", "", "(", "", ")", "", "[", "", "]", "", ",", "", " ", "", "\n", "", "\t", "")
+)
+
+func openSendIntentPredicateOK(pred string) bool {
+	lits := predLiteral.FindAllString(pred, -1)
+	set := map[string]bool{}
+	for _, l := range lits {
+		set[l] = true
+	}
+	if len(lits) != 2 || len(set) != 2 || !set["'processing'"] || !set["'uncertain'"] {
+		return false
+	}
+	rest := predLiteral.ReplaceAllString(pred, "")
+	rest = predCast.ReplaceAllString(rest, "")
+	return predTokens.Replace(rest) == ""
+}
+
 // VerifyOpenSendIntentGuard says whether the protection that keeps a case at one open customer send is really in
-// the database: the index exists, is UNIQUE, is VALID (a failed CREATE INDEX CONCURRENTLY leaves an invalid one),
-// is on exactly (organization_id, occurrence_id, kind) and its predicate covers both open states. nil = the
-// protection is there. Anything else is an operational error that says what to do. Read-only.
+// the database. It looks at the STRUCTURE in the catalog, never at the name alone and never at substrings of a
+// rendered definition: the index named uq_send_intent_open on the table occurrence_send_intents of the CURRENT
+// schema (a table or index of the same name in another schema counts for nothing), a btree, UNIQUE, VALID, READY and
+// live, on exactly the three plain columns (organization_id, occurrence_id, kind) in that order, with no
+// expression, no extra or included column, and the partial predicate "state is processing or uncertain" and
+// nothing else. nil = the protection is there. Anything else is an operational error that says what to do.
+// Read-only.
 func VerifyOpenSendIntentGuard(db *gorm.DB) error {
 	var row struct {
 		Def     string
 		Unique  bool
 		Valid   bool
 		Ready   bool
-		Partial bool
+		Live    bool
+		KeyAtts int
+		Atts    int
+		NoExprs bool
+		Pred    string
+		Cols    string
+		Method  string
 	}
 	err := db.Raw(`SELECT pg_get_indexdef(i.indexrelid) AS def, i.indisunique AS "unique", i.indisvalid AS valid,
-		i.indisready AS ready, (i.indpred IS NOT NULL) AS partial
-		FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
-		JOIN pg_class t ON t.oid = i.indrelid AND t.relname = 'occurrence_send_intents'
-		WHERE c.relname = ?`, OpenSendIntentIndexName).Scan(&row).Error
+		i.indisready AS ready, i.indislive AS live, i.indnkeyatts::int AS key_atts, i.indnatts::int AS atts,
+		(i.indexprs IS NULL) AS no_exprs, COALESCE(pg_get_expr(i.indpred, i.indrelid), '') AS pred,
+		COALESCE((SELECT string_agg(a.attname::text, ',' ORDER BY k.ord)
+			FROM unnest(i.indkey::int2[]) WITH ORDINALITY AS k(attnum, ord)
+			JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum), '') AS cols,
+		am.amname::text AS method
+		FROM pg_index i
+		JOIN pg_class c ON c.oid = i.indexrelid
+		JOIN pg_class t ON t.oid = i.indrelid
+		JOIN pg_namespace n ON n.oid = t.relnamespace
+		JOIN pg_am am ON am.oid = c.relam
+		WHERE c.relname = ? AND t.relname = 'occurrence_send_intents'
+		  AND n.nspname = current_schema() AND c.relnamespace = t.relnamespace`, OpenSendIntentIndexName).Scan(&row).Error
 	if err != nil {
 		return fmt.Errorf("could not check the open-send index: %w", err)
 	}
@@ -48,10 +93,10 @@ func VerifyOpenSendIntentGuard(db *gorm.DB) error {
 	switch {
 	case row.Def == "":
 		return fmt.Errorf("the index %s is missing.%s", OpenSendIntentIndexName, fix)
-	case !row.Unique || !row.Valid || !row.Ready:
-		return fmt.Errorf("the index %s exists but is not a valid unique index (unique=%v valid=%v ready=%v).%s", OpenSendIntentIndexName, row.Unique, row.Valid, row.Ready, fix)
-	case !row.Partial || !strings.Contains(row.Def, "(organization_id, occurrence_id, kind)") ||
-		!strings.Contains(row.Def, "processing") || !strings.Contains(row.Def, "uncertain"):
+	case !row.Unique || !row.Valid || !row.Ready || !row.Live:
+		return fmt.Errorf("the index %s exists but is not a valid unique index (unique=%v valid=%v ready=%v live=%v).%s", OpenSendIntentIndexName, row.Unique, row.Valid, row.Ready, row.Live, fix)
+	case row.Method != "btree" || !row.NoExprs || row.KeyAtts != 3 || row.Atts != 3 ||
+		row.Cols != "organization_id,occurrence_id,kind" || !openSendIntentPredicateOK(row.Pred):
 		return fmt.Errorf("the index %s does not have the expected definition (%s).%s", OpenSendIntentIndexName, row.Def, fix)
 	}
 	return nil
@@ -146,8 +191,12 @@ type OpenSendIntentIndexError struct{ Cause error }
 
 func (e *OpenSendIntentIndexError) Error() string {
 	return fmt.Sprintf("%s exists but is not the protection the system needs, and the migration does not touch an existing index: %v\n"+
-		"What to do: DROP INDEX %s; (an index only, no data is involved) and run the migration again, which creates it correctly. "+
-		"Customer sends from cases stay refused until then.", OpenSendIntentIndexName, e.Cause, OpenSendIntentIndexName)
+		"What to do, from psql, as the owner of the table: SET lock_timeout = '5s'; DROP INDEX %s; (an index only, no data is involved) "+
+		"and run the migration again, which creates it correctly. DROP INDEX waits for an exclusive lock on occurrence_send_intents, "+
+		"and while it waits every other access to that table queues behind it: that is what the lock_timeout is for (if it times out, "+
+		"try again when no long transaction is open). DROP INDEX CONCURRENTLY does not lock the table for long but cannot run inside a "+
+		"transaction block and, if cancelled, leaves an INVALID index behind that must be dropped as well. "+
+		"Customer sends from cases are refused (503) until the migration has run; nothing else is affected.", OpenSendIntentIndexName, e.Cause, OpenSendIntentIndexName)
 }
 func (e *OpenSendIntentIndexError) Unwrap() error { return e.Cause }
 
