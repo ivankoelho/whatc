@@ -24,6 +24,13 @@ const (
 	ChatChannelKindChannel ChatChannelKind = "channel"
 	// ChatChannelKindDM: exactly two users, identified by DMUserLowID/DMUserHighID.
 	ChatChannelKindDM ChatChannelKind = "dm"
+	// ChatChannelKindOccurrence: the internal discussion of ONE case (Occurrence).
+	// It has no membership rows and no team: who may read and who may write is
+	// decided by the case itself (authorizeOccurrence), so the discussion can never
+	// be wider or narrower than the case. It never carries anything to a customer:
+	// chat_messages is a different table from the WhatsApp messages and no code path
+	// connects them.
+	ChatChannelKindOccurrence ChatChannelKind = "occurrence"
 )
 
 // ChatChannel is a team channel, a free channel or a direct message.
@@ -35,8 +42,10 @@ type ChatChannel struct {
 	OrganizationID uuid.UUID       `gorm:"type:uuid;index;not null" json:"organization_id"`
 	Kind           ChatChannelKind `gorm:"size:20;not null" json:"kind"`
 	TeamID         *uuid.UUID      `gorm:"type:uuid;index" json:"team_id,omitempty"`
-	Name           string          `gorm:"size:100" json:"name"`
-	CreatedByID    *uuid.UUID      `gorm:"type:uuid" json:"created_by_id,omitempty"`
+	// OccurrenceID is set only for kind=occurrence (one channel per case).
+	OccurrenceID *uuid.UUID `gorm:"type:uuid;index" json:"occurrence_id,omitempty"`
+	Name         string     `gorm:"size:100" json:"name"`
+	CreatedByID  *uuid.UUID `gorm:"type:uuid" json:"created_by_id,omitempty"`
 
 	// ArchivedAt is set while the channel is archived (free channels only): hidden
 	// from the normal list, closed to new messages, edits and members; history stays.
@@ -170,3 +179,45 @@ type ChatAttachment struct {
 }
 
 func (ChatAttachment) TableName() string { return "chat_attachments" }
+
+// ChatPollVote is one person's vote for one option of a poll message. The poll
+// itself (question, options, single/multiple choice) lives in the message's Meta
+// ("poll"), so a poll is an ordinary message that every existing path (access,
+// archive, deletion, events) already governs. Removing a vote deletes the row.
+type ChatPollVote struct {
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
+	OrganizationID uuid.UUID `gorm:"type:uuid;index;not null" json:"organization_id"`
+	ChannelID      uuid.UUID `gorm:"type:uuid;not null" json:"channel_id"`
+	MessageID      uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_chat_poll_vote_unique,priority:1" json:"message_id"`
+	UserID         uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_chat_poll_vote_unique,priority:2" json:"user_id"`
+	OptionID       string    `gorm:"size:10;not null;uniqueIndex:idx_chat_poll_vote_unique,priority:3" json:"option_id"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+func (ChatPollVote) TableName() string { return "chat_poll_votes" }
+
+// NextcloudSettings is the organization's Nextcloud server (one per organization).
+type NextcloudSettings struct {
+	ID             uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
+	OrganizationID uuid.UUID  `gorm:"type:uuid;not null;uniqueIndex" json:"organization_id"`
+	BaseURL        string     `gorm:"size:300;not null" json:"base_url"`
+	UpdatedByID    *uuid.UUID `gorm:"type:uuid" json:"updated_by_id,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+}
+
+func (NextcloudSettings) TableName() string { return "nextcloud_settings" }
+
+// NextcloudCredential is one person's Nextcloud login: the user name and an APP
+// PASSWORD (revocable in Nextcloud), stored encrypted and never sent to the browser.
+type NextcloudCredential struct {
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
+	OrganizationID uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_nextcloud_cred_user,priority:1" json:"organization_id"`
+	UserID         uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_nextcloud_cred_user,priority:2" json:"user_id"`
+	Username       string    `gorm:"size:200;not null" json:"username"`
+	AppPassword    string    `gorm:"type:text;not null" json:"-"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+func (NextcloudCredential) TableName() string { return "nextcloud_credentials" }

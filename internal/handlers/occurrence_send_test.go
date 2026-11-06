@@ -40,7 +40,7 @@ func TestOccurrenceSendProtocol_RejectedOutsideServiceWindow(t *testing.T) {
 	testutil.SetAuthContext(req, org.ID, user.ID)
 	testutil.SetPathParam(req, "id", occ.ID.String())
 
-	require.NoError(t, app.SendOccurrenceProtocol(req))
+	require.NoError(t, app.SendOccurrenceProtocol(withKey(req)))
 	assert.Equal(t, fasthttp.StatusUnprocessableEntity, testutil.GetResponseStatusCode(req))
 
 	var sent int64
@@ -72,7 +72,7 @@ func TestOccurrenceSendProtocol_RejectedWhenNeverInbound(t *testing.T) {
 	testutil.SetAuthContext(req, org.ID, user.ID)
 	testutil.SetPathParam(req, "id", occ.ID.String())
 
-	require.NoError(t, app.SendOccurrenceProtocol(req))
+	require.NoError(t, app.SendOccurrenceProtocol(withKey(req)))
 	assert.Equal(t, fasthttp.StatusUnprocessableEntity, testutil.GetResponseStatusCode(req))
 }
 
@@ -103,7 +103,7 @@ func TestOccurrenceSendProtocol_DeniedForInvisibleContact(t *testing.T) {
 	testutil.SetAuthContext(req, org.ID, outsider.ID)
 	testutil.SetPathParam(req, "id", occ.ID.String())
 
-	require.NoError(t, app.SendOccurrenceProtocol(req))
+	require.NoError(t, app.SendOccurrenceProtocol(withKey(req)))
 	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(req))
 }
 
@@ -136,7 +136,7 @@ func TestOccurrenceSendProtocol_SendsWithinWindow(t *testing.T) {
 	testutil.SetAuthContext(req, org.ID, user.ID)
 	testutil.SetPathParam(req, "id", occ.ID.String())
 
-	require.NoError(t, app.SendOccurrenceProtocol(req))
+	require.NoError(t, app.SendOccurrenceProtocol(withKey(req)))
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
 	assert.Contains(t, string(testutil.GetResponseBody(req)), occ.ProtocolNumber)
 
@@ -194,7 +194,7 @@ func sendProtocol(t *testing.T, app *handlers.App, orgID, userID uuid.UUID, occ 
 	}
 	testutil.SetAuthContext(req, orgID, userID)
 	testutil.SetPathParam(req, "id", occ.ID.String())
-	require.NoError(t, app.SendOccurrenceProtocol(req))
+	require.NoError(t, app.SendOccurrenceProtocol(withKey(req)))
 	return req
 }
 

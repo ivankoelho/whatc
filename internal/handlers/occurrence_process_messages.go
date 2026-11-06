@@ -263,9 +263,9 @@ func (a *App) PreviewOccurrenceProcessMessage(r *fastglue.Request) error {
 	if occ.Contact == nil { // soft-deleted contact: Preload leaves it nil
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
 	}
-	// The assignee exception, mirroring loadAuthorizedOccurrence.
-	isAssignee := occ.AssignedUserID != nil && *occ.AssignedUserID == userID
-	if !isAssignee && !a.canViewConversation(userID, orgID, occ.Contact) {
+	// Same case-scope rule as loadAuthorizedOccurrence.
+
+	if !a.authorizeOccurrence(userID, orgID, &occ).view {
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You do not have access to this occurrence", nil, "")
 	}
 	if occ.ProcessID == nil || *occ.ProcessID != processID {

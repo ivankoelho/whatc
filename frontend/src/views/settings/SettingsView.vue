@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { setDisplayTimeZone } from '@/lib/datetime'
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -248,6 +249,7 @@ async function saveGeneralSettings() {
       }
     }
     await organizationService.updateSettings(payload)
+    setDisplayTimeZone(generalSettings.value.default_timezone)
     toast.success(t('settings.generalSaved'))
     // Clear secret input after save
     generalSettings.value.meta_app_secret = ''

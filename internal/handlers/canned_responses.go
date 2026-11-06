@@ -105,6 +105,9 @@ func (a *App) ListCannedResponses(r *fastglue.Request) error {
 
 // CreateCannedResponse creates a new canned response
 func (a *App) CreateCannedResponse(r *fastglue.Request) error {
+	if !a.can(r, models.ResourceCannedResponses, models.ActionWrite) {
+		return nil
+	}
 	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
@@ -179,6 +182,9 @@ func (a *App) GetCannedResponse(r *fastglue.Request) error {
 
 // UpdateCannedResponse updates an existing canned response
 func (a *App) UpdateCannedResponse(r *fastglue.Request) error {
+	if !a.can(r, models.ResourceCannedResponses, models.ActionWrite) {
+		return nil
+	}
 	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
@@ -233,6 +239,9 @@ func (a *App) UpdateCannedResponse(r *fastglue.Request) error {
 
 // DeleteCannedResponse deletes a canned response
 func (a *App) DeleteCannedResponse(r *fastglue.Request) error {
+	if !a.can(r, models.ResourceCannedResponses, models.ActionDelete) {
+		return nil
+	}
 	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")

@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"time"
 	"os"
 	"path/filepath"
 	"testing"
@@ -46,6 +47,11 @@ func makeMediaMessage(t *testing.T, app *handlers.App, orgID uuid.UUID, contactI
 		Status:         models.MessageStatusDelivered,
 	}
 	require.NoError(t, app.DB.Create(msg).Error)
+	if mediaURL != "" { // the usual case under test is a file the antimalware policy has already cleared
+		now := time.Now()
+		require.NoError(t, app.DB.Create(&models.FileScan{ID: uuid.New(), OrganizationID: orgID, Source: models.ScanSourceMessageMedia,
+			ResourceID: msg.ID, StoragePath: mediaURL, Status: models.ScanClean, ScannedAt: &now}).Error)
+	}
 	return msg
 }
 
@@ -54,7 +60,7 @@ func makeMediaMessage(t *testing.T, app *handlers.App, orgID uuid.UUID, contactI
 func TestApp_ServeMedia_Success_WithContactsRead(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	contactsReadPerms := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "media-reader", []string{"contacts:read"})
+	contactsReadPerms := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "media-reader", []string{"contacts:read", "conversations:view_all"})
 	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&contactsReadPerms.ID))
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
 
@@ -68,7 +74,7 @@ func TestApp_ServeMedia_Success_WithContactsRead(t *testing.T) {
 	require.NoError(t, app.ServeMedia(req))
 	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
 	assert.Equal(t, "image/jpeg", string(req.RequestCtx.Response.Header.Peek("Content-Type")))
-	assert.Equal(t, "private, max-age=3600", string(req.RequestCtx.Response.Header.Peek("Cache-Control")))
+	assert.Equal(t, "private, no-cache", string(req.RequestCtx.Response.Header.Peek("Cache-Control")))
 	assert.Equal(t, "\xFF\xD8\xFF\xE0jpeg-bytes", string(testutil.GetResponseBody(req)))
 }
 
@@ -77,7 +83,7 @@ func TestApp_ServeMedia_Success_WithContactsRead(t *testing.T) {
 func TestApp_ServeMedia_RejectsDirectoryTraversal(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "media-r", []string{"contacts:read"})
+	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "media-r", []string{"contacts:read", "conversations:view_all"})
 	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
 
@@ -107,7 +113,7 @@ func TestApp_ServeMedia_RejectsDirectoryTraversal(t *testing.T) {
 func TestApp_ServeMedia_RejectsSymlink(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "media-r-sym", []string{"contacts:read"})
+	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "media-r-sym", []string{"contacts:read", "conversations:view_all"})
 	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
 
@@ -143,7 +149,7 @@ func TestApp_ServeMedia_RejectsSymlink(t *testing.T) {
 func TestApp_ServeMedia_FileMissingOnDisk(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "media-missing", []string{"contacts:read"})
+	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "media-missing", []string{"contacts:read", "conversations:view_all"})
 	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
 
@@ -433,7 +439,7 @@ func TestApp_ServeMedia_StrictMode_TeamFallbackAllowsUnassignedQueue(t *testing.
 func TestApp_ServeMedia_FlagOff_SoftDeletedContactStillResolves(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "media-reader-softdel", []string{"contacts:read"})
+	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "media-reader-softdel", []string{"contacts:read", "conversations:view_all"})
 	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
 
@@ -459,7 +465,7 @@ func TestApp_ServeMedia_FlagOff_SoftDeletedContactStillResolves(t *testing.T) {
 func TestApp_ServeMedia_NoMediaInMessage(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "media-empty", []string{"contacts:read"})
+	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "media-empty", []string{"contacts:read", "conversations:view_all"})
 	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
 

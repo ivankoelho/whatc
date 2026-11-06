@@ -25,9 +25,12 @@ func (a *App) ReplyToOccurrence(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
-
-	occ, err := a.loadAuthorizedOccurrence(r, orgID, userID, true)
-	if err != nil {
+	// Writing to the customer's WhatsApp is the chat's permission, and only for someone
+	// who may use the case's channel: working a case does not include it, and chat:write
+	// alone does not open every conversation of the organization. Checked before
+	// anything that could reveal the window or the account.
+	occ, account, ok := a.authorizeCustomerMessageFromCase(r, orgID, userID)
+	if !ok {
 		return nil
 	}
 
@@ -40,14 +43,13 @@ func (a *App) ReplyToOccurrence(r *fastglue.Request) error {
 	}
 
 	contact := occ.Contact
-	if !serviceWindowOpen(contact) {
+	found := account != nil
+	// Direct Send lets Meta carry free text outside the window.
+	if !serviceWindowOpen(contact) && !(found && account.DirectSendEnabled) {
 		return r.SendErrorEnvelope(fasthttp.StatusUnprocessableEntity,
 			"The 24-hour service window is closed; only templates can be sent", nil, "")
 	}
-
-	var account models.WhatsAppAccount
-	if err := a.DB.Where("organization_id = ? AND name = ?", orgID, contact.WhatsAppAccount).
-		First(&account).Error; err != nil {
+	if !found {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest,
 			"WhatsApp account not found for this contact", nil, "")
 	}
@@ -60,7 +62,7 @@ func (a *App) ReplyToOccurrence(r *fastglue.Request) error {
 	opts.SentByUserID = &userID
 	opts.AllowOtherOwner = true // a protocol reply never takes over, nor is blocked by, the chat owner
 	if _, err := a.SendOutgoingMessage(context.Background(), OutgoingMessageRequest{
-		Account: &account,
+		Account: account,
 		Contact: contact,
 		Type:    models.MessageTypeText,
 		Content: req.Content,

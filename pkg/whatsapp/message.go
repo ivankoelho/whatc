@@ -25,6 +25,16 @@ func truncateLabel(s string, max int) string {
 
 // SendTextMessage sends a text message to a recipient with optional reply context
 func (c *Client) SendTextMessage(ctx context.Context, account *Account, rcpt Recipient, text string, replyToMsgID ...string) (string, error) {
+	return c.sendText(ctx, account, rcpt, text, "", replyToMsgID...)
+}
+
+// SendDirectTextMessage sends free text outside the 24h window via Meta's Direct
+// Send: category ("utility") replaces the template; Meta matches or creates one.
+func (c *Client) SendDirectTextMessage(ctx context.Context, account *Account, rcpt Recipient, text, category string) (string, error) {
+	return c.sendText(ctx, account, rcpt, text, category)
+}
+
+func (c *Client) sendText(ctx context.Context, account *Account, rcpt Recipient, text, category string, replyToMsgID ...string) (string, error) {
 	payload := map[string]any{
 		"messaging_product": "whatsapp",
 		"recipient_type":    "individual",
@@ -35,6 +45,9 @@ func (c *Client) SendTextMessage(ctx context.Context, account *Account, rcpt Rec
 		},
 	}
 	rcpt.SetOnPayload(payload)
+	if category != "" {
+		payload["category"] = category
+	}
 
 	// Add reply context if provided
 	if len(replyToMsgID) > 0 && replyToMsgID[0] != "" {
@@ -678,4 +691,22 @@ func (c *Client) SendTemplateMessage(ctx context.Context, account *Account, rcpt
 	}
 	c.Log.Info("Template message sent", "message_id", messageID, "phone", rcpt.Phone, "template", templateName)
 	return messageID, nil
+}
+
+// OTPButtonParams maps the first OTP button of an AUTHENTICATION template to the
+// code, in the shape ButtonURLParamsToComponents expects. Meta requires the code
+// again on the button, not only in the body. Returns nil when there is no code
+// or no OTP button. Shared by the direct send and the campaign worker.
+func OTPButtonParams(templateButtons []any, code string) map[string]string {
+	if code == "" {
+		return nil
+	}
+	for i, raw := range templateButtons {
+		if btn, ok := raw.(map[string]any); ok {
+			if btnType, _ := btn["type"].(string); strings.EqualFold(btnType, "OTP") {
+				return map[string]string{fmt.Sprintf("%d", i): code}
+			}
+		}
+	}
+	return nil
 }

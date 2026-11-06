@@ -80,6 +80,8 @@ func newTestApp(t *testing.T, opts ...appOption) *handlers.App {
 		HTTPClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		// A clean-unless-EICAR engine: tests of other features still open the files they upload.
+		Scanner: newFakeScanner(),
 	}
 
 	for _, opt := range opts {

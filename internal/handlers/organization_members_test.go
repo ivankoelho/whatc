@@ -22,7 +22,7 @@ func TestApp_CreateOrganization_Success(t *testing.T) {
 	org := testutil.CreateTestOrganization(t, app.DB)
 	allPerms := testutil.GetOrCreateTestPermissions(t, app.DB)
 	role := testutil.CreateTestRole(t, app.DB, org.ID, "admin", allPerms)
-	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("create-org")), testutil.WithRoleID(&role.ID))
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("create-org")), testutil.WithRoleID(&role.ID), testutil.WithSuperAdmin())
 
 	req := testutil.NewJSONRequest(t, map[string]string{
 		"name": "New Test Organization",
@@ -52,7 +52,7 @@ func TestApp_CreateOrganization_EmptyName(t *testing.T) {
 	org := testutil.CreateTestOrganization(t, app.DB)
 	allPerms := testutil.GetOrCreateTestPermissions(t, app.DB)
 	role := testutil.CreateTestRole(t, app.DB, org.ID, "admin", allPerms)
-	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("create-org-empty")), testutil.WithRoleID(&role.ID))
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("create-org-empty")), testutil.WithRoleID(&role.ID), testutil.WithSuperAdmin())
 
 	req := testutil.NewJSONRequest(t, map[string]string{
 		"name": "",

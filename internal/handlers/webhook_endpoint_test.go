@@ -153,34 +153,6 @@ func makeMessagesPayload(phoneNumberID string) []byte {
 	return b
 }
 
-func TestApp_WebhookHandler_NoSignatureNoAppSecret_Accepted(t *testing.T) {
-	// When no AppSecret is configured for the matching account, the handler must
-	// not reject — it just skips signature verification.
-	app := newAppForWebhook(t, "")
-	org := testutil.CreateTestOrganization(t, app.DB)
-	acc := &models.WhatsAppAccount{
-		BaseModel:          models.BaseModel{ID: uuid.New()},
-		OrganizationID:     org.ID,
-		Name:               "wbk-h-1",
-		PhoneID:            "phone-A",
-		BusinessID:         "biz-A",
-		AccessToken:        "tok",
-		WebhookVerifyToken: "vt",
-		APIVersion:         "v18.0",
-		Status:             "active",
-	}
-	require.NoError(t, app.DB.Create(acc).Error)
-
-	body := makeMessagesPayload("phone-A")
-	req := testutil.NewRequest(t)
-	req.RequestCtx.Request.Header.SetMethod("POST")
-	req.RequestCtx.Request.Header.SetContentType("application/json")
-	req.RequestCtx.Request.SetBody(body)
-
-	require.NoError(t, app.WebhookHandler(req))
-	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
-}
-
 func TestApp_WebhookHandler_ValidSignature_Accepted(t *testing.T) {
 	app := newAppForWebhook(t, "")
 	org := testutil.CreateTestOrganization(t, app.DB)

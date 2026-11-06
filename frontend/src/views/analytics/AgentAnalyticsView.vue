@@ -31,6 +31,7 @@ import {
 } from 'lucide-vue-next'
 // Centralized Chart.js setup (registered once)
 import { Line, Bar, Doughnut } from '@/lib/charts'
+import { formatShortDate } from '@/lib/datetime'
 import { useDateRange } from '@/composables/useDateRange'
 
 interface AgentAnalyticsSummary {
@@ -190,8 +191,7 @@ const trendChartData = computed(() => {
 
   return {
     labels: analytics.value.trend_data.map(t => {
-      const date = new Date(t.date)
-      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+      return formatShortDate(t.date)
     }),
     datasets: [
       {

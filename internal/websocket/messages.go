@@ -124,6 +124,11 @@ type BroadcastMessage struct {
 	// it. Zero value (uuid.Nil) is inert: no client ever has a Nil userID, so
 	// existing callers that don't set this field are unaffected.
 	AlsoUserID uuid.UUID
+
+	// OccurrenceID targets an occurrence event. Delivery is gated by the
+	// occurrence authorizer (never by conversation visibility) and fails closed
+	// when none is wired. ContactID must be left unset when this is used.
+	OccurrenceID uuid.UUID
 }
 
 // ContactStatusChangedPayload is the payload for contact_status_changed events.

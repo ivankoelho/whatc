@@ -57,3 +57,23 @@ func ResolveProcessMessageVariablesForTest(content string, occ *models.Occurrenc
 func FormatProcessDeadlineForTest(remaining time.Duration) string {
 	return formatProcessDeadline(remaining)
 }
+
+// NewForwardNotificationForTest replays the forwarded event's intent creation.
+func (a *App) NewForwardNotificationForTest(occ *models.Occurrence, contact *models.Contact) error {
+	return a.newForwardNotification(a.DB, occ, contact)
+}
+
+// UpdateMessageStatusForTest feeds one provider status through the same path the
+// status webhook uses.
+func (a *App) UpdateMessageStatusForTest(wamid, status string) {
+	a.updateMessageStatus(wamid, status, nil)
+}
+
+// BuildOutgoingMessageForTest exposes the pure message builder to the external test package.
+func (a *App) BuildOutgoingMessageForTest(req OutgoingMessageRequest) *models.Message {
+	return a.createOutgoingMessage(req, MessageSendOptions{})
+}
+
+// ClassifySendErrorForTest and PublicSendErrorForTest expose the notifier's error handling.
+func ClassifySendErrorForTest(err error) (string, bool, string) { return classifySendError(err) }
+func PublicSendErrorForTest(err error) string                   { return publicErrorText(err) }

@@ -55,6 +55,9 @@ func (a *App) canAccessChatChannelDB(db *gorm.DB, userID, orgID uuid.UUID, ch *m
 		db.Model(&models.ChatChannelMember{}).
 			Where("channel_id = ? AND user_id = ? AND organization_id = ?", ch.ID, userID, orgID).
 			Count(&count)
+	case models.ChatChannelKindOccurrence:
+		_, ok := a.occurrenceChatAccess(userID, orgID, ch)
+		return ok
 	default:
 		return false
 	}
@@ -77,4 +80,73 @@ func (a *App) canDeleteChatMessage(userID, orgID uuid.UUID, msg *models.ChatMess
 		return false
 	}
 	return msg.UserID == userID || a.HasPermission(userID, models.ResourceTeamChat, models.ActionDelete, orgID)
+}
+
+// occurrenceChatAccess is the access rule of a case's discussion: it IS the
+// case's own rule (assignee, team, unit supervisors, participants, opener), plus
+// the permission to use the CRM at all. The channel adds nothing and removes
+// nothing, so the chat can never be a side door into a case.
+func (a *App) occurrenceChatAccess(userID, orgID uuid.UUID, ch *models.ChatChannel) (occurrenceAccess, bool) {
+	if ch == nil || ch.OccurrenceID == nil || ch.OrganizationID != orgID {
+		return occurrenceAccess{}, false
+	}
+	if !a.HasPermission(userID, models.ResourceOccurrences, models.ActionRead, orgID) {
+		return occurrenceAccess{}, false
+	}
+	var occ models.Occurrence
+	if err := a.DB.Where("id = ? AND organization_id = ?", *ch.OccurrenceID, orgID).First(&occ).Error; err != nil {
+		return occurrenceAccess{}, false
+	}
+	acc := a.authorizeOccurrence(userID, orgID, &occ)
+	return acc, acc.view
+}
+
+// canPostChatChannelDB says whether the user may WRITE in the channel (messages,
+// attachments). For every channel kind but a case's discussion that is the same
+// as being able to access it. For a case it also needs the "comment" capability
+// and occurrences:write, so a read-only participant reads but does not write.
+func (a *App) canPostChatChannelDB(db *gorm.DB, userID, orgID uuid.UUID, ch *models.ChatChannel) bool {
+	if !a.canAccessChatChannelDB(db, userID, orgID, ch) {
+		return false
+	}
+	if ch.Kind != models.ChatChannelKindOccurrence {
+		return true
+	}
+	if !a.HasPermission(userID, models.ResourceOccurrences, models.ActionWrite, orgID) {
+		return false
+	}
+	acc, ok := a.occurrenceChatAccess(userID, orgID, ch)
+	return ok && acc.can(models.OccurrenceCapComment)
+}
+
+// chatGate is what the caller may do in a CASE discussion, evaluated on its own connection BEFORE the channel
+// transaction starts. Inside the transaction a request already holds one pooled connection; deriving case access
+// there needs several more queries, and with as many concurrent sends as the pool has connections every request
+// waits for a connection held by another one: the whole server stops answering. (Found in the cross-department
+// homologation: 40 simultaneous messages on one protocol froze the backend.) Other channel kinds keep their
+// in-transaction re-check, since that one runs on the transaction's own connection.
+type chatGate struct {
+	occurrence   bool
+	access, post bool
+}
+
+func (a *App) chatGateFor(userID, orgID uuid.UUID, ch *models.ChatChannel) chatGate {
+	if ch == nil || ch.Kind != models.ChatChannelKindOccurrence {
+		return chatGate{}
+	}
+	return chatGate{occurrence: true, access: a.canAccessChatChannelDB(a.DB, userID, orgID, ch), post: a.canPostChatChannelDB(a.DB, userID, orgID, ch)}
+}
+
+func (a *App) canAccessLocked(tx *gorm.DB, g chatGate, userID, orgID uuid.UUID, locked *models.ChatChannel) bool {
+	if g.occurrence {
+		return g.access && locked.OrganizationID == orgID
+	}
+	return a.canAccessChatChannelDB(tx, userID, orgID, locked)
+}
+
+func (a *App) canPostLocked(tx *gorm.DB, g chatGate, userID, orgID uuid.UUID, locked *models.ChatChannel) bool {
+	if g.occurrence {
+		return g.post && locked.OrganizationID == orgID
+	}
+	return a.canPostChatChannelDB(tx, userID, orgID, locked)
 }

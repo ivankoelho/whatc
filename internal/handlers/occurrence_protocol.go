@@ -12,10 +12,10 @@ import (
 
 // defaultStages is the pipeline every organisation starts with.
 var defaultStages = []models.OccurrenceStage{
-	{Name: "Aberto", Color: "#3b82f6", Position: 0, IsInitial: true},
-	{Name: "Em análise", Color: "#f59e0b", Position: 1},
-	{Name: "Aguardando cliente", Color: "#a855f7", Position: 2},
-	{Name: "Resolvido", Color: "#10b981", Position: 3, IsClosing: true},
+	{Name: "Aberto", Color: "#3b82f6", Position: 0, IsInitial: true, GeneralState: models.GeneralStateNew},
+	{Name: "Em análise", Color: "#f59e0b", Position: 1, GeneralState: models.GeneralStateInProgress},
+	{Name: "Aguardando cliente", Color: "#a855f7", Position: 2, GeneralState: models.GeneralStateWaitingCustomer},
+	{Name: "Resolvido", Color: "#10b981", Position: 3, IsClosing: true, GeneralState: models.GeneralStateResolved},
 }
 
 // ensureDefaultStages seeds the pipeline the first time an organisation touches
@@ -24,7 +24,7 @@ var defaultStages = []models.OccurrenceStage{
 func (a *App) ensureDefaultStages(orgID uuid.UUID) error {
 	var count int64
 	if err := a.DB.Model(&models.OccurrenceStage{}).
-		Where("organization_id = ?", orgID).Count(&count).Error; err != nil {
+		Where("organization_id = ? AND team_id IS NULL", orgID).Count(&count).Error; err != nil {
 		return err
 	}
 	if count > 0 {
@@ -43,19 +43,6 @@ func (a *App) ensureDefaultStages(orgID uuid.UUID) error {
 	return a.DB.Clauses(clause.OnConflict{DoNothing: true}).Create(&stages).Error
 }
 
-// initialStage returns the organisation's entry stage, seeding the defaults if
-// the pipeline has never been configured.
-func (a *App) initialStage(orgID uuid.UUID) (*models.OccurrenceStage, error) {
-	if err := a.ensureDefaultStages(orgID); err != nil {
-		return nil, err
-	}
-	var stage models.OccurrenceStage
-	if err := a.DB.Where("organization_id = ? AND is_initial = ?", orgID, true).
-		Order("position ASC").First(&stage).Error; err != nil {
-		return nil, err
-	}
-	return &stage, nil
-}
 
 // nextProtocolNumber returns the next protocol for the organisation and year.
 //
@@ -88,24 +75,65 @@ func (a *App) nextProtocolNumber(tx *gorm.DB, orgID uuid.UUID, year int) (string
 
 // insertOccurrenceWithProtocol assigns the protocol and inserts the occurrence in one
 // transaction, then records the opening event.
-func (a *App) insertOccurrenceWithProtocol(occ *models.Occurrence) error {
+func (a *App) insertOccurrenceWithProtocol(occ *models.Occurrence, extra ...func(tx *gorm.DB, occ *models.Occurrence) error) error {
 	return a.DB.Transaction(func(tx *gorm.DB) error {
 		protocol, err := a.nextProtocolNumber(tx, occ.OrganizationID, time.Now().Year())
 		if err != nil {
 			return err
 		}
 		occ.ProtocolNumber = protocol
+		if occ.GeneralState == "" {
+			var st models.OccurrenceStage
+			if err := tx.First(&st, "id = ?", occ.StageID).Error; err == nil {
+				occ.GeneralState = st.EffectiveState()
+			}
+		}
 
 		if err := tx.Create(occ).Error; err != nil {
 			return err
 		}
-
-		return tx.Create(&models.OccurrenceEvent{
+		if err := tx.Create(&models.OccurrenceEvent{
 			OrganizationID: occ.OrganizationID,
 			OccurrenceID:   occ.ID,
 			Type:           models.OccurrenceEventOpened,
 			Content:        occ.Title,
 			CreatedByID:    &occ.OpenedByUserID,
-		}).Error
+		}).Error; err != nil {
+			return err
+		}
+		for _, fn := range extra {
+			if err := fn(tx, occ); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
+}
+
+// initialStage returns the organisation's entry stage, seeding the defaults if
+// the pipeline has never been configured.
+func (a *App) initialStage(orgID uuid.UUID) (*models.OccurrenceStage, error) {
+	return a.initialStageFor(orgID, nil)
+}
+
+// initialStageFor returns the entry stage for a case routed to teamID: the
+// team's own initial stage when it configured one, otherwise the
+// organisation's.
+func (a *App) initialStageFor(orgID uuid.UUID, teamID *uuid.UUID) (*models.OccurrenceStage, error) {
+	if err := a.ensureDefaultStages(orgID); err != nil {
+		return nil, err
+	}
+	var stage models.OccurrenceStage
+	if teamID != nil {
+		err := a.DB.Where("organization_id = ? AND team_id = ? AND is_initial = ?", orgID, *teamID, true).
+			Order("position ASC").First(&stage).Error
+		if err == nil {
+			return &stage, nil
+		}
+	}
+	if err := a.DB.Where("organization_id = ? AND team_id IS NULL AND is_initial = ?", orgID, true).
+		Order("position ASC").First(&stage).Error; err != nil {
+		return nil, err
+	}
+	return &stage, nil
 }

@@ -27,9 +27,10 @@ const canDelete = computed(() => authStore.hasPermission('departments', 'delete'
 interface DepartmentFormData {
   name: string
   active: boolean
+  commercial: boolean
 }
 
-const defaultFormData: DepartmentFormData = { name: '', active: true }
+const defaultFormData: DepartmentFormData = { name: '', active: true, commercial: false }
 
 const {
   items: departments, isLoading, isSubmitting, isDialogOpen, editingItem: editingDepartment, deleteDialogOpen, itemToDelete: departmentToDelete,
@@ -45,7 +46,7 @@ const columns = computed<Column<Department>[]>(() => [
 ])
 
 function openEditDialog(department: Department) {
-  baseOpenEditDialog(department, (d) => ({ name: d.name, active: d.active }))
+  baseOpenEditDialog(department, (d) => ({ name: d.name, active: d.active, commercial: !!d.commercial }))
 }
 
 async function fetchDepartments() {
@@ -73,7 +74,7 @@ async function saveDepartment() {
   }
   isSubmitting.value = true
   try {
-    const payload = { name: formData.value.name.trim(), active: formData.value.active }
+    const payload = { name: formData.value.name.trim(), active: formData.value.active, commercial: formData.value.commercial }
     if (editingDepartment.value) {
       await departmentsService.update(editingDepartment.value.id, payload)
       toast.success(t('common.updatedSuccess', { resource: t('resources.Department') }))
@@ -188,6 +189,13 @@ async function confirmDelete() {
         <div class="flex items-center justify-between gap-4 pt-2">
           <Label>{{ $t('departments.active') }}</Label>
           <Switch :checked="formData.active" @update:checked="formData.active = $event" />
+        </div>
+        <div class="space-y-1 pt-2">
+          <div class="flex items-center justify-between gap-4">
+            <Label>{{ $t('departments.commercial') }}</Label>
+            <Switch :checked="formData.commercial" data-testid="department-commercial" @update:checked="formData.commercial = $event" />
+          </div>
+          <p class="text-xs text-muted-foreground">{{ $t('departments.commercialHint') }}</p>
         </div>
       </div>
     </CrudFormDialog>

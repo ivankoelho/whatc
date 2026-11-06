@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
@@ -11,6 +12,9 @@ import (
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
+	"golang.org/x/text/runes"
+	"golang.org/x/text/transform"
+	"golang.org/x/text/unicode/norm"
 )
 
 // TemplateRequest represents the request body for creating/updating a template
@@ -59,9 +63,16 @@ type TemplateResponse struct {
 
 // ListTemplates returns all templates for the organization
 func (a *App) ListTemplates(r *fastglue.Request) error {
-	orgID, err := a.getOrgID(r)
+	// The list is for whoever manages templates (templates:read) and for whoever sends messages (chat:write): the chat's
+	// template picker needs it to answer a customer outside the 24-hour window, and sending a template needs no templates
+	// permission. Everyone else (a read-only chat user, an analyst) is refused.
+	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+	if !a.HasPermission(userID, models.ResourceTemplates, models.ActionRead, orgID) &&
+		!a.HasPermission(userID, models.ResourceChat, models.ActionWrite, orgID) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Insufficient permissions", nil, "")
 	}
 
 	pg := parsePagination(r)
@@ -107,6 +118,9 @@ func (a *App) ListTemplates(r *fastglue.Request) error {
 
 // CreateTemplate creates a new message template
 func (a *App) CreateTemplate(r *fastglue.Request) error {
+	if !a.can(r, models.ResourceTemplates, models.ActionWrite) {
+		return nil
+	}
 	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
@@ -226,6 +240,9 @@ func (a *App) GetTemplate(r *fastglue.Request) error {
 
 // UpdateTemplate updates a message template
 func (a *App) UpdateTemplate(r *fastglue.Request) error {
+	if !a.can(r, models.ResourceTemplates, models.ActionWrite) {
+		return nil
+	}
 	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
@@ -322,6 +339,9 @@ func (a *App) UpdateTemplate(r *fastglue.Request) error {
 
 // DeleteTemplate deletes a message template
 func (a *App) DeleteTemplate(r *fastglue.Request) error {
+	if !a.can(r, models.ResourceTemplates, models.ActionDelete) {
+		return nil
+	}
 	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
@@ -358,6 +378,9 @@ func (a *App) DeleteTemplate(r *fastglue.Request) error {
 
 // SubmitTemplate submits a template to Meta for approval
 func (a *App) SubmitTemplate(r *fastglue.Request) error {
+	if !a.can(r, models.ResourceTemplates, models.ActionWrite) {
+		return nil
+	}
 	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
@@ -455,6 +478,9 @@ func (a *App) submitTemplateToMeta(account *models.WhatsAppAccount, template *mo
 
 // SyncTemplates syncs templates from Meta API
 func (a *App) SyncTemplates(r *fastglue.Request) error {
+	if !a.can(r, models.ResourceTemplates, models.ActionSync) {
+		return nil
+	}
 	orgID, err := a.getOrgID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
@@ -613,6 +639,11 @@ func templateToResponse(t models.Template) TemplateResponse {
 
 func normalizeTemplateName(name string) string {
 	// Convert to lowercase and replace spaces with underscores
+	// Transliterate accented letters (código -> codigo) instead of dropping
+	// them, which would turn "código_acesso" into "cdigo_acesso".
+	if decomposed, _, err := transform.String(transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC), name); err == nil {
+		name = decomposed
+	}
 	name = strings.ToLower(name)
 	name = strings.ReplaceAll(name, " ", "_")
 	name = strings.ReplaceAll(name, "-", "_")
@@ -643,6 +674,9 @@ func convertFromJSONBArray(arr models.JSONBArray) []any {
 // UploadTemplateMedia uploads a media file for use as template header sample
 // Returns a file handle that can be used in template creation
 func (a *App) UploadTemplateMedia(r *fastglue.Request) error {
+	if !a.can(r, models.ResourceTemplates, models.ActionWrite) {
+		return nil
+	}
 	orgID, err := a.getOrgID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
@@ -686,6 +720,10 @@ func (a *App) UploadTemplateMedia(r *fastglue.Request) error {
 	if _, err := file.Read(fileData); err != nil {
 		a.Log.Error("Failed to read file data", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to read file data", nil, "")
+	}
+
+	if !a.scanIngress(r, orgID, "template_media", fileData) {
+		return nil
 	}
 
 	// Determine mime type from Content-Type header or filename

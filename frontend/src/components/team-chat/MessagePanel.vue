@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import { formatTime as fmtTime } from '@/lib/utils'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowLeft, Check, CornerUpLeft, Hash, Loader2, Lock, MessageSquare, Pencil, Settings2, SmilePlus, Trash2, Users, X } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, Check, CornerUpLeft, FileText, Hash, Loader2, Lock, MessageSquare, Pencil, Settings2, SmilePlus, Trash2, Users, X } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
@@ -13,12 +14,15 @@ import { ErrorState } from '@/components/shared'
 import { Badge } from '@/components/ui/badge'
 import ChannelManagePanel from './ChannelManagePanel.vue'
 import { useInfiniteScroll } from '@/composables/useInfiniteScroll'
+import { usePendingPoll } from '@/composables/usePendingPoll'
 import { useTeamChatStore } from '@/stores/teamChat'
 import { useAuthStore } from '@/stores/auth'
 import { getAvatarGradient, getInitials } from '@/lib/utils'
 import { getErrorMessage } from '@/lib/api-utils'
 import MessageAttachments from './MessageAttachments.vue'
+import PollCard from './PollCard.vue'
 import MessageComposer from './MessageComposer.vue'
+import { bubbleClass, bubbleMeta, dayLabel, isOwnMessage } from '@/lib/chat-bubbles'
 import { TEAM_CHAT_REACTIONS, chatErrorCode, isSendableBody, reactionGlyph, systemEventKey } from '@/lib/team-chat'
 import type { TeamChatMessage, TeamChatReplyTo } from '@/services/api'
 
@@ -37,6 +41,9 @@ const editingBody = ref('')
 const endRef = ref<HTMLElement | null>(null)
 
 const panel = computed(() => store.panel(props.channelId))
+// An attachment still being checked for malware: refresh by itself (controlled polling) until released.
+const hasUnsettledFile = computed(() => panel.value.messages.some(m => m.attachments?.some(a => a.scan_status === 'pending' || a.scan_status === 'error')))
+usePendingPoll(hasUnsettledFile, () => store.refreshLatest(props.channelId))
 const channel = computed(() => store.channelById(props.channelId))
 const isArchived = computed(() => !!channel.value?.archived_at)
 const manageOpen = ref(false)
@@ -111,8 +118,20 @@ function goToMessage(id: string) {
 const reactionTitle = (r: { names: string[]; count: number }) =>
   r.names.join(', ') + (r.count > r.names.length ? ` +${r.count - r.names.length}` : '')
 
+// Reading old history must not be yanked to the bottom by a new message: follow only when already
+// near the end (or when the message is mine); otherwise count what arrived and offer a jump.
+const atBottom = ref(true)
+const unseen = ref(0)
+const NEAR_BOTTOM_PX = 80
+function trackBottom(e: Event) {
+  const el = e.target as HTMLElement
+  atBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX
+  if (atBottom.value) unseen.value = 0
+}
+
 const scroll = useInfiniteScroll({
   direction: 'top',
+  onScroll: trackBottom,
   onLoadMore: async () => {
     await scroll.preserveScrollPosition(async () => {
       await store.loadOlder(props.channelId)
@@ -124,11 +143,14 @@ const scroll = useInfiniteScroll({
 })
 
 function scrollToBottom(instant = false) {
+  unseen.value = 0
+  atBottom.value = true
   void nextTick(() => endRef.value?.scrollIntoView({ behavior: instant ? 'instant' : 'smooth', block: 'end' }))
 }
 
 function arm() {
   scroll.cleanup()
+  unseen.value = 0
   void nextTick(() => setTimeout(() => {
     scrollToBottom(true)
     scroll.setup()
@@ -163,14 +185,19 @@ watch(() => props.channelId, () => {
 watch(() => panel.value.loading, (now, was) => { if (was && !now) arm() })
 // New message at the bottom: follow it.
 watch(() => panel.value.messages[panel.value.messages.length - 1]?.id, (now, was) => {
-  if (was && now && now !== was) scrollToBottom()
+  if (!was || !now || now === was) return
+  const last = panel.value.messages[panel.value.messages.length - 1]
+  if (atBottom.value || isOwnMessage(last, myId.value)) scrollToBottom()
+  else unseen.value++
 })
 
 function formatTime(iso: string) {
-  return new Date(iso).toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
+  return fmtTime(iso)
 }
 
-const isOwn = (m: TeamChatMessage) => m.user_id === myId.value
+const isOwn = (m: TeamChatMessage) => isOwnMessage(m, myId.value)
+const metaOf = (i: number) => bubbleMeta(panel.value.messages, i)
+const dayText = (iso: string) => dayLabel(iso, locale.value, { today: t('teamChat.today'), yesterday: t('teamChat.yesterday') })
 const canEdit = (m: TeamChatMessage) => isOwn(m) && canWrite.value
 const canDelete = (m: TeamChatMessage) => isOwn(m) || canModerate.value
 
@@ -214,9 +241,13 @@ async function removeMessage(m: TeamChatMessage) {
       </Button>
       <Users v-if="channel?.kind === 'team'" class="h-4 w-4 text-muted-foreground" />
       <Hash v-else-if="channel?.kind === 'channel'" class="h-4 w-4 text-muted-foreground" />
+      <FileText v-else-if="channel?.kind === 'occurrence'" class="h-4 w-4 text-muted-foreground" />
       <Lock v-else class="h-4 w-4 text-muted-foreground" />
       <h2 class="truncate text-sm font-semibold">{{ channel?.name || t('teamChat.unnamed') }}</h2>
       <Badge v-if="isArchived" variant="secondary">{{ t('teamChat.manage.archivedBadge') }}</Badge>
+      <Button v-if="channel?.kind === 'occurrence' && channel.occurrence_id" as-child variant="outline" size="sm" class="ml-auto" data-testid="open-occurrence">
+        <RouterLink :to="`/crm/occurrences/${channel.occurrence_id}`"><FileText class="mr-1.5 h-4 w-4" aria-hidden="true" />{{ t('teamChat.openOccurrence') }}</RouterLink>
+      </Button>
       <Button
         v-if="channel?.kind === 'channel'"
         variant="ghost" size="icon" class="ml-auto h-9 w-9"
@@ -247,6 +278,7 @@ async function removeMessage(m: TeamChatMessage) {
 
     <template v-else>
       <!-- the viewport wrapper is min-width: fit-content, which lets a long line stretch the whole list past the pane: undo that so text wraps -->
+      <div class="relative flex min-h-0 flex-1 flex-col">
       <ScrollArea :ref="(el: any) => scroll.scrollAreaRef.value = el" class="flex-1 [&_[data-reka-scroll-area-viewport]>div]:!min-w-0">
         <div class="space-y-1 p-4" aria-live="polite">
           <div v-if="panel.loadingOlder" class="flex justify-center py-2">
@@ -264,26 +296,29 @@ async function removeMessage(m: TeamChatMessage) {
             :description="t('teamChat.noMessages')"
           />
 
-          <template v-for="m in panel.messages" :key="m.id">
+          <template v-for="(m, i) in panel.messages" :key="m.id">
+          <div v-if="metaOf(i).newDay" class="flex justify-center py-2" :data-testid="`day-${m.id}`">
+            <span class="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">{{ dayText(m.created_at) }}</span>
+          </div>
           <div v-if="m.kind === 'system'" :data-testid="`system-${m.id}`" class="flex justify-center px-2 py-1">
             <p class="max-w-[90%] break-words rounded-full bg-muted px-3 py-1 text-center text-xs text-muted-foreground">{{ systemText(m) }}</p>
           </div>
           <article
             v-else
             :data-testid="`message-${m.id}`"
-            :class="['group relative flex flex-wrap items-start gap-x-3 rounded-md px-2 py-1.5 transition-colors hover:bg-muted/50 md:flex-nowrap', highlightId === m.id ? 'bg-primary/10' : '']"
+            :data-own="isOwn(m)"
+            :class="['group relative flex flex-wrap items-end gap-x-2 rounded-md px-2 transition-colors md:flex-nowrap', isOwn(m) ? 'flex-row-reverse justify-start' : 'justify-start', metaOf(i).first ? 'mt-2' : 'mt-0.5', highlightId === m.id ? 'bg-primary/10' : '']"
           >
-            <Avatar class="mt-0.5 h-8 w-8 shrink-0">
-              <AvatarFallback :class="'bg-gradient-to-br text-[11px] text-white ' + getAvatarGradient(m.user_name)">
-                {{ getInitials(m.user_name || '?') }}
-              </AvatarFallback>
-            </Avatar>
-            <div :class="['min-w-0 max-w-3xl max-md:flex-1 max-md:basis-[calc(100%-46px)]', editingId === m.id ? 'flex-1' : '']">
-              <div class="flex items-baseline gap-2">
-                <span class="text-sm font-semibold">{{ m.user_name }}</span>
-                <time class="text-[11px] text-muted-foreground" :datetime="m.created_at">{{ formatTime(m.created_at) }}</time>
-                <span v-if="m.edited_at" class="text-[11px] text-muted-foreground">{{ t('teamChat.edited') }}</span>
-              </div>
+            <!-- The avatar sits beside the first bubble of a run by someone else; own messages have none. -->
+            <div v-if="!isOwn(m)" class="h-8 w-8 shrink-0">
+              <Avatar v-if="metaOf(i).first" class="h-8 w-8">
+                <AvatarFallback :class="'bg-gradient-to-br text-[11px] text-white ' + getAvatarGradient(m.user_name)">
+                  {{ getInitials(m.user_name || '?') }}
+                </AvatarFallback>
+              </Avatar>
+            </div>
+            <div :class="['min-w-0 max-w-[88%] rounded-2xl px-3 py-1.5 shadow-sm md:max-w-[min(36rem,70%)]', bubbleClass(isOwn(m)), metaOf(i).first ? '' : (isOwn(m) ? 'rounded-tr-2xl' : 'rounded-tl-2xl'), editingId === m.id ? 'flex-1' : '']">
+              <span v-if="!isOwn(m) && metaOf(i).first" class="block text-xs font-semibold text-primary">{{ m.user_name }}</span>
 
               <button
                 v-if="m.reply_to" type="button" :data-testid="`quote-${m.id}`"
@@ -312,6 +347,7 @@ async function removeMessage(m: TeamChatMessage) {
                 </div>
               </div>
               <!-- Plain text, escaped by Vue; never v-html -->
+              <PollCard v-else-if="m.poll" :message="m" :can-vote="canWrite && !isArchived" />
               <p v-else-if="m.body" class="whitespace-pre-wrap text-sm [overflow-wrap:anywhere]">{{ m.body }}</p>
 
               <MessageAttachments v-if="m.attachments?.length" :attachments="m.attachments" />
@@ -329,12 +365,17 @@ async function removeMessage(m: TeamChatMessage) {
                   @click="canInteract && toggleReaction(m, r.code)"
                 >{{ reactionGlyph(r.code) }} {{ r.count }}</component>
               </div>
+
+              <div class="mt-0.5 flex items-center justify-end gap-1.5 text-[11px] text-muted-foreground">
+                <span v-if="m.edited_at">{{ t('teamChat.edited') }}</span>
+                <time :datetime="m.created_at">{{ formatTime(m.created_at) }}</time>
+              </div>
             </div>
 
             <!-- Right after the message (not at the far edge of the pane), so the actions stay near what they act on -->
             <div
               v-if="editingId !== m.id && (canInteract || canEdit(m) || canDelete(m))"
-              class="relative flex shrink-0 gap-0.5 transition-opacity max-md:ml-[44px] md:opacity-0 md:focus-within:opacity-100 md:group-hover:opacity-100"
+              class="relative flex shrink-0 gap-0.5 transition-opacity max-md:basis-full max-md:justify-end md:opacity-0 md:focus-within:opacity-100 md:group-hover:opacity-100"
               :class="pickerFor === m.id ? 'md:opacity-100' : ''" :data-testid="`actions-${m.id}`"
             >
               <button v-if="canInteract" type="button" class="flex h-9 w-9 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground md:h-7 md:w-7" :aria-label="t('teamChat.react')" @click="pickerFor = pickerFor === m.id ? null : m.id">
@@ -365,6 +406,14 @@ async function removeMessage(m: TeamChatMessage) {
           <div ref="endRef" />
         </div>
       </ScrollArea>
+      <button
+        v-if="unseen > 0" type="button" data-testid="new-messages"
+        class="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground shadow-lg"
+        @click="scrollToBottom()"
+      >
+        <ArrowDown class="h-3.5 w-3.5" aria-hidden="true" />{{ t('teamChat.newMessages', { n: unseen }, unseen) }}
+      </button>
+      </div>
 
       <MessageComposer
         ref="composer" :channel-id="channelId" :can-write="canWrite" :archived="isArchived"

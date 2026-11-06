@@ -558,9 +558,18 @@
 }
 
 /* ─── Page transitions ─── */
+/* No out-in mode: it waits for the leaving page's transition to report its end, and when that never arrives
+   (seen leaving the transfers screen) the next page is never mounted and the area stays blank until a reload.
+   The leaving page leaves the flow instead, so both can animate at once. */
 .page-enter-active,
 .page-leave-active {
   transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.page-leave-active {
+  position: absolute;
+  inset: 0;
+  width: 100%;
 }
 
 .page-enter-from {

@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { formatTime as formatDtTime, formatDate as formatDtDate } from '@/lib/utils'
 import { ref, watch, onMounted, onUnmounted, nextTick, computed, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { useMediaScan } from '@/composables/useMediaScan'
 import { useContactsStore, type Contact, type Message } from '@/stores/contacts'
 import { useAuthStore } from '@/stores/auth'
 import { useUsersStore } from '@/stores/users'
@@ -82,6 +84,7 @@ import {
   MapPin,
   ExternalLink,
   Loader2,
+  ShieldAlert,
   Zap,
   Ticket,
   ArrowLeft,
@@ -120,6 +123,9 @@ const { t, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const contactsStore = useContactsStore()
+// WhatsApp media that is still being checked for malware: a "verifying" card in its place, and a
+// controlled refresh until the server releases it.
+const { blockedState: mediaBlocked, releasedAt: mediaReleased } = useMediaScan(computed(() => contactsStore.messages))
 const { notifyTyping } = useTypingNotifier()
 const authStore = useAuthStore()
 const usersStore = useUsersStore()
@@ -547,13 +553,23 @@ function resetAgentPickerFilters() {
 
 // Openers: ensure the picker data is loaded even for users who can transfer
 // but were not covered by the on-mount fetch (which is gated on canAssign).
+// The directory needs users:read; handing a conversation over needs transfers:write.
+async function loadAgentPicker() {
+  if (authStore.hasPermission('users', 'read')) await usersStore.fetchUsers()
+  else await usersStore.fetchAssignableAgents()
+}
+// The full teams list needs teams:read; handing a conversation over needs transfers:write.
+async function loadTransferTeams() {
+  if (authStore.hasPermission('teams', 'read')) await teamsStore.fetchTeams({ limit: 100 })
+  else await teamsStore.fetchTransferTeams()
+}
 function openTransferAgentDialog() {
-  if (usersStore.users.length === 0) usersStore.fetchUsers().catch(() => {})
+  if (usersStore.users.length === 0) loadAgentPicker().catch(() => {})
   isTransferAgentDialogOpen.value = true
 }
 function openTransferTeamDialog() {
   // Fetch up to the backend's max page so all teams show, not just the first 50.
-  teamsStore.fetchTeams({ limit: 100 }).catch(() => {})
+  loadTransferTeams().catch(() => {})
   teamSearchQuery.value = ''
   isTransferTeamDialogOpen.value = true
 }
@@ -567,7 +583,7 @@ onMounted(async () => {
   }
 
   // Teams populate the "Transfer to team" picker in the conversation menu.
-  if (teamsStore.teams.length === 0) teamsStore.fetchTeams({ limit: 100 })
+  if (teamsStore.teams.length === 0) loadTransferTeams().catch(() => {})
 
   // Ensure auth session is restored
   if (!authStore.isAuthenticated) {
@@ -585,7 +601,7 @@ onMounted(async () => {
 
   // Fetch users if can assign contacts
   if (canAssignContacts.value) {
-    usersStore.fetchUsers().catch(() => {
+    loadAgentPicker().catch(() => {
       // Silently fail if user list can't be loaded
     })
   }
@@ -1413,12 +1429,18 @@ async function transferToAgent(agentId: string) {
   isTransferring.value = true
   isTransferAgentDialogOpen.value = false
   try {
-    await chatbotService.createTransfer({
-      contact_id: contactsStore.currentContact.id,
-      whatsapp_account: (contactsStore.currentContact as any).whatsapp_account,
-      agent_id: agentId,
-      source: 'manual'
-    })
+    // A conversation that is already being attended is HANDED OVER (the active transfer moves to the new
+    // agent); only a conversation with no attendance gets a new transfer.
+    if (activeTransferId.value) {
+      await chatbotService.assignTransfer(activeTransferId.value, agentId)
+    } else {
+      await chatbotService.createTransfer({
+        contact_id: contactsStore.currentContact.id,
+        whatsapp_account: (contactsStore.currentContact as any).whatsapp_account,
+        agent_id: agentId,
+        source: 'manual'
+      })
+    }
     toast.success(t('chat.transferSuccess'), {
       description: t('chat.transferSuccessDesc')
     })
@@ -1438,12 +1460,18 @@ async function transferToTeam(teamId: string) {
   isTransferring.value = true
   isTransferTeamDialogOpen.value = false
   try {
-    await chatbotService.createTransfer({
-      contact_id: contactsStore.currentContact.id,
-      whatsapp_account: (contactsStore.currentContact as any).whatsapp_account,
-      team_id: teamId,
-      source: 'manual'
-    })
+    // Same rule as above: an active attendance is handed over to the team (its strategy picks an available
+    // agent, or the team's queue holds it), not duplicated.
+    if (activeTransferId.value) {
+      await chatbotService.assignTransfer(activeTransferId.value, null, teamId)
+    } else {
+      await chatbotService.createTransfer({
+        contact_id: contactsStore.currentContact.id,
+        whatsapp_account: (contactsStore.currentContact as any).whatsapp_account,
+        team_id: teamId,
+        source: 'manual'
+      })
+    }
     toast.success(t('chat.transferSuccess'), {
       description: t('chat.transferSuccessDesc')
     })
@@ -1528,8 +1556,7 @@ function getMessageStatusClass(status: string) {
 }
 
 function formatMessageTime(dateStr: string) {
-  const date = new Date(dateStr)
-  return date.toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
+  return formatDtTime(dateStr)
 }
 
 function formatContactTime(dateStr?: string) {
@@ -1539,13 +1566,13 @@ function formatContactTime(dateStr?: string) {
   const diffDays = Math.floor((now.getTime() - date.getTime()) / 86400000)
 
   if (diffDays === 0) {
-    return date.toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
+    return formatDtTime(dateStr)
   } else if (diffDays === 1) {
     return t('chat.yesterday')
   } else if (diffDays < 7) {
     return date.toLocaleDateString(locale.value, { weekday: 'short' })
   }
-  return date.toLocaleDateString(locale.value, { month: 'short', day: 'numeric' })
+  return formatDtDate(dateStr)
 }
 
 function getDateLabel(dateStr: string): string {
@@ -1560,7 +1587,7 @@ function getDateLabel(dateStr: string): string {
   } else if (diffDays === 1) {
     return t('chat.yesterday')
   }
-  return date.toLocaleDateString(locale.value, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+  return `${date.toLocaleDateString(locale.value, { weekday: 'long' })}, ${formatDtDate(dateStr)}`
 }
 
 function shouldShowDateSeparator(index: number): boolean {
@@ -1742,7 +1769,8 @@ function isMediaMessage(message: Message): boolean {
 function getMediaUrl(message: Message): string {
   if (!message.media_url) return ''
   const basePath = ((window as any).__BASE_PATH__ ?? '').replace(/\/$/, '')
-  return `${basePath}/api/media/${message.id}`
+  const released = mediaReleased[message.id]
+  return `${basePath}/api/media/${message.id}${released ? `?r=${released}` : ''}`
 }
 
 // Every media attachment in the open conversation, in chronological order, that
@@ -2230,11 +2258,11 @@ async function sendMediaMessage() {
                   <UserPlus class="mr-2 h-4 w-4" />
                   <span>{{ $t('chat.assignToAgent') }}</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem v-if="!activeTransferId" @click="openTransferAgentDialog" :disabled="isTransferring">
+                <DropdownMenuItem @click="openTransferAgentDialog" :disabled="isTransferring">
                   <UserX class="mr-2 h-4 w-4" />
                   <span>{{ $t('chat.transferToAgent') }}</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem v-if="!activeTransferId" @click="openTransferTeamDialog" :disabled="isTransferring">
+                <DropdownMenuItem @click="openTransferTeamDialog" :disabled="isTransferring">
                   <Users class="mr-2 h-4 w-4" />
                   <span>{{ $t('chat.transferToTeam') }}</span>
                 </DropdownMenuItem>
@@ -2357,8 +2385,18 @@ async function sendMediaMessage() {
                     {{ getReplyPreviewContent(message) }}
                   </p>
                 </div>
+                <!-- Media not cleared by the antimalware scan: its state, nothing about the scanner -->
+                <div
+                  v-if="message.media_url && mediaBlocked(message.id)" class="mb-2 flex items-center gap-2 rounded-lg bg-background/50 px-3 py-2 text-sm"
+                  :class="mediaBlocked(message.id) === 'infected' ? 'text-destructive' : 'text-muted-foreground'"
+                  :data-testid="`media-scan-${message.id}`" :data-scan="mediaBlocked(message.id)"
+                >
+                  <Loader2 v-if="mediaBlocked(message.id) === 'pending'" class="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />
+                  <ShieldAlert v-else class="h-4 w-4 shrink-0" aria-hidden="true" />
+                  <span>{{ t(`fileScan.${mediaBlocked(message.id)}`) }}</span>
+                </div>
                 <!-- Template header media (image/video/document shown above template text) -->
-                <div v-if="message.message_type === 'template' && message.media_url" class="mb-2">
+                <div v-else-if="message.message_type === 'template' && message.media_url" class="mb-2">
                   <img
                     v-if="message.media_mime_type?.startsWith('image/')"
                     :src="getMediaUrl(message)"

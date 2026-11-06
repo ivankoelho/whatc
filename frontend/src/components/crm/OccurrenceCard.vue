@@ -4,12 +4,12 @@ import { useI18n } from 'vue-i18n'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import type { Occurrence } from '@/services/api'
 import { slaStatus } from '@/lib/occurrence-sla'
-import { getInitials, getAvatarGradient } from '@/lib/utils'
+import { getInitials, getAvatarGradient, formatDate } from '@/lib/utils'
 import { MessageCircle, Clock, AlertTriangle, ArrowUp } from 'lucide-vue-next'
 
 const props = defineProps<{ occurrence: Occurrence; disabled?: boolean }>()
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 
 // As chaves do i18n são camelCase; não existe `priority_low`.
 const PRIORITY_KEY = {
@@ -33,7 +33,7 @@ const assignee = computed(() => props.occurrence.assigned_user_name || '')
 const sla = computed(() => slaStatus(props.occurrence))
 const openedAt = computed(() => {
   const d = new Date(props.occurrence.opened_at)
-  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString(locale.value, { day: '2-digit', month: 'short' })
+  return Number.isNaN(d.getTime()) ? '' : formatDate(d)
 })
 </script>
 

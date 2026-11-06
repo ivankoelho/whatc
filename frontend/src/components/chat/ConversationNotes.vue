@@ -10,7 +10,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'vue-sonner'
 import { useInfiniteScroll } from '@/composables/useInfiniteScroll'
-import { getInitials, getAvatarGradient } from '@/lib/utils'
+import { getInitials, getAvatarGradient, formatDate } from '@/lib/utils'
 import {
   StickyNote, Pencil, Trash2, X, Check, Loader2, Send
 } from 'lucide-vue-next'
@@ -157,7 +157,7 @@ function formatNoteTime(dateStr: string) {
   if (diffMins < 60) return `${diffMins}m ago`
   if (diffHours < 24) return `${diffHours}h ago`
   if (diffDays < 7) return `${diffDays}d ago`
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  return formatDate(date)
 }
 </script>
 

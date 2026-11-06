@@ -70,6 +70,11 @@ func (a *App) ListRoles(r *fastglue.Request) error {
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
 	}
+	// The role list (with every permission) is for those who manage roles, or who must pick one for a user.
+	if !a.HasPermission(userID, models.ResourceRoles, models.ActionRead, orgID) &&
+		!a.HasPermission(userID, models.ResourceUsers, models.ActionWrite, orgID) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Insufficient permissions", nil, "")
+	}
 
 	pg := parsePagination(r)
 	search := string(r.RequestCtx.QueryArgs().Peek("search"))
@@ -143,6 +148,9 @@ func (a *App) GetRole(r *fastglue.Request) error {
 
 // CreateRole creates a new custom role
 func (a *App) CreateRole(r *fastglue.Request) error {
+	if !a.can(r, models.ResourceRoles, models.ActionWrite) {
+		return nil
+	}
 	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
@@ -210,6 +218,9 @@ func (a *App) CreateRole(r *fastglue.Request) error {
 
 // UpdateRole updates a custom role
 func (a *App) UpdateRole(r *fastglue.Request) error {
+	if !a.can(r, models.ResourceRoles, models.ActionWrite) {
+		return nil
+	}
 	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
@@ -341,6 +352,9 @@ func (a *App) UpdateRole(r *fastglue.Request) error {
 
 // DeleteRole deletes a custom role
 func (a *App) DeleteRole(r *fastglue.Request) error {
+	if !a.can(r, models.ResourceRoles, models.ActionDelete) {
+		return nil
+	}
 	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")

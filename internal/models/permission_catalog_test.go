@@ -16,8 +16,26 @@ func TestPermissionCatalogGroupsEveryKey(t *testing.T) {
 			t.Errorf("%s is not mapped to a functional group", key)
 		}
 	}
-	if len(seen) != 126 {
-		t.Errorf("catalog has %d keys, want 126 (a key was added or removed: update this test on purpose)", len(seen))
+	// Not a fixed count: new permissions are expected. What must hold is that the
+	// keys other code authorizes with exist (a rename or removal is caught), that no
+	// key is duplicated (checked above) and that the admin role receives every key.
+	for _, key := range []string{
+		"occurrences:read", "occurrences:write", "occurrences:view_all",
+		"conversations:view_all", "conversations:view_team",
+		"chat:read", "chat:write", "team_chat:read", "team_chat:write",
+	} {
+		if !seen[key] {
+			t.Errorf("catalog lost %s, which authorization code depends on", key)
+		}
+	}
+	admin := map[string]bool{}
+	for _, k := range SystemRolePermissions()["admin"] {
+		admin[k] = true
+	}
+	for key := range seen {
+		if !admin[key] {
+			t.Errorf("admin role does not receive catalog key %s", key)
+		}
 	}
 
 	owner := map[string]string{}

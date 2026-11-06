@@ -32,6 +32,12 @@ type OccurrenceDocument struct {
 	AttachmentName string `gorm:"size:255" json:"attachment_name,omitempty"`
 	AttachmentMime string `gorm:"size:100" json:"attachment_mime,omitempty"`
 
+	// Source says how the values were filled: "" (typed by hand), "xml" or "pdf_text" (read from the
+	// attached file and confirmed by the person). AccessKey is the NF-e key when one was read and its
+	// check digit is valid. Neither is a fiscal validation.
+	Source    string `gorm:"size:20" json:"source,omitempty"`
+	AccessKey string `gorm:"size:44" json:"access_key,omitempty"`
+
 	CreatedByID *uuid.UUID `gorm:"type:uuid" json:"created_by_id,omitempty"`
 }
 

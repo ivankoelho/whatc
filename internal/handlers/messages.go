@@ -1,13 +1,13 @@
 package handlers
 
 import (
+	"github.com/shridarpatil/whatomate/internal/safehttp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"maps"
-	"net/http"
 	"net/url"
 	"path"
 	"strings"
@@ -35,6 +35,11 @@ type OutgoingMessageRequest struct {
 	// Required
 	Account *models.WhatsAppAccount
 	Contact *models.Contact
+
+	// MessageID is optional: a caller that must record the message before it is
+	// sent (so the record can later be matched to the message row) assigns the id.
+	// uuid.Nil lets the message get its own.
+	MessageID uuid.UUID
 
 	// Message type determines which fields are used
 	Type models.MessageType // text, image, video, audio, document, interactive, template
@@ -80,6 +85,11 @@ type OutgoingMessageRequest struct {
 	// Reply context
 	ReplyToMessage *models.Message
 
+	// ExtraMetadata is merged into the stored message metadata (template sends).
+	// The automation worker uses it to tie the message to its notification, so a
+	// status webhook can find the notification even before the provider id is saved.
+	ExtraMetadata models.JSONB
+
 	// Origin says who produced the message, for the consumption ledger. Optional:
 	// when empty it is taken from ctx (usage.WithOrigin) or inferred from SentByUserID.
 	Origin usage.Origin
@@ -112,6 +122,17 @@ type MessageSendOptions struct {
 	// successful send. Used for chatbot replies so a bot-handled exchange
 	// doesn't leave an "unread" badge in the agent's contact list.
 	MarkIncomingRead bool
+
+	// OnResult, when set, is called once per send with the provider message id or
+	// the error, after the message row was updated. Lets a caller that needs the
+	// outcome (not only the stored status) reuse this sender instead of a copy.
+	OnResult func(wamid string, err error)
+
+	// BeforeSend, when set, runs after the message row exists and immediately before the provider is called. It
+	// is the point of no return of a send that must be fenced (the protocol send): it returns the context the
+	// provider call must use (carrying the deadline the owner is allowed to send until) or an error, in which case
+	// NOTHING is sent: the message row is marked failed and the error is returned to the caller.
+	BeforeSend func(ctx context.Context) (context.Context, context.CancelFunc, error)
 }
 
 // DefaultSendOptions returns options suitable for agent UI sends
@@ -172,14 +193,31 @@ func (a *App) agentNamePrefix(userID uuid.UUID) string {
 	return "*" + first + ":*\n"
 }
 
+// ErrBeforeSendNeedsSync: a send with a BeforeSend point of no return cannot be asynchronous.
+var ErrBeforeSendNeedsSync = errors.New("BeforeSend requires a synchronous send (Async=false)")
+
 // SendOutgoingMessage is the unified method for sending all types of WhatsApp messages.
 // It handles: text, media (image/video/audio/document), interactive (buttons/list/cta_url), and template messages.
 func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageRequest, opts MessageSendOptions) (*models.Message, error) {
+	// A fenced send must stay in this goroutine: the deadline BeforeSend returns is the deadline of the provider call.
+	// The async branch would call the provider in a goroutine with its own context and silently drop it.
+	if opts.BeforeSend != nil && opts.Async {
+		return nil, ErrBeforeSendNeedsSync
+	}
+
 	// 0. Ownership gate for human sends: claim the attendance (or open one)
 	// BEFORE anything is created or sent, so the loser of a race, or an agent
 	// writing into another agent's conversation, never reaches the customer.
+	isAuth := isAuthTemplateRequest(req)
 	if opts.SentByUserID != nil && req.Contact != nil && req.Account != nil {
-		if err := a.ensureAgentOwnsConversation(req.Account, req.Contact, *opts.SentByUserID, opts.AllowOtherOwner); err != nil {
+		if isAuth {
+			// A verification code never claims or opens an attendance: only
+			// refuse when another agent owns the conversation (same rule as
+			// a normal send, without the side effects).
+			if err := a.checkNotOwnedByOther(req.Contact, *opts.SentByUserID, opts.AllowOtherOwner); err != nil {
+				return nil, err
+			}
+		} else if err := a.ensureAgentOwnsConversation(req.Account, req.Contact, *opts.SentByUserID, opts.AllowOtherOwner); err != nil {
 			return nil, err
 		}
 	}
@@ -225,6 +263,9 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 
 		switch req.Type {
 		case models.MessageTypeText:
+			if req.Account.DirectSendEnabled && !serviceWindowOpen(req.Contact) {
+				return a.WhatsApp.SendDirectTextMessage(sendCtx, waAccount, rcpt, signedContent, "utility")
+			}
 			return a.WhatsApp.SendTextMessage(sendCtx, waAccount, rcpt, signedContent, replyToMsgID)
 
 		case models.MessageTypeImage, models.MessageTypeVideo, models.MessageTypeAudio, models.MessageTypeDocument:
@@ -278,6 +319,16 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 			// Add URL/COPY_CODE button components with dynamic params
 			buttonComponents := whatsapp.ButtonURLParamsToComponents(req.ButtonURLParams, req.Template.Buttons)
 			components = append(components, buttonComponents...)
+			if isAuth {
+				// The client redacts echoed codes from errors before any logging.
+				secrets := make([]string, 0, len(req.BodyParams)+len(req.ButtonURLParams))
+				for _, m := range []map[string]string{req.BodyParams, req.ButtonURLParams} {
+					for _, v := range m {
+						secrets = append(secrets, v)
+					}
+				}
+				sendCtx = whatsapp.WithSecrets(sendCtx, secrets...)
+			}
 			return a.WhatsApp.SendTemplateMessage(sendCtx, waAccount, rcpt, req.Template.Name, req.Template.Language, components)
 
 		case models.MessageTypeFlow:
@@ -289,6 +340,19 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 		default:
 			return "", fmt.Errorf("unsupported message type: %s", req.Type)
 		}
+	}
+
+	// 2b. The point of no return, for a send that must be fenced.
+	if opts.BeforeSend != nil {
+		sendCtx, cancel, err := opts.BeforeSend(ctx)
+		if err != nil {
+			// Nothing reached the provider and nothing will: close the message row, the usage ledger entry
+			// (pending since the row was created) and tell the viewers, exactly as any send that did not leave.
+			a.finalizeMessageSend(msg, req, opts, "", err)
+			return nil, err
+		}
+		defer cancel()
+		ctx = sendCtx
 	}
 
 	// 3. Execute send (async or sync)
@@ -310,6 +374,13 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 	// 4. Immediate actions (before send completes for async)
 	if opts.BroadcastWebSocket {
 		a.broadcastNewMessage(req.Account.OrganizationID, msg, req.Contact)
+	}
+
+	// Authentication templates (one-time codes) stay out of the inbox: no
+	// reordering, preview, SLA tracking, first response or status change.
+	// The message itself still shows up in the conversation history.
+	if isAuth {
+		return msg, nil
 	}
 
 	if opts.TrackSLA {
@@ -341,6 +412,35 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 // Internal Helpers
 // ============================================================================
 
+const (
+	// MetadataAuthCodeMasked flags a stored message whose one-time code was masked.
+	MetadataAuthCodeMasked = "auth_code_masked"
+	// InteractiveTypeAuthCode is the technical marker clients use to render a
+	// masked verification-code message without actions.
+	InteractiveTypeAuthCode = "auth_code"
+)
+
+// isAuthTemplateRequest reports whether the request sends an AUTHENTICATION
+// template (identified by its category, not by name).
+func isAuthTemplateRequest(req OutgoingMessageRequest) bool {
+	return req.Type == models.MessageTypeTemplate && req.Template != nil &&
+		templateutil.IsAuthCategory(req.Template.Category)
+}
+
+// checkNotOwnedByOther is the read-only half of ensureAgentOwnsConversation:
+// it refuses a send into a conversation owned by another agent but never
+// claims, opens or audits anything.
+func (a *App) checkNotOwnedByOther(contact *models.Contact, userID uuid.UUID, allowOtherOwner bool) error {
+	t, has := a.activeTransferFor(contact.OrganizationID, contact.ID)
+	if !has || t.AgentID == nil || *t.AgentID == userID {
+		return nil
+	}
+	if allowOtherOwner || a.canOverrideConversationOwner(userID, contact.OrganizationID) {
+		return nil
+	}
+	return ErrConversationOwned
+}
+
 // toWhatsAppAccount converts models.WhatsAppAccount to whatsapp.Account
 func (a *App) toWhatsAppAccount(account *models.WhatsAppAccount) *whatsapp.Account {
 	return account.ToWAAccount()
@@ -348,8 +448,12 @@ func (a *App) toWhatsAppAccount(account *models.WhatsAppAccount) *whatsapp.Accou
 
 // createOutgoingMessage creates a Message model from the request
 func (a *App) createOutgoingMessage(req OutgoingMessageRequest, opts MessageSendOptions) *models.Message {
+	id := req.MessageID
+	if id == uuid.Nil {
+		id = uuid.New()
+	}
 	msg := &models.Message{
-		BaseModel:       models.BaseModel{ID: uuid.New()},
+		BaseModel:       models.BaseModel{ID: id},
 		OrganizationID:  req.Account.OrganizationID,
 		WhatsAppAccount: req.Account.Name,
 		ContactID:       req.Contact.ID,
@@ -385,8 +489,16 @@ func (a *App) createOutgoingMessage(req OutgoingMessageRequest, opts MessageSend
 
 	case models.MessageTypeTemplate:
 		if req.Template != nil {
-			// Store actual rendered content instead of just template name
-			content := templateutil.ReplaceWithStringParams(req.Template.BodyContent, req.BodyParams)
+			// Store actual rendered content instead of just template name.
+			// Authentication bodies are masked BEFORE persisting: the real
+			// code only ever exists in the request sent to Meta.
+			isAuth := isAuthTemplateRequest(req)
+			var content string
+			if isAuth {
+				content = templateutil.MaskAllParams(req.Template.BodyContent)
+			} else {
+				content = templateutil.ReplaceWithStringParams(req.Template.BodyContent, req.BodyParams)
+			}
 			if content == "" {
 				content = fmt.Sprintf("[Template: %s]", req.Template.DisplayName)
 			}
@@ -395,6 +507,25 @@ func (a *App) createOutgoingMessage(req OutgoingMessageRequest, opts MessageSend
 			msg.Metadata = models.JSONB{
 				"template_name": req.Template.Name,
 				"template_id":   req.Template.ID.String(),
+			}
+			// Extra metadata (ids that link a send to its origin, e.g. a case notification) is accepted ONLY for
+			// non-authentication sends and can never replace a key this function already owns. An authentication
+			// message keeps exactly the masked-code metadata and nothing a caller adds: copying caller data after the
+			// sanitisation is how a one-time code could re-enter the stored message.
+			if !isAuth {
+				for k, v := range req.ExtraMetadata {
+					if _, owned := msg.Metadata[k]; !owned && k != MetadataAuthCodeMasked {
+						msg.Metadata[k] = v
+					}
+				}
+			}
+			if isAuth {
+				msg.Metadata[MetadataAuthCodeMasked] = true
+				// Technical marker for the UI (no copy button, no promotion
+				// to the top of the list). Detection on the backend relies on
+				// the template category and metadata, never on this field.
+				msg.InteractiveData = models.JSONB{"type": InteractiveTypeAuthCode}
+				return msg
 			}
 			// Store header media so it renders in the chat bubble
 			if req.MediaURL != "" {
@@ -498,10 +629,24 @@ func (a *App) buildInteractiveData(req OutgoingMessageRequest) models.JSONB {
 
 // finalizeMessageSend updates message status and triggers post-send actions
 func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageRequest, opts MessageSendOptions, wamid string, err error) {
+	if opts.OnResult != nil {
+		defer opts.OnResult(wamid, err)
+	}
 	// Use Where instead of Model(msg) to avoid mutating the shared msg struct,
 	// which may be read concurrently by the caller when sending is async.
 	if err != nil {
-		errMsg := err.Error()
+		if isAuthTemplateRequest(req) {
+			// Error text can echo request details: the code must not reach the
+			// message row, the logs or the websocket broadcast below.
+			secrets := map[string]any{}
+			for _, m := range []map[string]string{req.BodyParams, req.ButtonURLParams} {
+				for k, v := range m {
+					secrets[k] = v
+				}
+			}
+			err = errors.New(templateutil.RedactValues(err.Error(), secrets))
+		}
+		errMsg := whatsapp.PublicErrorText(err) // what is stored and broadcast: never a raw provider body
 
 		a.DB.Model(&models.Message{}).Where("id = ?", msg.ID).Updates(map[string]any{
 			"status":        models.MessageStatusFailed,
@@ -769,6 +914,9 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
 	}
+	if !a.requireChatWrite(r, orgID, userID) {
+		return nil
+	}
 
 	var req SendTemplateMessageRequest
 	var headerFileData []byte
@@ -947,6 +1095,13 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 			WhatsAppAccount: account.Name,
 			AssignedUserID:  &userID,
 		}
+		if templateutil.IsAuthCategory(template.Category) {
+			// A verification code is not the start of a conversation: the contact
+			// is created (a message needs one) but stays unassigned, exactly like
+			// a number that wrote in first, instead of landing in the carteira of
+			// the user who owns the API key.
+			c.AssignedUserID = nil
+		}
 		if err := a.DB.Create(&c).Error; err != nil {
 			a.Log.Error("Failed to create contact", "error", err, "phone", req.PhoneNumber)
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create contact", nil, "")
@@ -1000,24 +1155,22 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 	var headerMimeType string
 	if template.HeaderType == "IMAGE" || template.HeaderType == "VIDEO" || template.HeaderType == "DOCUMENT" {
 		if req.HeaderMediaID != "" {
-			// Option 1: Pre-uploaded WhatsApp media ID — use directly (no local preview)
+			// Option 1: Pre-uploaded WhatsApp media ID — only one this server uploaded after a scan; an id
+			// from anywhere else is content WhatC never saw.
+			if !a.metaMediaKnown(orgID, req.HeaderMediaID) {
+				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Unknown media: upload the header file instead", nil, "")
+			}
 			headerMediaID = req.HeaderMediaID
 		} else if req.HeaderMediaURL != "" {
-			// Option 2: Download from URL, then upload to WhatsApp
-			resp, err := http.Get(req.HeaderMediaURL)
-			if err != nil {
-				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Failed to download header media from URL", nil, "")
+			// Option 2: Download from the URL the person typed, then upload to WhatsApp. That URL is
+			// untrusted input aimed at this server's network position: it goes through the safe client
+			// (https only, public addresses only, bounded), and the bytes are scanned below before use.
+			fetched, ferr := a.mediaFetcher().Fetch(context.Background(), req.HeaderMediaURL, maxHeaderMediaURLBytes)
+			if ferr != nil {
+				return a.sendMediaFetchError(r, ferr)
 			}
-			defer resp.Body.Close() //nolint:errcheck
-			if resp.StatusCode != http.StatusOK {
-				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, fmt.Sprintf("Header media URL returned status %d", resp.StatusCode), nil, "")
-			}
-			headerMediaData, err = io.ReadAll(resp.Body)
-			if err != nil {
-				a.Log.Error("Failed to read header media from URL", "error", err)
-				return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to read header media from URL", nil, "")
-			}
-			headerMimeType = resp.Header.Get("Content-Type")
+			headerMediaData = fetched.Data
+			headerMimeType = fetched.ContentType
 			if headerMimeType == "" {
 				headerMimeType = "application/octet-stream"
 			}
@@ -1027,8 +1180,11 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 			headerMimeType = headerFileMimeType
 		}
 
-		// Upload to WhatsApp if we have raw data (options 2 & 3)
+		// Upload to WhatsApp if we have raw data (options 2 & 3): only after a clean verdict
 		if len(headerMediaData) > 0 {
+			if !a.scanIngress(r, orgID, "template_header_media", headerMediaData) {
+				return nil
+			}
 			waAcct := a.toWhatsAppAccount(account)
 			mediaID, err := a.WhatsApp.UploadMedia(context.Background(), waAcct, headerMediaData, headerMimeType, "header")
 			if err != nil {
@@ -1036,6 +1192,7 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 				return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to upload header media to WhatsApp", nil, "")
 			}
 			headerMediaID = mediaID
+			a.recordMetaMedia(orgID, account.Name, mediaID, "template_header_media", headerMediaData)
 		}
 	}
 
@@ -1061,20 +1218,7 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 	// Auto-populate from template_params["1"] so callers don't need button_params.
 	buttonParams := req.ButtonParams
 	if strings.EqualFold(template.Category, "AUTHENTICATION") && len(buttonParams) == 0 {
-		if code, ok := req.TemplateParams["1"]; ok && code != "" {
-			for i, raw := range template.Buttons {
-				if btn, ok := raw.(map[string]any); ok {
-					btnType, _ := btn["type"].(string)
-					if strings.EqualFold(btnType, "OTP") {
-						if buttonParams == nil {
-							buttonParams = make(map[string]string)
-						}
-						buttonParams[fmt.Sprintf("%d", i)] = code
-						break
-					}
-				}
-			}
-		}
+		buttonParams = whatsapp.OTPButtonParams(template.Buttons, req.TemplateParams["1"])
 	}
 
 	// Resolve filename for DOCUMENT headers — required by Meta (#351).
@@ -1157,4 +1301,33 @@ func (a *App) senderNameForBroadcast(msg *models.Message) string {
 	var name string
 	a.DB.Model(&models.User{}).Where("id = ?", *msg.SentByUserID).Pluck("full_name", &name)
 	return name
+}
+
+// maxHeaderMediaURLBytes bounds a template header downloaded from a URL (WhatsApp's own limit is 16 MB).
+const maxHeaderMediaURLBytes = 16 << 20
+
+// MediaFetcher downloads media from a URL a person supplied. Production uses internal/safehttp.
+type MediaFetcher interface {
+	Fetch(ctx context.Context, rawURL string, maxBytes int64) (*safehttp.Result, error)
+}
+
+func (a *App) mediaFetcher() MediaFetcher {
+	if a.MediaFetcher != nil {
+		return a.MediaFetcher
+	}
+	return safehttp.Default()
+}
+
+// sendMediaFetchError answers without revealing what the server's network looks like: the person
+// learns that the URL cannot be used, not which internal address it pointed at.
+func (a *App) sendMediaFetchError(r *fastglue.Request, err error) error {
+	a.Log.Warn("Remote media download refused or failed", "error", err)
+	switch {
+	case errors.Is(err, safehttp.ErrTooLarge):
+		return r.SendErrorEnvelope(fasthttp.StatusRequestEntityTooLarge, "The media at that URL is too large", nil, "")
+	case errors.Is(err, safehttp.ErrBlockedURL), errors.Is(err, safehttp.ErrBlockedAddress):
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "That media URL is not allowed: use a public https address", nil, "")
+	default:
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Failed to download header media from URL", nil, "")
+	}
 }

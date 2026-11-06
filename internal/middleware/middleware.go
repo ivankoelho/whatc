@@ -87,7 +87,7 @@ func CORS(allowedOrigins map[string]bool) fastglue.FastMiddleware {
 		// which causes the browser to block the request.
 
 		r.RequestCtx.Response.Header.Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
-		r.RequestCtx.Response.Header.Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key, X-Organization-ID, X-CSRF-Token")
+		r.RequestCtx.Response.Header.Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key, X-Organization-ID, X-CSRF-Token, Idempotency-Key")
 		r.RequestCtx.Response.Header.Set("Access-Control-Max-Age", "86400")
 
 		return r
@@ -227,7 +227,7 @@ func validateAPIKey(r *fastglue.Request, key string, db *gorm.DB) bool {
 			}(apiKey.ID)
 
 			// Set context values from the user who created the key
-			if apiKey.User != nil {
+			if apiKey.User != nil && apiKey.User.IsActive {
 				r.RequestCtx.SetUserValue(ContextKeyUserID, apiKey.UserID)
 				r.RequestCtx.SetUserValue(ContextKeyOrganizationID, apiKey.OrganizationID)
 				r.RequestCtx.SetUserValue(ContextKeyEmail, apiKey.User.Email)

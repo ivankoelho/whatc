@@ -223,3 +223,17 @@ func CSVUnsafeCellForTest(s string) string { return csvUnsafeCell(s) }
 func CSVLooksLikeFormulaForTest(s string) bool {
 	return startsWithFormulaTrigger(s) && !numericCell.MatchString(s)
 }
+
+// NewRetentionEngineForTest builds an engine that EXECUTES against the given store. The production
+// constructor cannot: purgeExecutionEnabled is a false constant. This file is compiled only into tests.
+func (a *App) NewRetentionEngineForTest(store PurgeStore) *RetentionEngine {
+	e := a.NewRetentionEngine(store)
+	e.execute = store != nil
+	return e
+}
+
+// FSPurgeStoreForTest exposes the (unwired) filesystem store.
+func (a *App) FSPurgeStoreForTest() PurgeStore { return fsPurgeStore{a} }
+
+// PurgeExecutionEnabledForTest reports the master switch.
+const PurgeExecutionEnabledForTest = purgeExecutionEnabled

@@ -32,6 +32,7 @@ type AccountRequest struct {
 	IsDefaultOutgoing      bool    `json:"is_default_outgoing"`
 	AutoReadReceipt        bool    `json:"auto_read_receipt"`
 	BusinessCallingEnabled bool    `json:"business_calling_enabled"`
+	DirectSendEnabled      bool    `json:"direct_send_enabled"`
 	DefaultTeamID          *string `json:"default_team_id"` // "" ou null limpa; uuid define
 }
 
@@ -48,6 +49,7 @@ type AccountResponse struct {
 	IsDefaultOutgoing      bool       `json:"is_default_outgoing"`
 	AutoReadReceipt        bool       `json:"auto_read_receipt"`
 	BusinessCallingEnabled bool       `json:"business_calling_enabled"`
+	DirectSendEnabled      bool       `json:"direct_send_enabled"`
 	Status                 string     `json:"status"`
 	HasAccessToken         bool       `json:"has_access_token"`
 	HasAppSecret           bool       `json:"has_app_secret"`
@@ -151,6 +153,7 @@ func (a *App) CreateAccount(r *fastglue.Request) error {
 		IsDefaultOutgoing:      req.IsDefaultOutgoing,
 		AutoReadReceipt:        req.AutoReadReceipt,
 		BusinessCallingEnabled: req.BusinessCallingEnabled,
+		DirectSendEnabled:      req.DirectSendEnabled,
 		Status:                 "active",
 		CreatedByID:            &userID,
 		UpdatedByID:            &userID,
@@ -284,6 +287,7 @@ func (a *App) UpdateAccount(r *fastglue.Request) error {
 	}
 	account.AutoReadReceipt = req.AutoReadReceipt
 	account.BusinessCallingEnabled = req.BusinessCallingEnabled
+	account.DirectSendEnabled = req.DirectSendEnabled
 
 	// Handle default flags
 	if req.IsDefaultIncoming && !account.IsDefaultIncoming {
@@ -385,6 +389,9 @@ func (a *App) DeleteAccount(r *fastglue.Request) error {
 // TestAccountConnection tests the WhatsApp API connection
 // This validates both PhoneID and BusinessID to ensure all credentials are correct
 func (a *App) TestAccountConnection(r *fastglue.Request) error {
+	if !a.can(r, models.ResourceAccounts, models.ActionWrite) {
+		return nil
+	}
 	orgID, err := a.getOrgID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
@@ -536,8 +543,9 @@ func accountToResponse(acc models.WhatsAppAccount) AccountResponse {
 		IsDefaultOutgoing:      acc.IsDefaultOutgoing,
 		AutoReadReceipt:        acc.AutoReadReceipt,
 		BusinessCallingEnabled: acc.BusinessCallingEnabled,
+		DirectSendEnabled:      acc.DirectSendEnabled,
 		Status:                 acc.Status,
-		HasAccessToken:         acc.AccessToken != "",
+		HasAccessToken:        acc.AccessToken != "",
 		HasAppSecret:           acc.AppSecret != "",
 		CreatedByID:            acc.CreatedByID,
 		UpdatedByID:            acc.UpdatedByID,
@@ -574,6 +582,9 @@ func (a *App) validateAccountCredentials(phoneID, businessID, accessToken, apiVe
 // SubscribeApp subscribes the app to webhooks for the WhatsApp Business Account.
 // This is required after phone number registration to receive incoming messages from Meta.
 func (a *App) SubscribeApp(r *fastglue.Request) error {
+	if !a.can(r, models.ResourceAccounts, models.ActionWrite) {
+		return nil
+	}
 	orgID, err := a.getOrgID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")

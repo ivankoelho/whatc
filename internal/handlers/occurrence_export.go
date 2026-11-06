@@ -1,0 +1,390 @@
+package handlers
+
+import (
+	"archive/zip"
+	"bytes"
+	"encoding/csv"
+	"fmt"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/valyala/fasthttp"
+	"github.com/zerodha/fastglue"
+)
+
+// Exporting a case. The person picks sections and a format; the SERVER decides what each section may
+// contain, from the same rules as the screens:
+//
+//	summary / history / documents list   anyone who can open the case (history withholds customer message text)
+//	internal discussion                  those who may read the case discussion (team_chat:read + case access)
+//	WhatsApp conversation                only those who may read it (canUseCaseChannel): never "because they see the case"
+//	attached files (zip only)            only the files the person may download
+//
+// Asking for a section one may not have is refused (403), not quietly dropped; "full" means "everything
+// I am allowed" and lists what was left out. Ids never come from the client: everything is read from the
+// case in the path. The file is built in memory and sent: nothing is left on disk to clean up.
+// Limits keep a request bounded; beyond them the answer is 413 (an asynchronous export is future work).
+
+const (
+	exportMaxEvents   = 5000
+	exportMaxMessages = 5000
+	exportMaxZipFiles = 100 << 20
+)
+
+var exportSections = map[string]bool{"summary": true, "history": true, "internal_chat": true, "whatsapp": true, "documents": true, "full": true}
+
+type exportRequest struct {
+	Sections []string `json:"sections"`
+	Format   string   `json:"format"` // pdf | csv | zip
+}
+
+// exportAvailability says, for the caller, which sections can be exported.
+func (a *App) exportAvailability(orgID, userID uuid.UUID, occ *models.Occurrence, acc occurrenceAccess) map[string]bool {
+	var ch models.ChatChannel
+	chatOK := false
+	if a.HasPermission(userID, models.ResourceTeamChat, models.ActionRead, orgID) &&
+		a.DB.Where("organization_id = ? AND occurrence_id = ? AND kind = ?", orgID, occ.ID, models.ChatChannelKindOccurrence).First(&ch).Error == nil {
+		chatOK = a.canAccessChatChannelDB(a.DB, userID, orgID, &ch)
+	}
+	return map[string]bool{
+		"summary": true, "history": true, "documents": true,
+		"internal_chat": chatOK,
+		"whatsapp":      a.canUseCaseChannel(orgID, userID, occ, acc, a.caseChannelAccount(orgID, occ), false),
+	}
+}
+
+// GetOccurrenceExportOptions tells the UI what to offer.
+func (a *App) GetOccurrenceExportOptions(r *fastglue.Request) error {
+	orgID, userID, err := a.requireAuth(r, models.ResourceOccurrences, models.ActionRead)
+	if err != nil {
+		return nil
+	}
+	occ, acc, err := a.loadOccurrenceWithAccess(r, orgID, userID, false)
+	if err != nil {
+		return nil
+	}
+	return r.SendEnvelope(map[string]any{"sections": a.exportAvailability(orgID, userID, occ, acc)})
+}
+
+type exportTable struct {
+	name   string
+	header []string
+	rows   [][]string
+}
+
+// Names for people reading the report (the screens translate the same codes).
+var exportEventLabels = map[string]string{
+	"opened": "Ocorrência aberta", "note": "Nota interna", "reply": "Resposta ao cliente", "stage_change": "Mudança de etapa",
+	"assignment": "Atribuição", "protocol_sent": "Protocolo enviado", "closed": "Ocorrência encerrada", "forwarded": "Encaminhado para uma equipe",
+	"participant_added": "Participante adicionado", "participant_removed": "Participante removido", "reopened": "Reaberto",
+	"scope_regularized": "Escopo regularizado", "customer_notification": "Comunicação com o cliente", "process_message_used": "Mensagem do processo usada",
+	"file_added": "Documento anexado", "file_removed": "Documento removido", "returned": "Devolvida ao departamento anterior",
+}
+
+var exportNoticeLabels = map[string]string{
+	"prepared": "preparada", "pending": "na fila", "processing": "enviando", "accepted": "aceita pelo provedor", "delivered": "entregue",
+	"read": "lida", "failed": "falhou", "uncertain": "resultado incerto", "cancelled": "cancelada", "skipped": "não enviada",
+}
+
+var exportStateLabels = map[string]string{"new": "Novo", "in_progress": "Em andamento", "awaiting_customer": "Aguardando cliente", "waiting_customer": "Aguardando cliente", "resolved": "Concluído", "done": "Concluído"}
+
+func label(m map[string]string, k string) string {
+	if v, ok := m[k]; ok {
+		return v
+	}
+	return k
+}
+
+// tsvIn shows an instant in the organization's time zone as DD/MM/YYYY HH:mm (24 h). It never uses the
+// server's own zone: the same case must read the same wherever the server runs.
+func tsvIn(loc *time.Location, t time.Time) string { return t.In(loc).Format("02/01/2006 15:04") }
+
+// ExportOccurrence builds the report.
+func (a *App) ExportOccurrence(r *fastglue.Request) error {
+	orgID, userID, err := a.requireAuth(r, models.ResourceOccurrences, models.ActionRead)
+	if err != nil {
+		return nil
+	}
+	occ, acc, err := a.loadOccurrenceWithAccess(r, orgID, userID, false)
+	if err != nil {
+		return nil
+	}
+	var req exportRequest
+	if err := a.decodeRequest(r, &req); err != nil {
+		return nil
+	}
+	if req.Format != "pdf" && req.Format != "csv" && req.Format != "zip" {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "format must be pdf, csv or zip", nil, "")
+	}
+	want := map[string]bool{}
+	for _, s := range req.Sections {
+		if !exportSections[s] {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "unknown section", nil, "")
+		}
+		want[s] = true
+	}
+	if len(want) == 0 {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "choose at least one section", nil, "")
+	}
+	avail := a.exportAvailability(orgID, userID, occ, acc)
+	var omitted []string
+	if want["full"] {
+		for s, ok := range avail {
+			if ok {
+				want[s] = true
+			} else {
+				omitted = append(omitted, s)
+			}
+		}
+		delete(want, "full")
+	}
+	for s := range want {
+		if !avail[s] {
+			return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You cannot export this section", nil, fastglue.ErrorType("forbidden_section"))
+		}
+	}
+	if !a.chatUploadAllowed(userID) { // same per-person throttle as uploads: an export is heavy
+		return a.sendChatError(r, errChatRateLimited, "export the case")
+	}
+
+	// Load the case with its names, as the screen does.
+	a.DB.Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Category").Preload("Contact").First(occ, occ.ID)
+	teamName := ""
+	if occ.TeamID != nil {
+		a.DB.Model(&models.Team{}).Where("id = ? AND organization_id = ?", *occ.TeamID, orgID).Select("name").Scan(&teamName)
+	}
+
+	loc := a.orgLocation(orgID)
+	issuedAt := time.Now()
+	rep := a.newReportData(orgID, userID, occ, teamName, loc, issuedAt, want["summary"])
+
+	var tables []exportTable
+	counts := map[string]int{}
+	if want["history"] {
+		t, ok := a.exportHistory(orgID, userID, occ, acc)
+		if !ok {
+			return r.SendErrorEnvelope(fasthttp.StatusRequestEntityTooLarge, "The history is too large to export at once", nil, "")
+		}
+		tables = append(tables, t)
+		counts["history"] = len(t.rows)
+	}
+	if want["internal_chat"] {
+		t, ok := a.exportInternalChat(orgID, occ)
+		if !ok {
+			return r.SendErrorEnvelope(fasthttp.StatusRequestEntityTooLarge, "The discussion is too large to export at once", nil, "")
+		}
+		tables = append(tables, t)
+		counts["internal_chat"] = len(t.rows)
+	}
+	if want["whatsapp"] {
+		t, ok := a.exportWhatsApp(orgID, occ)
+		if !ok {
+			return r.SendErrorEnvelope(fasthttp.StatusRequestEntityTooLarge, "The conversation is too large to export at once", nil, "")
+		}
+		tables = append(tables, t)
+		counts["whatsapp"] = len(t.rows)
+	}
+	var files []models.OccurrenceFile
+	if want["documents"] {
+		a.DB.Where("organization_id = ? AND occurrence_id = ?", orgID, occ.ID).Order("created_at ASC").Find(&files)
+		t := exportTable{name: "documents", header: []string{"Nome", "Tipo", "Tamanho (bytes)", "Enviado por", "Data", "Restrito"}}
+		ids := make([]uuid.UUID, len(files))
+		for i, f := range files {
+			ids[i] = f.UploadedByID
+		}
+		names := a.chatUserNames(ids)
+		for _, f := range files {
+			t.rows = append(t.rows, []string{f.Name, f.Mime, fmt.Sprint(f.SizeBytes), names[f.UploadedByID], tsvIn(loc, f.CreatedAt), map[bool]string{true: "sim", false: "não"}[f.Restricted]})
+		}
+		tables = append(tables, t)
+		counts["documents"] = len(files)
+	}
+
+	stamp := issuedAt.In(loc).Format("20060102-150405")
+	base := "protocolo-" + strings.ReplaceAll(occ.ProtocolNumber, "/", "-") + "-" + stamp
+	var body []byte
+	var ctype, filename string
+
+	switch req.Format {
+	case "csv":
+		if len(tables) != 1 || want["summary"] {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "CSV holds one table: choose a single section among history, discussion, WhatsApp or documents (or use PDF or ZIP)", nil, "")
+		}
+		body, filename, ctype = csvBytes(tables[0]), base+"-"+tables[0].name+".csv", "text/csv; charset=utf-8"
+	case "pdf":
+		body, filename, ctype = a.exportPDF(rep, want, tables, omitted, files, nil), base+".pdf", "application/pdf"
+	case "zip":
+		// Only files with a clean antimalware verdict travel in the ZIP; the report lists the others.
+		fileIDs := make([]uuid.UUID, len(files))
+		for i, f := range files {
+			fileIDs[i] = f.ID
+		}
+		scans := a.scanStatuses(orgID, models.ScanSourceOccurrenceFile, fileIDs)
+		var held []string
+		for _, f := range files {
+			if a.canDownloadOccurrenceFile(userID, acc, &f) && scanStatusOf(scans, f.ID) != models.ScanClean {
+				held = append(held, f.Name+" ("+scanStatusOf(scans, f.ID)+")")
+			}
+		}
+		counts["documents_held"] = len(held)
+		var buf bytes.Buffer
+		zw := zip.NewWriter(&buf)
+		put := func(name string, data []byte) {
+			if w, e := zw.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Deflate, Modified: time.Now()}); e == nil {
+				_, _ = w.Write(data)
+			}
+		}
+		put("relatorio.pdf", a.exportPDF(rep, want, tables, omitted, files, held))
+		for _, t := range tables {
+			put(t.name+".csv", csvBytes(t))
+		}
+		total := 0
+		for _, f := range files {
+			if !a.canDownloadOccurrenceFile(userID, acc, &f) || scanStatusOf(scans, f.ID) != models.ScanClean {
+				continue
+			}
+			full, perr := a.resolveSafeStoragePath(f.StoragePath)
+			if perr != nil {
+				continue
+			}
+			data, rerr := os.ReadFile(full)
+			if rerr != nil {
+				continue
+			}
+			if total += len(data); total > exportMaxZipFiles {
+				return r.SendErrorEnvelope(fasthttp.StatusRequestEntityTooLarge, "The documents are too large to export at once", nil, "")
+			}
+			put("documentos/"+f.ID.String()[:8]+"-"+sanitizeChatFileName(f.Name, ""), data)
+		}
+		_ = zw.Close()
+		body, filename, ctype = buf.Bytes(), base+".zip", "application/zip"
+	}
+
+	h := &r.RequestCtx.Response.Header
+	h.Set("Content-Type", ctype)
+	h.Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Cache-Control", "private, no-store")
+	r.RequestCtx.SetBody(body)
+	secs := make([]string, 0, len(want))
+	for s := range want {
+		secs = append(secs, s)
+	}
+	a.logAudit(orgID, userID, "occurrence_export", occ.ID, models.AuditActionAccessed, nil,
+		map[string]any{"protocol": occ.ProtocolNumber, "reference": rep.ref, "format": req.Format, "sections": secs, "omitted": omitted, "counts": counts})
+	return nil
+}
+
+func csvBytes(t exportTable) []byte {
+	var buf bytes.Buffer
+	buf.WriteString("\xEF\xBB\xBF") // BOM so Excel reads accents
+	w := csv.NewWriter(&buf)
+	w.Comma = ';'
+	_ = w.Write(t.header)
+	for _, row := range t.rows {
+		// A cell that starts with = + - @ would run as a formula in a spreadsheet: neutralize it.
+		safe := make([]string, len(row))
+		for i, c := range row {
+			if c != "" && strings.ContainsRune("=+-@\t\r", rune(c[0])) {
+				c = "'" + c
+			}
+			safe[i] = c
+		}
+		_ = w.Write(safe)
+	}
+	w.Flush()
+	return buf.Bytes()
+}
+
+func (a *App) exportHistory(orgID, userID uuid.UUID, occ *models.Occurrence, acc occurrenceAccess) (exportTable, bool) {
+	t := exportTable{name: "historico", header: []string{"Data", "Evento", "Autor", "Descrição"}}
+	loc := a.orgLocation(orgID)
+	reads := a.canUseCaseChannel(orgID, userID, occ, acc, a.caseChannelAccount(orgID, occ), false)
+	var events []models.OccurrenceEvent
+	a.DB.Where("organization_id = ? AND occurrence_id = ?", orgID, occ.ID).
+		Where(`NOT (type = 'stage_change' AND EXISTS (
+			SELECT 1 FROM occurrence_events s
+			WHERE s.occurrence_id = occurrence_events.occurrence_id AND s.deleted_at IS NULL AND s.type IN ('closed','reopened')
+			  AND s.created_by_id IS NOT DISTINCT FROM occurrence_events.created_by_id
+			  AND ABS(EXTRACT(EPOCH FROM (s.created_at - occurrence_events.created_at))) < 2))`).
+		Preload("CreatedBy").Order("created_at ASC, id ASC").Limit(exportMaxEvents + 1).Find(&events)
+	if len(events) > exportMaxEvents {
+		return t, false
+	}
+	for _, e := range events {
+		content := e.Content
+		if !reads && (e.Type == models.OccurrenceEventReply || e.Type == models.OccurrenceEventProcessMessageUsed) {
+			content = "(texto da mensagem ao cliente não disponível para o seu perfil)"
+		}
+		author := ""
+		if e.CreatedBy != nil {
+			author = e.CreatedBy.FullName
+		}
+		if e.Type == models.OccurrenceEventCustomerNotice {
+			content = label(exportNoticeLabels, content)
+		}
+		t.rows = append(t.rows, []string{tsvIn(loc, e.CreatedAt), label(exportEventLabels, string(e.Type)), author, content})
+	}
+	return t, true
+}
+
+func (a *App) exportInternalChat(orgID uuid.UUID, occ *models.Occurrence) (exportTable, bool) {
+	t := exportTable{name: "discussao-interna", header: []string{"Data", "Autor", "Mensagem", "Anexos"}}
+	loc := a.orgLocation(orgID)
+	var ch models.ChatChannel
+	if a.DB.Where("organization_id = ? AND occurrence_id = ? AND kind = ?", orgID, occ.ID, models.ChatChannelKindOccurrence).First(&ch).Error != nil {
+		return t, true
+	}
+	var msgs []models.ChatMessage
+	a.DB.Where("channel_id = ? AND organization_id = ? AND kind = ?", ch.ID, orgID, models.ChatMessageKindUser).
+		Order("created_at ASC, id ASC").Limit(exportMaxMessages + 1).Find(&msgs)
+	if len(msgs) > exportMaxMessages {
+		return t, false
+	}
+	ids := make([]uuid.UUID, len(msgs))
+	mids := make([]uuid.UUID, len(msgs))
+	for i, m := range msgs {
+		ids[i], mids[i] = m.UserID, m.ID
+	}
+	names := a.chatUserNames(ids)
+	files := a.chatAttachmentsFor(mids)
+	for _, m := range msgs {
+		var fn []string
+		for _, f := range files[m.ID] {
+			fn = append(fn, f.Name)
+		}
+		t.rows = append(t.rows, []string{tsvIn(loc, m.CreatedAt), names[m.UserID], m.Body, strings.Join(fn, ", ")})
+	}
+	return t, true
+}
+
+func (a *App) exportWhatsApp(orgID uuid.UUID, occ *models.Occurrence) (exportTable, bool) {
+	t := exportTable{name: "whatsapp", header: []string{"Data", "Sentido", "Mensagem", "Estado", "Enviado por"}}
+	loc := a.orgLocation(orgID)
+	account := a.caseChannelAccount(orgID, occ)
+	if account == nil {
+		return t, true
+	}
+	var rows []models.Message
+	a.DB.Where("organization_id = ? AND contact_id = ? AND whats_app_account = ? AND created_at >= ?",
+		orgID, occ.ContactID, account.Name, occ.OpenedAt.Add(-time.Minute)).
+		Order("created_at ASC").Limit(exportMaxMessages + 1).Find(&rows)
+	if len(rows) > exportMaxMessages {
+		return t, false
+	}
+	for _, m := range rows {
+		who := ""
+		if m.SentByUserID != nil {
+			who = a.senderNameForBroadcast(&m)
+		}
+		dir := "recebida"
+		if m.Direction == models.DirectionOutgoing {
+			dir = "enviada"
+		}
+		t.rows = append(t.rows, []string{tsvIn(loc, m.CreatedAt), dir, m.Content, string(m.Status), who})
+	}
+	return t, true
+}

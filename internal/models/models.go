@@ -185,6 +185,8 @@ type Team struct {
 	AssignmentStrategy  AssignmentStrategy `gorm:"size:50;default:'round_robin'" json:"assignment_strategy"` // round_robin, load_balanced, manual
 	PerAgentTimeoutSecs int                `gorm:"default:0" json:"per_agent_timeout_secs"`                  // 0 = use org/global default
 	IsActive            bool               `gorm:"default:true" json:"is_active"`
+	// Commercial marks a sales team: never a protocol destination (see also Department.Commercial).
+	Commercial  bool       `gorm:"not null;default:false" json:"commercial"`
 	CreatedByID         *uuid.UUID         `gorm:"type:uuid" json:"created_by_id,omitempty"`
 	UpdatedByID         *uuid.UUID         `gorm:"type:uuid" json:"updated_by_id,omitempty"`
 
@@ -333,6 +335,10 @@ type WhatsAppAccount struct {
 	// Calling API. Used by the canned-response editor to disable the Call
 	// button option, and by the send path to refuse voice_call sends.
 	BusinessCallingEnabled bool       `gorm:"default:false" json:"business_calling_enabled"`
+	// DirectSendEnabled: Meta enrolled this number in Direct Send. Outside the
+	// 24h window free text then goes out as a "utility" message (Meta builds the
+	// template) instead of being refused. Ineligible accounts get error 100.
+	DirectSendEnabled bool `gorm:"default:false" json:"direct_send_enabled"`
 	IsSMB                  bool       `gorm:"default:false" json:"is_smb"`
 	Status                 string     `gorm:"size:20;default:'active'" json:"status"`
 	Pin                    string     `gorm:"size:255" json:"-"` // 6-digit 2FA PIN (encrypted)

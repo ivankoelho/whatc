@@ -157,7 +157,9 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 		}
 	}
 
-	if statusParam != "" {
+	if statusParam == string(models.ContactStatusNew) {
+		query = a.whereAwaitingAttendance(query, orgID)
+	} else if statusParam != "" {
 		query = query.Where("contact_status = ?", statusParam)
 	}
 
@@ -593,6 +595,9 @@ func (a *App) SendMessage(r *fastglue.Request) error {
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
 	}
+	if !a.requireChatWrite(r, orgID, userID) {
+		return nil
+	}
 	contactID, err := parsePathUUID(r, "id", "contact")
 	if err != nil {
 		return nil
@@ -801,6 +806,9 @@ func (a *App) SendMediaMessage(r *fastglue.Request) error {
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
 	}
+	if !a.requireChatWrite(r, orgID, userID) {
+		return nil
+	}
 
 	// Parse multipart form
 	form, err := r.RequestCtx.MultipartForm()
@@ -855,6 +863,11 @@ func (a *App) SendMediaMessage(r *fastglue.Request) error {
 	if err != nil {
 		a.Log.Error("Failed to read file data", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to read file data", nil, "")
+	}
+
+	// Nothing is stored or forwarded to the customer without a clean verdict.
+	if !a.scanIngress(r, orgID, "conversation_media", fileData) {
+		return nil
 	}
 
 	// Get MIME type
@@ -991,6 +1004,9 @@ func (a *App) SendReaction(r *fastglue.Request) error {
 	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+	if !a.requireChatWrite(r, orgID, userID) {
+		return nil
 	}
 	contactID, err := parsePathUUID(r, "id", "contact")
 	if err != nil {
@@ -1199,10 +1215,18 @@ func (a *App) AssignContact(r *fastglue.Request) error {
 	}
 
 	// If assigning to a user, verify they exist in the same org
+	var target models.User
+	active, hasActive := a.activeTransferFor(orgID, contact.ID)
 	if req.UserID != nil {
-		var user models.User
-		if err := a.DB.Where("id = ? AND organization_id = ?", req.UserID, orgID).First(&user).Error; err != nil {
+		if err := a.DB.Where("id = ? AND organization_id = ?", req.UserID, orgID).First(&target).Error; err != nil {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "User not found", nil, "")
+		}
+		// A live attendance decides who sees the conversation (the carteira only counts when there is none), so
+		// the new owner must be able to take it now.
+		if hasActive && (active.AgentID == nil || *active.AgentID != target.ID) {
+			if reason := a.agentIneligibleReason(orgID, &target); reason != "" {
+				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, reason, nil, "")
+			}
 		}
 	}
 
@@ -1210,6 +1234,21 @@ func (a *App) AssignContact(r *fastglue.Request) error {
 	if err := a.DB.Model(contact).Update("assigned_user_id", req.UserID).Error; err != nil {
 		a.Log.Error("Failed to assign contact", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to assign contact", nil, "")
+	}
+
+	// ...and the live attendance follows: the responsible agent changes with it, so the visibility changes too.
+	if req.UserID != nil && hasActive && (active.AgentID == nil || *active.AgentID != target.ID) {
+		moved, merr := a.moveTransfer(a.DB, active.ID, active.AgentID, map[string]any{"agent_id": target.ID, "transferred_by_user_id": userID})
+		if merr != nil {
+			a.Log.Error("Failed to move the active transfer with the assignment", "error", merr)
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to assign contact", nil, "")
+		}
+		if !moved {
+			return r.SendErrorEnvelope(fasthttp.StatusConflict, "The conversation was reassigned by someone else; reload and try again", nil, "")
+		}
+		a.auditDistribution(orgID, &userID, active.ID, distEventAssigned, active.AgentID, &target.ID, "assigned with the contact")
+		active.AgentID = &target.ID
+		a.broadcastTransferAssigned(&active)
 	}
 
 	return r.SendEnvelope(map[string]any{

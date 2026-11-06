@@ -32,6 +32,7 @@ func TestApp_ListConversationNotes_Success(t *testing.T) {
 	role := chatRWRole(t, app.DB, org.ID)
 	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	ownContact(t, app, contact, user)
 
 	for i := range 3 {
 		require.NoError(t, app.DB.Create(&models.ConversationNote{
@@ -119,6 +120,7 @@ func TestApp_CreateConversationNote_Success(t *testing.T) {
 	role := chatRWRole(t, app.DB, org.ID)
 	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	ownContact(t, app, contact, user)
 
 	req := testutil.NewJSONRequest(t, map[string]any{"content": "follow up tomorrow"})
 	testutil.SetAuthContext(req, org.ID, user.ID)
@@ -147,6 +149,7 @@ func TestApp_CreateConversationNote_EmptyContentRejected(t *testing.T) {
 	role := chatRWRole(t, app.DB, org.ID)
 	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	ownContact(t, app, contact, user)
 
 	req := testutil.NewJSONRequest(t, map[string]any{"content": ""})
 	testutil.SetAuthContext(req, org.ID, user.ID)
@@ -181,6 +184,7 @@ func TestApp_UpdateConversationNote_OnlyCreatorCanEdit(t *testing.T) {
 	creator := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
 	other := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	shareContact(t, app, org.ID, contact, creator, other)
 
 	note := &models.ConversationNote{
 		BaseModel:      models.BaseModel{ID: uuid.New()},
@@ -240,6 +244,7 @@ func TestApp_UpdateConversationNote_EmptyContentRejected(t *testing.T) {
 	role := chatRWRole(t, app.DB, org.ID)
 	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	ownContact(t, app, contact, user)
 	note := &models.ConversationNote{
 		BaseModel:      models.BaseModel{ID: uuid.New()},
 		OrganizationID: org.ID,
@@ -267,6 +272,7 @@ func TestApp_DeleteConversationNote_OnlyCreatorCanDelete(t *testing.T) {
 	creator := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
 	other := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	shareContact(t, app, org.ID, contact, creator, other)
 	note := &models.ConversationNote{
 		BaseModel:      models.BaseModel{ID: uuid.New()},
 		OrganizationID: org.ID,

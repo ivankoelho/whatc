@@ -54,9 +54,16 @@ func SetupTestDB(t *testing.T) *gorm.DB {
 			testDBInitErr = fmt.Errorf("failed to create indexes: %w", err)
 			return
 		}
+		// The one-open-send index is the last step of the migration (not part of CreateIndexes).
+		if err := database.EnsureOpenSendIntentUniqueness(testDB); err != nil {
+			testDBInitErr = fmt.Errorf("failed to create the open-send index: %w", err)
+			return
+		}
 
 		// Clean up any existing data before tests start
-		cleanupTables(testDB)
+		if os.Getenv("TEST_DB_KEEP") != "1" { // homologation phases keep the data of the previous phase
+			cleanupTables(testDB)
+		}
 	})
 
 	if testDBInitErr != nil {
@@ -139,6 +146,12 @@ func runMigrations(db *gorm.DB) error {
 		&models.CallPermission{},
 		// CRM de ocorrências
 		&models.OccurrenceStage{},
+		&models.OccurrenceParticipant{},
+		&models.OccurrenceTransfer{},
+		&models.OccurrenceChannelConfig{},
+		&models.OccurrenceNotification{},
+		&models.OccurrenceNotificationAttempt{},
+		&models.OccurrenceSendIntent{},
 		&models.OccurrenceCategory{},
 		&models.OccurrenceSLAPolicy{},
 		&models.Occurrence{},
@@ -158,7 +171,18 @@ func runMigrations(db *gorm.DB) error {
 		&models.ChatMessage{},
 		&models.ChatRead{},
 		&models.ChatMessageReaction{},
+		&models.ChatPollVote{},
+		&models.OccurrenceFile{},
+		&models.NextcloudSettings{},
+		&models.NextcloudCredential{},
 		&models.ChatAttachment{},
+		&models.FileScan{},
+		&models.MetaMedia{},
+		&models.RetentionPolicy{},
+		&models.RetentionHold{},
+		&models.RetentionHoldEvent{},
+		&models.RetentionRun{},
+		&models.RetentionItem{},
 		// Help Desk — unidade e departamento
 		&models.Unit{},
 		&models.Department{},
@@ -188,6 +212,17 @@ func runMigrations(db *gorm.DB) error {
 // Uses TRUNCATE CASCADE to handle foreign key constraints properly.
 func cleanupTables(db *gorm.DB) {
 	tables := []string{
+		// Antimalware verdicts
+		"file_scans",
+		"meta_media_uploads",
+		"retention_items",
+		"retention_runs",
+		"retention_hold_events",
+		"retention_holds",
+		"retention_policies",
+		"occurrence_files",
+		"chat_attachments",
+		"occurrence_documents",
 		// Chat interno
 		"chat_reads",
 		"chat_messages",
@@ -240,6 +275,7 @@ func cleanupTables(db *gorm.DB) {
 		"occurrence_what_happened",
 		"occurrence_sla_policies",
 		"occurrence_counters",
+		"occurrence_send_intents",
 		"occurrence_events",
 		"occurrences",
 		"occurrence_categories",
@@ -321,6 +357,7 @@ func TruncateTables(db *gorm.DB) {
 		"call_permissions",
 		"occurrence_sla_policies",
 		"occurrence_counters",
+		"occurrence_send_intents",
 		"occurrence_events",
 		"occurrences",
 		"occurrence_categories",

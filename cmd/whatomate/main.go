@@ -14,6 +14,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/shridarpatil/whatomate/internal/assignment"
 	"github.com/shridarpatil/whatomate/internal/calling"
+	"github.com/shridarpatil/whatomate/internal/antimalware"
 	"github.com/shridarpatil/whatomate/internal/config"
 	"github.com/shridarpatil/whatomate/internal/database"
 	"github.com/shridarpatil/whatomate/internal/frontend"
@@ -51,6 +52,18 @@ func main() {
 		runKnowledge(os.Args[2:])
 	case "contacts":
 		runContacts(os.Args[2:])
+	case "antimalware":
+		runAntimalware(os.Args[2:])
+	case "verify-template-names":
+		runVerifyTemplateNames(os.Args[2:])
+	case "otp-uncertain":
+		runOTPUncertain(os.Args[2:])
+	case "otp-validity-report":
+		runOTPValidityReport(os.Args[2:])
+	case "audit-queue-otp":
+		runAuditQueueOTP(os.Args[2:])
+	case "mask-auth-codes":
+		runMaskAuthCodes(os.Args[2:])
 	case "version":
 		fmt.Printf("Whatomate %s (built %s)\n", Version, BuildTime)
 	case "help", "-h", "--help":
@@ -169,6 +182,11 @@ func runServer(args []string) {
 		if err := handlers.BackfillChatbotFlowGraph(db, lo); err != nil {
 			lo.Fatal("Chatbot flow graph backfill failed", "error", err)
 		}
+		// Registers every file that already exists for antimalware scanning (pending: closed until a
+		// clean verdict). Idempotent; deletes nothing.
+		if err := database.BackfillFileScans(db, lo); err != nil {
+			lo.Fatal("File scan backfill failed", "error", err)
+		}
 		// Concede as permissões do CRM a quem já tem a capacidade equivalente.
 		// Precisa rodar aqui, no bloco de migração: o ListenAndServe só
 		// acontece depois, então nenhuma requisição chega antes de os papéis
@@ -201,6 +219,21 @@ func runServer(args []string) {
 		// own guard rather than piggybacking on an existing one.
 		if err := database.BackfillSalesOpportunityPermissions(db, lo); err != nil {
 			lo.Fatal("Sales opportunity permissions backfill failed", "error", err)
+		}
+
+		// Settling a customer send of unknown outcome is its own permission (additive, once per organization).
+		if err := database.BackfillResolveUncertainSendPermission(db, lo); err != nil {
+			// Not optional: without it nobody may settle an uncertain send, which the index step's own recovery needs.
+			lo.Fatal("Resolve-send permission backfill failed", "error", err)
+		}
+
+		// Same window: supervising cases became its own permission. Grant it to
+		// whoever could (conversations:view_all), THEN narrow the untouched preset.
+		if err := database.BackfillOccurrenceViewAll(db, lo); err != nil {
+			lo.Fatal("Occurrence view_all backfill failed", "error", err)
+		}
+		if err := database.ReconcileSupervisorSACPreset(db, lo); err != nil {
+			lo.Fatal("Supervisor de SAC preset reconcile failed", "error", err)
 		}
 
 		// Same window: xprocess_integration is a brand-new resource, needs its
@@ -269,6 +302,19 @@ func runServer(args []string) {
 		if _, _, err := database.EncryptChatbotAIKeys(db, cfg.App.EncryptionKey, lo); err != nil {
 			lo.Fatal("AI API key encryption failed", "error", err)
 		}
+
+		// LAST step: the one-open-send index. If existing data would break it, the migration stops HERE, after
+		// everything else (schema, permissions, roles, backfills) is in place, and says what to do. Nothing is
+		// deleted or changed to make it fit.
+		if err := database.EnsureOpenSendIntentUniqueness(db); err != nil {
+			lo.Fatal("Open-send index failed", "error", err)
+		}
+	}
+
+	// Without the index nothing can stop two people sending to one customer from one case at the same time, so
+	// customer sends from cases are REFUSED until it is there (see claimSendIntent: the check runs inside every new claim). Say so loudly.
+	if err := database.VerifyOpenSendIntentGuard(db); err != nil {
+		lo.Error("Customer sends from cases are DISABLED: "+err.Error(), "error", err)
 	}
 
 	// Connect to Redis
@@ -328,11 +374,24 @@ func runServer(args []string) {
 		HTTPClient: httpClient,
 		Usage:      usage.New(db, cfg.Usage),
 	}
+	// Telephony plays audio only after a clean verdict (checked from memory, never during a call).
+	calling.SetAudioGate(app.AudioGate())
+	app.AudioGate().Refresh()
+
+	// Antimalware engine (clamd on the private network). Without an address nothing can be cleared, so
+	// every scan-gated file stays closed: say so loudly instead of failing quietly.
+	if cfg.Antimalware.Address != "" {
+		app.Scanner = &antimalware.Clamd{Addr: cfg.Antimalware.Address, Timeout: time.Duration(max(cfg.Antimalware.TimeoutSeconds, 30)) * time.Second}
+		lo.Info("Antimalware scanner configured", "address", cfg.Antimalware.Address)
+	} else {
+		lo.Warn("Antimalware is NOT configured (antimalware.address): uploaded files and media stay blocked until a scanner clears them")
+	}
 
 	// Wire the conversation authorizer into the hub now that the App (which owns
 	// the single visibility rule) exists. This gates all WebSocket conversation
 	// delivery — without it the hub would fall back to legacy (insecure) behaviour.
 	wsHub.SetConversationAuthorizer(app.CanViewConversationByID)
+	wsHub.SetOccurrenceAuthorizer(app.CanViewOccurrenceByID)
 
 	// Presence reaper: releases an agent's attendances only after they stay
 	// disconnected past the grace period (reconnects within it change nothing).
@@ -426,6 +485,15 @@ func runServer(args []string) {
 	chatFilesCtx, chatFilesCancel := context.WithCancel(context.Background())
 	go app.RunChatAttachmentCleanup(chatFilesCtx, time.Hour)
 
+	// Antimalware: scans new and pre-existing files at a gentle pace, retries after an outage
+	fileScanCtx, fileScanCancel := context.WithCancel(context.Background())
+	go app.RunFileScanWorker(fileScanCtx)
+
+	// Customer communications of forwarded cases (templates via the case's logistics account)
+	notifierCtx, notifierCancel := context.WithCancel(context.Background())
+	go app.StartOccurrenceNotifier(notifierCtx)
+	go app.StartSendIntentReconciler(notifierCtx)
+
 	// Start presence reaper (sweeps every 10s; grace is 60s)
 	presenceCtx, presenceCancel := context.WithCancel(context.Background())
 	go presenceReaper.Start(presenceCtx)
@@ -489,6 +557,8 @@ func runServer(args []string) {
 	lo.Info("Stopping SLA processor...")
 	slaCancel()
 	chatFilesCancel()
+	fileScanCancel()
+	notifierCancel()
 	slaProcessor.Stop()
 	presenceCancel()
 	presenceReaper.Stop()
@@ -815,6 +885,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/accounts/{id}/business_profile/photo", app.UpdateProfilePicture)
 
 	// Contacts
+	g.GET("/api/contacts/find", app.LookupContacts)
 	g.GET("/api/contacts", app.ListContacts)
 	// Registered before /api/contacts/{id} so "counts" is not captured as an id
 	g.GET("/api/contacts/counts", app.GetContactStatusCounts)
@@ -863,6 +934,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/team-chat/channels", app.CreateChatChannel)
 	g.POST("/api/team-chat/dm", app.CreateChatDM)
 	g.GET("/api/team-chat/users", app.ListChatUsers)
+	g.GET("/api/team-chat/occurrence-search", app.SearchChatOccurrences)
 	g.GET("/api/team-chat/channels/{id}/messages", app.ListChatMessages)
 	g.POST("/api/team-chat/channels/{id}/messages", app.SendChatMessage)
 	g.POST("/api/team-chat/channels/{id}/read", app.MarkChatChannelRead)
@@ -882,6 +954,28 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.DELETE("/api/team-chat/channels/{id}/attachments/{aid}", app.DeleteChatAttachment)
 	g.GET("/api/team-chat/attachments/{id}", app.DownloadChatAttachment)
 	g.GET("/api/team-chat/messages/{id}", app.GetChatMessage)
+	g.POST("/api/team-chat/channels/{id}/polls", app.CreateChatPoll)
+	g.POST("/api/team-chat/channels/{id}/nextcloud-files", app.AttachNextcloudFile)
+	g.GET("/api/occurrences/{id}/files", app.ListOccurrenceFiles)
+	g.POST("/api/occurrences/{id}/files", app.UploadOccurrenceFile)
+	g.POST("/api/occurrences/{id}/files/nextcloud", app.AttachNextcloudToOccurrence)
+	g.GET("/api/occurrences/{id}/files/{fid}/download", app.DownloadOccurrenceFile)
+	g.DELETE("/api/occurrences/{id}/files/{fid}", app.DeleteOccurrenceFile)
+	g.GET("/api/retention", app.GetRetention)
+	g.PUT("/api/retention/policies/{category}", app.PutRetentionPolicy)
+	g.POST("/api/retention/simulate", app.SimulateRetention)
+	g.GET("/api/retention/holds", app.ListRetentionHolds)
+	g.POST("/api/retention/holds", app.CreateRetentionHold)
+	g.POST("/api/retention/holds/{id}/revoke", app.RevokeRetentionHold)
+	g.GET("/api/retention/history", app.RetentionHistory)
+	g.GET("/api/integrations/antimalware", app.AntimalwareStatus)
+	g.POST("/api/integrations/antimalware/retry", app.RetryAntimalwareScans)
+	g.GET("/api/integrations/nextcloud", app.GetNextcloudStatus)
+	g.PUT("/api/integrations/nextcloud", app.PutNextcloudSettings)
+	g.PUT("/api/integrations/nextcloud/me", app.ConnectNextcloud)
+	g.DELETE("/api/integrations/nextcloud/me", app.DisconnectNextcloud)
+	g.GET("/api/integrations/nextcloud/files", app.ListNextcloudFiles)
+	g.PUT("/api/team-chat/messages/{id}/poll-vote", app.VoteChatPoll)
 	g.PUT("/api/team-chat/messages/{id}/reactions/{code}", app.PutChatReaction)
 	g.DELETE("/api/team-chat/messages/{id}/reactions/{code}", app.DeleteChatReaction)
 	g.PUT("/api/team-chat/messages/{id}", app.UpdateChatMessage)
@@ -890,23 +984,53 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	// CRM — etapas de ocorrência
 	g.GET("/api/occurrence-stages", app.ListOccurrenceStages)
 	g.POST("/api/occurrence-stages", app.CreateOccurrenceStage)
+	g.POST("/api/occurrence-stages/reorder", app.ReorderOccurrenceStages)
 	g.PUT("/api/occurrence-stages/{id}", app.UpdateOccurrenceStage)
 	g.DELETE("/api/occurrence-stages/{id}", app.DeleteOccurrenceStage)
 
 	// CRM — ocorrências
 	g.GET("/api/occurrences", app.ListOccurrences)
+	g.GET("/api/occurrences/summary", app.GetOccurrencesSummary)
+	g.GET("/api/occurrences/forward-targets", app.ListForwardTargets)
+	g.GET("/api/occurrences/scope-audit", app.GetOccurrenceScopeAudit)
+	g.POST("/api/occurrences/scope-audit/apply", app.ApplyOccurrenceScopeSuggestions)
+	g.PUT("/api/occurrences/{id}/scope", app.SetOccurrenceScope)
+	g.POST("/api/occurrences/{id}/reassign", app.ReassignOccurrence)
+	g.GET("/api/occurrences/{id}/notifications", app.ListOccurrenceNotifications)
+	g.POST("/api/occurrences/{id}/notifications/{nid}/resolve", app.ResolveOccurrenceNotification)
+	g.GET("/api/occurrences/{id}/chat", app.GetOccurrenceChat)
+	g.GET("/api/occurrences/{id}/whatsapp", app.GetOccurrenceWhatsApp)
+	g.POST("/api/occurrences/{id}/whatsapp", app.SendOccurrenceWhatsApp)
+	g.GET("/api/occurrences/{id}/participants", app.ListOccurrenceParticipants)
+	g.POST("/api/occurrences/{id}/participants", app.AddOccurrenceParticipant)
+	g.GET("/api/occurrences/{id}/support-options", app.ListSupportOptions)
+	g.GET("/api/occurrences/{id}/transfers", app.ListOccurrenceTransfers)
+	g.POST("/api/occurrences/{id}/forward", app.ForwardOccurrence)
+	g.POST("/api/occurrences/{id}/return", app.ReturnOccurrence)
+	g.DELETE("/api/occurrences/{id}/participants/{userId}", app.RemoveOccurrenceParticipant)
+	g.GET("/api/occurrence-channel-config", app.ListOccurrenceChannelConfigs)
+	g.PUT("/api/occurrence-channel-config", app.SetOccurrenceChannelConfig)
+	g.DELETE("/api/occurrence-channel-config/{id}", app.DeleteOccurrenceChannelConfig)
 	g.POST("/api/occurrences", app.CreateOccurrence)
 	g.GET("/api/contacts/{id}/occurrences", app.ListContactOccurrences)
 	g.GET("/api/occurrences/{id}", app.GetOccurrence)
 	g.PUT("/api/occurrences/{id}", app.UpdateOccurrence)
 	g.DELETE("/api/occurrences/{id}", app.DeleteOccurrence)
 	g.PUT("/api/occurrences/{id}/stage", app.ChangeOccurrenceStage)
+	g.POST("/api/occurrences/{id}/claim", app.ClaimOccurrence)
 	g.GET("/api/occurrences/{id}/events", app.ListOccurrenceEvents)
+	g.GET("/api/occurrences/{id}/history", app.ListOccurrenceHistory)
+	g.GET("/api/occurrences/{id}/export/options", app.GetOccurrenceExportOptions)
+	g.POST("/api/occurrences/{id}/export", app.ExportOccurrence)
 	g.POST("/api/occurrences/{id}/events", app.CreateOccurrenceEvent)
 	g.POST("/api/occurrences/{id}/send-protocol", app.SendOccurrenceProtocol)
+	g.GET("/api/occurrences/{id}/protocol-sends", app.GetOccurrenceProtocolSendByKey)
+	g.GET("/api/occurrences/{id}/protocol-sends/{send_id}", app.GetOccurrenceProtocolSend)
+	g.POST("/api/occurrences/{id}/protocol-sends/{send_id}/resolve", app.ResolveOccurrenceProtocolSend)
 	g.POST("/api/occurrences/{id}/reply", app.ReplyToOccurrence)
 	g.GET("/api/occurrences/{id}/documents", app.ListOccurrenceDocuments)
 	g.POST("/api/occurrences/{id}/documents", app.CreateOccurrenceDocument)
+	g.POST("/api/occurrences/{id}/documents/extract", app.ExtractOccurrenceInvoice)
 	g.DELETE("/api/occurrences/{id}/documents/{docId}", app.DeleteOccurrenceDocument)
 	g.POST("/api/occurrences/{id}/documents/{docId}/attachment", app.UploadOccurrenceDocumentAttachment)
 	g.GET("/api/occurrences/{id}/documents/{docId}/attachment", app.ServeOccurrenceDocumentAttachment)
@@ -994,6 +1118,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.PUT("/api/occurrence-sla-policies/{priority}", app.UpsertOccurrenceSLAPolicy)
 
 	// Media (serves media files for messages, auth-protected)
+	g.GET("/api/media-status", app.MediaScanStatus)
 	g.GET("/api/media/{message_id}", app.ServeMedia)
 
 	// Templates
@@ -1072,6 +1197,8 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/chatbot/transfers/pick", app.PickNextTransfer)
 	g.PUT("/api/chatbot/transfers/{id}/resume", app.ResumeFromTransfer)
 	g.PUT("/api/chatbot/transfers/{id}/assign", app.AssignAgentTransfer)
+	g.GET("/api/chatbot/transfers/agents", app.ListTransferAgents)
+	g.GET("/api/chatbot/transfers/teams", app.ListTransferTeams)
 	g.PUT("/api/chatbot/transfers/{id}/unassign", app.UnassignTransfer)
 
 	// Teams (admin/manager - access control in handler)
