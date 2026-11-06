@@ -31,16 +31,26 @@ const createUncertainRecheckIndexSQL = `CREATE INDEX IF NOT EXISTS idx_send_inte
 // and parentheses that differ between versions.
 //
 // FIRST, before anything is normalized, the string literals are checked as they are: there must be exactly two, one
-// 'processing' and one 'uncertain' (no other spelling, no space, no cast or escape inside the quotes). Only then are
-// the casts to a character type taken out and the whitespace dropped (outside the quotes this changes nothing in the
-// meaning; inside them there is nothing left to change), and what is left must be EXACTLY ONE shape, anchored at both
-// ends:
+// 'processing' and one 'uncertain', byte for byte (this is what refuses a space, tab, line break or a cast spelled
+// INSIDE the quotes, which the normalization below would otherwise remove). Only then are two things taken out, and
+// only outside the quotes (neither contains a quote, so the literals already checked are not touched): casts to a
+// character type (::text, ::character varying, ::varchar, ::character, ::bpchar, ::name, also as arrays) and
+// whitespace. Those casts are not always meaning-neutral: ::bpchar ignores trailing spaces and ::name truncates at 63
+// bytes, so a predicate with them is accepted although it may match slightly MORE values; it still covers
+// 'processing' and 'uncertain', so the protection is not weakened. What is left must be EXACTLY ONE shape, anchored
+// at both ends:
 //
 //	(...(state)...) = ANY (...(ARRAY[ 'processing' , 'uncertain' ])...)      (the two literals distinct, either order)
 //
-// Nothing is stripped out of the middle: a literal, an operator, a column or a function anywhere else (state compared
-// to a literal, an array of columns, ALL instead of ANY, NOT, <>, OR/AND, a time condition, a comparison of two
-// constants, a comparison of two booleans) makes the shape not match. Parentheses must also balance.
+// Nothing is treated as a wildcard: a literal, an operator, a column or a function anywhere else (state compared to a
+// literal, an array of columns, ALL instead of ANY, NOT, <>, OR/AND, a time condition, a comparison of two constants, a
+// comparison of two booleans) makes the shape not match. Parentheses must also balance. An escaped quote (a doubled
+// single quote inside a literal) or an E'...' literal is refused by the shape, as it already was before the literal check.
+//
+// The check trusts the catalog: it reads how Postgres prints the predicate, so an object of the schema that changes
+// what SQL means (for example a user-defined "=" operator in a schema on the search_path, which is printed as a plain
+// "="), is NOT detected. That needs DDL rights and breaks every such query of the application anyway; it is outside
+// what this check protects against (see the contract, "Known limits").
 //
 // Postgres renders the SAME index in two ways, and both are accepted, each as its own anchored shape:
 //

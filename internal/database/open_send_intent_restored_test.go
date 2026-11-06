@@ -138,15 +138,22 @@ func TestVerifyOpenSendIntentGuard_ALiteralThatOnlyLooksRight_IsRefused(t *testi
 			require.NoError(t, db.Exec(ddl).Error)
 			before := indexDef(t, db)
 
-			// The index really does not protect 'processing': two open processing rows for one case are accepted.
+			// With the table still EMPTY (so the migration's duplicate check has nothing to say), the migration must stop
+			// at the verification of the index, and say so with the index error, leaving the index as it is.
+			err := database.EnsureOpenSendIntentUniqueness(db)
+			require.Error(t, err, "the migration must not report success")
+			var ie *database.OpenSendIntentIndexError
+			require.True(t, errors.As(err, &ie), "refused by the verification of the index, not by anything else: %v", err)
+			var dup *database.OpenSendIntentDuplicatesError
+			require.False(t, errors.As(err, &dup), "not by the duplicate check")
+			assert.Equal(t, before, indexDef(t, db), "the existing index was left exactly as it was")
+			require.Error(t, database.VerifyOpenSendIntentGuard(db), "the guard must refuse it")
+
+			// Only now: the index really does not protect 'processing', two open processing rows for one case go in.
 			require.NoError(t, db.Exec(`INSERT INTO occurrence_send_intents (id, organization_id, idempotency_key, occurrence_id, user_id, kind, request_hash, state, message_id, claimed_at)
 				SELECT gen_random_uuid(), '00000000-0000-0000-0000-000000000001', gen_random_uuid()::text, '00000000-0000-0000-0000-000000000002',
 				       '00000000-0000-0000-0000-000000000003', 'protocol', 'h', 'processing', gen_random_uuid(), now() FROM generate_series(1, 2)`).Error)
-
-			require.Error(t, database.VerifyOpenSendIntentGuard(db), "the guard must refuse it")
-			err := database.EnsureOpenSendIntentUniqueness(db)
-			require.Error(t, err, "the migration must not report success")
-			assert.Equal(t, before, indexDef(t, db), "the existing index was left exactly as it was")
+			require.Error(t, database.VerifyOpenSendIntentGuard(db), "and the guard still refuses it")
 		})
 	}
 }
