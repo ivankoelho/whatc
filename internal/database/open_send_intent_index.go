@@ -44,8 +44,9 @@ const createUncertainRecheckIndexSQL = `CREATE INDEX IF NOT EXISTS idx_send_inte
 //
 // Nothing is treated as a wildcard: a literal, an operator, a column or a function anywhere else (state compared to a
 // literal, an array of columns, ALL instead of ANY, NOT, <>, OR/AND, a time condition, a comparison of two constants, a
-// comparison of two booleans) makes the shape not match. Parentheses must also balance. An escaped quote (a doubled
-// single quote inside a literal) or an E'...' literal is refused by the shape, as it already was before the literal check.
+// comparison of two booleans) makes the shape not match. Parentheses must also balance. A literal with an escaped
+// quote (a doubled single quote inside it) is captured whole by the literal check and refused there, before the shape is
+// looked at. An E'...' literal passes the literal check (the E is outside the quotes) and is refused by the shape.
 //
 // The check trusts the catalog: it reads how Postgres prints the predicate, so an object of the schema that changes
 // what SQL means (for example a user-defined "=" operator in a schema on the search_path, which is printed as a plain
