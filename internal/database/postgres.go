@@ -139,6 +139,7 @@ func GetMigrationModels() []MigrationModel {
 		{"OccurrenceChannelConfig", &models.OccurrenceChannelConfig{}},
 		{"OccurrenceNotification", &models.OccurrenceNotification{}},
 		{"OccurrenceNotificationAttempt", &models.OccurrenceNotificationAttempt{}},
+		{"OccurrenceSendIntent", &models.OccurrenceSendIntent{}},
 		{"OccurrenceCategory", &models.OccurrenceCategory{}},
 		{"OccurrenceWhatHappened", &models.OccurrenceWhatHappened{}},
 		{"OccurrenceSLAPolicy", &models.OccurrenceSLAPolicy{}},
@@ -247,6 +248,10 @@ func RunMigrationWithProgress(db *gorm.DB, adminCfg *config.DefaultAdminConfig) 
 		}
 		currentStep++
 	}
+
+	// The one-open-send index is created by the caller as the LAST step of the whole -migrate boot (after the seeds
+	// and the backfills): if it cannot be created, everything else is already in place, including the permission
+	// that lets a person settle the sends in the way. See EnsureOpenSendIntentUniqueness.
 
 	// One active transfer per contact. Never auto-fixes data: with duplicates
 	// present the index is skipped and the offending rows are reported.

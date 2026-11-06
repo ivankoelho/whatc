@@ -95,6 +95,12 @@ Go to `http://localhost:8080` and login with `admin@admin.com` / `admin`
 
 __________________
 
+### Upgrading
+
+Tables are created by AutoMigrate, which only runs with `-migrate`. When a release adds a table, start the new backend once with `./whatomate server -migrate` (after a database backup) **before** making it available, and deploy backend and frontend together.
+
+- Occurrence protocol send (`occurrence_send_intents`): without `-migrate` the send does not work. Checks, order and rollback: [docs/superpowers/specs/2026-11-04-protocol-send-idempotency-contract.md](./docs/superpowers/specs/2026-11-04-protocol-send-idempotency-contract.md#deployment-migration-order-and-rollback).
+
 ### Build from Source
 
 ```bash

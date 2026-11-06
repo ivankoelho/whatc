@@ -2,6 +2,9 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { toast } from 'vue-sonner'
 import { i18n } from '@/i18n'
+import { sendOutcome, type SendOutcome } from '@/lib/occurrence-customer-messaging'
+import { useAuthStore } from '@/stores/auth'
+import { loadRecord, saveRecord, clearRecord, recordStorageKey, textHash, answerClosesIntention, isSendNotFound, ProtocolSendPendingError, IN_FLIGHT_GRACE_MS, RECOVERY_TTL_MS, type SendIntentRecord, type RecoveryScope, type SendState } from '@/lib/protocol-send-recovery'
 import { occurrencesService, occurrenceProcessesService, type Occurrence, type OccurrenceStage, type OccurrenceEvent, type OccurrenceDocumentInput } from '@/services/api'
 
 export const useOccurrencesStore = defineStore('occurrences', () => {
@@ -96,13 +99,116 @@ export const useOccurrencesStore = defineStore('occurrences', () => {
   // false = the 24h service window is closed (HTTP 422): an expected outcome the
   // UI shows plainly (spec 16/17), not an error to throw past the caller.
   // An empty message makes the backend send the legacy protocol text.
-  async function sendRegistrationMessage(occurrenceId: string, message: string): Promise<boolean> {
+  // 'uncertain' = the provider did not confirm it (HTTP 202): it may have been delivered, so it
+  // is neither a success nor a failure, and it is never sent again from here.
+  async function sendRegistrationMessage(occurrenceId: string, message: string): Promise<'sent' | 'window_closed' | 'uncertain'> {
     try {
-      await occurrencesService.sendProtocol(occurrenceId, message.trim() || undefined)
-      return true
+      return sendOutcome(await postProtocol(occurrenceId, message.trim() || undefined))
     } catch (e: any) {
-      if (e?.response?.status === 422) return false
+      if (e?.response?.status === 422) return 'window_closed'
       throw e
+    }
+  }
+
+  // One key per intention. It is kept (in memory AND in the browser, scoped by organization, user and
+  // case) while the outcome is unknown: no answer at all, or 202. A double click, a retry, a refresh or
+  // coming back later then ask about the SAME send instead of making a second one. Any answer that
+  // closes the intention (sent, refused) drops it, and the next click is a new intention, new key.
+  const auth = useAuthStore()
+  const mem = new Map<string, SendIntentRecord>()
+  const scopeOf = (occurrenceId: string): RecoveryScope => ({ organizationId: auth.organizationId, userId: auth.user?.id ?? '', occurrenceId })
+  // The copy in memory obeys the same 24 h as the one in the browser storage: a tab left open for days must not
+  // go on holding a send that the storage already forgot.
+  function currentRecord(occurrenceId: string): SendIntentRecord | null {
+    const stored = loadRecord(scopeOf(occurrenceId))
+    if (stored) return stored
+    const k = recordStorageKey(scopeOf(occurrenceId))
+    const m = mem.get(k)
+    if (m && Date.now() - m.savedAt > RECOVERY_TTL_MS) {
+      mem.delete(k)
+      return null
+    }
+    return m ?? null
+  }
+  function keepRecord(occurrenceId: string, rec: SendIntentRecord) {
+    mem.set(recordStorageKey(scopeOf(occurrenceId)), rec)
+    saveRecord(scopeOf(occurrenceId), rec)
+  }
+  function dropRecord(occurrenceId: string) {
+    mem.delete(recordStorageKey(scopeOf(occurrenceId)))
+    clearRecord(scopeOf(occurrenceId))
+  }
+
+  async function postProtocol(occurrenceId: string, message: string | undefined) {
+    const h = textHash(message)
+    let rec = currentRecord(occurrenceId)
+    // A record that is still here is an unresolved intention. A different text must not take a new key
+    // over it: that would be a second message while the first may be in flight or delivered.
+    if (rec && rec.textHash !== h) throw new ProtocolSendPendingError()
+    // A record that exists means this POST repeats an earlier request under the same key. The clock of the
+    // in-flight grace restarts with every request: the new one may still be on its way.
+    const isRetry = !!rec
+    rec = rec ? { ...rec, savedAt: Date.now() } : { key: crypto.randomUUID(), textHash: h, savedAt: Date.now() }
+    keepRecord(occurrenceId, rec) // before the request: a refresh mid-flight must still find the key
+    try {
+      const res = await occurrencesService.sendProtocol(occurrenceId, message, rec.key)
+      if (res.status === 202) keepRecord(occurrenceId, { ...rec, sendId: res.data?.data?.send_id ?? rec.sendId })
+      else dropRecord(occurrenceId)
+      return res.data
+    } catch (e: any) {
+      if (answerClosesIntention(e, isRetry)) dropRecord(occurrenceId) // only the application's own conclusive answer ends the intention (not a proxy 5xx, a timeout, or a refusal of a retry)
+      throw e
+    }
+  }
+
+  // Asks the server what became of a send (after a refresh, a timeout or a lost answer).
+  async function getProtocolSend(occurrenceId: string, sendId: string) {
+    return (await occurrencesService.getProtocolSend(occurrenceId, sendId)).data.data
+  }
+
+  // Is there a send of this case whose outcome this browser has not seen close? The record is the truth:
+  // it is dropped only by a conclusive answer, so the screens ask it instead of re-deriving it from an error.
+  const hasPendingProtocolSend = (occurrenceId: string) => !!currentRecord(occurrenceId)
+
+  // The case's open send (whoever started it, on any device), or null. Never sends anything.
+  async function getOpenProtocolSend(occurrenceId: string): Promise<{ state: 'processing' | 'uncertain'; sendId: string; own: boolean } | null> {
+    try {
+      const d = (await occurrencesService.getOpenProtocolSend(occurrenceId)).data.data
+      return { state: d.state, sendId: d.send_id, own: !!d.own }
+    } catch (e: any) {
+      if (isSendNotFound(e)) return null
+      throw e
+    }
+  }
+
+  // A person settles an uncertain send after checking the conversation. Sends nothing; the record of the browser is
+  // forgotten because the outcome is now known.
+  async function resolveProtocolSend(occurrenceId: string, sendId: string, body: { outcome: 'delivered' | 'not_delivered'; conversation_checked: boolean; note: string }) {
+    const d = (await occurrencesService.resolveProtocolSend(occurrenceId, sendId, body)).data.data
+    dropRecord(occurrenceId)
+    return d
+  }
+
+  // What happened to the send this browser started for this case and did not see finish.
+  // null = nothing pending. Read-only: it only ever asks, never creates a send.
+  async function recoverProtocolSend(occurrenceId: string): Promise<SendState | null> {
+    const rec = currentRecord(occurrenceId)
+    if (!rec) return null
+    try {
+      const data = rec.sendId
+        ? await getProtocolSend(occurrenceId, rec.sendId)
+        : (await occurrencesService.getProtocolSendByKey(occurrenceId, rec.key)).data.data
+      if (!rec.sendId) keepRecord(occurrenceId, { ...rec, sendId: data.send_id })
+      if (data.state === 'sent' || data.state === 'failed') dropRecord(occurrenceId)
+      return data.state
+    } catch (e: any) {
+      // Only the application's own "send not found" means "no claim". Any other failure (no answer, not allowed, a
+      // 404 for the case or the route) says nothing about the send: keep the record, say nothing false.
+      if (!isSendNotFound(e)) throw e
+      // No claim for the key. A request may still be on its way: until it cannot be, it is "in progress".
+      if (!rec.sendId && Date.now() - rec.savedAt < IN_FLIGHT_GRACE_MS) return 'processing'
+      dropRecord(occurrenceId)
+      return null
     }
   }
 
@@ -137,9 +243,10 @@ export const useOccurrencesStore = defineStore('occurrences', () => {
     return true
   }
 
-  async function sendProtocol(occurrenceId: string) {
-    await occurrencesService.sendProtocol(occurrenceId)
+  async function sendProtocol(occurrenceId: string): Promise<SendOutcome> {
+    const body = await postProtocol(occurrenceId, undefined)
     await fetchEvents(occurrenceId)
+    return sendOutcome(body)
   }
 
   function clear() {
@@ -153,6 +260,6 @@ export const useOccurrencesStore = defineStore('occurrences', () => {
     occurrences, total, contactOccurrences, stages, events, isLoading,
     fetchStages, stageColor, fetchOccurrences, fetchColumn, fetchContactOccurrences, fetchEvents,
     createOccurrence, changeStage, moveStage, addNote, reply, sendProtocol,
-    previewRegistrationMessage, sendRegistrationMessage, clear,
+    previewRegistrationMessage, sendRegistrationMessage, getProtocolSend, recoverProtocolSend, hasPendingProtocolSend, getOpenProtocolSend, resolveProtocolSend, clear,
   }
 })

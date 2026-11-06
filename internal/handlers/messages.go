@@ -36,6 +36,11 @@ type OutgoingMessageRequest struct {
 	Account *models.WhatsAppAccount
 	Contact *models.Contact
 
+	// MessageID is optional: a caller that must record the message before it is
+	// sent (so the record can later be matched to the message row) assigns the id.
+	// uuid.Nil lets the message get its own.
+	MessageID uuid.UUID
+
 	// Message type determines which fields are used
 	Type models.MessageType // text, image, video, audio, document, interactive, template
 
@@ -122,6 +127,12 @@ type MessageSendOptions struct {
 	// the error, after the message row was updated. Lets a caller that needs the
 	// outcome (not only the stored status) reuse this sender instead of a copy.
 	OnResult func(wamid string, err error)
+
+	// BeforeSend, when set, runs after the message row exists and immediately before the provider is called. It
+	// is the point of no return of a send that must be fenced (the protocol send): it returns the context the
+	// provider call must use (carrying the deadline the owner is allowed to send until) or an error, in which case
+	// NOTHING is sent: the message row is marked failed and the error is returned to the caller.
+	BeforeSend func(ctx context.Context) (context.Context, context.CancelFunc, error)
 }
 
 // DefaultSendOptions returns options suitable for agent UI sends
@@ -182,9 +193,18 @@ func (a *App) agentNamePrefix(userID uuid.UUID) string {
 	return "*" + first + ":*\n"
 }
 
+// ErrBeforeSendNeedsSync: a send with a BeforeSend point of no return cannot be asynchronous.
+var ErrBeforeSendNeedsSync = errors.New("BeforeSend requires a synchronous send (Async=false)")
+
 // SendOutgoingMessage is the unified method for sending all types of WhatsApp messages.
 // It handles: text, media (image/video/audio/document), interactive (buttons/list/cta_url), and template messages.
 func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageRequest, opts MessageSendOptions) (*models.Message, error) {
+	// A fenced send must stay in this goroutine: the deadline BeforeSend returns is the deadline of the provider call.
+	// The async branch would call the provider in a goroutine with its own context and silently drop it.
+	if opts.BeforeSend != nil && opts.Async {
+		return nil, ErrBeforeSendNeedsSync
+	}
+
 	// 0. Ownership gate for human sends: claim the attendance (or open one)
 	// BEFORE anything is created or sent, so the loser of a race, or an agent
 	// writing into another agent's conversation, never reaches the customer.
@@ -322,6 +342,19 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 		}
 	}
 
+	// 2b. The point of no return, for a send that must be fenced.
+	if opts.BeforeSend != nil {
+		sendCtx, cancel, err := opts.BeforeSend(ctx)
+		if err != nil {
+			// Nothing reached the provider and nothing will: close the message row, the usage ledger entry
+			// (pending since the row was created) and tell the viewers, exactly as any send that did not leave.
+			a.finalizeMessageSend(msg, req, opts, "", err)
+			return nil, err
+		}
+		defer cancel()
+		ctx = sendCtx
+	}
+
 	// 3. Execute send (async or sync)
 	if opts.Async {
 		a.wg.Add(1)
@@ -415,8 +448,12 @@ func (a *App) toWhatsAppAccount(account *models.WhatsAppAccount) *whatsapp.Accou
 
 // createOutgoingMessage creates a Message model from the request
 func (a *App) createOutgoingMessage(req OutgoingMessageRequest, opts MessageSendOptions) *models.Message {
+	id := req.MessageID
+	if id == uuid.Nil {
+		id = uuid.New()
+	}
 	msg := &models.Message{
-		BaseModel:       models.BaseModel{ID: uuid.New()},
+		BaseModel:       models.BaseModel{ID: id},
 		OrganizationID:  req.Account.OrganizationID,
 		WhatsAppAccount: req.Account.Name,
 		ContactID:       req.Contact.ID,
@@ -876,6 +913,9 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+	if !a.requireChatWrite(r, orgID, userID) {
+		return nil
 	}
 
 	var req SendTemplateMessageRequest

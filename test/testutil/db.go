@@ -54,6 +54,11 @@ func SetupTestDB(t *testing.T) *gorm.DB {
 			testDBInitErr = fmt.Errorf("failed to create indexes: %w", err)
 			return
 		}
+		// The one-open-send index is the last step of the migration (not part of CreateIndexes).
+		if err := database.EnsureOpenSendIntentUniqueness(testDB); err != nil {
+			testDBInitErr = fmt.Errorf("failed to create the open-send index: %w", err)
+			return
+		}
 
 		// Clean up any existing data before tests start
 		if os.Getenv("TEST_DB_KEEP") != "1" { // homologation phases keep the data of the previous phase
@@ -146,6 +151,7 @@ func runMigrations(db *gorm.DB) error {
 		&models.OccurrenceChannelConfig{},
 		&models.OccurrenceNotification{},
 		&models.OccurrenceNotificationAttempt{},
+		&models.OccurrenceSendIntent{},
 		&models.OccurrenceCategory{},
 		&models.OccurrenceSLAPolicy{},
 		&models.Occurrence{},
@@ -269,6 +275,7 @@ func cleanupTables(db *gorm.DB) {
 		"occurrence_what_happened",
 		"occurrence_sla_policies",
 		"occurrence_counters",
+		"occurrence_send_intents",
 		"occurrence_events",
 		"occurrences",
 		"occurrence_categories",
@@ -350,6 +357,7 @@ func TruncateTables(db *gorm.DB) {
 		"call_permissions",
 		"occurrence_sla_policies",
 		"occurrence_counters",
+		"occurrence_send_intents",
 		"occurrence_events",
 		"occurrences",
 		"occurrence_categories",

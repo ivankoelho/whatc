@@ -1829,9 +1829,28 @@ export const occurrencesService = {
   // The ONLY way to send a public message from an occurrence: also stamps the first-response SLA.
   reply: (id: string, content: string) =>
     api.post<ApiEnvelope<{ sent: boolean }>>(`/occurrences/${id}/reply`, { content }),
-  sendProtocol: (id: string, message?: string) =>
-    api.post<ApiEnvelope<{ sent: boolean; protocol_number: string }>>(
-      `/occurrences/${id}/send-protocol`, message ? { message } : undefined),
+  // `key` is the Idempotency-Key of ONE intention to send: required by the backend; the same key
+  // answers the same send again, a new intention uses a new key.
+  sendProtocol: (id: string, message: string | undefined, key: string) =>
+    // 200 sent | 202 result "uncertain" or "processing" (not confirmed: may have been delivered) | 502 proven failure
+    api.post<ApiEnvelope<{ sent: boolean; protocol_number: string; result?: 'sent' | 'uncertain' | 'failed' | 'processing'; confirmed?: boolean; send_id?: string; message_id?: string }>>(
+      `/occurrences/${id}/send-protocol`, message ? { message } : undefined, { headers: { 'Idempotency-Key': key } }),
+  // What happened to a send, after a timeout, a refresh or a lost answer. Never sends anything.
+  // Same question when the answer to the POST never arrived and the send_id is unknown.
+  getProtocolSendByKey: (id: string, key: string) =>
+    api.get<ApiEnvelope<{ state: 'processing' | 'sent' | 'failed' | 'uncertain'; sent: boolean; confirmed: boolean; send_id: string; message_id: string }>>(
+      `/occurrences/${id}/protocol-sends`, { params: { idempotency_key: key } }),
+  getProtocolSend: (id: string, sendId: string) =>
+    api.get<ApiEnvelope<{ state: 'processing' | 'sent' | 'failed' | 'uncertain'; sent: boolean; confirmed: boolean; send_id: string; message_id: string }>>(
+      `/occurrences/${id}/protocol-sends/${sendId}`),
+  // The case's open send (processing, or uncertain until a person settles it), whoever started it and on
+  // whichever device. 404 send_not_found = none. Never sends anything.
+  getOpenProtocolSend: (id: string) =>
+    api.get<ApiEnvelope<{ state: 'processing' | 'uncertain'; send_id: string; own?: boolean }>>(
+      `/occurrences/${id}/protocol-sends`, { params: { open: true } }),
+  // A person settles an uncertain send after checking the conversation. Sends nothing.
+  resolveProtocolSend: (id: string, sendId: string, body: { outcome: 'delivered' | 'not_delivered'; conversation_checked: boolean; note: string }) =>
+    api.post<ApiEnvelope<{ state: 'sent' | 'failed'; send_id: string }>>(`/occurrences/${id}/protocol-sends/${sendId}/resolve`, body),
   // Permanent hard delete, restricted to super admins server-side.
   delete: (id: string) => api.delete<ApiEnvelope<{ deleted: boolean }>>(`/occurrences/${id}`),
   listForContact: (contactId: string) =>

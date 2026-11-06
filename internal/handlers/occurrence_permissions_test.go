@@ -130,7 +130,7 @@ func TestOccurrencePermissions_SendProtocolRequiresOccurrencesWrite(t *testing.T
 
 	req := testutil.NewJSONRequest(t, map[string]any{})
 	testutil.SetAuthContext(req, org.ID, user.ID)
-	require.NoError(t, app.SendOccurrenceProtocol(req))
+	require.NoError(t, app.SendOccurrenceProtocol(withKey(req)))
 	require.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(req))
 	// Same shape as ReadOnlyCannotCreate above: pin the denial to requireAuth,
 	// not the conversation-visibility gate this role would also fail.

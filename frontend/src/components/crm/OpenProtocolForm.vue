@@ -31,6 +31,8 @@ import { useOccurrencesStore } from '@/stores/occurrences'
 import { debounce } from '@/lib/utils'
 import { isProcessFieldRequired, missingProcessFields, unresolvedPlaceholders } from '@/lib/occurrence-process'
 import { getErrorMessage } from '@/lib/api-utils'
+import { useAuthStore } from '@/stores/auth'
+import { canSendRegistrationMessage } from '@/lib/occurrence-customer-messaging'
 import { toast } from 'vue-sonner'
 
 const props = defineProps<{
@@ -211,12 +213,16 @@ onMounted(async () => {
 // --- Submissão ---
 const submitting = ref(false)
 // sent: null = registration message not attempted yet (agent is reviewing it).
-const result = ref<{ protocolId: string; protocolNumber: string; title: string; sent: boolean | null } | null>(null)
+// uncertain: the provider did not confirm the message (it may have been delivered): never offer to send it again.
+const result = ref<{ protocolId: string; protocolNumber: string; title: string; sent: boolean | null; uncertain?: boolean } | null>(null)
 const suggestedMessage = ref('')
 const hasSuggestedTemplate = ref(false)
 // The suggested text is the built-in protocol text, not a process template.
 const suggestedIsFallback = ref(false)
 const sendingMessage = ref(false)
+// Writing to the customer is the chat's permission: without it the suggested text can only be copied.
+const authStore = useAuthStore()
+const canSendMessage = computed(() => canSendRegistrationMessage(authStore.hasPermission('chat', 'write')))
 // Live: recomputed as the agent edits, so the notice clears once every token is filled in.
 const unresolvedTokens = computed(() => unresolvedPlaceholders(suggestedMessage.value))
 
@@ -359,9 +365,17 @@ async function sendSuggestedMessage() {
   const text = suggestedMessage.value
   sendingMessage.value = true
   try {
-    const sent = await store.sendRegistrationMessage(protocolId, text)
+    const outcome = await store.sendRegistrationMessage(protocolId, text)
     // A reset mid-send leaves nothing to update.
     if (!result.value) return
+    if (outcome === 'uncertain') {
+      // 202: not confirmed, it may have been delivered. Neither sent nor failed: the send button
+      // stays off so it is not sent again, and the person is told to check the conversation.
+      result.value = { ...current, sent: null, uncertain: true }
+      toast.warning(t('occurrences.protocolSendUncertain'))
+      return
+    }
+    const sent = outcome === 'sent'
     result.value = { ...current, sent }
     // Only a real, non-blank process template counts as "process message used" (not the
     // built-in fallback text); logging is best-effort.
@@ -373,6 +387,26 @@ async function sendSuggestedMessage() {
       }
     }
   } catch (e) {
+    if (store.hasPendingProtocolSend(protocolId) && result.value) {
+      // No conclusive answer (timeout, lost connection, proxy 5xx, another send of this case pending): the
+      // message may be in flight or delivered. Ask the server and keep the key; never offer a second send
+      // (editing the text and sending again would be one) until the server says how it ended.
+      const state = await store.recoverProtocolSend(protocolId).catch(() => 'uncertain' as const)
+      if (state === 'sent') {
+        result.value = { ...current, sent: true }
+        return
+      }
+      if (state === 'failed') {
+        result.value = { ...current, sent: null }
+        toast.error(t('occurrences.protocolSendFailed'))
+        return
+      }
+      if (state !== null) {
+        result.value = { ...current, sent: null, uncertain: true }
+        toast.warning(t('occurrences.protocolSendUncertain'))
+        return
+      }
+    }
     toast.error(getErrorMessage(e, t('occurrences.protocolSendFailed')))
   } finally {
     sendingMessage.value = false
@@ -398,10 +432,13 @@ function goToProtocol() {
         <p v-if="result.sent !== null" :class="['text-sm', result.sent ? 'text-emerald-600' : 'text-amber-600']">
           {{ result.sent ? t('occurrences.protocolSentToCustomer') : t('occurrences.protocolNotSentToCustomer') }}
         </p>
+        <p v-if="result.uncertain" class="text-sm text-amber-600" role="status" data-testid="protocol-send-uncertain">
+          {{ t('occurrences.protocolSendUncertain') }}
+        </p>
         <!-- Review before sending. After a closed 24h window (sent === false) keep the text copyable for a template. -->
         <div v-if="result.sent !== true" class="space-y-2 text-left">
           <Label>{{ t('occurrences.suggestedMessageLabel') }}</Label>
-          <Textarea v-model="suggestedMessage" :rows="8" :maxlength="4096" :disabled="sendingMessage" />
+          <Textarea v-model="suggestedMessage" :rows="8" :maxlength="4096" :disabled="sendingMessage || !!result.uncertain" />
           <p v-if="result.sent === null && unresolvedTokens.length" class="text-xs text-amber-600" role="status">
             {{ t('occurrences.unresolvedPlaceholdersNotice', { tokens: unresolvedTokens.join(', ') }) }}
           </p>
@@ -410,7 +447,7 @@ function goToProtocol() {
           </p>
           <div class="flex justify-end gap-2">
             <Button variant="outline" :disabled="!suggestedMessage.trim()" @click="copySuggestedMessage">{{ t('occurrences.copyMessage') }}</Button>
-            <Button v-if="result.sent === null" :disabled="sendingMessage" @click="sendSuggestedMessage">
+            <Button v-if="result.sent === null && canSendMessage && !result.uncertain" :disabled="sendingMessage" @click="sendSuggestedMessage">
               <Loader2 v-if="sendingMessage" class="h-4 w-4 mr-2 animate-spin" />
               {{ t('occurrences.sendMessage') }}
             </Button>

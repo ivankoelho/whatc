@@ -81,7 +81,7 @@ func TeamProfiles() []TeamProfile {
 			Description: "Acompanha Vendas e Logística da sua loja, intervém nas conversas e fala com o backoffice no chat interno",
 			Permissions: with(
 				"contacts:read", "contacts:write", "tags:read", "templates:read",
-				"conversations:view_team", "chat.assign:write",
+				"conversations:view_team", "chat.assign:write", "occurrences:resolve_send",
 				"sales_opportunities:read", "sales_opportunities:write", "sales_opportunities:view_team",
 				"analytics:read", "analytics.agents:read", "analytics.agents:view_team",
 				"call_logs:read",
@@ -92,7 +92,7 @@ func TeamProfiles() []TeamProfile {
 			Description: "Supervisiona os chamados de todas as lojas e os agentes de SAC; só lê as conversas das contas e equipes a que pertence (conversations:view_all é concessão explícita)",
 			Permissions: with(
 				"contacts:read", "contacts:write", "contacts:export", "tags:read", "templates:read",
-				"conversations:view_team", "occurrences:view_all", "chat.assign:write",
+				"conversations:view_team", "occurrences:view_all", "chat.assign:write", "occurrences:resolve_send",
 				"sales_opportunities:read", "sales_opportunities:write", "sales_opportunities:view_all",
 				"team_chat:manage",
 				"analytics:read", "analytics.agents:read",

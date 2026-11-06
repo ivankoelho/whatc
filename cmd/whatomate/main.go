@@ -221,6 +221,12 @@ func runServer(args []string) {
 			lo.Fatal("Sales opportunity permissions backfill failed", "error", err)
 		}
 
+		// Settling a customer send of unknown outcome is its own permission (additive, once per organization).
+		if err := database.BackfillResolveUncertainSendPermission(db, lo); err != nil {
+			// Not optional: without it nobody may settle an uncertain send, which the index step's own recovery needs.
+			lo.Fatal("Resolve-send permission backfill failed", "error", err)
+		}
+
 		// Same window: supervising cases became its own permission. Grant it to
 		// whoever could (conversations:view_all), THEN narrow the untouched preset.
 		if err := database.BackfillOccurrenceViewAll(db, lo); err != nil {
@@ -296,6 +302,19 @@ func runServer(args []string) {
 		if _, _, err := database.EncryptChatbotAIKeys(db, cfg.App.EncryptionKey, lo); err != nil {
 			lo.Fatal("AI API key encryption failed", "error", err)
 		}
+
+		// LAST step: the one-open-send index. If existing data would break it, the migration stops HERE, after
+		// everything else (schema, permissions, roles, backfills) is in place, and says what to do. Nothing is
+		// deleted or changed to make it fit.
+		if err := database.EnsureOpenSendIntentUniqueness(db); err != nil {
+			lo.Fatal("Open-send index failed", "error", err)
+		}
+	}
+
+	// Without the index nothing can stop two people sending to one customer from one case at the same time, so
+	// customer sends from cases are REFUSED until it is there (see claimSendIntent: the check runs inside every new claim). Say so loudly.
+	if err := database.VerifyOpenSendIntentGuard(db); err != nil {
+		lo.Error("Customer sends from cases are DISABLED: "+err.Error(), "error", err)
 	}
 
 	// Connect to Redis
@@ -473,6 +492,7 @@ func runServer(args []string) {
 	// Customer communications of forwarded cases (templates via the case's logistics account)
 	notifierCtx, notifierCancel := context.WithCancel(context.Background())
 	go app.StartOccurrenceNotifier(notifierCtx)
+	go app.StartSendIntentReconciler(notifierCtx)
 
 	// Start presence reaper (sweeps every 10s; grace is 60s)
 	presenceCtx, presenceCancel := context.WithCancel(context.Background())
@@ -1004,6 +1024,9 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/occurrences/{id}/export", app.ExportOccurrence)
 	g.POST("/api/occurrences/{id}/events", app.CreateOccurrenceEvent)
 	g.POST("/api/occurrences/{id}/send-protocol", app.SendOccurrenceProtocol)
+	g.GET("/api/occurrences/{id}/protocol-sends", app.GetOccurrenceProtocolSendByKey)
+	g.GET("/api/occurrences/{id}/protocol-sends/{send_id}", app.GetOccurrenceProtocolSend)
+	g.POST("/api/occurrences/{id}/protocol-sends/{send_id}/resolve", app.ResolveOccurrenceProtocolSend)
 	g.POST("/api/occurrences/{id}/reply", app.ReplyToOccurrence)
 	g.GET("/api/occurrences/{id}/documents", app.ListOccurrenceDocuments)
 	g.POST("/api/occurrences/{id}/documents", app.CreateOccurrenceDocument)
