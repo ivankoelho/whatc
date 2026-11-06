@@ -74,7 +74,21 @@ func TestOpenSendIntentPredicateOK(t *testing.T) {
 		"restored, an array of one ROW":               `((state)::text = ANY (ARRAY[('processing', 'uncertain')]))`,
 		"restored, a function around the element":     `((state)::text = ANY (ARRAY[lower('processing'::character varying)::text, ('uncertain'::character varying)::text]))`,
 		"restored, a cast to a non-character type":    `((state)::text = ANY (ARRAY[('processing'::character varying)::boolean, ('uncertain'::character varying)::text]))`,
-		"bare shape with the elements of both":        `((state)::text = ANY (ARRAY['processing'::text, ('uncertain'::character varying)::text]))`,
+		// M1 of the review of 855ad22d: the literals are checked AS WRITTEN, before casts and whitespace are taken out.
+		// Each of these used to pass and none protects 'processing'.
+		"a space inside a literal":           `((state)::text = ANY ((ARRAY['proc essing'::character varying, 'uncertain'::character varying])::text[]))`,
+		"a cast spelled inside a literal":    `((state)::text = ANY ((ARRAY['pro::textcessing'::character varying, 'uncertain'::character varying])::text[]))`,
+		"a line break inside a literal":      "((state)::text = ANY ((ARRAY['proces\nsing'::character varying, 'uncertain'::character varying])::text[]))",
+		"a tab inside a literal":             "((state)::text = ANY ((ARRAY['processing'::character varying, 'uncer\ttain'::character varying])::text[]))",
+		"restored, a space inside a literal": `((state)::text = ANY (ARRAY[('proc essing'::character varying)::text, ('uncertain'::character varying)::text]))`,
+		"an escaped quote inside a literal":  `((state)::text = ANY ((ARRAY['proc''essing'::character varying, 'uncertain'::character varying])::text[]))`,
+		"an E'' literal":                     `((state)::text = ANY ((ARRAY[E'processing'::character varying, 'uncertain'::character varying])::text[]))`,
+		"a third literal elsewhere":          `(((state)::text = ANY ((ARRAY['processing'::character varying, 'uncertain'::character varying])::text[])) AND ('a'::text = 'a'::text))`,
+		// L1 of the same review: exactly one parenthesis per element in the restored shape, and none in the bare one.
+		"restored, two parentheses per element": `((state)::text = ANY (ARRAY[(('processing'::character varying))::text, (('uncertain'::character varying))::text]))`,
+		"restored, two parentheses on one":      `((state)::text = ANY (ARRAY[(('processing'::character varying))::text, ('uncertain'::character varying)::text]))`,
+		"bare, parenthesized twice":             `((state)::text = ANY ((ARRAY[(('processing')), (('uncertain'))])::text[]))`,
+		"bare shape with the elements of both":  `((state)::text = ANY (ARRAY['processing'::text, ('uncertain'::character varying)::text]))`,
 	}
 	for name, p := range bad {
 		assert.False(t, openSendIntentPredicateOK(p), name)

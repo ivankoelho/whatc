@@ -121,3 +121,32 @@ func TestVerifyOpenSendIntentGuard_ARestoredIndex_InvalidOrAbsent_IsRefused(t *t
 		assert.Contains(t, err.Error(), "is missing")
 	})
 }
+
+// M1 of the review of 855ad22d, at the database level: an index whose literal only LOOKS like 'processing' once casts
+// and whitespace are taken out does not cover 'processing' at all (two open 'processing' rows for the same case go in).
+// The guard and the migration must refuse it, and leave it as it is.
+func TestVerifyOpenSendIntentGuard_ALiteralThatOnlyLooksRight_IsRefused(t *testing.T) {
+	for label, ddl := range map[string]string{
+		"a space inside the literal":         `CREATE UNIQUE INDEX uq_send_intent_open ON occurrence_send_intents (organization_id, occurrence_id, kind) WHERE state IN ('proc essing', 'uncertain')`,
+		"a cast spelled inside the literal":  `CREATE UNIQUE INDEX uq_send_intent_open ON occurrence_send_intents (organization_id, occurrence_id, kind) WHERE state IN ('pro::textcessing', 'uncertain')`,
+		"a line break inside the literal":    "CREATE UNIQUE INDEX uq_send_intent_open ON occurrence_send_intents (organization_id, occurrence_id, kind) WHERE state IN ('proces\nsing', 'uncertain')",
+		"restored shape, space in a literal": `CREATE UNIQUE INDEX uq_send_intent_open ON public.occurrence_send_intents USING btree (organization_id, occurrence_id, kind) WHERE ((state)::text = ANY (ARRAY[('proc essing'::character varying)::text, ('uncertain'::character varying)::text]))`,
+	} {
+		t.Run(label, func(t *testing.T) {
+			db := testutil.ScratchDatabase(t)
+			require.NoError(t, db.AutoMigrate(&models.OccurrenceSendIntent{}))
+			require.NoError(t, db.Exec(ddl).Error)
+			before := indexDef(t, db)
+
+			// The index really does not protect 'processing': two open processing rows for one case are accepted.
+			require.NoError(t, db.Exec(`INSERT INTO occurrence_send_intents (id, organization_id, idempotency_key, occurrence_id, user_id, kind, request_hash, state, message_id, claimed_at)
+				SELECT gen_random_uuid(), '00000000-0000-0000-0000-000000000001', gen_random_uuid()::text, '00000000-0000-0000-0000-000000000002',
+				       '00000000-0000-0000-0000-000000000003', 'protocol', 'h', 'processing', gen_random_uuid(), now() FROM generate_series(1, 2)`).Error)
+
+			require.Error(t, database.VerifyOpenSendIntentGuard(db), "the guard must refuse it")
+			err := database.EnsureOpenSendIntentUniqueness(db)
+			require.Error(t, err, "the migration must not report success")
+			assert.Equal(t, before, indexDef(t, db), "the existing index was left exactly as it was")
+		})
+	}
+}

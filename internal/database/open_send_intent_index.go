@@ -28,8 +28,13 @@ const createUncertainRecheckIndexSQL = `CREATE INDEX IF NOT EXISTS idx_send_inte
 
 // The predicate of the protection is "state is processing or uncertain", and nothing else. Postgres stores
 // `state IN ('processing','uncertain')` as `state = ANY (ARRAY['processing','uncertain'])`, and renders it with casts
-// and parentheses that differ between versions. So the casts to a character type are taken out, the whitespace is
-// dropped, and what is left must be EXACTLY ONE shape, anchored at both ends:
+// and parentheses that differ between versions.
+//
+// FIRST, before anything is normalized, the string literals are checked as they are: there must be exactly two, one
+// 'processing' and one 'uncertain' (no other spelling, no space, no cast or escape inside the quotes). Only then are
+// the casts to a character type taken out and the whitespace dropped (outside the quotes this changes nothing in the
+// meaning; inside them there is nothing left to change), and what is left must be EXACTLY ONE shape, anchored at both
+// ends:
 //
 //	(...(state)...) = ANY (...(ARRAY[ 'processing' , 'uncertain' ])...)      (the two literals distinct, either order)
 //
@@ -46,14 +51,29 @@ const createUncertainRecheckIndexSQL = `CREATE INDEX IF NOT EXISTS idx_send_inte
 // The two shapes are NOT mixed (both elements bare or both parenthesized), and a parenthesis only wraps a whole literal
 // (so ARRAY[('processing','uncertain')], an array of one ROW, does not match). Everything else stays refused.
 var (
+	// A SQL string literal as pg_get_expr prints it: quotes, with '' for an embedded quote. An E'...' literal (escapes)
+	// is caught too: the E stays outside the match and the shape check refuses it.
+	predLiteral        = regexp.MustCompile(`'(?:[^']|'')*'`)
 	predCast           = regexp.MustCompile(`::(?:character varying|character|varchar|bpchar|text|name)(?:\[\])?`)
 	predCanonicalBare  = regexp.MustCompile(`^\(*state\)*=ANY\(*ARRAY\[('(?:processing|uncertain)'),('(?:processing|uncertain)')\]\)*$`)
 	predCanonicalParen = regexp.MustCompile(`^\(*state\)*=ANY\(*ARRAY\[\(('(?:processing|uncertain)')\),\(('(?:processing|uncertain)')\)\]\)*$`)
 )
 
 func openSendIntentPredicateOK(pred string) bool {
+	// The literals, exactly as written, before any normalization: exactly 'processing' and 'uncertain', once each.
+	lits := predLiteral.FindAllString(pred, -1)
+	if len(lits) != 2 {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, l := range lits {
+		if (l != "'processing'" && l != "'uncertain'") || seen[l] {
+			return false
+		}
+		seen[l] = true
+	}
 	rest := predCast.ReplaceAllString(pred, "")
-	rest = strings.Join(strings.Fields(rest), "") // drop every whitespace (none is inside a literal here)
+	rest = strings.Join(strings.Fields(rest), "") // drop every whitespace; the literals were already checked to have none
 	m := predCanonicalBare.FindStringSubmatch(rest)
 	if m == nil {
 		m = predCanonicalParen.FindStringSubmatch(rest)
