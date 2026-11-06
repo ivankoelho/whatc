@@ -15,6 +15,10 @@ func TestOpenSendIntentPredicateOK(t *testing.T) {
 		"no casts":                  `(state = ANY (ARRAY['processing', 'uncertain']))`,
 		"the other element order":   `((state)::text = ANY ((ARRAY['uncertain'::character varying, 'processing'::character varying])::text[]))`,
 		"extra whitespace and tabs": "((state)::text =  ANY (\n\t(ARRAY['processing'::character varying,\n 'uncertain'::character varying])::text[]))",
+		// What pg_dump/pg_restore leaves for the SAME index (seen on PostgreSQL 16.15 and 17.11): each element parenthesized with its own cast.
+		"restored by pg_restore (16.15 and 17.11)": `((state)::text = ANY (ARRAY[('processing'::character varying)::text, ('uncertain'::character varying)::text]))`,
+		"restored, the other element order":        `((state)::text = ANY (ARRAY[('uncertain'::character varying)::text, ('processing'::character varying)::text]))`,
+		"restored, extra whitespace":               "((state)::text = ANY (ARRAY[ ( 'processing'::character varying )::text ,\n\t('uncertain'::character varying)::text ]))",
 	}
 	for name, p := range good {
 		assert.True(t, openSendIntentPredicateOK(p), name)
@@ -50,6 +54,27 @@ func TestOpenSendIntentPredicateOK(t *testing.T) {
 		"a leading negation":              `NOT ((state)::text = ANY (ARRAY['processing'::text, 'uncertain'::text]))`,
 		"the column compared with itself": `((state)::text = ANY (ARRAY[state, state]))`,
 		"literals with other spellings":   `((state)::text = ANY (ARRAY['Processing'::text, 'Uncertain'::text]))`,
+		// The restored (parenthesized) shape must be as strict as the bare one: every mutation of it is refused too.
+		"restored, ALL instead of ANY":                `((state)::text = ALL (ARRAY[('processing'::character varying)::text, ('uncertain'::character varying)::text]))`,
+		"restored, <> ALL (NOT IN)":                   `((state)::text <> ALL (ARRAY[('processing'::character varying)::text, ('uncertain'::character varying)::text]))`,
+		"restored, a third element":                   `((state)::text = ANY (ARRAY[('processing'::character varying)::text, ('uncertain'::character varying)::text, ('sent'::character varying)::text]))`,
+		"restored, a replaced element":                `((state)::text = ANY (ARRAY[('processing'::character varying)::text, ('sent'::character varying)::text]))`,
+		"restored, the same element twice":            `((state)::text = ANY (ARRAY[('processing'::character varying)::text, ('processing'::character varying)::text]))`,
+		"restored, a one-element array":               `((state)::text = ANY (ARRAY[('processing'::character varying)::text]))`,
+		"restored, the column inside the array":       `((state)::text = ANY (ARRAY[('processing'::character varying)::text, (state)::text]))`,
+		"restored, the other column":                  `((kind)::text = ANY (ARRAY[('processing'::character varying)::text, ('uncertain'::character varying)::text]))`,
+		"restored, a constant compared to a constant": `(('processing'::character varying)::text = ANY (ARRAY[('processing'::character varying)::text, ('uncertain'::character varying)::text]))`,
+		"restored, NOT around it":                     `(NOT ((state)::text = ANY (ARRAY[('processing'::character varying)::text, ('uncertain'::character varying)::text])))`,
+		"restored, OR with another condition":         `(((state)::text = ANY (ARRAY[('processing'::character varying)::text, ('uncertain'::character varying)::text])) OR (kind = 'x'::text))`,
+		"restored, AND with another condition":        `(((state)::text = ANY (ARRAY[('processing'::character varying)::text, ('uncertain'::character varying)::text])) AND (claimed_at < now()))`,
+		"restored, a trailing condition":              `((state)::text = ANY (ARRAY[('processing'::character varying)::text, ('uncertain'::character varying)::text])) IS TRUE`,
+		"restored, unbalanced parentheses":            `((state)::text = ANY (ARRAY[('processing'::character varying)::text, ('uncertain'::character varying)::text])))`,
+		"restored, a literal with another spelling":   `((state)::text = ANY (ARRAY[('Processing'::character varying)::text, ('uncertain'::character varying)::text]))`,
+		"restored, the elements mixed (one bare)":     `((state)::text = ANY (ARRAY[('processing'::character varying)::text, 'uncertain'::character varying]))`,
+		"restored, an array of one ROW":               `((state)::text = ANY (ARRAY[('processing', 'uncertain')]))`,
+		"restored, a function around the element":     `((state)::text = ANY (ARRAY[lower('processing'::character varying)::text, ('uncertain'::character varying)::text]))`,
+		"restored, a cast to a non-character type":    `((state)::text = ANY (ARRAY[('processing'::character varying)::boolean, ('uncertain'::character varying)::text]))`,
+		"bare shape with the elements of both":        `((state)::text = ANY (ARRAY['processing'::text, ('uncertain'::character varying)::text]))`,
 	}
 	for name, p := range bad {
 		assert.False(t, openSendIntentPredicateOK(p), name)

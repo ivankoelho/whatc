@@ -36,15 +36,28 @@ const createUncertainRecheckIndexSQL = `CREATE INDEX IF NOT EXISTS idx_send_inte
 // Nothing is stripped out of the middle: a literal, an operator, a column or a function anywhere else (state compared
 // to a literal, an array of columns, ALL instead of ANY, NOT, <>, OR/AND, a time condition, a comparison of two
 // constants, a comparison of two booleans) makes the shape not match. Parentheses must also balance.
+//
+// Postgres renders the SAME index in two ways, and both are accepted, each as its own anchored shape:
+//
+//   - the index as the migration creates it: ARRAY['processing'::varchar, 'uncertain'::varchar] (elements bare);
+//   - the index as pg_dump/pg_restore leaves it (checked on PostgreSQL 16.15 and 17.11): the elements come back
+//     parenthesized with a cast each, ARRAY[('processing'::varchar)::text, ('uncertain'::varchar)::text].
+//
+// The two shapes are NOT mixed (both elements bare or both parenthesized), and a parenthesis only wraps a whole literal
+// (so ARRAY[('processing','uncertain')], an array of one ROW, does not match). Everything else stays refused.
 var (
-	predCast      = regexp.MustCompile(`::(?:character varying|character|varchar|bpchar|text|name)(?:\[\])?`)
-	predCanonical = regexp.MustCompile(`^\(*state\)*=ANY\(*ARRAY\[('(?:processing|uncertain)'),('(?:processing|uncertain)')\]\)*$`)
+	predCast           = regexp.MustCompile(`::(?:character varying|character|varchar|bpchar|text|name)(?:\[\])?`)
+	predCanonicalBare  = regexp.MustCompile(`^\(*state\)*=ANY\(*ARRAY\[('(?:processing|uncertain)'),('(?:processing|uncertain)')\]\)*$`)
+	predCanonicalParen = regexp.MustCompile(`^\(*state\)*=ANY\(*ARRAY\[\(('(?:processing|uncertain)')\),\(('(?:processing|uncertain)')\)\]\)*$`)
 )
 
 func openSendIntentPredicateOK(pred string) bool {
 	rest := predCast.ReplaceAllString(pred, "")
 	rest = strings.Join(strings.Fields(rest), "") // drop every whitespace (none is inside a literal here)
-	m := predCanonical.FindStringSubmatch(rest)
+	m := predCanonicalBare.FindStringSubmatch(rest)
+	if m == nil {
+		m = predCanonicalParen.FindStringSubmatch(rest)
+	}
 	if m == nil || m[1] == m[2] {
 		return false
 	}
