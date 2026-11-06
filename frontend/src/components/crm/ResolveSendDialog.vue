@@ -75,16 +75,17 @@ async function submit() {
             {{ t('occurrences.resolveSend.notDeliveredWarning') }}
           </p>
         </fieldset>
-        <label class="flex items-start gap-2 text-sm">
-          <input v-model="checked" type="checkbox" data-testid="resolve-checked" class="mt-1">
-          <span>{{ t('occurrences.resolveSend.checked') }}</span>
-        </label>
         <div class="space-y-1.5">
           <Label for="resolve-note">{{ t('occurrences.resolveSend.note') }} <span class="text-destructive">*</span></Label>
           <Textarea id="resolve-note" v-model="note" :rows="3" :maxlength="NOTE_MAX" data-testid="resolve-note" />
           <p class="text-xs text-muted-foreground">{{ t('occurrences.resolveSend.noteHint', { min: NOTE_MIN }) }}</p>
         </div>
         <p class="text-xs text-muted-foreground">{{ t('occurrences.resolveSend.final') }}</p>
+        <!-- The confirmation comes last, right before the buttons: it confirms what was chosen and written above. -->
+        <label class="flex items-start gap-2 text-sm">
+          <input v-model="checked" type="checkbox" data-testid="resolve-checked" class="mt-1">
+          <span>{{ t('occurrences.resolveSend.checked') }}</span>
+        </label>
       </div>
       <DialogFooter>
         <Button variant="outline" :disabled="working" @click="emit('update:open', false)">{{ t('common.cancel') }}</Button>
