@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fasthttp"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func TestApp_Login_Success(t *testing.T) {
@@ -53,6 +54,27 @@ func TestApp_Login_Success(t *testing.T) {
 	assert.NotEmpty(t, testutil.GetResponseCookie(req, "whm_access"))
 	assert.NotEmpty(t, testutil.GetResponseCookie(req, "whm_refresh"))
 	assert.NotEmpty(t, testutil.GetResponseCookie(req, "whm_csrf"))
+}
+
+// CreateTestUser hashes "password123" once per process and shares the hash between users; each user must still
+// log in with that password, and only with it.
+func TestApp_Login_CreateTestUserDefaultPassword(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	a := testutil.CreateTestUser(t, app.DB, org.ID)
+	b := testutil.CreateTestUser(t, app.DB, org.ID)
+	require.NoError(t, bcrypt.CompareHashAndPassword([]byte(a.PasswordHash), []byte("password123")))
+	require.NoError(t, bcrypt.CompareHashAndPassword([]byte(b.PasswordHash), []byte("password123")))
+
+	for _, u := range []*models.User{a, b} {
+		req := testutil.NewJSONRequest(t, map[string]string{"email": u.Email, "password": "password123"})
+		require.NoError(t, app.Login(req))
+		assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req), u.Email)
+
+		req = testutil.NewJSONRequest(t, map[string]string{"email": u.Email, "password": "password124"})
+		require.NoError(t, app.Login(req))
+		assert.Equal(t, fasthttp.StatusUnauthorized, testutil.GetResponseStatusCode(req), u.Email)
+	}
 }
 
 func TestApp_Login_WrongPassword(t *testing.T) {

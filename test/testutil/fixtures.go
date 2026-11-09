@@ -1,6 +1,7 @@
 package testutil
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -45,6 +46,23 @@ func WithEmail(email string) UserOption {
 	}
 }
 
+var (
+	defaultHashOnce sync.Once
+	defaultHash     string
+	defaultHashErr  error
+)
+
+// defaultTestPasswordHash returns the bcrypt hash (DefaultCost) of "password123", computed once per process.
+// Hashing per user cost ~1 s each under -race and dominated the setup of the handlers suite. Every user made by
+// CreateTestUser shares the hash; bcrypt.CompareHashAndPassword still verifies the password.
+func defaultTestPasswordHash() (string, error) {
+	defaultHashOnce.Do(func() {
+		h, err := bcrypt.GenerateFromPassword([]byte("password123"), bcrypt.DefaultCost)
+		defaultHash, defaultHashErr = string(h), err
+	})
+	return defaultHash, defaultHashErr
+}
+
 // WithPassword sets the password (bcrypt hashed) for the test user.
 func WithPassword(password string) UserOption {
 	return func(u *models.User) {
@@ -86,14 +104,14 @@ func WithFullName(name string) UserOption {
 func CreateTestUser(t *testing.T, db *gorm.DB, orgID uuid.UUID, opts ...UserOption) *models.User {
 	t.Helper()
 
-	hash, err := bcrypt.GenerateFromPassword([]byte("password123"), bcrypt.DefaultCost)
+	hash, err := defaultTestPasswordHash()
 	require.NoError(t, err)
 
 	user := &models.User{
 		BaseModel:      models.BaseModel{ID: uuid.New()},
 		OrganizationID: orgID,
 		Email:          UniqueEmail("test"),
-		PasswordHash:   string(hash),
+		PasswordHash:   hash,
 		FullName:       "Test User",
 		IsActive:       true,
 		IsAvailable:    true,
