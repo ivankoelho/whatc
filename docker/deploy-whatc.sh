@@ -313,8 +313,28 @@ if ! ( cd "$PROD_DIR" && docker compose config -q ); then
     fail "Compose invalido com o antimalware (a rede 'whatomate' existe no compose de producao?)."
 fi
 
-( cd "$PROD_DIR" && docker compose up -d clamav ) \
-    || fail "Falha ao subir o ClamAV."
+# Instala so se faltar; atualiza so se a versao pedida no repositorio mudou.
+# As assinaturas ficam no volume clamav-db, entao atualizar a imagem nao baixa tudo de novo.
+WANT_IMAGE=$( cd "$PROD_DIR" && docker compose config --images | grep -m1 clamav ) \
+    || fail "Imagem do ClamAV nao encontrada no compose."
+HAVE_IMAGE=$(docker inspect --format '{{.Config.Image}}' "$CLAMAV_CONTAINER" 2>/dev/null || true)
+CLAMAV_RUNNING=$(docker inspect --format '{{.State.Running}}' "$CLAMAV_CONTAINER" 2>/dev/null || true)
+
+if [ -z "$HAVE_IMAGE" ]; then
+    echo "ClamAV nao instalado: instalando $WANT_IMAGE."
+    ( cd "$PROD_DIR" && docker compose pull clamav && docker compose up -d clamav ) \
+        || fail "Falha ao instalar o ClamAV."
+elif [ "$HAVE_IMAGE" != "$WANT_IMAGE" ]; then
+    echo "ClamAV $HAVE_IMAGE -> $WANT_IMAGE: atualizando."
+    ( cd "$PROD_DIR" && docker compose pull clamav && docker compose up -d clamav ) \
+        || fail "Falha ao atualizar o ClamAV."
+elif [ "$CLAMAV_RUNNING" != "true" ]; then
+    echo "ClamAV $HAVE_IMAGE ja instalado, mas parado: iniciando."
+    ( cd "$PROD_DIR" && docker compose up -d clamav ) \
+        || fail "Falha ao iniciar o ClamAV."
+else
+    echo "ClamAV $HAVE_IMAGE ja instalado e em execucao: nada a fazer."
+fi
 
 # Na primeira vez ele baixa as assinaturas (minutos). Nao bloqueia o deploy: a
 # aplicacao sobe e os uploads ficam bloqueados ate o scanner responder.
