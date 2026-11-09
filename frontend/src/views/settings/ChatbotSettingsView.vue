@@ -93,7 +93,8 @@ const chatbotSettings = ref({
   strict_conversation_visibility: false,
   sign_with_agent_name: false,
   away_reassign_enabled: false,
-  away_reassign_after_mins: 10
+  away_reassign_after_mins: 10,
+  offline_release_after_mins: 1
 })
 
 // SLA Settings
@@ -190,7 +191,8 @@ onMounted(async () => {
         strict_conversation_visibility: chatbotData.settings.strict_conversation_visibility === true,
         sign_with_agent_name: chatbotData.settings.sign_with_agent_name === true,
         away_reassign_enabled: chatbotData.settings.away_reassign_enabled === true,
-        away_reassign_after_mins: chatbotData.settings.away_reassign_after_mins || 10
+        away_reassign_after_mins: chatbotData.settings.away_reassign_after_mins || 10,
+        offline_release_after_mins: chatbotData.settings.offline_release_after_mins || 1
       }
 
       const slaEnabledValue = chatbotData.settings.sla_enabled === true
@@ -264,7 +266,8 @@ async function saveAgentSettings() {
       sign_with_agent_name: chatbotSettings.value.sign_with_agent_name,
       away_reassign_enabled: chatbotSettings.value.away_reassign_enabled,
       // An empty or out-of-range field would be rejected by the server: keep it in 1..1440.
-      away_reassign_after_mins: Math.min(1440, Math.max(1, Math.round(Number(chatbotSettings.value.away_reassign_after_mins)) || 10))
+      away_reassign_after_mins: Math.min(1440, Math.max(1, Math.round(Number(chatbotSettings.value.away_reassign_after_mins)) || 10)),
+      offline_release_after_mins: Math.min(1440, Math.max(1, Math.round(Number(chatbotSettings.value.offline_release_after_mins)) || 1))
     })
     toast.success(t('chatbotSettings.agentSettingsSaved'))
     refreshActivityLog(agentsLogKey)
@@ -529,6 +532,16 @@ function removeEscalationUser(userId: string) {
                     <p class="text-sm text-muted-foreground">{{ $t('chatbotSettings.awayReassignAfterDesc') }}</p>
                   </div>
                   <Input v-model.number="chatbotSettings.away_reassign_after_mins" type="number" min="1" max="1440" class="w-24" />
+                </div>
+
+                <Separator />
+
+                <div class="flex items-center justify-between gap-4 py-2">
+                  <div>
+                    <p class="font-medium">{{ $t('chatbotSettings.offlineRelease') }}</p>
+                    <p class="text-sm text-muted-foreground">{{ $t('chatbotSettings.offlineReleaseDesc') }}</p>
+                  </div>
+                  <Input v-model.number="chatbotSettings.offline_release_after_mins" type="number" min="1" max="1440" class="w-24" />
                 </div>
 
                 <div class="flex justify-end pt-4">

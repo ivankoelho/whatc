@@ -2679,6 +2679,8 @@
     "awayReassignDesc": "Off: marking away returns the agent's conversations to the queue at once. On: they stay with the agent and are returned to the queue only after the time below.",
     "awayReassignAfter": "Return to the queue after (minutes)",
     "awayReassignAfterDesc": "Counted from the moment the agent marked away. Between 1 and 1440.",
+    "offlineRelease": "Return to the queue after a disconnection (minutes)",
+    "offlineReleaseDesc": "How long an agent can stay disconnected (closed tab, dropped network, sleeping computer) before their conversations return to the queue. Between 1 and 1440.",
     "businessHours": "Business Hours",
     "businessHoursDesc": "Set when the chatbot is active and configure out-of-hours behavior",
     "enableBusinessHours": "Enable Business Hours",
