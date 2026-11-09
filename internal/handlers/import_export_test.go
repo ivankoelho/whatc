@@ -16,7 +16,7 @@ import (
 
 func contactsExportRole(t *testing.T, db *gorm.DB, orgID uuid.UUID) *models.CustomRole {
 	t.Helper()
-	return testutil.CreateTestRoleWithKeys(t, db, orgID, "contacts-exporter", []string{"contacts:export", "contacts:import"})
+	return testutil.CreateTestRoleWithKeys(t, db, orgID, "contacts-exporter", []string{"contacts:export", "contacts:import", "conversations:view_all"})
 }
 
 // --- GetExportConfig ---

@@ -33,7 +33,23 @@ type Config struct {
 	XProcess     XProcessConfig     `koanf:"xprocess"`
 	Knowledge    KnowledgeConfig    `koanf:"knowledge"`
 	AITools      AIToolsConfig      `koanf:"ai_tools"`
+	OTP          OTPConfig          `koanf:"otp"`
 	Usage        UsageConfig        `koanf:"usage"`
+	Antimalware  AntimalwareConfig  `koanf:"antimalware"`
+}
+
+// AntimalwareConfig points at a clamd daemon on the private network. With Address empty nothing is
+// scanned and, by design, nothing scanned-gated is ever released (fail-closed).
+type AntimalwareConfig struct {
+	Address        string `koanf:"address"`         // host:port of clamd, e.g. clamav:3310 (never exposed publicly)
+	TimeoutSeconds int    `koanf:"timeout_seconds"` // per scan, connect included (default 30)
+	MaxMB          int    `koanf:"max_mb"`          // larger files are not scanned and stay blocked (default 25)
+	InlineMaxKB    int    `koanf:"inline_max_kb"`   // uploads up to this size are scanned before the response (default 2048)
+	ReuseHours     int    `koanf:"reuse_hours"`     // an identical file reuses a clean verdict this fresh (default 24)
+	RescanDays     int    `koanf:"rescan_days"`     // clean files are re-checked after a signature update, older than this (default 7)
+	BatchSize      int    `koanf:"batch_size"`      // scans per worker pass (default 5)
+	// SignatureMaxAgeHours: older signatures raise an alert and show as stale in the panel (default 48).
+	SignatureMaxAgeHours int `koanf:"signature_max_age_hours"`
 }
 
 // XProcessConfig holds the switches of the X2 (XProcess) integration.
@@ -117,6 +133,12 @@ type AppConfig struct {
 	Environment   string `koanf:"environment"` // development, staging, production
 	Debug         bool   `koanf:"debug"`
 	EncryptionKey string `koanf:"encryption_key"` // AES-256 key for encrypting secrets at rest
+	// AllowPrivateNextcloud lets the organization's Nextcloud address be plain http or on a
+	// private network. For local development only: otherwise an admin could aim the server
+	// at the internal network.
+	AllowPrivateNextcloud bool `koanf:"allow_private_nextcloud"`
+	// OccurrenceFileMaxMB caps one document of a case (default 15).
+	OccurrenceFileMaxMB int `koanf:"occurrence_file_max_mb"`
 }
 
 type ServerConfig struct {
@@ -156,12 +178,17 @@ type JWTConfig struct {
 }
 
 type WhatsAppConfig struct {
-	WebhookVerifyToken string `koanf:"webhook_verify_token"`
-	APIVersion         string `koanf:"api_version"`
-	BaseURL            string `koanf:"base_url"` // Meta Graph API base URL
-	AppID              string `koanf:"app_id"`   // WhatsApp App ID for frontend
-	AppSecret          string `koanf:"app_secret"`
-	ConfigID           string `koanf:"config_id"` // WhatsApp Config ID for frontend
+	// AutomationSendingEnabled lets the background worker send customer
+	// communications of cases (templates). Off by default: nothing leaves the
+	// instance until someone turns it on after the consent/eligibility checklist
+	// (docs/superpowers/specs/2026-10-25-chamados-etapa6-*.md) was met.
+	AutomationSendingEnabled bool   `koanf:"automation_sending_enabled"`
+	WebhookVerifyToken       string `koanf:"webhook_verify_token"`
+	APIVersion               string `koanf:"api_version"`
+	BaseURL                  string `koanf:"base_url"` // Meta Graph API base URL
+	AppID                    string `koanf:"app_id"`   // WhatsApp App ID for frontend
+	AppSecret                string `koanf:"app_secret"`
+	ConfigID                 string `koanf:"config_id"` // WhatsApp Config ID for frontend
 }
 
 type AIConfig struct {
@@ -205,10 +232,15 @@ type RateLimitConfig struct {
 // Load loads configuration from file and environment variables
 func Load(configPath string) (*Config, error) {
 	k := koanf.New(".")
+	// Switches that must never come from the environment are read from the FILE only.
+	fileOnly := koanf.New(".")
 
 	// Load from config file if provided
 	if configPath != "" {
 		if err := k.Load(file.Provider(configPath), toml.Parser()); err != nil {
+			return nil, err
+		}
+		if err := fileOnly.Load(file.Provider(configPath), toml.Parser()); err != nil {
 			return nil, err
 		}
 	}
@@ -232,6 +264,10 @@ func Load(configPath string) (*Config, error) {
 	if err := k.Unmarshal("", &cfg); err != nil {
 		return nil, err
 	}
+
+	// Only a real TOML boolean true enables it; anything else (absent, "true" as text) is false.
+	allow, _ := fileOnly.Get("otp.allow_local_release").(bool) // a type assertion, not koanf.Bool, which would read "true" and 1 as true
+	cfg.OTP.AllowLocalRelease = allow
 
 	// Set defaults
 	setDefaults(&cfg)
@@ -508,4 +544,33 @@ type KnowledgeConfig struct {
 	// false, and an unparseable value makes the configuration fail to load (it never turns
 	// the switch on). With it off the chatbot behaves exactly as before.
 	RAGEnabled bool `koanf:"rag_enabled"`
+}
+
+// OTPConfig holds the policy for one-time codes sent through campaigns
+// (AUTHENTICATION templates). Validity belongs to the external issuer; this is
+// only the guard rail around it.
+type OTPConfig struct {
+	// MaxValidityMinutes caps how long after upload a code may still be sent,
+	// whatever valid_until says (default 5, max 90).
+	MaxValidityMinutes int `koanf:"max_validity_minutes"`
+	// RequireValidUntil rejects recipients of authentication campaigns that come
+	// without the issuer's valid_until, and refuses to send codes that lack it.
+	// Off by default so existing campaigns keep working during the transition.
+	RequireValidUntil bool `koanf:"require_valid_until"`
+	// AllowLocalRelease lets `whatomate otp-uncertain -release` free a recipient whose
+	// delivery is uncertain so it can be sent again (the code may already have reached the
+	// customer). It is OFF unless the config FILE sets `allow_local_release = true` under
+	// [otp]: an absent key, a non-boolean value and the environment all mean false. The tag
+	// is "-" on purpose, so WHATOMATE_OTP__ALLOW_LOCAL_RELEASE can never switch it on; Load
+	// reads it from the file only. The operator it records is not authenticated.
+	AllowLocalRelease bool `koanf:"-"`
+}
+
+// MaxValidity returns the send window, bounded and defaulted.
+func (c OTPConfig) MaxValidity() time.Duration {
+	m := c.MaxValidityMinutes
+	if m < 1 || m > 90 {
+		m = 5
+	}
+	return time.Duration(m) * time.Minute
 }

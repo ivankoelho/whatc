@@ -47,6 +47,11 @@ func (p *AudioPlayer) Sequence() (uint16, uint32) {
 // using the segment table, and sends each as a properly timed RTP packet.
 // Returns the number of RTP packets sent.
 func (p *AudioPlayer) PlayFile(filePath string) (int, error) {
+	// The one choke point of every playback (greetings, menus, hold music, ringback): a file without a
+	// clean verdict is never opened, let alone decoded.
+	if !audioApproved(filePath) {
+		return 0, ErrAudioNotApproved
+	}
 	file, err := os.Open(filePath)
 	if err != nil {
 		return 0, fmt.Errorf("failed to open audio file: %w", err)

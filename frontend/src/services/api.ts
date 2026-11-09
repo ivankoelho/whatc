@@ -211,6 +211,7 @@ export interface WhatsAppAccountUpdatePayload {
   is_default_outgoing?: boolean
   auto_read_receipt?: boolean
   business_calling_enabled?: boolean
+  direct_send_enabled?: boolean
   default_team_id?: string | null
 }
 
@@ -393,7 +394,7 @@ export const campaignsService = {
   retryFailed: (id: string) => api.post(`/campaigns/${id}/retry-failed`),
   // Recipients
   getRecipients: (id: string) => api.get(`/campaigns/${id}/recipients`),
-  addRecipients: (id: string, recipients: Array<{ phone_number: string; recipient_name?: string; template_params?: Record<string, any> }>) =>
+  addRecipients: (id: string, recipients: Array<{ phone_number: string; recipient_name?: string; template_params?: Record<string, any>; header_params?: Record<string, any>; valid_until?: string }>) =>
     api.post(`/campaigns/${id}/recipients/import`, { recipients }),
   addRecipientsFromContacts: (id: string, filters: { ddds?: string[]; contact_type?: string; unit_id?: string; department_id?: string }, dryRun = false) =>
     api.post(`/campaigns/${id}/recipients/from-contacts`, { ...filters, dry_run: dryRun }),
@@ -468,7 +469,13 @@ export const chatbotService = {
   pickNextTransfer: () => api.post('/chatbot/transfers/pick'),
   resumeTransfer: (id: string) => api.put(`/chatbot/transfers/${id}/resume`),
   assignTransfer: (id: string, agentId: string | null, teamId?: string | null) =>
-    api.put(`/chatbot/transfers/${id}/assign`, { agent_id: agentId, team_id: teamId })
+    api.put(`/chatbot/transfers/${id}/assign`, { agent_id: agentId, team_id: teamId }),
+  // The people a conversation may be handed to. Needs transfers:write only (not users:read).
+  listTransferAgents: () =>
+    api.get<{ data: { agents: { id: string; full_name: string; is_active: boolean; is_available: boolean; is_online: boolean }[] } }>('/chatbot/transfers/agents'),
+  // The active teams a conversation may be handed to. Needs transfers:write only (not teams:read).
+  listTransferTeams: () =>
+    api.get<{ data: { teams: Pick<Team, 'id' | 'name' | 'is_active' | 'unit_id' | 'department_id' | 'assignment_strategy'>[] } }>('/chatbot/transfers/teams')
 }
 
 export interface CannedResponseButton {
@@ -853,6 +860,8 @@ export interface Team {
   assignment_strategy: 'round_robin' | 'load_balanced' | 'manual'
   per_agent_timeout_secs: number
   is_active: boolean
+  // Sales team: never a protocol destination.
+  commercial?: boolean
   unit_id?: string
   department_id?: string
   member_count: number
@@ -1109,7 +1118,7 @@ export const notesService = {
 
 // Internal chat (team_chat). The server decides who can see what: every id sent
 // here is checked again there, and an inaccessible channel answers 404.
-export type TeamChatChannelKind = 'team' | 'channel' | 'dm'
+export type TeamChatChannelKind = 'team' | 'channel' | 'dm' | 'occurrence'
 
 export interface TeamChatChannel {
   id: string
@@ -1117,6 +1126,8 @@ export interface TeamChatChannel {
   name: string
   team_id?: string
   dm_user_id?: string
+  // The case a discussion belongs to (kind "occurrence"): the chat links back to it.
+  occurrence_id?: string
   unread_count: number
   last_message_at?: string
   created_at: string
@@ -1146,10 +1157,55 @@ export interface TeamChatMessage {
   reply_to?: TeamChatReplyTo
   reactions?: TeamChatReaction[]
   attachments?: TeamChatAttachment[]
+  // Set when the message is a poll: the options with their tally and the viewer's own votes.
+  poll?: TeamChatPoll
 }
+
+export interface TeamChatPollOption {
+  id: string
+  label: string
+  count: number
+  mine: boolean
+  voters: string[]
+}
+
+export interface TeamChatPoll {
+  multiple: boolean
+  options: TeamChatPollOption[]
+  voters: number
+}
+
+export interface NextcloudStatus {
+  configured: boolean
+  connected: boolean
+  base_url?: string
+  username?: string
+  can_configure: boolean
+}
+
+export interface NextcloudEntry {
+  name: string
+  path: string
+  is_dir: boolean
+  size: number
+  mime?: string
+}
+
+export const nextcloudService = {
+  status: () => api.get<NextcloudStatus>('/integrations/nextcloud'),
+  saveServer: (baseUrl: string) => api.put('/integrations/nextcloud', { base_url: baseUrl }),
+  connect: (username: string, appPassword: string) =>
+    api.put('/integrations/nextcloud/me', { username, app_password: appPassword }),
+  disconnect: () => api.delete('/integrations/nextcloud/me'),
+  files: (path: string) => api.get<{ path: string; entries: NextcloudEntry[] }>('/integrations/nextcloud/files', { params: { path } })
+}
+
+/** Antimalware verdict of a stored file: only "clean" can be opened. */
+export type FileScanStatus = 'pending' | 'clean' | 'infected' | 'error' | 'skipped'
 
 export interface TeamChatAttachment {
   id: string
+  scan_status?: FileScanStatus
   kind: 'image' | 'audio' | 'file'
   name: string
   mime: string
@@ -1207,6 +1263,7 @@ export interface TeamChatUser {
 export const teamChatService = {
   channels: () => api.get<{ channels: TeamChatChannel[] }>('/team-chat/channels'),
   users: (q?: string) => api.get<{ users: TeamChatUser[] }>('/team-chat/users', { params: q ? { q } : undefined }),
+  searchOccurrences: (q: string) => api.get<{ channels: TeamChatChannel[] }>('/team-chat/occurrence-search', { params: { q } }),
   createChannel: (data: { name: string; member_ids?: string[] }) =>
     api.post<TeamChatChannel>('/team-chat/channels', data),
   openDM: (userId: string) => api.post<TeamChatChannel>('/team-chat/dm', { user_id: userId }),
@@ -1235,6 +1292,12 @@ export const teamChatService = {
       onUploadProgress: e => { if (e.total) opts.onProgress?.(Math.round((e.loaded / e.total) * 100)) }
     })
   },
+  attachNextcloudFile: (channelId: string, path: string) =>
+    api.post<TeamChatAttachment>(`/team-chat/channels/${channelId}/nextcloud-files`, { path }),
+  createPoll: (channelId: string, data: { question: string; options: string[]; multiple: boolean }) =>
+    api.post<TeamChatMessage>(`/team-chat/channels/${channelId}/polls`, data),
+  votePoll: (messageId: string, optionIds: string[]) =>
+    api.put<{ poll: TeamChatPoll }>(`/team-chat/messages/${messageId}/poll-vote`, { option_ids: optionIds }),
   discardAttachment: (channelId: string, attachmentId: string) =>
     api.delete(`/team-chat/channels/${channelId}/attachments/${attachmentId}`),
   message: (messageId: string) => api.get<TeamChatMessage>(`/team-chat/messages/${messageId}`),
@@ -1510,6 +1573,33 @@ interface ApiEnvelope<T> {
   data: T
 }
 
+export interface OccurrenceTransfer {
+  id: string
+  kind: 'forward' | 'return'
+  from_team?: string
+  to_team?: string
+  to_user?: string
+  by: string
+  reason: string
+  created_at: string
+}
+
+export interface OccurrenceParticipant {
+  user_id: string
+  user_name: string
+  capabilities: string[]
+  /** 'support' (pessoa de apoio) or 'follower' (participante acompanhando) */
+  role: 'support' | 'follower'
+  department_id?: string
+  department_name?: string
+  added_by?: string
+  added_at: string
+  /** false once removed: the row stays as history */
+  active: boolean
+  removed_by?: string
+  removed_at?: string
+}
+
 export interface OccurrenceStage {
   id: string
   name: string
@@ -1517,6 +1607,9 @@ export interface OccurrenceStage {
   position: number
   is_initial: boolean
   is_closing: boolean
+  general_state?: string
+  team_id?: string
+  allowed_from?: string[] | null
 }
 
 export interface Occurrence {
@@ -1529,6 +1622,13 @@ export interface Occurrence {
   description: string
   stage_id: string
   stage_name: string
+  general_state?: string
+  team_id?: string
+  reopened_count?: number
+  order_ref?: string
+  team_name?: string
+  updated_at?: string
+  can?: Record<string, boolean>
   priority: 'low' | 'normal' | 'high' | 'urgent'
   assigned_user_id?: string
   assigned_user_name?: string
@@ -1570,6 +1670,8 @@ export interface Department {
   id: string
   name: string
   active: boolean
+  // Sales department: its teams are never a protocol destination.
+  commercial?: boolean
 }
 
 export interface OccurrenceCategory {
@@ -1583,7 +1685,7 @@ export interface OccurrenceCategory {
 export interface OccurrenceEvent {
   id: string
   occurrence_id: string
-  type: 'opened' | 'note' | 'stage_change' | 'assignment' | 'protocol_sent' | 'closed' | 'reply' | 'process_message_used'
+  type: 'opened' | 'note' | 'stage_change' | 'assignment' | 'protocol_sent' | 'closed' | 'reply' | 'process_message_used' | 'forwarded' | 'participant_added' | 'participant_removed' | 'reopened' | 'scope_regularized' | 'customer_notification'
   content: string
   metadata: Record<string, unknown> | null
   created_by_id?: string
@@ -1604,6 +1706,21 @@ export interface OccurrenceDocumentInput {
   number: string
   purchase_date?: string
   items: OccurrenceDocumentItem[]
+  // Set when the form was pre-filled from the attached file and then confirmed by the person.
+  source?: 'xml' | 'pdf_text'
+  access_key?: string
+}
+
+export interface InvoiceExtraction {
+  method: 'xml' | 'pdf_text' | 'none'
+  number?: string
+  series?: string
+  issue_date?: string
+  access_key?: string
+  issuer?: string
+  items: OccurrenceDocumentItem[]
+  uncertain: string[]
+  warnings: string[]
 }
 
 export interface OccurrenceDocument extends OccurrenceDocumentInput {
@@ -1621,6 +1738,14 @@ export const occurrenceDocumentsService = {
     api.post<ApiEnvelope<OccurrenceDocument>>(`/occurrences/${occurrenceId}/documents`, data),
   delete: (occurrenceId: string, documentId: string) =>
     api.delete<ApiEnvelope<{ deleted: boolean }>>(`/occurrences/${occurrenceId}/documents/${documentId}`),
+  // Reads an invoice file and PROPOSES form values; nothing is saved.
+  extract: (occurrenceId: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return api.post<ApiEnvelope<InvoiceExtraction>>(`/occurrences/${occurrenceId}/documents/extract`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+  },
   uploadAttachment: (occurrenceId: string, documentId: string, file: File) => {
     const form = new FormData()
     form.append('file', file)
@@ -1643,6 +1768,8 @@ export const occurrencesService = {
     priority?: 'low' | 'normal' | 'high' | 'urgent'
     assigned_user_id?: string
     source_transfer_id?: string
+    team_id?: string
+    order_ref?: string
     unit_id?: string
     department_id?: string
     category_id?: string
@@ -1665,16 +1792,65 @@ export const occurrencesService = {
   }) => api.put<ApiEnvelope<Occurrence>>(`/occurrences/${id}`, data),
   changeStage: (id: string, stageId: string) =>
     api.put<ApiEnvelope<Occurrence>>(`/occurrences/${id}/stage`, { stage_id: stageId }),
+  history: (id: string, params: { limit?: number; cursor?: string; types?: string; q?: string }) =>
+    api.get(`/occurrences/${id}/history`, { params }),
   listEvents: (id: string) =>
     api.get<ApiEnvelope<{ events: OccurrenceEvent[] }>>(`/occurrences/${id}/events`),
   addNote: (id: string, content: string) =>
     api.post<ApiEnvelope<OccurrenceEvent>>(`/occurrences/${id}/events`, { content }),
+  // Atomic: 409 when another agent got there first.
+  claim: (id: string) => api.post<ApiEnvelope<Occurrence>>(`/occurrences/${id}/claim`, {}),
+  reassign: (id: string, assignedUserId: string) =>
+    api.post<ApiEnvelope<Occurrence>>(`/occurrences/${id}/reassign`, { assigned_user_id: assignedUserId }),
+  listParticipants: (id: string) =>
+    api.get<ApiEnvelope<{ participants: OccurrenceParticipant[] }>>(`/occurrences/${id}/participants`),
+  addParticipant: (id: string, userId: string, opts: { role?: 'support' | 'follower'; departmentId?: string; capabilities?: string[] } = {}) =>
+    api.post<ApiEnvelope<OccurrenceParticipant>>(`/occurrences/${id}/participants`, {
+      user_id: userId, capabilities: opts.capabilities ?? ['comment'], role: opts.role ?? 'follower', department_id: opts.departmentId,
+    }),
+  listTransfers: (id: string) =>
+    api.get<ApiEnvelope<{ transfers: OccurrenceTransfer[]; can_forward: boolean; can_return: boolean; return_to?: string }>>(`/occurrences/${id}/transfers`),
+  forward: (id: string, body: { team_id: string; assigned_user_id?: string; reason: string }) =>
+    api.post<ApiEnvelope<Occurrence>>(`/occurrences/${id}/forward`, body),
+  returnCase: (id: string, reason: string) =>
+    api.post<ApiEnvelope<Occurrence>>(`/occurrences/${id}/return`, { reason }),
+  teamMembers: (teamId: string) =>
+    api.get<ApiEnvelope<{ members: { id: string; full_name: string }[] }>>('/occurrences/forward-targets', { params: { team_id: teamId } }),
+  supportDepartments: (id: string) =>
+    api.get<ApiEnvelope<{ departments: { id: string; name: string }[] }>>(`/occurrences/${id}/support-options`),
+  supportUsers: (id: string, departmentId: string) =>
+    api.get<ApiEnvelope<{ users: { id: string; full_name: string }[] }>>(`/occurrences/${id}/support-options`, { params: { department_id: departmentId } }),
+  removeParticipant: (id: string, userId: string) =>
+    api.delete<ApiEnvelope<{ removed: boolean }>>(`/occurrences/${id}/participants/${userId}`),
+  forwardTargets: () =>
+    api.get<ApiEnvelope<{ targets: { id: string; name: string; unit_id?: string; unit_name?: string }[] }>>('/occurrences/forward-targets'),
+  summary: (params?: Record<string, string>) =>
+    api.get<ApiEnvelope<{ counts: Record<string, number>; total: number }>>('/occurrences/summary', { params }),
   // The ONLY way to send a public message from an occurrence: also stamps the first-response SLA.
   reply: (id: string, content: string) =>
     api.post<ApiEnvelope<{ sent: boolean }>>(`/occurrences/${id}/reply`, { content }),
-  sendProtocol: (id: string, message?: string) =>
-    api.post<ApiEnvelope<{ sent: boolean; protocol_number: string }>>(
-      `/occurrences/${id}/send-protocol`, message ? { message } : undefined),
+  // `key` is the Idempotency-Key of ONE intention to send: required by the backend; the same key
+  // answers the same send again, a new intention uses a new key.
+  sendProtocol: (id: string, message: string | undefined, key: string) =>
+    // 200 sent | 202 result "uncertain" or "processing" (not confirmed: may have been delivered) | 502 proven failure
+    api.post<ApiEnvelope<{ sent: boolean; protocol_number: string; result?: 'sent' | 'uncertain' | 'failed' | 'processing'; confirmed?: boolean; send_id?: string; message_id?: string }>>(
+      `/occurrences/${id}/send-protocol`, message ? { message } : undefined, { headers: { 'Idempotency-Key': key } }),
+  // What happened to a send, after a timeout, a refresh or a lost answer. Never sends anything.
+  // Same question when the answer to the POST never arrived and the send_id is unknown.
+  getProtocolSendByKey: (id: string, key: string) =>
+    api.get<ApiEnvelope<{ state: 'processing' | 'sent' | 'failed' | 'uncertain'; sent: boolean; confirmed: boolean; send_id: string; message_id: string }>>(
+      `/occurrences/${id}/protocol-sends`, { params: { idempotency_key: key } }),
+  getProtocolSend: (id: string, sendId: string) =>
+    api.get<ApiEnvelope<{ state: 'processing' | 'sent' | 'failed' | 'uncertain'; sent: boolean; confirmed: boolean; send_id: string; message_id: string }>>(
+      `/occurrences/${id}/protocol-sends/${sendId}`),
+  // The case's open send (processing, or uncertain until a person settles it), whoever started it and on
+  // whichever device. 404 send_not_found = none. Never sends anything.
+  getOpenProtocolSend: (id: string) =>
+    api.get<ApiEnvelope<{ state: 'processing' | 'uncertain'; send_id: string; own?: boolean }>>(
+      `/occurrences/${id}/protocol-sends`, { params: { open: true } }),
+  // A person settles an uncertain send after checking the conversation. Sends nothing.
+  resolveProtocolSend: (id: string, sendId: string, body: { outcome: 'delivered' | 'not_delivered'; conversation_checked: boolean; note: string }) =>
+    api.post<ApiEnvelope<{ state: 'sent' | 'failed'; send_id: string }>>(`/occurrences/${id}/protocol-sends/${sendId}/resolve`, body),
   // Permanent hard delete, restricted to super admins server-side.
   delete: (id: string) => api.delete<ApiEnvelope<{ deleted: boolean }>>(`/occurrences/${id}`),
   listForContact: (contactId: string) =>
@@ -1684,6 +1860,8 @@ export const occurrencesService = {
   createStage: (data: Partial<OccurrenceStage>) => api.post<ApiEnvelope<OccurrenceStage>>('/occurrence-stages', data),
   updateStage: (id: string, data: Partial<OccurrenceStage>) =>
     api.put<ApiEnvelope<OccurrenceStage>>(`/occurrence-stages/${id}`, data),
+  reorderStages: (ids: string[], expected: string[]) =>
+    api.post<ApiEnvelope<{ ids: string[] }>>('/occurrence-stages/reorder', { ids, expected }),
   deleteStage: (id: string) => api.delete<ApiEnvelope<{ deleted: boolean }>>(`/occurrence-stages/${id}`),
 }
 
@@ -1772,6 +1950,8 @@ export const salesOpportunitiesService = {
   list: (params?: Record<string, string>) =>
     api.get<ApiEnvelope<{ opportunities: SalesOpportunity[]; total: number; has_more: boolean }>>('/sales-opportunities', { params }),
   /** Indicators, scoped like the list; params: assigned_user_id, unit_id, from, to. */
+  forwardTargets: () =>
+    api.get<ApiEnvelope<{ targets: { id: string; name: string; unit_id?: string; unit_name?: string }[] }>>('/occurrences/forward-targets'),
   summary: (params?: Record<string, string>) =>
     api.get<ApiEnvelope<SalesSummary>>('/sales-opportunities/summary', { params }),
   scope: () => api.get<ApiEnvelope<SalesScopeInfo>>('/sales-opportunities/scope'),
@@ -1896,9 +2076,9 @@ export const unitsService = {
 
 export const departmentsService = {
   list: () => api.get<ApiEnvelope<{ departments: Department[] }>>('/departments'),
-  create: (data: { name: string; active: boolean }) =>
+  create: (data: { name: string; active: boolean; commercial?: boolean }) =>
     api.post<ApiEnvelope<Department>>('/departments', data),
-  update: (id: string, data: { name: string; active: boolean }) =>
+  update: (id: string, data: { name: string; active: boolean; commercial?: boolean }) =>
     api.put<ApiEnvelope<Department>>(`/departments/${id}`, data),
   delete: (id: string) => api.delete<ApiEnvelope<{ deleted: boolean }>>(`/departments/${id}`),
 }
@@ -2244,4 +2424,239 @@ export const whatsappRatesService = {
   create: (data: WhatsAppRateInput) => api.post<ApiEnvelope<WhatsAppRate>>('/whatsapp-rates', data),
   update: (id: string, data: WhatsAppRateInput) => api.put<ApiEnvelope<WhatsAppRate>>(`/whatsapp-rates/${id}`, data),
   delete: (id: string) => api.delete<ApiEnvelope<{ deleted: boolean }>>(`/whatsapp-rates/${id}`),
+}
+
+// --- Customer communication of a case (WhatsApp template sent by the case's account) ---
+
+export interface OccurrenceNotificationAttempt {
+  number: number
+  whatsapp_account: string
+  template_name: string
+  started_at: string
+  finished_at?: string
+  outcome: string
+  provider_message_id?: string
+  error?: string
+}
+
+export interface OccurrenceNotification {
+  id: string
+  status: 'prepared' | 'pending' | 'processing' | 'accepted' | 'delivered' | 'read' | 'failed' | 'uncertain' | 'cancelled' | 'skipped'
+  reason?: string
+  whatsapp_account: string
+  template_name: string
+  template_language: string
+  template_category?: string
+  attempts: number
+  max_attempts: number
+  provider_message_id?: string
+  last_error?: string
+  accepted_at?: string
+  delivered_at?: string
+  read_at?: string
+  next_attempt_at?: string
+  attempt_history: OccurrenceNotificationAttempt[]
+  can_retry: boolean
+  can_cancel: boolean
+}
+
+export interface OccurrenceAutomation {
+  id: string
+  unit_id?: string
+  unit_name?: string
+  team_id?: string
+  team_name?: string
+  event: string
+  whatsapp_account: string
+  template_name: string
+  template_language: string
+  fallback_template_name: string
+  is_active: boolean
+  max_attempts: number
+  retry_backoff_secs: number
+  on_failure: 'manual_retry' | 'cancel'
+  last_run_at?: string
+  last_status?: string
+  recent_failures: number
+}
+
+export const occurrenceNotificationsService = {
+  list: (occurrenceId: string) =>
+    api.get<ApiEnvelope<{ notifications: OccurrenceNotification[] }>>(`/occurrences/${occurrenceId}/notifications`),
+  resolve: (occurrenceId: string, notificationId: string, action: 'retry' | 'cancel', confirmDuplicateRisk = false) =>
+    api.post(`/occurrences/${occurrenceId}/notifications/${notificationId}/resolve`, {
+      action,
+      confirm_duplicate_risk: confirmDuplicateRisk,
+    }),
+}
+
+export const occurrenceAutomationsService = {
+  list: () => api.get<ApiEnvelope<{ configs: OccurrenceAutomation[]; sending_enabled: boolean }>>('/occurrence-channel-config'),
+  save: (data: {
+    unit_id?: string
+    team_id?: string
+    whatsapp_account: string
+    template_name?: string
+    template_language?: string
+    fallback_template_name?: string
+    is_active?: boolean
+    max_attempts?: number
+    retry_backoff_secs?: number
+    on_failure?: 'manual_retry' | 'cancel'
+  }) => api.put<ApiEnvelope<OccurrenceAutomation>>('/occurrence-channel-config', data),
+  remove: (id: string) => api.delete(`/occurrence-channel-config/${id}`),
+}
+
+export const contactFinderService = {
+  // Locates a contact of the organization by phone or name; returns only id, number and name.
+  find: (q: string) =>
+    api.get<ApiEnvelope<{ contacts: { id: string; phone_number: string; profile_name: string; can_open_conversation: boolean }[] }>>('/contacts/find', { params: { q } }),
+}
+
+// --- The case's internal discussion and its WhatsApp channel ---
+
+export interface OccurrenceChatState {
+  channel_id: string
+  unread: number
+  can_post: boolean
+  messages: number
+}
+
+export interface CaseWhatsAppMessage {
+  id: string
+  direction: 'incoming' | 'outgoing'
+  type: string
+  content: string
+  status: string
+  error?: string
+  template_name?: string
+  sent_by?: string
+  created_at: string
+}
+
+export interface CaseWhatsApp {
+  configured: boolean
+  restricted: boolean
+  account?: string
+  messages?: CaseWhatsAppMessage[]
+  window_open?: boolean
+  can_reply?: boolean
+  templates?: { name: string; language: string; body: string; params: string[] }[]
+}
+
+export const occurrenceChatService = {
+  // Internal only: messages between colleagues. Creates the channel on first use.
+  open: (occurrenceId: string) => api.get<ApiEnvelope<OccurrenceChatState>>(`/occurrences/${occurrenceId}/chat`),
+}
+
+export const caseWhatsAppService = {
+  // To the CUSTOMER, from the case's channel account. Not the internal chat.
+  get: (occurrenceId: string) => api.get<ApiEnvelope<CaseWhatsApp>>(`/occurrences/${occurrenceId}/whatsapp`),
+  sendText: (occurrenceId: string, content: string) =>
+    api.post(`/occurrences/${occurrenceId}/whatsapp`, { content }),
+  sendTemplate: (occurrenceId: string, template: string, language: string, params: string[]) =>
+    api.post(`/occurrences/${occurrenceId}/whatsapp`, { template, language, params }),
+}
+
+// General documents of a case (Word, Excel, PDF, images, NF-e XML), apart from invoice/coupon records.
+export interface OccurrenceFileItem {
+  id: string
+  name: string
+  mime: string
+  kind: 'image' | 'file'
+  size_bytes: number
+  restricted: boolean
+  uploaded_by_id: string
+  uploaded_by_name: string
+  created_at: string
+  can_download: boolean
+  can_delete: boolean
+  can_preview: boolean
+  scan_status?: FileScanStatus
+}
+
+export const occurrenceFilesService = {
+  list: (occurrenceId: string) => api.get(`/occurrences/${occurrenceId}/files`),
+  upload: (occurrenceId: string, file: File, restricted: boolean) => {
+    const form = new FormData()
+    form.append('file', file)
+    form.append('restricted', restricted ? 'true' : 'false')
+    return api.post(`/occurrences/${occurrenceId}/files`, form, { headers: { 'Content-Type': 'multipart/form-data' } })
+  },
+  fromNextcloud: (occurrenceId: string, path: string, restricted: boolean) =>
+    api.post(`/occurrences/${occurrenceId}/files/nextcloud`, { path, restricted }),
+  remove: (occurrenceId: string, fileId: string) => api.delete(`/occurrences/${occurrenceId}/files/${fileId}`),
+  url: (occurrenceId: string, fileId: string, inline = false) => {
+    const base = (((window as unknown as { __BASE_PATH__?: string }).__BASE_PATH__) ?? '').replace(/\/$/, '')
+    return `${base}/api/occurrences/${occurrenceId}/files/${fileId}/download${inline ? '?inline=1' : ''}`
+  }
+}
+
+export const occurrenceExportService = {
+  options: (occurrenceId: string) => api.get(`/occurrences/${occurrenceId}/export/options`),
+  // The file comes back as the response body; the caller saves it.
+  run: (occurrenceId: string, sections: string[], format: 'pdf' | 'csv' | 'zip') =>
+    api.post<Blob>(`/occurrences/${occurrenceId}/export`, { sections, format }, { responseType: 'blob' }),
+}
+
+export interface AntimalwareStatus {
+  configured: boolean
+  reachable: boolean
+  engine: string
+  signatures_at?: string
+  signatures_age_hours?: number
+  signatures_stale?: boolean
+  performance?: { scans_24h: number; avg_scan_ms: number }
+  backlog?: { pending: number; errors: number; old_unverified: number; old_unverified_bytes: number; pending_bytes: number }
+  counts: { source: string; status: FileScanStatus; n: number }[]
+  flagged: { id: string; source: string; status: FileScanStatus; signature?: string; last_error?: string; attempts: number; scanned_at?: string; updated_at: string; size_bytes: number }[]
+}
+
+export const mediaScanService = {
+  /** Scan state of WhatsApp media by message id (only those the caller may see are answered). */
+  status: (ids: string[]) => api.get('/media-status', { params: { ids: ids.join(',') } })
+}
+
+export const antimalwareService = {
+  status: () => api.get('/integrations/antimalware'),
+  retry: () => api.post('/integrations/antimalware/retry')
+}
+
+export interface RetentionPolicyView {
+  category: string
+  enabled: boolean
+  keep_months: number
+  updated_at?: string
+  updated_by?: string
+}
+export interface RetentionSample { id: string; name: string; bytes: number; bucket: string; reason: string; related?: string; reference_at?: string }
+export interface RetentionCategoryReport {
+  category: string
+  applied: boolean
+  reason?: string
+  months: number
+  assumed: boolean
+  buckets: Record<string, { count: number; bytes: number }>
+  bytes_partial: boolean
+  samples: RetentionSample[]
+  protected_samples: RetentionSample[]
+}
+export interface RetentionHold {
+  id: string
+  scope_type: 'occurrence' | 'contact'
+  scope_label: string
+  reason: string
+  created_by: string
+  created_at: string
+  active: boolean
+}
+
+export const retentionService = {
+  get: () => api.get('/retention'),
+  putPolicy: (category: string, body: { keep_months: number; enabled: boolean }) => api.put(`/retention/policies/${category}`, body),
+  simulate: (body: { categories?: string[]; months?: Record<string, number> }) => api.post('/retention/simulate', body),
+  holds: (status: 'active' | 'revoked' | 'all' = 'active') => api.get('/retention/holds', { params: { status } }),
+  createHold: (body: { scope_type: string; protocol_number?: string; scope_id?: string; reason: string }) => api.post('/retention/holds', body),
+  revokeHold: (id: string, reason: string) => api.post(`/retention/holds/${id}/revoke`, { reason }),
+  history: () => api.get('/retention/history')
 }

@@ -120,6 +120,9 @@ const (
 	// ActionJoinAny lets the holder enter a private chat channel without being a
 	// member (audited, with a reason). Only the system admin role gets it.
 	ActionJoinAny = "join_any"
+	// ActionResolveSend lets the holder settle a customer send whose outcome the system could not
+	// establish (a message that may or may not have reached the customer), after checking the conversation.
+	ActionResolveSend = "resolve_send"
 )
 
 // DefaultPermissions returns the list of all available permissions to seed
@@ -292,6 +295,10 @@ func DefaultPermissions() []Permission {
 		// não administrá-lo.
 		{Resource: ResourceOccurrences, Action: ActionRead, Description: "View occurrences and pipeline stages"},
 		{Resource: ResourceOccurrences, Action: ActionWrite, Description: "Create and edit occurrences"},
+		// Supervising cases is not supervising conversations: this lets a supervisor see
+		// every case of the organization WITHOUT opening any WhatsApp conversation.
+		{Resource: ResourceOccurrences, Action: ActionResolveSend, Description: "Settle a customer message whose delivery is unknown, after checking the conversation (does not send anything)"},
+		{Resource: ResourceOccurrences, Action: ActionViewAll, Description: "Supervise all occurrences of the organization (cases only; does not open WhatsApp conversations)"},
 		// Exclusão permanente de protocolo. Não entra na lista de permissões
 		// padrão de nenhum papel: o handler exige super admin explicitamente
 		// (bypassa a checagem de permissão normal), então conceder isso a um
@@ -382,7 +389,7 @@ func SystemRolePermissions() map[string][]string {
 		// Chat interno
 		"team_chat:read", "team_chat:write", "team_chat:manage", "team_chat:delete",
 		// CRM: o gestor usa e administra o funil, coerente com ter settings.general:write
-		"occurrences:read", "occurrences:write",
+		"occurrences:read", "occurrences:write", "occurrences:view_all", "occurrences:resolve_send",
 		"occurrences.stages:read", "occurrences.stages:write", "occurrences.stages:delete",
 		"occurrences.categories:read", "occurrences.categories:write", "occurrences.categories:delete",
 		"occurrences.what_happened:read", "occurrences.what_happened:write", "occurrences.what_happened:delete",

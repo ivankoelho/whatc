@@ -678,6 +678,10 @@ func TestWorker_HandleRecipientJob_Success(t *testing.T) {
 	campaign.HeaderMediaMimeType = "application/pdf"
 	campaign.HeaderMediaFilename = "invoice.pdf"
 	require.NoError(t, w.DB.Save(campaign).Error)
+	// A local copy is released only by a clean verdict (the real upload path records one at ingress); a missing
+	// scan row is not "clean".
+	require.NoError(t, w.DB.Create(&models.FileScan{ID: uuid.New(), OrganizationID: org.ID, Source: models.ScanSourceCampaignMedia,
+		ResourceID: campaign.ID, StoragePath: campaign.HeaderMediaLocalPath, Status: models.ScanClean}).Error)
 
 	// Create mock server
 	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
@@ -1122,4 +1126,31 @@ func TestReplaceTemplateContent_NoParams(t *testing.T) {
 	result := templateutil.ReplaceWithJSONBParams(bodyContent, content, params)
 
 	assert.Equal(t, "Hello, your order is ready!", result)
+}
+
+// A campaign whose header media the antimalware scan found infected is never sent; recipients fail with a clear reason.
+func TestWorker_HandleRecipientJob_InfectedCampaignMediaIsNotSent(t *testing.T) {
+	w := testWorker(t)
+	org, account, _, campaign, recipient := createTestCampaignData(t, w)
+	campaign.HeaderMediaID = "media-evil"
+	campaign.HeaderMediaLocalPath = "campaigns/evil.pdf"
+	require.NoError(t, w.DB.Save(campaign).Error)
+	require.NoError(t, w.DB.Create(&models.FileScan{ID: uuid.New(), OrganizationID: org.ID, Source: models.ScanSourceCampaignMedia,
+		ResourceID: campaign.ID, StoragePath: "campaigns/evil.pdf", Status: models.ScanInfected}).Error)
+
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) { called = true }))
+	defer server.Close()
+	require.NoError(t, w.DB.Model(account).Update("api_version", "v21.0").Error)
+	w.WhatsApp = whatsapp.NewWithBaseURL(w.Log, server.URL)
+
+	job := &queue.RecipientJob{CampaignID: campaign.ID, RecipientID: recipient.ID, OrganizationID: org.ID,
+		PhoneNumber: recipient.PhoneNumber, RecipientName: recipient.RecipientName, TemplateParams: recipient.TemplateParams}
+	require.NoError(t, w.HandleRecipientJob(context.Background(), job))
+
+	assert.False(t, called, "nothing reached Meta")
+	var got models.BulkMessageRecipient
+	require.NoError(t, w.DB.First(&got, recipient.ID).Error)
+	assert.Equal(t, models.MessageStatusFailed, got.Status)
+	assert.Contains(t, got.ErrorMessage, "malware")
 }

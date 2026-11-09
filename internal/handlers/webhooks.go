@@ -1,9 +1,12 @@
 package handlers
 
 import (
+	"net/netip"
+
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/shridarpatil/whatomate/internal/safehttp"
 	"net"
 	"net/url"
 	"strings"
@@ -68,13 +71,14 @@ func SSRFSafeDialer() func(ctx context.Context, network, addr string) (net.Conn,
 		}
 
 		for _, ipStr := range ips {
-			ip := net.ParseIP(ipStr)
-			if ip == nil {
+			ip, perr := netip.ParseAddr(ipStr)
+			if perr != nil {
 				continue
 			}
-			if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
-				ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
-				return nil, fmt.Errorf("connection to private address %s is not allowed", ipStr)
+			// The same address policy as internal/safehttp: also CGNAT, reserved, metadata, IPv4-mapped
+			// and tunnelled IPv6, not just loopback/private.
+			if cerr := safehttp.CheckAddr(ip); cerr != nil {
+				return nil, fmt.Errorf("connection to address %s is not allowed", ipStr)
 			}
 		}
 
@@ -119,6 +123,9 @@ var AvailableWebhookEvents = []map[string]string{
 
 // ListWebhooks returns all webhooks for the organization
 func (a *App) ListWebhooks(r *fastglue.Request) error {
+	if !a.can(r, models.ResourceWebhooks, models.ActionRead) {
+		return nil
+	}
 	orgID, err := a.getOrgID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
@@ -161,6 +168,9 @@ func (a *App) ListWebhooks(r *fastglue.Request) error {
 
 // GetWebhook returns a single webhook by ID
 func (a *App) GetWebhook(r *fastglue.Request) error {
+	if !a.can(r, models.ResourceWebhooks, models.ActionRead) {
+		return nil
+	}
 	orgID, err := a.getOrgID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
@@ -181,6 +191,9 @@ func (a *App) GetWebhook(r *fastglue.Request) error {
 
 // CreateWebhook creates a new webhook
 func (a *App) CreateWebhook(r *fastglue.Request) error {
+	if !a.can(r, models.ResourceWebhooks, models.ActionWrite) {
+		return nil
+	}
 	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
@@ -241,6 +254,9 @@ func (a *App) CreateWebhook(r *fastglue.Request) error {
 
 // UpdateWebhook updates an existing webhook
 func (a *App) UpdateWebhook(r *fastglue.Request) error {
+	if !a.can(r, models.ResourceWebhooks, models.ActionWrite) {
+		return nil
+	}
 	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
@@ -308,6 +324,9 @@ func (a *App) UpdateWebhook(r *fastglue.Request) error {
 
 // DeleteWebhook deletes a webhook
 func (a *App) DeleteWebhook(r *fastglue.Request) error {
+	if !a.can(r, models.ResourceWebhooks, models.ActionDelete) {
+		return nil
+	}
 	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
@@ -339,6 +358,9 @@ func (a *App) DeleteWebhook(r *fastglue.Request) error {
 
 // TestWebhook sends a test event to a webhook
 func (a *App) TestWebhook(r *fastglue.Request) error {
+	if !a.can(r, models.ResourceWebhooks, models.ActionWrite) {
+		return nil
+	}
 	orgID, err := a.getOrgID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")

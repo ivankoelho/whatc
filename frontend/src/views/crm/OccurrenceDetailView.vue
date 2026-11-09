@@ -1,14 +1,24 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import DetailPageLayout from '@/components/shared/DetailPageLayout.vue'
 import { IconButton, DeleteConfirmDialog } from '@/components/shared'
-import OccurrenceDocumentsCard from '@/components/crm/OccurrenceDocumentsCard.vue'
+import OccurrenceAttachmentsCard from '@/components/crm/OccurrenceAttachmentsCard.vue'
+import OccurrenceHistoryDialog from '@/components/crm/OccurrenceHistoryDialog.vue'
+import OccurrenceExportDialog from '@/components/crm/OccurrenceExportDialog.vue'
+import { eventIcons, eventLabels } from '@/lib/occurrence-events'
+import OccurrenceParticipantsCard from '@/components/crm/OccurrenceParticipantsCard.vue'
+import OccurrenceTransferCard from '@/components/crm/OccurrenceTransferCard.vue'
+import OccurrenceCommunicationCard from '@/components/crm/OccurrenceCommunicationCard.vue'
+import OccurrenceChatPanel from '@/components/crm/OccurrenceChatPanel.vue'
+import OccurrenceWhatsAppCard from '@/components/crm/OccurrenceWhatsAppCard.vue'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import ResolveSendDialog from '@/components/crm/ResolveSendDialog.vue'
+import { isSendPending } from '@/lib/protocol-send-recovery'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
@@ -22,22 +32,21 @@ import { useOccurrencesStore } from '@/stores/occurrences'
 import { useUsersStore } from '@/stores/users'
 import { useAuthStore } from '@/stores/auth'
 import { wsService } from '@/services/websocket'
-import { formatDateTime } from '@/lib/utils'
+import { formatDateTime, formatCivilDate } from '@/lib/utils'
 import { getErrorMessage } from '@/lib/api-utils'
+import { canSendProtocol } from '@/lib/occurrence-customer-messaging'
 import {
   ClipboardList,
   Send,
   Loader2,
-  PlusCircle,
   StickyNote,
-  Reply,
-  Lightbulb,
-  ArrowRightLeft,
   UserPlus,
-  CheckCircle2,
   Copy,
   Trash2,
   MessageCircle,
+  MessagesSquare,
+  ChevronDown,
+  Download,
 } from 'lucide-vue-next'
 
 const route = useRoute()
@@ -52,12 +61,89 @@ const authStore = useAuthStore()
 // to clear assigned_user_id (see occurrences.go's resolveAssignee).
 const UNASSIGNED = '__unassigned__'
 
+// Old links used ?aba=<tab>. The page is a single column now, so the value only
+// says which section to bring into view; the query is then dropped.
+const legacySection: Record<string, string> = {
+  summary: 'case-summary', customer: 'case-customer', internal: 'case-internal', history: 'case-history', people: 'case-people',
+}
+function openLegacySection() {
+  const aba = route.query.aba
+  if (typeof aba !== 'string') return
+  if (aba === 'internal') convTab.value = 'internal'
+  if (aba === 'customer') convTab.value = 'customer'
+  const { aba: _drop, ...rest } = route.query
+  void router.replace({ query: rest })
+  const el = document.getElementById(legacySection[aba] ?? '')
+  el?.scrollIntoView?.({ block: 'start' })
+  // The customer card loads after the page: scroll again once the layout settles.
+  setTimeout(() => el?.scrollIntoView?.({ block: 'start' }), 700)
+}
+
+// Which conversation is showing; the last one used is remembered on this device.
+const CONV_KEY = 'case-conversation-tab'
+const convTab = ref<'customer' | 'internal'>((() => {
+  try { return localStorage.getItem(CONV_KEY) === 'internal' ? 'internal' : 'customer' } catch { return 'customer' }
+})())
+watch(convTab, v => { try { localStorage.setItem(CONV_KEY, v) } catch { /* private window */ } })
+
+const historyOpen = ref(false)
+const exportOpen = ref(false)
+const HISTORY_PREVIEW = 6
+const showAllEvents = ref(false)
+const shownEvents = computed(() => {
+  const all = [...store.events].reverse() // most recent first
+  return showAllEvents.value ? all : all.slice(0, HISTORY_PREVIEW)
+})
+
 const occurrenceId = computed(() => route.params.id as string)
 const occurrence = ref<Occurrence | null>(null)
 const isLoading = ref(true)
 const isNotFound = ref(false)
 const isSendingProtocol = ref(false)
-const isAddingNote = ref(false)
+
+// A protocol send this browser started for this case and did not see finish (refresh, lost answer,
+// 202). It is recovered by ASKING the server; nothing here ever sends. While it is processing or
+// uncertain the send button stays off, so it cannot be repeated by accident.
+const pendingSend = ref<'processing' | 'uncertain' | null>(null)
+// The case's open send as the SERVER knows it (any person, any device): its id is what a person settles, and
+// `own` tells whether this person started it.
+const openSend = ref<{ state: 'processing' | 'uncertain'; sendId: string; own: boolean } | null>(null)
+const resolveOpen = ref(false)
+const canResolveSend = computed(() => authStore.hasPermission('occurrences', 'resolve_send'))
+let recheckTimer: ReturnType<typeof setTimeout> | undefined
+let rechecks = 0
+
+async function checkPendingSend() {
+  clearTimeout(recheckTimer)
+  try {
+    const state = await store.recoverProtocolSend(occurrenceId.value)
+    if (state === 'sent') {
+      pendingSend.value = null
+      toast.success(t('occurrences.protocolSent'))
+    } else if (state === 'failed') {
+      pendingSend.value = null
+      toast.error(t('occurrences.protocolSendFailed'))
+    } else {
+      pendingSend.value = state
+    }
+    // What this browser remembers is one source; the case's open send on the server is the other, and the only
+    // one that sees a send started by another person or device. Ask it whenever this browser knows nothing, or
+    // something is still open (to learn which send a person would settle).
+    if (state === null || state === 'processing' || state === 'uncertain') {
+      try {
+        openSend.value = await store.getOpenProtocolSend(occurrenceId.value)
+      } catch {
+        openSend.value = null
+      }
+      if (state === null) pendingSend.value = openSend.value?.state ?? null
+    } else {
+      openSend.value = null
+    }
+    if (pendingSend.value === 'processing' && rechecks++ < 12) recheckTimer = setTimeout(checkPendingSend, 10_000)
+  } catch {
+    // Could not ask (offline, not allowed): the record stays and the next visit asks again.
+  }
+}
 // "Responder ao cliente": text SENT to the contact via WhatsApp (unlike newNoteContent,
 // which is internal). The stage-message picker prefills this ref.
 const replyContent = ref('')
@@ -68,38 +154,17 @@ const messageStage = ref<Exclude<OccurrenceMessageStage, 'registration'>>('docum
 const loadingSuggestion = ref(false)
 const lastSuggestedStage = ref<OccurrenceMessageStage | null>(null)
 const canWrite = computed(() => authStore.hasPermission('occurrences', 'write'))
-const newNoteContent = ref('')
 const isUpdatingAssignee = ref(false)
+const isClaiming = ref(false)
+const waConfigured = ref(false)
 const isDeleteDialogOpen = ref(false)
 const isDeleting = ref(false)
-
-const eventIcons: Record<string, any> = {
-  opened: PlusCircle,
-  note: StickyNote,
-  stage_change: ArrowRightLeft,
-  assignment: UserPlus,
-  protocol_sent: Send,
-  closed: CheckCircle2,
-  reply: Reply,
-  process_message_used: Lightbulb,
-}
 
 const priorityLabels: Record<string, string> = {
   low: 'occurrences.priorityLow',
   normal: 'occurrences.priorityNormal',
   high: 'occurrences.priorityHigh',
   urgent: 'occurrences.priorityUrgent',
-}
-
-const eventLabels: Record<string, string> = {
-  opened: 'occurrences.eventOpened',
-  note: 'occurrences.eventNote',
-  stage_change: 'occurrences.eventStageChange',
-  assignment: 'occurrences.eventAssignment',
-  protocol_sent: 'occurrences.eventProtocolSent',
-  closed: 'occurrences.eventClosed',
-  reply: 'occurrences.eventReply',
-  process_message_used: 'occurrences.eventProcessMessageUsed',
 }
 
 const breadcrumbs = computed(() => [
@@ -109,6 +174,26 @@ const breadcrumbs = computed(() => [
 
 const activeUsers = computed(() => usersStore.users.filter(u => u.is_active))
 const assigneeSelectValue = computed(() => occurrence.value?.assigned_user_id || UNASSIGNED)
+
+// Atomic on the server: when someone else claimed first this answers 409 and
+// the case is reloaded so the new owner shows.
+async function claimOccurrence() {
+  if (!occurrence.value) return
+  isClaiming.value = true
+  try {
+    await occurrencesService.claim(occurrence.value.id)
+    toast.success(t('occurrences.claimed'))
+  } catch (e) {
+    toast.error(getErrorMessage(e, t('occurrences.claimFailed')))
+  } finally {
+    isClaiming.value = false
+    await loadOccurrence()
+  }
+}
+
+async function onTransferred() {
+  await Promise.all([loadOccurrence(), store.fetchEvents(occurrenceId.value)])
+}
 
 async function loadOccurrence() {
   isLoading.value = true
@@ -198,9 +283,24 @@ async function sendProtocol() {
   if (!occurrence.value) return
   isSendingProtocol.value = true
   try {
-    await store.sendProtocol(occurrence.value.id)
-    toast.success(t('occurrences.protocolSent'))
+    const outcome = await store.sendProtocol(occurrence.value.id)
+    if (outcome === 'uncertain') {
+      // 202: the provider did not confirm it and it may have been delivered. Not a success, and
+      // not a plain failure either: it says so and does not invite sending it again.
+      toast.warning(t('occurrences.protocolSendUncertain'))
+      pendingSend.value = 'uncertain'
+    } else {
+      toast.success(t('occurrences.protocolSent'))
+    }
   } catch (e: any) {
+    if (isSendPending(e)) {
+      // The server refused: another message of this case is not settled yet (maybe started by somebody else).
+      // Nothing was sent; show it and what to do, not a failure.
+      toast.warning(t('occurrences.protocolSendPendingOther'))
+      void checkPendingSend()
+      return
+    }
+    if (store.hasPendingProtocolSend(occurrenceId.value)) void checkPendingSend() // no conclusive answer (timeout, proxy 5xx, another send pending): ask what became of it
     if (e?.response?.status === 422) {
       toast.error(t('chat.sendProtocolWindowClosed'))
     } else {
@@ -270,19 +370,7 @@ async function submitReply() {
   }
 }
 
-async function submitNote() {
-  if (!occurrence.value || !newNoteContent.value.trim()) return
-  isAddingNote.value = true
-  try {
-    await store.addNote(occurrence.value.id, newNoteContent.value.trim())
-    newNoteContent.value = ''
-    toast.success(t('occurrences.noteAdded'))
-  } catch (e) {
-    toast.error(getErrorMessage(e, t('occurrences.noteAddFailed')))
-  } finally {
-    isAddingNote.value = false
-  }
-}
+// Old internal notes stay in the history below; new discussion happens in the internal chat panel.
 
 onMounted(async () => {
   await Promise.all([
@@ -292,11 +380,15 @@ onMounted(async () => {
     usersStore.users.length === 0 ? usersStore.fetchUsers().catch(() => {}) : Promise.resolve(),
   ])
 
+  void checkPendingSend()
   unsubscribeOccurrenceChanged = wsService.onOccurrenceChanged(handleOccurrenceChanged)
   unsubscribeOccurrenceEventCreated = wsService.onOccurrenceEventCreated(handleOccurrenceEventCreated)
+  await nextTick()
+  openLegacySection()
 })
 
 onUnmounted(() => {
+  clearTimeout(recheckTimer)
   unsubscribeOccurrenceChanged?.()
   unsubscribeOccurrenceEventCreated?.()
 })
@@ -310,13 +402,15 @@ onUnmounted(() => {
       icon-gradient="bg-gradient-to-br from-violet-500 to-purple-600 shadow-violet-500/20"
       back-link="/crm/occurrences"
       :breadcrumbs="breadcrumbs"
+      full-width
       :is-loading="isLoading"
       :is-not-found="isNotFound"
       :not-found-title="$t('occurrences.notFound')"
+      :not-found-description="$t('occurrences.notFoundHint')"
     >
       <template #actions>
-        <div v-if="occurrence" class="flex items-center gap-2">
-          <Select :model-value="occurrence.stage_id" @update:model-value="handleStageChange($event as string)">
+        <div v-if="occurrence" class="flex w-full flex-wrap items-center gap-2 lg:w-auto">
+          <Select :model-value="occurrence.stage_id" :disabled="!!occurrence.can && !occurrence.can.change_status && !occurrence.can.resolve" @update:model-value="handleStageChange($event as string)">
             <SelectTrigger class="w-48">
               <SelectValue :placeholder="$t('occurrences.selectStage')" />
             </SelectTrigger>
@@ -326,13 +420,22 @@ onUnmounted(() => {
               </SelectItem>
             </SelectContent>
           </Select>
-          <Button size="sm" variant="outline" as-child>
+          <Button size="sm" variant="outline" data-testid="export-open" @click="exportOpen = true">
+            <Download class="h-4 w-4 mr-2" aria-hidden="true" />
+            {{ $t('occurrences.export.button') }}
+          </Button>
+          <Button v-if="occurrence.can?.open_conversation ?? false" size="sm" variant="outline" as-child>
             <RouterLink :to="`/chat/${occurrence.contact_id}`">
               <MessageCircle class="h-4 w-4 mr-2 text-emerald-500" aria-hidden="true" />
               {{ $t('chat.openConversation') }}
             </RouterLink>
           </Button>
-          <Button size="sm" :disabled="isSendingProtocol" @click="sendProtocol">
+          <Button v-if="canWrite && !occurrence.assigned_user_id && (occurrence.can?.claim ?? true)" size="sm" data-testid="claim-occurrence" :disabled="isClaiming" @click="claimOccurrence">
+            <Loader2 v-if="isClaiming" class="h-4 w-4 mr-2 animate-spin" />
+            <UserPlus v-else class="h-4 w-4 mr-2" />
+            {{ $t('occurrences.claim') }}
+          </Button>
+          <Button v-if="canSendProtocol(occurrence.can)" size="sm" :disabled="isSendingProtocol || !!pendingSend" data-testid="send-protocol" @click="sendProtocol">
             <Loader2 v-if="isSendingProtocol" class="h-4 w-4 mr-2 animate-spin" />
             <Send v-else class="h-4 w-4 mr-2" />
             {{ $t('chat.sendProtocol') }}
@@ -348,110 +451,101 @@ onUnmounted(() => {
       </template>
 
       <template v-if="occurrence">
-        <!-- Details -->
-        <Card>
-          <CardHeader class="pb-3">
-            <div class="flex items-center justify-between gap-2">
-              <div class="flex items-center gap-1.5">
-                <CardTitle class="text-lg font-semibold font-mono tracking-wide">{{ occurrence.protocol_number }}</CardTitle>
-                <IconButton
-                  :icon="Copy"
-                  :label="$t('occurrences.copyProtocol')"
-                  class="h-7 w-7"
-                  @click="copyProtocol"
-                />
-              </div>
+      <div class="mx-auto w-full max-w-[1600px] space-y-6" data-testid="unified-case">
+
+        <div v-if="pendingSend" class="flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm" role="status" data-testid="protocol-send-pending">
+          <p>
+            <template v-if="openSend && !openSend.own">{{ $t('occurrences.protocolSendOpenByOther') }}</template>
+            <template v-else>{{ pendingSend === 'processing' ? $t('occurrences.protocolSendProcessing') : $t('occurrences.protocolSendUncertain') }}</template>
+          </p>
+          <Button v-if="canResolveSend && openSend && openSend.state === 'uncertain'" size="sm" variant="outline" data-testid="resolve-send-open" @click="resolveOpen = true">
+            {{ $t('occurrences.resolveSend.button') }}
+          </Button>
+        </div>
+        <ResolveSendDialog v-if="openSend" v-model:open="resolveOpen" :occurrence-id="occurrenceId" :send-id="openSend.sendId" @resolved="() => { pendingSend = null; openSend = null }" />
+
+        <!-- 1. Operational strip: what it is, whose it is, how urgent -->
+        <section id="case-summary" class="scroll-mt-4 rounded-lg border bg-card px-4 py-3" data-testid="case-strip">
+          <div class="flex flex-wrap items-center gap-x-8 gap-y-3 text-sm">
+            <div class="flex items-center gap-2">
+              <span class="font-mono text-base font-semibold tracking-wide">{{ occurrence.protocol_number }}</span>
+              <IconButton :icon="Copy" :label="$t('occurrences.copyProtocol')" class="h-7 w-7" @click="copyProtocol" />
               <Badge variant="outline" :style="{ borderColor: store.stageColor(occurrence.stage_id), color: store.stageColor(occurrence.stage_id) }">
                 {{ occurrence.stage_name }}
               </Badge>
             </div>
-          </CardHeader>
-          <CardContent class="space-y-3 text-sm">
-            <div>
-              <span class="text-muted-foreground text-xs">{{ $t('occurrences.contactLabel') }}</span>
-              <p>{{ occurrence.contact_name }}</p>
-            </div>
-            <div v-if="occurrence.description">
-              <span class="text-muted-foreground text-xs">{{ $t('chat.occurrenceDescription') }}</span>
-              <p class="whitespace-pre-wrap">{{ occurrence.description }}</p>
-            </div>
-            <div class="grid grid-cols-3 gap-3">
+            <dl class="flex flex-1 flex-wrap items-start gap-x-8 gap-y-3 [&_dd]:mt-0.5 [&_dd]:flex [&_dd]:h-7 [&_dd]:items-center">
               <div>
-                <span class="text-muted-foreground text-xs">{{ $t('occurrences.priorityLabel') }}</span>
-                <p>{{ $t(priorityLabels[occurrence.priority]) }}</p>
+                <dt class="text-xs text-muted-foreground">{{ $t('occurrences.generalState') }}</dt>
+                <dd>{{ $t('occurrences.generalStates.' + (occurrence.general_state || 'new')) }}</dd>
+              </div>
+              <div v-if="occurrence.unit_name">
+                <dt class="text-xs text-muted-foreground">{{ $t('occurrences.unitLabel') }}</dt>
+                <dd>{{ occurrence.unit_name }}</dd>
+              </div>
+              <div v-if="occurrence.team_name">
+                <dt class="text-xs text-muted-foreground">{{ $t('occurrences.stageTeam') }}</dt>
+                <dd>{{ occurrence.team_name }}</dd>
               </div>
               <div>
-                <span class="text-muted-foreground text-xs">{{ $t('occurrences.assigneeLabel') }}</span>
-                <Select
-                  :model-value="assigneeSelectValue"
-                  :disabled="isUpdatingAssignee"
-                  @update:model-value="handleAssigneeChange($event as string)"
-                >
-                  <SelectTrigger class="h-8 mt-1 -ml-2.5 border-none shadow-none px-2.5">
-                    <SelectValue :placeholder="$t('occurrences.unassigned')" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem :value="UNASSIGNED">{{ $t('occurrences.unassigned') }}</SelectItem>
-                    <SelectItem v-for="u in activeUsers" :key="u.id" :value="u.id">
-                      {{ u.full_name }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
+                <dt class="text-xs text-muted-foreground">{{ $t('occurrences.priorityLabel') }}</dt>
+                <dd>{{ $t(priorityLabels[occurrence.priority]) }}</dd>
+              </div>
+              <div v-if="occurrence.sla_resolution_deadline">
+                <dt class="text-xs text-muted-foreground">{{ $t('occurrences.slaDeadline') }}</dt>
+                <dd :class="occurrence.sla_breached ? 'font-medium text-destructive' : ''">{{ formatDateTime(occurrence.sla_resolution_deadline) }}</dd>
               </div>
               <div>
-                <span class="text-muted-foreground text-xs">{{ $t('occurrences.openedAtLabel') }}</span>
-                <p>{{ formatDateTime(occurrence.opened_at) }}</p>
+                <dt class="text-xs text-muted-foreground">{{ $t('occurrences.assigneeLabel') }}</dt>
+                <dd>
+                  <Select
+                    :model-value="assigneeSelectValue"
+                    :disabled="isUpdatingAssignee || (!!occurrence.can && !occurrence.can.reassign && !occurrence.can.claim)"
+                    @update:model-value="handleAssigneeChange($event as string)"
+                  >
+                    <SelectTrigger class="-ml-2.5 h-7 w-auto min-w-40 border-none px-2.5 shadow-none">
+                      <SelectValue :placeholder="$t('occurrences.unassigned')" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem :value="UNASSIGNED">{{ $t('occurrences.unassigned') }}</SelectItem>
+                      <SelectItem v-for="u in activeUsers" :key="u.id" :value="u.id">{{ u.full_name }}</SelectItem>
+                      <!-- Roles without users:read have no user list: still show who owns the case. -->
+                      <SelectItem v-if="occurrence.assigned_user_id && !activeUsers.some(u => u.id === occurrence!.assigned_user_id)" :value="occurrence.assigned_user_id">
+                        {{ occurrence.assigned_user_name }}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </dd>
               </div>
-            </div>
-          </CardContent>
-        </Card>
+            </dl>
+          </div>
+        </section>
 
-        <OccurrenceDocumentsCard :occurrence-id="occurrence.id" :can-write="canWrite" />
-
-        <!-- Timeline -->
-        <Card>
-          <CardHeader class="pb-3">
-            <CardTitle class="text-sm font-medium">{{ $t('chat.occurrenceTimeline') }}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p v-if="store.events.length === 0" class="text-sm text-muted-foreground text-center py-6">
-              {{ $t('occurrences.noEventsYet') }}
-            </p>
-            <div v-else class="relative">
-              <div class="absolute left-3 top-3 bottom-3 w-px bg-border" />
-              <div v-for="event in store.events" :key="event.id" class="relative pl-9 pb-6 last:pb-0">
-                <div class="absolute left-1.5 top-1 w-3 h-3 rounded-full border-2 border-background bg-muted-foreground flex items-center justify-center" />
-                <div class="flex items-center gap-2 flex-wrap">
-                  <component :is="eventIcons[event.type] || StickyNote" class="h-3.5 w-3.5 text-muted-foreground" />
-                  <span class="text-sm font-medium">{{ $t(eventLabels[event.type] || 'occurrences.eventUnknown') }}</span>
-                  <span v-if="event.created_by_name" class="text-xs text-muted-foreground">{{ event.created_by_name }}</span>
-                  <span class="text-xs text-muted-foreground">{{ formatDateTime(event.created_at) }}</span>
-                </div>
-                <p v-if="event.content" class="text-sm mt-1 whitespace-pre-wrap">{{ event.content }}</p>
-              </div>
-            </div>
-
-            <!-- Add note (internal) -->
-            <div class="mt-6 space-y-2">
-              <div>
-                <p class="text-sm font-medium">{{ $t('occurrences.internalNoteTitle') }}</p>
-                <p class="text-xs text-muted-foreground">{{ $t('occurrences.internalNoteHint') }}</p>
-              </div>
-              <Textarea
-                v-model="newNoteContent"
-                :placeholder="$t('occurrences.writeNote')"
-                :rows="3"
-              />
-              <Button size="sm" :disabled="!newNoteContent.trim() || isAddingNote" @click="submitNote">
-                <Loader2 v-if="isAddingNote" class="h-4 w-4 mr-2 animate-spin" />
-                {{ $t('occurrences.addNote') }}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        <!-- Reply to customer (sent via WhatsApp) -->
-        <Card v-if="canWrite" class="border-primary/40">
+        <!-- The conversation is the heart of the case: right under the identification strip, larger. -->
+        <!-- 4. ONE conversation area with two clearly different destinations: the customer (WhatsApp)
+             and the colleagues (internal). A switch, never both at once, so nothing typed for one can
+             be sent to the other; each tab says who will read it. -->
+        <section id="case-conversation" class="scroll-mt-4 rounded-xl border-2 border-primary/25 bg-card shadow-md" data-testid="case-conversation">
+          <div class="flex border-b" role="tablist" :aria-label="$t('occurrences.convTitle')">
+            <button
+              type="button" role="tab" :aria-selected="convTab === 'customer'" data-testid="conv-tab-customer"
+              class="flex items-center gap-2 border-b-2 px-5 py-3.5 text-base transition-colors"
+              :class="convTab === 'customer' ? 'border-emerald-500 font-medium text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'"
+              @click="convTab = 'customer'"
+            ><MessageCircle class="h-4 w-4 text-emerald-600" aria-hidden="true" />{{ $t('occurrences.waTitle') }}</button>
+            <button
+              type="button" role="tab" :aria-selected="convTab === 'internal'" data-testid="conv-tab-internal"
+              class="flex items-center gap-2 border-b-2 px-5 py-3.5 text-base transition-colors"
+              :class="convTab === 'internal' ? 'border-sky-500 font-medium text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'"
+              @click="convTab = 'internal'"
+            ><MessagesSquare class="h-4 w-4 text-sky-600" aria-hidden="true" />{{ $t('occurrences.internalChat') }}</button>
+          </div>
+          <div class="p-5 max-sm:p-2 [&_[data-testid=occurrence-chat]]:min-h-[26rem] max-sm:[&_[data-testid=occurrence-chat]]:min-h-[34rem] [&_[data-testid=case-whatsapp]]:border-0 [&_[data-testid=case-whatsapp]]:shadow-none [&_[data-testid=occurrence-chat]]:border-0 [&_[data-testid=occurrence-chat]]:shadow-none">
+        <div v-show="convTab === 'customer'" id="case-customer" class="scroll-mt-4 space-y-4">
+          <OccurrenceWhatsAppCard :occurrence-id="occurrence.id" @configured="waConfigured = $event" />
+          <OccurrenceCommunicationCard :occurrence-id="occurrence.id" />
+        <!-- Legacy reply (from the contact's own account): only when the case has no channel account -->
+        <Card v-if="canWrite && (occurrence.can?.reply ?? true) && !waConfigured" class="border-primary/40">
           <CardHeader class="pb-3">
             <CardTitle class="text-sm font-medium">{{ $t('occurrences.replyTitle') }}</CardTitle>
             <p class="text-xs text-muted-foreground">{{ $t('occurrences.replyHint') }}</p>
@@ -490,9 +584,130 @@ onUnmounted(() => {
             </Button>
           </CardContent>
         </Card>
+        </div>
+
+        <!-- Colleagues only (kept mounted so it keeps receiving messages while the other tab is open) -->
+        <div v-show="convTab === 'internal'" id="case-internal" class="scroll-mt-4">
+          <OccurrenceChatPanel :occurrence-id="occurrence.id" />
+        </div>
+          </div>
+        </section>
+
+        <!-- 2 + 3. The request with its order and followers; documents and history beside it -->
+        <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <section class="rounded-lg border bg-card p-4" data-testid="case-request">
+            <h2 class="mb-3 text-sm font-semibold">{{ $t('occurrences.secRequest') }}</h2>
+            <dl class="grid grid-cols-2 gap-x-6 gap-y-3 text-sm md:grid-cols-4">
+              <div>
+                <dt class="text-xs text-muted-foreground">{{ $t('occurrences.contactLabel') }}</dt>
+                <dd>{{ occurrence.contact_name }}</dd>
+              </div>
+              <div v-if="occurrence.category_name">
+                <dt class="text-xs text-muted-foreground">{{ $t('occurrences.categoryLabel') }}</dt>
+                <dd>{{ occurrence.category_name }}</dd>
+              </div>
+              <div v-if="occurrence.sale_channel">
+                <dt class="text-xs text-muted-foreground">{{ $t('occurrences.secOrigin') }}</dt>
+                <dd>{{ occurrence.sale_channel }}</dd>
+              </div>
+              <div>
+                <dt class="text-xs text-muted-foreground">{{ $t('occurrences.openedAtLabel') }}</dt>
+                <dd>{{ formatDateTime(occurrence.opened_at) }}</dd>
+              </div>
+              <div v-if="occurrence.process_name">
+                <dt class="text-xs text-muted-foreground">{{ $t('occurrences.secProcess') }}</dt>
+                <dd>{{ occurrence.process_name }}</dd>
+              </div>
+              <div v-if="occurrence.what_happened_name">
+                <dt class="text-xs text-muted-foreground">{{ $t('occurrences.whatHappenedLabel') }}</dt>
+                <dd>{{ occurrence.what_happened_name }}</dd>
+              </div>
+              <div v-if="occurrence.updated_at">
+                <dt class="text-xs text-muted-foreground">{{ $t('occurrences.updatedAt') }}</dt>
+                <dd>{{ formatDateTime(occurrence.updated_at) }}</dd>
+              </div>
+            </dl>
+            <div v-if="occurrence.description" class="mt-4 border-t pt-3">
+              <p class="whitespace-pre-wrap text-sm leading-relaxed [overflow-wrap:anywhere]">{{ occurrence.description }}</p>
+            </div>
+
+            <div class="mt-4 border-t pt-3" data-testid="case-order">
+              <h3 class="mb-2 text-sm font-semibold">{{ $t('occurrences.secOrder') }}</h3>
+              <template v-if="occurrence.order_ref || occurrence.invoice_number || occurrence.product_description">
+                <dl class="space-y-2 text-sm">
+                  <div v-if="occurrence.order_ref">
+                    <dt class="text-xs text-muted-foreground">{{ $t('occurrences.orderRef') }}</dt>
+                    <dd class="font-mono">{{ occurrence.order_ref }}</dd>
+                  </div>
+                  <div v-if="occurrence.invoice_number">
+                    <dt class="text-xs text-muted-foreground">{{ $t('occurrences.invoiceNumberLabel') }}</dt>
+                    <dd class="font-mono">{{ occurrence.invoice_number }}</dd>
+                  </div>
+                  <div v-if="occurrence.purchase_date">
+                    <dt class="text-xs text-muted-foreground">{{ $t('occurrences.purchaseDateLabel') }}</dt>
+                    <dd>{{ formatCivilDate(occurrence.purchase_date) }}</dd>
+                  </div>
+                  <div v-if="occurrence.product_description">
+                    <dt class="text-xs text-muted-foreground">{{ $t('occurrences.secProduct') }}</dt>
+                    <dd class="[overflow-wrap:anywhere]">{{ occurrence.product_description }}</dd>
+                  </div>
+                </dl>
+                <p v-if="occurrence.order_ref" class="mt-3 text-xs text-muted-foreground">{{ $t('occurrences.orderNoIntegration') }}</p>
+              </template>
+              <p v-else class="text-sm text-muted-foreground">{{ $t('occurrences.noOrder') }}</p>
+              </div>
+
+            <div id="case-transfer" class="mt-4 scroll-mt-4 border-t pt-3">
+              <OccurrenceTransferCard
+                :occurrence-id="occurrence.id" :team-name="occurrence.team_name" :assigned-name="occurrence.assigned_user_name"
+                :closed="occurrence.general_state === 'resolved'" @changed="onTransferred"
+              />
+            </div>
+
+            <div id="case-people" class="mt-4 scroll-mt-4 border-t pt-3">
+              <OccurrenceParticipantsCard embedded :occurrence-id="occurrence.id" :can-write="canWrite && (occurrence.can?.add_participant ?? true)" />
+            </div>
+          </section>
+
+          <div class="flex flex-col gap-6">
+            <OccurrenceAttachmentsCard :occurrence-id="occurrence.id" :can-write="canWrite" />
+          <section id="case-history" class="scroll-mt-4 flex-1 rounded-lg border bg-card p-4" data-testid="case-history">
+            <div class="mb-3 flex items-center justify-between gap-2">
+              <h2 class="text-sm font-semibold">{{ $t('chat.occurrenceTimeline') }}</h2>
+              <Button variant="outline" size="sm" data-testid="open-full-history" @click="historyOpen = true">{{ $t('occurrences.history.openFull') }}</Button>
+            </div>
+            <p v-if="store.events.length === 0" class="py-4 text-center text-sm text-muted-foreground">{{ $t('occurrences.noEventsYet') }}</p>
+            <ol v-else class="space-y-3">
+              <li v-for="event in shownEvents" :key="event.id" class="flex gap-3 text-sm">
+                <component :is="eventIcons[event.type] || StickyNote" class="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <div class="min-w-0">
+                  <p class="flex flex-wrap items-baseline gap-x-2">
+                    <span class="font-medium">{{ $t(eventLabels[event.type] || 'occurrences.eventUnknown') }}</span>
+                    <span v-if="event.created_by_name" class="text-xs text-muted-foreground">{{ event.created_by_name }}</span>
+                    <span class="text-xs text-muted-foreground">{{ formatDateTime(event.created_at) }}</span>
+                  </p>
+                  <p v-if="event.type === 'customer_notification'" class="mt-0.5 text-muted-foreground">{{ $t('occurrences.notice.' + event.content) }}</p>
+                  <p v-else-if="event.content" class="mt-0.5 whitespace-pre-wrap text-muted-foreground [overflow-wrap:anywhere]">{{ event.content }}</p>
+                </div>
+              </li>
+            </ol>
+            <Button v-if="store.events.length > HISTORY_PREVIEW" variant="ghost" size="sm" class="mt-3" data-testid="history-toggle" :aria-expanded="showAllEvents" @click="showAllEvents = !showAllEvents">
+              <ChevronDown class="mr-1 h-4 w-4 transition-transform" :class="showAllEvents ? 'rotate-180' : ''" aria-hidden="true" />
+              {{ showAllEvents ? $t('occurrences.showLess') : $t('occurrences.showAll', { n: store.events.length }) }}
+            </Button>
+          </section>
+          </div>
+        </div>
+
+      </div>
       </template>
     </DetailPageLayout>
 
+    <OccurrenceExportDialog v-if="occurrence && exportOpen" v-model:open="exportOpen" :occurrence-id="occurrence.id" />
+    <OccurrenceHistoryDialog
+      v-if="occurrence && historyOpen" v-model:open="historyOpen"
+      :occurrence-id="occurrence.id" :protocol="occurrence.protocol_number" :title="occurrence.title"
+    />
     <DeleteConfirmDialog
       v-model:open="isDeleteDialogOpen"
       :title="$t('occurrences.deleteProtocolTitle')"

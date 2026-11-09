@@ -1,0 +1,98 @@
+# Isolated Linux environment to homologate the antimalware policy (ClamAV) — never touches production.
+#
+# What it reproduces of the Contabo layout: a Linux host, PostgreSQL 17, Redis 7 and a clamd/freshclam
+# container reachable only on a private network (no published ports at all). The backend code is
+# exercised by the Go homologation tests (internal/handlers/homologation_test.go) running in the
+# `runner` container, so the files are real files on a Linux filesystem and no Windows antivirus
+# interferes with the EICAR test string.
+#
+# Run everything:   scripts/homologation/antimalware.sh
+# Tear down:        docker compose -p whatc-homolog -f docker/homologation/docker-compose.yml down -v
+#
+# Resource limits mimic a modest VPS (adjust to the real plan). Nothing here uses production
+# credentials: every secret below is a throw-away value for this isolated network.
+name: whatc-homolog
+
+networks:
+  homolog:
+    internal: false # the runner needs the module proxy once; clamav and the databases publish nothing
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    networks: [homolog]
+    environment:
+      POSTGRES_USER: homolog
+      POSTGRES_PASSWORD: homolog-only
+      POSTGRES_DB: whatc_homolog
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U homolog -d whatc_homolog"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 512m }
+
+  redis:
+    image: redis:7-alpine
+    networks: [homolog]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  clamav:
+    image: clamav/clamav:stable
+    networks: [homolog]
+    environment:
+      CLAMAV_NO_FRESHCLAMD: "false" # automatic signature updates, as in production
+      CLAMD_CONF_StreamMaxLength: "30M"
+      CLAMD_CONF_MaxScanSize: "100M"
+      CLAMD_CONF_MaxFileSize: "30M"
+    volumes:
+      - clamav-db:/var/lib/clamav
+    deploy:
+      resources:
+        limits: { cpus: "2.0", memory: 3g }
+    healthcheck:
+      test: ["CMD-SHELL", "clamdcheck.sh"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 120s
+
+  # Accepts connections and never answers: the "engine is hung" case (timeout scenario).
+  tarpit:
+    image: alpine:3.20
+    networks: [homolog]
+    command: ["sh", "-c", "apk add --no-cache socat >/dev/null && socat TCP-LISTEN:3310,fork,reuseaddr EXEC:'sleep 3600'"]
+
+  runner:
+    image: golang:1.26
+    profiles: ["run"]
+    networks: [homolog]
+    working_dir: /src
+    volumes:
+      - ../..:/src:ro
+      - go-mod:/go/pkg/mod
+      - go-build:/root/.cache/go-build
+      - storage:/state # a Docker volume (inside the Linux VM): a bind mount from a Windows host would let the host antivirus eat the EICAR file
+    environment:
+      TEST_DATABASE_URL: postgres://homolog:homolog-only@postgres:5432/whatc_homolog?sslmode=disable
+      TEST_REDIS_URL: redis://redis:6379/0
+      TEST_CLAMD_ADDR: clamav:3310
+      HOMOLOG_TARPIT_ADDR: tarpit:3310
+      HOMOLOG_DOWN_ADDR: 127.0.0.1:9 # nothing listens: connection refused
+      HOMOLOG_STATE: /state/state.json
+      HOMOLOG_PHASE: ${HOMOLOG_PHASE:-A}
+      TEST_DB_KEEP: ${TEST_DB_KEEP:-0}
+      CGO_ENABLED: "0"
+    command: ["sh", "-c", "go test ./internal/handlers -p 1 -count=1 -timeout 20m -v -run \"TestHomolog_$${HOMOLOG_PHASE}\""]
+
+volumes:
+  clamav-db:
+  go-mod:
+  go-build:
+  storage:

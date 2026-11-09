@@ -100,7 +100,7 @@ func TestApp_GetBusinessProfile_Success(t *testing.T) {
 	acc := mkAccountForProfile(t, app.DB, org.ID)
 
 	req := testutil.NewGETRequest(t)
-	testutil.SetAuthContext(req, org.ID, uuid.New())
+	testutil.SetAuthContext(req, org.ID, testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin()).ID)
 	testutil.SetPathParam(req, "id", acc.ID.String())
 
 	require.NoError(t, app.GetBusinessProfile(req))
@@ -120,7 +120,7 @@ func TestApp_GetBusinessProfile_AccountNotFound(t *testing.T) {
 	org := testutil.CreateTestOrganization(t, app.DB)
 
 	req := testutil.NewGETRequest(t)
-	testutil.SetAuthContext(req, org.ID, uuid.New())
+	testutil.SetAuthContext(req, org.ID, testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin()).ID)
 	testutil.SetPathParam(req, "id", uuid.New().String())
 
 	require.NoError(t, app.GetBusinessProfile(req))
@@ -135,7 +135,7 @@ func TestApp_GetBusinessProfile_CrossOrgIsolation(t *testing.T) {
 	acc := mkAccountForProfile(t, app.DB, orgA.ID)
 
 	req := testutil.NewGETRequest(t)
-	testutil.SetAuthContext(req, orgB.ID, uuid.New())
+	testutil.SetAuthContext(req, orgB.ID, testutil.CreateTestUser(t, app.DB, orgB.ID, testutil.WithSuperAdmin()).ID)
 	testutil.SetPathParam(req, "id", acc.ID.String())
 
 	require.NoError(t, app.GetBusinessProfile(req))
@@ -154,7 +154,7 @@ func TestApp_GetBusinessProfile_MetaAPIErrorBubbles(t *testing.T) {
 	acc := mkAccountForProfile(t, app.DB, org.ID)
 
 	req := testutil.NewGETRequest(t)
-	testutil.SetAuthContext(req, org.ID, uuid.New())
+	testutil.SetAuthContext(req, org.ID, testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin()).ID)
 	testutil.SetPathParam(req, "id", acc.ID.String())
 
 	require.NoError(t, app.GetBusinessProfile(req))
@@ -188,7 +188,7 @@ func TestApp_UpdateBusinessProfile_Success(t *testing.T) {
 		"websites":    []string{"https://new.example.com"},
 		"address":     "2 New Rd",
 	})
-	testutil.SetAuthContext(req, org.ID, uuid.New())
+	testutil.SetAuthContext(req, org.ID, testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin()).ID)
 	testutil.SetPathParam(req, "id", acc.ID.String())
 
 	require.NoError(t, app.UpdateBusinessProfile(req))
@@ -221,7 +221,7 @@ func TestApp_UpdateBusinessProfile_RefetchFailureStillReportsSuccess(t *testing.
 	acc := mkAccountForProfile(t, app.DB, org.ID)
 
 	req := testutil.NewJSONRequest(t, map[string]any{"about": "x"})
-	testutil.SetAuthContext(req, org.ID, uuid.New())
+	testutil.SetAuthContext(req, org.ID, testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin()).ID)
 	testutil.SetPathParam(req, "id", acc.ID.String())
 
 	require.NoError(t, app.UpdateBusinessProfile(req))
@@ -246,7 +246,7 @@ func TestApp_UpdateBusinessProfile_MetaUpdateFails(t *testing.T) {
 	acc := mkAccountForProfile(t, app.DB, org.ID)
 
 	req := testutil.NewJSONRequest(t, map[string]any{"email": "bad"})
-	testutil.SetAuthContext(req, org.ID, uuid.New())
+	testutil.SetAuthContext(req, org.ID, testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin()).ID)
 	testutil.SetPathParam(req, "id", acc.ID.String())
 
 	require.NoError(t, app.UpdateBusinessProfile(req))
@@ -261,7 +261,7 @@ func TestApp_UpdateBusinessProfile_CrossOrgIsolation(t *testing.T) {
 	acc := mkAccountForProfile(t, app.DB, orgA.ID)
 
 	req := testutil.NewJSONRequest(t, map[string]any{"about": "should-not-apply"})
-	testutil.SetAuthContext(req, orgB.ID, uuid.New())
+	testutil.SetAuthContext(req, orgB.ID, testutil.CreateTestUser(t, app.DB, orgB.ID, testutil.WithSuperAdmin()).ID)
 	testutil.SetPathParam(req, "id", acc.ID.String())
 
 	require.NoError(t, app.UpdateBusinessProfile(req))
@@ -279,7 +279,7 @@ func TestApp_UpdateBusinessProfile_InvalidJSONBody(t *testing.T) {
 	req.RequestCtx.Request.Header.SetContentType("application/json")
 	req.RequestCtx.Request.Header.SetMethod("PUT")
 	req.RequestCtx.Request.SetBody([]byte("not json"))
-	testutil.SetAuthContext(req, org.ID, uuid.New())
+	testutil.SetAuthContext(req, org.ID, testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithSuperAdmin()).ID)
 	testutil.SetPathParam(req, "id", acc.ID.String())
 
 	require.NoError(t, app.UpdateBusinessProfile(req))

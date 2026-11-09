@@ -25,6 +25,9 @@ func newTestHubWithClient(t *testing.T, orgID uuid.UUID) (*websocket.Hub, *webso
 	t.Helper()
 	hub := websocket.NewHub(testutil.NopLogger())
 	go hub.Run()
+	// Plumbing tests: this hub says yes to everyone. Real scope is covered by the
+	// occurrence isolation tests and the inline hubs below.
+	hub.SetOccurrenceAuthorizer(func(_, _, _ uuid.UUID) bool { return true })
 
 	client := websocket.NewClient(hub, nil, uuid.New(), orgID)
 	hub.Register(client)
@@ -406,6 +409,7 @@ func TestOccurrences_CreateBroadcastDeniesUnauthorizedViewer(t *testing.T) {
 
 	hub := websocket.NewHub(testutil.NopLogger())
 	go hub.Run()
+	hub.SetOccurrenceAuthorizer(app.CanViewOccurrenceByID)
 	// Only the creator (who becomes the default assignee) is "authorized".
 	hub.SetConversationAuthorizer(func(userID, orgID, contactID uuid.UUID) bool {
 		return userID == creator.ID
@@ -445,6 +449,7 @@ func TestOccurrences_CreateBroadcastReachesAssigneeDespiteNoGeneralAuthorization
 
 	hub := websocket.NewHub(testutil.NopLogger())
 	go hub.Run()
+	hub.SetOccurrenceAuthorizer(app.CanViewOccurrenceByID)
 	// Nobody passes the general check -- the assignee fan-out is the only
 	// thing that can deliver this broadcast.
 	hub.SetConversationAuthorizer(func(userID, orgID, contactID uuid.UUID) bool { return false })
@@ -482,6 +487,7 @@ func TestOccurrences_CreateBroadcastDeliversExactlyOnceWhenAssigneeIsAlsoAuthori
 
 	hub := websocket.NewHub(testutil.NopLogger())
 	go hub.Run()
+	hub.SetOccurrenceAuthorizer(app.CanViewOccurrenceByID)
 	// The creator (who becomes the default assignee) is ALSO generally
 	// authorized -- this is the case that used to double-deliver.
 	hub.SetConversationAuthorizer(func(userID, orgID, contactID uuid.UUID) bool {

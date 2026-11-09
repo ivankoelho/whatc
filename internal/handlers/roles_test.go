@@ -85,7 +85,7 @@ func TestApp_GetRole_Success(t *testing.T) {
 func TestApp_GetRole_NotFound(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("get-role-404")))
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("get-role-404")), testutil.WithSuperAdmin())
 
 	req := testutil.NewGETRequest(t)
 	req.RequestCtx.SetUserValue("user_id", user.ID)
@@ -101,7 +101,7 @@ func TestApp_CreateRole_Success(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
 	permissions := testutil.GetOrCreateTestPermissions(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("create-role")))
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("create-role")), testutil.WithSuperAdmin())
 
 	reqBody := handlers.RoleRequest{
 		Name:        "New Role",
@@ -146,7 +146,7 @@ func TestApp_CreateRole_DuplicateName(t *testing.T) {
 	_ = testutil.GetOrCreateTestPermissions(t, app.DB)
 
 	testutil.CreateTestRoleExact(t, app.DB, org.ID, "Existing Role", false, false, nil)
-	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("create-dup-role")))
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("create-dup-role")), testutil.WithSuperAdmin())
 
 	reqBody := handlers.RoleRequest{
 		Name:        "Existing Role",
@@ -166,7 +166,7 @@ func TestApp_CreateRole_DuplicateName(t *testing.T) {
 func TestApp_CreateRole_MissingName(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("create-no-name")))
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("create-no-name")), testutil.WithSuperAdmin())
 
 	reqBody := handlers.RoleRequest{
 		Name:        "",
@@ -190,7 +190,7 @@ func TestApp_CreateRole_WithDefaultFlag(t *testing.T) {
 
 	// Create an existing default role
 	existingDefault := testutil.CreateTestRoleExact(t, app.DB, org.ID, "Old Default", false, true, nil)
-	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("create-default")))
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("create-default")), testutil.WithSuperAdmin())
 
 	reqBody := handlers.RoleRequest{
 		Name:        "New Default Role",
@@ -219,7 +219,7 @@ func TestApp_UpdateRole_Success(t *testing.T) {
 	permissions := testutil.GetOrCreateTestPermissions(t, app.DB)
 
 	role := testutil.CreateTestRoleExact(t, app.DB, org.ID, "Editable Role", false, false, permissions[:1])
-	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("update-role")))
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("update-role")), testutil.WithSuperAdmin())
 
 	reqBody := handlers.RoleRequest{
 		Name:        "Updated Role Name",
@@ -255,7 +255,7 @@ func TestApp_UpdateRole_SystemRoleOnlyDescription(t *testing.T) {
 
 	// Create a system role
 	systemRole := testutil.CreateTestRoleExact(t, app.DB, org.ID, "System Admin", true, false, permissions)
-	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("update-sys-role")))
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("update-sys-role")), testutil.WithSuperAdmin())
 
 	reqBody := handlers.RoleRequest{
 		Name:        "Changed Name",         // Should be ignored for system roles
@@ -289,7 +289,7 @@ func TestApp_UpdateRole_SystemRoleOnlyDescription(t *testing.T) {
 func TestApp_UpdateRole_NotFound(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("update-404")))
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("update-404")), testutil.WithSuperAdmin())
 
 	reqBody := handlers.RoleRequest{
 		Name: "Updated Name",
@@ -310,7 +310,7 @@ func TestApp_DeleteRole_Success(t *testing.T) {
 	org := testutil.CreateTestOrganization(t, app.DB)
 
 	role := testutil.CreateTestRoleExact(t, app.DB, org.ID, "Deletable Role", false, false, nil)
-	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("delete-role")))
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("delete-role")), testutil.WithSuperAdmin())
 
 	req := testutil.NewGETRequest(t)
 	req.RequestCtx.Request.Header.SetMethod("DELETE")
@@ -333,7 +333,7 @@ func TestApp_DeleteRole_SystemRole(t *testing.T) {
 	org := testutil.CreateTestOrganization(t, app.DB)
 
 	systemRole := testutil.CreateTestRoleExact(t, app.DB, org.ID, "System Role", true, false, nil)
-	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("delete-sys")))
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("delete-sys")), testutil.WithSuperAdmin())
 
 	req := testutil.NewGETRequest(t)
 	req.RequestCtx.Request.Header.SetMethod("DELETE")
@@ -357,7 +357,7 @@ func TestApp_DeleteRole_WithAssignedUsers(t *testing.T) {
 	role := testutil.CreateTestRoleExact(t, app.DB, org.ID, "Role With Users", false, false, nil)
 	// Create a user with this role
 	testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("assigned-user")), testutil.WithRoleID(&role.ID))
-	adminUser := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("delete-used-role")))
+	adminUser := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("delete-used-role")), testutil.WithSuperAdmin())
 
 	req := testutil.NewGETRequest(t)
 	req.RequestCtx.Request.Header.SetMethod("DELETE")
@@ -374,7 +374,7 @@ func TestApp_ListPermissions_Success(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
 	permissions := testutil.GetOrCreateTestPermissions(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("list-perms")))
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("list-perms")), testutil.WithSuperAdmin())
 
 	req := testutil.NewGETRequest(t)
 	req.RequestCtx.SetUserValue("user_id", user.ID)
@@ -412,7 +412,7 @@ func TestApp_ListPermissions_KeepsEveryCatalogKeyWithAGroup(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
 	testutil.GetOrCreateTestPermissions(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("list-perms-groups")))
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("list-perms-groups")), testutil.WithSuperAdmin())
 
 	req := testutil.NewGETRequest(t)
 	req.RequestCtx.SetUserValue("user_id", user.ID)

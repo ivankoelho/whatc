@@ -13,7 +13,7 @@ import MoneyInput from '@/components/sales/MoneyInput.vue'
 import XProcessLinkForm from '@/components/sales/XProcessLinkForm.vue'
 import SalesOpportunityDetailsDialog from '@/components/sales/SalesOpportunityDetailsDialog.vue'
 import { formatQuantity, parseDecimalInput } from '@/lib/salesUnits'
-import { getInitials, getAvatarGradient } from '@/lib/utils'
+import { getInitials, getAvatarGradient, formatDate } from '@/lib/utils'
 import { Pencil, MessageCircle, AlertTriangle } from 'lucide-vue-next'
 
 const props = defineProps<{ opportunity: SalesOpportunity; disabled?: boolean }>()
@@ -25,14 +25,14 @@ const emit = defineEmits<{
   'details-change': [opportunity: SalesOpportunity]
 }>()
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 
 const contactName = computed(() =>
   props.opportunity.contact?.profile_name || props.opportunity.contact?.phone_number || props.opportunity.contact_id)
 const sellerName = computed(() => props.opportunity.assigned_user?.full_name || '')
 const openedAt = computed(() => {
   const d = new Date(props.opportunity.opened_at)
-  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString(locale.value, { day: '2-digit', month: 'short' })
+  return Number.isNaN(d.getTime()) ? '' : formatDate(d)
 })
 
 // As 2 chaves fechadas de SalesDirecionamento (services/api.ts).

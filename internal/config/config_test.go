@@ -471,3 +471,46 @@ func TestUsageConfig_InvalidValuesFailTheLoad(t *testing.T) {
 		require.Error(t, err)
 	})
 }
+
+func TestOTPAllowLocalRelease_IsOffUnlessTheFileSaysTrue(t *testing.T) {
+	cases := []struct {
+		name, toml string
+		want       bool
+	}{
+		{"no config at all", "", false},
+		{"[otp] without the key", "[otp]\nmax_validity_minutes = 5\n", false},
+		{"explicit false", "[otp]\nallow_local_release = false\n", false},
+		{"explicit true", "[otp]\nallow_local_release = true\n", true},
+		{"text is not a boolean", "[otp]\nallow_local_release = \"true\"\n", false},
+		{"number is not a boolean", "[otp]\nallow_local_release = 1\n", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg, err := config.Load(writeConfig(t, c.toml))
+			require.NoError(t, err)
+			assert.Equal(t, c.want, cfg.OTP.AllowLocalRelease)
+		})
+	}
+}
+
+// The environment must never be able to switch the release on, with or without a file.
+func TestOTPAllowLocalRelease_TheEnvironmentCannotEnableIt(t *testing.T) {
+	for _, v := range []string{"true", "1", "TRUE"} {
+		t.Run("env="+v, func(t *testing.T) {
+			t.Setenv("WHATOMATE_OTP__ALLOW_LOCAL_RELEASE", v)
+			cfg, err := config.Load(writeConfig(t, ""))
+			require.NoError(t, err)
+			assert.False(t, cfg.OTP.AllowLocalRelease, "no file key: the environment alone is ignored")
+
+			cfg, err = config.Load(writeConfig(t, "[otp]\nallow_local_release = false\n"))
+			require.NoError(t, err)
+			assert.False(t, cfg.OTP.AllowLocalRelease, "the file says false: the environment cannot override it")
+		})
+	}
+	t.Run("the other [otp] settings still come from the environment", func(t *testing.T) {
+		t.Setenv("WHATOMATE_OTP__REQUIRE_VALID_UNTIL", "true")
+		cfg, err := config.Load(writeConfig(t, ""))
+		require.NoError(t, err)
+		assert.True(t, cfg.OTP.RequireValidUntil)
+	})
+}

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDateTime } from '@/lib/utils'
 import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -150,7 +151,10 @@ async function fetchTransfers() {
 
 async function fetchAgents() {
   try {
-    await usersStore.fetchUsers()
+    // The directory needs users:read; handing conversations over needs transfers:write. Use the list the person is
+    // allowed to read instead of failing for roles (SAC, Vendas) that can transfer but not browse users.
+    if (authStore.hasPermission('users', 'read')) await usersStore.fetchUsers()
+    else await usersStore.fetchAssignableAgents()
     agents.value = usersStore.users
       .filter((u) => u.is_active !== false)
       .map((u) => ({ id: u.id, full_name: u.full_name }))
@@ -161,7 +165,8 @@ async function fetchAgents() {
 
 async function fetchTeams() {
   try {
-    await teamsStore.fetchTeams()
+    if (authStore.hasPermission('teams', 'read')) await teamsStore.fetchTeams()
+    else await teamsStore.fetchTransferTeams()
     teams.value = teamsStore.teams.filter((t: Team) => t.is_active)
   } catch {
     teams.value = []
@@ -281,7 +286,7 @@ function viewChat(transfer: AgentTransfer) {
 }
 
 function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleString()
+  return formatDateTime(dateStr)
 }
 
 function getSourceBadge(source: string) {

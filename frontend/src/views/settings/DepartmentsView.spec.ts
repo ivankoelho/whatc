@@ -62,7 +62,7 @@ describe('DepartmentsView', () => {
     const buttons = document.body.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')
     Array.from(buttons).find(b => b.textContent!.trim() === 'Create')!.click()
     await flushPromises()
-    expect(api.create).toHaveBeenCalledWith({ name: 'ADM', active: true })
+    expect(api.create).toHaveBeenCalledWith({ name: 'ADM', active: true, commercial: false })
     expect(api.list).toHaveBeenCalledTimes(2)
   })
 

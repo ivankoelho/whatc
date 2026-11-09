@@ -182,6 +182,167 @@ POST /api/campaigns/{id}/recipients/import
 positional header `{{1}}` doesn't collide with body `{{1}}`. Omit the field
 entirely for templates without a header variable.
 
+### Authentication templates (one-time codes)
+
+For campaigns whose template category is `AUTHENTICATION`, each recipient may carry
+`valid_until`:
+
+```json
+{
+  "phone_number": "+5511999990001",
+  "template_params": { "1": "482913" },
+  "valid_until": "2030-01-01T10:05:00-03:00"
+}
+```
+
+- **Meaning:** the instant until which the system that **issued** the code (the one
+  that generates and validates it) says the code works. Whatomate does not generate,
+  validate or renew codes, and never assumes a validity the issuer did not give.
+- **Format:** RFC 3339 date-time **with a time zone** (`Z` or `±hh:mm`). Any offset is
+  accepted and stored in UTC, so `2030-01-01T10:05:00-03:00` and
+  `2030-01-01T13:05:00Z` are the same instant. A value in the past is rejected with
+  `400`.
+- **Effect:** the code is never sent after `valid_until`, nor later than
+  `otp.max_validity_minutes` (default 5) after it was uploaded; the earlier of the two
+  wins. This is checked right before the request to Meta, again on every retry
+  (a retry never extends the validity) and when a worker picks the job up late. A code
+  that can no longer be sent marks the recipient as failed with the reason
+  `otp_expired` and the stored code is deleted.
+- **Optional for now, and a risk:** without `valid_until` the request is still accepted,
+  but Whatomate cannot know whether the code is still valid. The code keeps the previous
+  behaviour (it is only deleted after 24 hours of retention) and **may be sent after the
+  issuer has already expired it**, for example when a campaign is started or scheduled
+  long after the import, or when a failed recipient is retried. This is a temporary
+  compatibility exception, not a safe default: always send `valid_until`.
+  When `otp.require_valid_until` is enabled, recipients of authentication campaigns
+  without `valid_until` are rejected with `400` and codes without it are not sent
+  (`otp_validity_missing`). The 24-hour retention is not a validity period.
+- Ignored for templates that are not `AUTHENTICATION`.
+- The code is stored encrypted and is never returned by the API.
+- A worker that cannot decrypt a code (key missing or wrong, or a damaged value) does
+  not delete it: the recipient fails with `otp_unavailable`, and after the key is
+  restored `retry-failed` sends it, as long as its validity has not passed.
+- `from-contacts` cannot be used with authentication templates (contacts carry no code);
+  use `recipients/import`.
+
+### One code, one send (and what "uncertain" means)
+
+Meta offers no idempotency key, so Whatomate cannot make a send "exactly once". What it
+guarantees locally for authentication campaigns:
+
+- Before calling Meta, a worker **claims** the recipient in PostgreSQL (one short
+  transaction that creates the masked, pending message and sets the recipient's
+  `message_id`, only while it is still `pending` with no claim). Only the worker that wins
+  the claim calls Meta; duplicate jobs and a second worker leave it alone. The transaction
+  is closed before the request is made, and the call has a deadline of its own (30 seconds).
+- What a failed request proves is decided by the Meta **error code** together with a 4xx
+  status, never by the status alone (Meta's reference does not map HTTP statuses to "not
+  sent"):
+  - **Refused** (`100`, `131008`, `131009`, `131021`, `131047`, `131051`, `132000`,
+    `132001`, `132005`, `132007`, `132012`, `132015`, `132016`, `190`, `368`), a failure
+    before the request was built, or a connection that was never established: provably not
+    sent. The claim is released and `retry-failed` may try again (error prefix
+    `meta_refused`); the sealed code is kept until its validity ends.
+  - **Throttled** (`130429`, `131056`, `80007`): provably not sent and worth retrying
+    later (`meta_transient`). Same handling.
+  - **Anything else is unknown**: timeouts, connection resets, 408, 425, any 5xx, a bare
+    429 or any other 4xx without a documented rejection code, an unreadable answer, or a
+    worker that stopped after claiming. The recipient is marked failed with
+    `delivery_uncertain`, **keeps its claim**, and the code is **never resent
+    automatically**: `retry-failed` skips it (and reports `skipped_uncertain`). Meta may
+    have delivered it.
+- A claim that is never resolved (the worker died) is found **in PostgreSQL**, with no job
+  having to come back from Redis: worker housekeeping runs every five minutes and declares
+  it `delivery_uncertain` once it is older than a live send can be (twice the Meta call's
+  timeout plus the time for the writes around it: 2 × (30 s + 30 s) by default). Both the
+  claim instant and its age are measured with the **database clock**, so workers whose own
+  clocks are off cannot make a live send look stuck. The update is atomic with that age
+  check, so a live worker is never overridden; if one is cut off and its answer arrives
+  late, the result is refused and the recipient stays blocked. Marking a delivery uncertain
+  changes the recipient and its message in one transaction.
+- **Shutdown.** A worker that is stopping makes no new claim and no new Meta call: a job
+  that has not claimed yet is left for the next process, and one that claimed but has not
+  made its request yet has its claim undone (the recipient goes back to pending). A request
+  that is already in flight is allowed to finish within its own timeout, and the worker
+  waits for it for a bounded time (the call's timeout plus 15 s) before exiting. If the
+  process is killed before the answer arrives, the claim stays and is resolved as
+  `delivery_uncertain`.
+- A confirmed send is recorded on the message created by the claim (no duplicate messages),
+  and delivery and read receipts update it as for any message. The stored code is cleared
+  by the **same write** that records the send, so a code is never kept after a confirmed
+  send and a separate, later statement can never erase the code of a newer attempt. If
+  that write fails, nothing is committed and the code stays (the claim is resolved as
+  uncertain, never resent). Uncertain, refused and `otp_unavailable` states keep the code.
+- Each send attempt is its own message record, and finished attempts stay in the history
+  as `failed`. `retry-failed` never turns them back into `pending`; a new attempt creates
+  a new record, and the campaign's failed counter counts only what is still failed
+  (recipients with an uncertain delivery).
+
+#### Reconciling an uncertain delivery
+
+`whatomate otp-uncertain` lists these recipients (phone shown as its last four digits),
+including claims that are stuck and not yet resolved. Listing is read-only and always
+available.
+
+**Releasing is disabled by default.** It only works when the configuration **file** has
+
+```toml
+[otp]
+allow_local_release = true
+```
+
+An absent key, `false`, a value that is not a TOML boolean, and the environment
+(`WHATOMATE_OTP__ALLOW_LOCAL_RELEASE` is ignored on purpose) all mean *disabled*. The
+check lives in the release function itself, not only in the command, and it runs before
+anything is read or written, dry runs included. Enabling it is an **exceptional**
+decision: it requires administrative control of the server and its configuration, and it
+does not authenticate the operator it records (see below). Switch it back off when done.
+
+To let one be sent again, **first confirm with Meta's logs or the customer that the code
+was not delivered**, then:
+
+```bash
+whatomate otp-uncertain -release <recipient-id> -operator admin@example.com \
+  -reason "no delivery in the Meta message log" -confirm-not-delivered -apply
+```
+
+- Without `-apply` it only checks and reports. `-confirm-not-delivered`, `-operator` and
+  `-reason` are required.
+- `-operator` must be a **real, active user of the campaign's organization** with the
+  `campaigns:write` permission (or a super admin). The reason is audited and must not
+  contain a code.
+- **`-operator` does not authenticate anyone.** It is an e-mail typed on a command line:
+  the tool checks that it names a user who is allowed to edit campaigns, but it cannot
+  know who is actually at the keyboard. The audit entry therefore records a **declared**
+  operator, not necessarily the person who ran the command, and must not be treated as
+  proof of who authorized a resend.
+- The local release needs administrative access to the server and to the database (the
+  command reads the application's configuration and writes to PostgreSQL directly). That
+  reduces who can run it; it does not give a trustworthy record of who did. A release
+  that is authenticated and attributed to the signed-in user through the API **is not
+  implemented yet**. Until it is, treat releasing as a controlled operational action
+  (restricted accounts on the server, a ticket or second approver outside the tool), and
+  decide deliberately whether to allow it at all in production.
+- It refuses when the code is no longer valid (or no longer stored).
+- The release is a compare-and-set and an entry in the audit log (operator, recipient,
+  campaign, date, reason) written in the **same transaction**: no audit, no release.
+- It queues nothing. Only an explicit `retry-failed` sends it again.
+
+### Deploying and operating (authentication campaigns)
+
+- **Server and worker must run the same version, the same `app.encryption_key` and the
+  same `[otp]` settings.** The server stores the codes sealed and queues them sealed; a
+  worker from an older version would read the sealed value as a template parameter and
+  fail every recipient (nothing is sent, but nothing is delivered either). The embedded
+  workers (`server -workers N`) always match the server; separately started `worker`
+  processes must be upgraded together with it.
+- Drain or pause authentication campaigns before upgrading or rolling back.
+- Start and retry are atomic: concurrent requests for the same campaign enqueue each
+  recipient once and the extra requests get `409`.
+
+The CSV import in the UI accepts a `valid_until` column for these templates, and the
+import dialog has an optional "valid until" field for recipients without their own.
+
 ### Response
 
 ```json

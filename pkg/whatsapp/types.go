@@ -58,9 +58,10 @@ func ParseMetaAPIError(statusCode int, respBody []byte) error {
 		if apiErr.Error.ErrorUserMsg != "" {
 			errMsg += " - " + apiErr.Error.ErrorUserMsg
 		}
-		return fmt.Errorf("%s", errMsg)
+		return &APIError{Status: statusCode, Code: apiErr.Error.Code, msg: errMsg}
 	}
-	return fmt.Errorf("API returned status %d: %s", statusCode, string(respBody))
+	// Not a Meta error object: the status says what happened; the raw body is never put in the error.
+	return &APIError{Status: statusCode, msg: fmt.Sprintf("API returned status %d", statusCode)}
 }
 
 // TemplateResponse represents response from template submission

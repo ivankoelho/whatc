@@ -185,7 +185,7 @@ func (c *RedisConsumer) Consume(ctx context.Context, handler JobHandler) error {
 				}
 
 				// Acknowledge the message
-				if err := c.client.XAck(ctx, StreamName, ConsumerGroup, msg.ID).Err(); err != nil {
+				if err := c.ackAndDelete(ctx, msg.ID); err != nil {
 					c.log.Error("Failed to ACK message", "error", err, "message_id", msg.ID)
 				}
 			}
@@ -238,7 +238,7 @@ func (c *RedisConsumer) claimPendingMessages(ctx context.Context, handler JobHan
 			}
 
 			// Acknowledge the message
-			if err := c.client.XAck(ctx, StreamName, ConsumerGroup, msg.ID).Err(); err != nil {
+			if err := c.ackAndDelete(ctx, msg.ID); err != nil {
 				c.log.Error("Failed to ACK claimed message", "error", err, "message_id", msg.ID)
 			}
 		}
@@ -276,4 +276,13 @@ func (c *RedisConsumer) processMessage(ctx context.Context, msg redis.XMessage, 
 // Close closes the consumer connection
 func (c *RedisConsumer) Close() error {
 	return nil // Redis client is managed externally
+}
+
+// ackAndDelete acknowledges a processed job and removes it from the stream, so
+// job payloads (which may carry sealed secrets) do not accumulate in Redis.
+func (c *RedisConsumer) ackAndDelete(ctx context.Context, id string) error {
+	if err := c.client.XAck(ctx, StreamName, ConsumerGroup, id).Err(); err != nil {
+		return err
+	}
+	return c.client.XDel(ctx, StreamName, id).Err()
 }

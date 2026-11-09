@@ -60,13 +60,28 @@ type ChatAttachmentResponse struct {
 	DurationMs *int      `json:"duration_ms,omitempty"`
 	// PendingTTLMs is only on the upload response: the pending file is guaranteed for this long.
 	PendingTTLMs int64 `json:"pending_ttl_ms,omitempty"`
+	// ScanStatus is the antimalware verdict: only "clean" can be opened.
+	ScanStatus string `json:"scan_status"`
 }
 
-func chatAttachmentResponse(a models.ChatAttachment) ChatAttachmentResponse {
+func chatAttachmentResponse(a models.ChatAttachment, scanStatus string) ChatAttachmentResponse {
 	return ChatAttachmentResponse{
 		ID: a.ID, Kind: a.Kind, Name: a.Name, Mime: a.Mime, Size: a.SizeBytes,
-		Width: a.Width, Height: a.Height, DurationMs: a.DurationMs,
+		Width: a.Width, Height: a.Height, DurationMs: a.DurationMs, ScanStatus: scanStatus,
 	}
+}
+
+// chatScanStatuses reads the verdicts of a set of attachments (all of one organization) in one query.
+func (a *App) chatScanStatuses(files map[uuid.UUID][]models.ChatAttachment) map[uuid.UUID]string {
+	var ids []uuid.UUID
+	var org uuid.UUID
+	for _, list := range files {
+		for _, f := range list {
+			ids = append(ids, f.ID)
+			org = f.OrganizationID
+		}
+	}
+	return a.scanStatuses(org, models.ScanSourceChatAttachment, ids)
 }
 
 // chatUploadAllowed is a fixed one-minute window per person. It fails open when
@@ -125,7 +140,18 @@ func (a *App) UploadChatAttachment(r *fastglue.Request) error {
 	}
 
 	wantAudio := len(form.Value["kind"]) > 0 && form.Value["kind"][0] == "audio"
-	info, ierr := inspectChatFile(data, fh.Filename, wantAudio)
+	durationRaw := ""
+	if len(form.Value["duration_ms"]) > 0 {
+		durationRaw = form.Value["duration_ms"][0]
+	}
+	return a.finishChatUpload(r, orgID, userID, ch, data, fh.Filename, wantAudio, durationRaw)
+}
+
+// finishChatUpload inspects the bytes, stores the file and records it as a pending
+// attachment of the channel. Both the upload from the computer and the import from
+// Nextcloud end here, so they obey the same type, size and access rules.
+func (a *App) finishChatUpload(r *fastglue.Request, orgID, userID uuid.UUID, ch *models.ChatChannel, data []byte, filename string, wantAudio bool, durationRaw string) error {
+	info, ierr := inspectChatFile(data, filename, wantAudio)
 	switch ierr {
 	case nil:
 	case errFileType:
@@ -140,15 +166,15 @@ func (a *App) UploadChatAttachment(r *fastglue.Request) error {
 	sum := sha256.Sum256(data)
 	att := models.ChatAttachment{
 		ID: uuid.New(), OrganizationID: orgID, ChannelID: ch.ID, UploaderID: userID,
-		Kind: info.Kind, Name: sanitizeChatFileName(fh.Filename, info.Ext), Mime: info.Mime,
+		Kind: info.Kind, Name: sanitizeChatFileName(filename, info.Ext), Mime: info.Mime,
 		SizeBytes: int64(len(data)), SHA256: hex.EncodeToString(sum[:]),
 	}
 	att.StoragePath = filepath.Join(chatAttachmentsRoot, orgID.String(), ch.ID.String(), att.ID.String()+info.Ext)
 	if info.Width > 0 {
 		att.Width, att.Height = &info.Width, &info.Height
 	}
-	if info.Kind == "audio" && len(form.Value["duration_ms"]) > 0 {
-		if ms, e := strconv.Atoi(form.Value["duration_ms"][0]); e == nil && ms >= 0 {
+	if info.Kind == "audio" && durationRaw != "" {
+		if ms, e := strconv.Atoi(durationRaw); e == nil && ms >= 0 {
 			if ms > chatMaxAudioMillis {
 				ms = chatMaxAudioMillis
 			}
@@ -162,9 +188,13 @@ func (a *App) UploadChatAttachment(r *fastglue.Request) error {
 		a.Log.Error("Failed to store chat attachment", "error", werr)
 		return a.sendChatError(r, errChatStorage, "upload the file")
 	}
+	gate := a.chatGateFor(userID, orgID, ch)
 	txErr := a.withLockedChannel(orgID, ch.ID, chatLockShare, func(tx *gorm.DB, locked *models.ChatChannel) error {
-		if !a.canAccessChatChannelDB(tx, userID, orgID, locked) {
+		if !a.canAccessLocked(tx, gate, userID, orgID, locked) {
 			return errChatNotFound
+		}
+		if !a.canPostLocked(tx, gate, userID, orgID, locked) {
+			return errChatForbidden
 		}
 		if locked.ArchivedAt != nil {
 			return errChatArchived
@@ -180,13 +210,17 @@ func (a *App) UploadChatAttachment(r *fastglue.Request) error {
 		if pending >= chatMaxPending {
 			return errChatTooManyAtt
 		}
-		return tx.Create(&att).Error
+		if err := tx.Create(&att).Error; err != nil {
+			return err
+		}
+		return registerScanTx(tx, orgID, models.ScanSourceChatAttachment, att.ID, att.StoragePath, att.SHA256, att.SizeBytes)
 	})
 	if txErr != nil {
 		_ = a.removeChatFile(att.StoragePath)
 		return a.sendChatError(r, txErr, "upload the file")
 	}
-	resp := chatAttachmentResponse(att)
+	a.ScanNow(models.ScanSourceChatAttachment, att.ID) // small files are cleared (or blocked) before the answer
+	resp := chatAttachmentResponse(att, a.fileStatus(orgID, models.ScanSourceChatAttachment, att.ID, att.StoragePath))
 	resp.PendingTTLMs = chatPendingGrace.Milliseconds()
 	return r.SendEnvelope(resp)
 }
@@ -329,6 +363,10 @@ func (a *App) DownloadChatAttachment(r *fastglue.Request) error {
 			return notFound()
 		}
 	}
+	// Before anything is read, ranged or answered 304: only a clean verdict opens the file.
+	if !a.requireCleanFile(r, orgID, models.ScanSourceChatAttachment, att.ID, att.StoragePath) {
+		return nil
+	}
 	full, serr := a.resolveSafeStoragePath(att.StoragePath)
 	if serr != nil {
 		return notFound()
@@ -377,7 +415,12 @@ func (a *App) DownloadChatAttachment(r *fastglue.Request) error {
 	hd.Set("Content-Security-Policy", "default-src 'none'; sandbox")
 	hd.Set("Cross-Origin-Resource-Policy", "same-origin")
 	hd.Set("Accept-Ranges", "bytes")
-	hd.Set("Content-Disposition", chatContentDisposition(att))
+	disp := chatContentDisposition(att)
+	// ?inline=1 asks for a preview of a PDF or plain text; the stored type was detected from the bytes at upload.
+	if string(r.RequestCtx.QueryArgs().Peek("inline")) == "1" && (att.Mime == "application/pdf" || att.Mime == "text/plain") {
+		disp = strings.Replace(disp, "attachment;", "inline;", 1)
+	}
+	hd.Set("Content-Disposition", disp)
 	r.RequestCtx.SetStatusCode(status)
 	r.RequestCtx.SetBodyStream(&sectionCloser{io.NewSectionReader(f, start, length), f}, int(length))
 	return nil
@@ -557,6 +600,7 @@ func (a *App) CleanupChatAttachments(now time.Time) ChatCleanupResult {
 		var batch []models.ChatAttachment
 		a.DB.Raw(`SELECT a.* FROM chat_attachments a JOIN chat_messages m ON m.id = a.message_id
 			WHERE a.purged_at IS NULL AND m.deleted_at IS NOT NULL AND m.deleted_at < ? AND a.id > ?
+			  AND NOT `+heldChatAttachmentSQL+`
 			ORDER BY a.id LIMIT ?`, deletedCutoff, last, chatCleanupBatch).Scan(&batch)
 		if len(batch) == 0 {
 			break

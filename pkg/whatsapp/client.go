@@ -1,6 +1,7 @@
 package whatsapp
 
 import (
+	"errors"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -68,15 +69,33 @@ func (c *Client) getBaseURL() string {
 }
 
 // doRequest performs an HTTP request to the Meta API
+// preflightKey carries an optional check that runs immediately before a request is handed to the HTTP client.
+type preflightKey struct{}
+
+// WithPreflight returns a context whose requests are checked, as late as this package can, right before they are
+// handed to the HTTP client: if the check returns an error the request is NOT made and the error is classified as
+// "never sent" (so the caller may record a proven failure). It narrows, and does not remove, the gap between the
+// caller's last verification and the write on the network: nothing here can stop a process that is frozen after the
+// check returns.
+func WithPreflight(ctx context.Context, check func(context.Context) error) context.Context {
+	return context.WithValue(ctx, preflightKey{}, check)
+}
+
 func (c *Client) doRequest(ctx context.Context, method, url string, body any, accessToken string) ([]byte, error) {
 	var reqBody io.Reader
+	var jsonBody []byte
 	if body != nil {
-		jsonBody, err := json.Marshal(body)
+		var err error
+		jsonBody, err = json.Marshal(body)
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal request body: %w", err)
 		}
 		reqBody = bytes.NewBuffer(jsonBody)
 	}
+	// Values that must never come back in an error or a log line (one-time
+	// codes): errors leave this function already redacted, so every caller's
+	// logging is covered at once.
+	secrets := append(requestSecrets(ctx, jsonBody), accessToken)
 
 	req, err := http.NewRequestWithContext(ctx, method, url, reqBody)
 	if err != nil {
@@ -86,19 +105,25 @@ func (c *Client) doRequest(ctx context.Context, method, url string, body any, ac
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Content-Type", "application/json")
 
+	if check, ok := ctx.Value(preflightKey{}).(func(context.Context) error); ok && check != nil {
+		if err := check(ctx); err != nil {
+			return nil, NewNotSentError(fmt.Errorf("the request was not made: %w", err))
+		}
+	}
+
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
+		return nil, redactError(fmt.Errorf("request failed: %w", err), secrets)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
+		return nil, redactError(fmt.Errorf("failed to read response body: %w", err), secrets)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, ParseMetaAPIError(resp.StatusCode, respBody)
+		return nil, parseMetaAPIErrorRedacted(resp.StatusCode, respBody, secrets)
 	}
 
 	return respBody, nil
@@ -340,7 +365,7 @@ func (c *Client) UploadMedia(ctx context.Context, account *Account, data []byte,
 	}
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return "", fmt.Errorf("media upload failed with status %d: %s", resp.StatusCode, string(respBody))
+		return "", errors.New(statusText("media upload failed", resp.StatusCode, respBody, account.AccessToken))
 	}
 
 	var uploadResp UploadMediaResponse
@@ -499,7 +524,7 @@ func (c *Client) ResumableUpload(ctx context.Context, account *Account, data []b
 	}
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return "", fmt.Errorf("upload failed with status %d: %s", resp.StatusCode, string(respBody))
+		return "", errors.New(statusText("upload failed", resp.StatusCode, respBody, account.AccessToken))
 	}
 
 	var finishResp ResumableUploadFinishResponse
@@ -617,11 +642,7 @@ func (c *Client) ExchangeCodeForToken(ctx context.Context, code, appID, appSecre
 
 	if resp.StatusCode != http.StatusOK {
 		// Parse Meta error using same pattern as doRequest
-		var metaErr MetaAPIError
-		if json.Unmarshal(respBody, &metaErr) == nil && metaErr.Error.Message != "" {
-			return "", fmt.Errorf("token exchange failed: %s", metaErr.Error.Message)
-		}
-		return "", fmt.Errorf("token exchange failed with status %d: %s", resp.StatusCode, string(respBody))
+		return "", errors.New(statusText("token exchange failed", resp.StatusCode, respBody, code, appSecret))
 	}
 
 	var tokenResp TokenExchangeResponse

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
@@ -17,6 +18,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/storage"
 	"github.com/shridarpatil/whatomate/internal/tts"
 	"github.com/shridarpatil/whatomate/internal/websocket"
+	"github.com/shridarpatil/whatomate/internal/antimalware"
 	"github.com/shridarpatil/whatomate/internal/usage"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/valyala/fasthttp"
@@ -27,6 +29,10 @@ import (
 
 // App holds all dependencies for handlers
 type App struct {
+	// verifyOpenSendGuard replaces the check of the open-send index (tests only; nil = database.VerifyOpenSendIntentGuard).
+	verifyOpenSendGuard func(tx *gorm.DB) error
+	// dbClockForTest replaces the read of the database clock (tests only; nil = SELECT NOW()).
+	dbClockForTest func() (time.Time, error)
 	Config            *config.Config
 	DB                *gorm.DB
 	Redis             *redis.Client
@@ -54,6 +60,14 @@ type App struct {
 	// Usage records the WhatsApp consumption ledger and contact status history.
 	// nil or disabled (usage.record_enabled=false) = nothing is recorded.
 	Usage *usage.Recorder
+	// Scanner is the antimalware engine (ClamAV). nil = not configured: files stay pending and closed.
+	Scanner antimalware.Scanner
+	// MediaFetcher downloads media from URLs people supply (nil = the safe client of internal/safehttp).
+	MediaFetcher MediaFetcher
+	scanVer scanVersionCache
+	// audioGate is what telephony asks before playing a file (see audio_gate.go).
+	audioGate     *AudioGate
+	audioGateOnce sync.Once
 	// wg tracks background goroutines for graceful shutdown
 	wg sync.WaitGroup
 }
@@ -265,6 +279,15 @@ func (a *App) requirePermission(r *fastglue.Request, userID uuid.UUID, resource,
 		return errEnvelopeSent
 	}
 	return nil
+}
+
+// can is requireAuth for handlers that resolve org/user themselves: it writes
+// the 401/403 envelope and returns false when the caller lacks resource:action.
+// The route-level RBAC hook in main.go does nothing, so every handler that
+// changes org configuration must call this (or requireAuth) first.
+func (a *App) can(r *fastglue.Request, resource, action string) bool {
+	_, _, err := a.requireAuth(r, resource, action)
+	return err == nil
 }
 
 // requireAuth extracts the organization ID and user ID from the request and

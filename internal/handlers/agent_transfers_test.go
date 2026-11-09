@@ -182,12 +182,9 @@ func TestApp_ListAgentTransfers_AgentRoleFiltering(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &result))
 
-	// Transfer visibility now mirrors conversation visibility (canView), rather
-	// than the old divergent transfers:write gate. Flag off, this fixture agent
-	// holds contacts:read, so it can view every contact's conversation — and
-	// therefore every transfer for those contacts. All three transfers reference
-	// the same contact the agent can view, so all three are listed.
-	assert.Equal(t, int64(3), result.Data.TotalCount)
+	// Transfer visibility mirrors conversation visibility, and that is strict: the agent
+	// sees the attendance assigned to them, not the colleague's nor the unrouted general queue.
+	assert.Equal(t, int64(1), result.Data.TotalCount)
 }
 
 func TestApp_ListAgentTransfers_Pagination(t *testing.T) {
@@ -539,6 +536,9 @@ func TestApp_AssignAgentTransfer_AgentSelfAssign(t *testing.T) {
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
 	agent := createTestAgent(t, app, org.ID)
 	transfer := createTestTransfer(t, app, org.ID, contact.ID, account.Name, models.TransferStatusActive, nil)
+	// The attendance waits in a team queue the agent belongs to (an agent outside it cannot claim it).
+	team := createTeamWithMember(t, app, org.ID, agent.ID)
+	require.NoError(t, app.DB.Model(transfer).Update("team_id", team.ID).Error)
 
 	// Agent self-assigns (no agent_id in body means assign to self)
 	req := testutil.NewJSONRequest(t, map[string]any{})
@@ -564,6 +564,8 @@ func TestApp_AssignAgentTransfer_AgentCannotAssignToOthers(t *testing.T) {
 	agent := createTestAgent(t, app, org.ID)
 	otherAgent := createTestAgent(t, app, org.ID)
 	transfer := createTestTransfer(t, app, org.ID, contact.ID, account.Name, models.TransferStatusActive, nil)
+	teamQ := createTeamWithMember(t, app, org.ID, agent.ID)
+	require.NoError(t, app.DB.Model(transfer).Update("team_id", teamQ.ID).Error)
 
 	// Agent tries to assign to another agent - should fail
 	req := testutil.NewJSONRequest(t, map[string]any{

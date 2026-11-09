@@ -7,6 +7,8 @@ const (
 	AuditActionCreated AuditAction = "created"
 	AuditActionUpdated AuditAction = "updated"
 	AuditActionDeleted AuditAction = "deleted"
+	// AuditActionAccessed: a sensitive read worth tracing (a document download, an export).
+	AuditActionAccessed AuditAction = "accessed"
 )
 
 // ContactStatus represents the service state of a conversation.

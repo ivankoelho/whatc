@@ -134,6 +134,12 @@ func GetMigrationModels() []MigrationModel {
 
 		// CRM de ocorrências
 		{"OccurrenceStage", &models.OccurrenceStage{}},
+		{"OccurrenceParticipant", &models.OccurrenceParticipant{}},
+		{"OccurrenceTransfer", &models.OccurrenceTransfer{}},
+		{"OccurrenceChannelConfig", &models.OccurrenceChannelConfig{}},
+		{"OccurrenceNotification", &models.OccurrenceNotification{}},
+		{"OccurrenceNotificationAttempt", &models.OccurrenceNotificationAttempt{}},
+		{"OccurrenceSendIntent", &models.OccurrenceSendIntent{}},
 		{"OccurrenceCategory", &models.OccurrenceCategory{}},
 		{"OccurrenceWhatHappened", &models.OccurrenceWhatHappened{}},
 		{"OccurrenceSLAPolicy", &models.OccurrenceSLAPolicy{}},
@@ -153,7 +159,18 @@ func GetMigrationModels() []MigrationModel {
 		{"ChatMessage", &models.ChatMessage{}},
 		{"ChatRead", &models.ChatRead{}},
 		{"ChatMessageReaction", &models.ChatMessageReaction{}},
+		{"ChatPollVote", &models.ChatPollVote{}},
+		{"OccurrenceFile", &models.OccurrenceFile{}},
+		{"NextcloudSettings", &models.NextcloudSettings{}},
+		{"NextcloudCredential", &models.NextcloudCredential{}},
 		{"ChatAttachment", &models.ChatAttachment{}},
+		{"FileScan", &models.FileScan{}},
+		{"MetaMedia", &models.MetaMedia{}},
+		{"RetentionPolicy", &models.RetentionPolicy{}},
+		{"RetentionHold", &models.RetentionHold{}},
+		{"RetentionHoldEvent", &models.RetentionHoldEvent{}},
+		{"RetentionRun", &models.RetentionRun{}},
+		{"RetentionItem", &models.RetentionItem{}},
 
 		// Help Desk — unidade e departamento
 		{"Unit", &models.Unit{}},
@@ -187,6 +204,10 @@ func AutoMigrate(db *gorm.DB) error {
 func RunMigrationWithProgress(db *gorm.DB, adminCfg *config.DefaultAdminConfig) error {
 	// Silence GORM logging during migration
 	silentDB := db.Session(&gorm.Session{Logger: logger.Default.LogMode(logger.Silent)})
+
+	// Whether the "commercial" columns already existed before this boot: the name-based classification runs only
+	// when they are introduced, never again, so an administrator's later choice is not overridden at a restart.
+	commercialExisted := CommercialColumnsExist(db)
 
 	migrationModels := GetMigrationModels()
 	indexes := getIndexes()
@@ -227,6 +248,10 @@ func RunMigrationWithProgress(db *gorm.DB, adminCfg *config.DefaultAdminConfig) 
 		}
 		currentStep++
 	}
+
+	// The one-open-send index is created by the caller as the LAST step of the whole -migrate boot (after the seeds
+	// and the backfills): if it cannot be created, everything else is already in place, including the permission
+	// that lets a person settle the sends in the way. See EnsureOpenSendIntentUniqueness.
 
 	// One active transfer per contact. Never auto-fixes data: with duplicates
 	// present the index is skipped and the offending rows are reported.
@@ -278,6 +303,12 @@ func RunMigrationWithProgress(db *gorm.DB, adminCfg *config.DefaultAdminConfig) 
 		return err
 	}
 
+	// Classify existing sales teams and departments by name, once, when the commercial flag is introduced
+	if err := ApplyCommercialBackfill(silentDB, commercialExisted); err != nil {
+		fmt.Println("Failed to backfill commercial departments")
+		return err
+	}
+
 	// Derive contact_status for contacts that predate the column
 	if err := BackfillContactStatus(silentDB); err != nil {
 		fmt.Printf("\n  \033[31m✗ Failed to backfill contact_status\033[0m\n\n")
@@ -312,6 +343,28 @@ func coreIndexes() []string {
 		`ALTER TABLE chatbot_sessions ALTER COLUMN phone_number TYPE varchar(50)`,
 		`ALTER TABLE agent_transfers ALTER COLUMN phone_number TYPE varchar(50)`,
 		`ALTER TABLE bulk_message_recipients ALTER COLUMN phone_number TYPE varchar(50)`,
+		// Occurrence stages: name uniqueness per scope (organization-wide vs team) and
+		// general-state backfill. Additive and idempotent; rows already classified are
+		// left alone, so admin edits survive a re-run.
+		`DROP INDEX IF EXISTS idx_occ_stage_org_name`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_occ_stage_org_name_org ON occurrence_stages(organization_id, name) WHERE team_id IS NULL AND deleted_at IS NULL`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_occ_stage_team_name ON occurrence_stages(organization_id, team_id, name) WHERE team_id IS NOT NULL AND deleted_at IS NULL`,
+		// Automations: one configuration per scope and event (team, unit, organization).
+		`DROP INDEX IF EXISTS idx_occ_channel_org`,
+		`DROP INDEX IF EXISTS idx_occ_channel_unit`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_occ_auto_org ON occurrence_channel_configs(organization_id, purpose, event) WHERE unit_id IS NULL AND team_id IS NULL AND deleted_at IS NULL`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_occ_auto_unit ON occurrence_channel_configs(organization_id, unit_id, purpose, event) WHERE unit_id IS NOT NULL AND team_id IS NULL AND deleted_at IS NULL`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_occ_auto_team ON occurrence_channel_configs(organization_id, team_id, purpose, event) WHERE team_id IS NOT NULL AND deleted_at IS NULL`,
+		// Intents written before the send pipeline existed were only "prepared": keep them visible and inert.
+		`UPDATE occurrence_notifications SET status = 'prepared' WHERE status = 'prepared'`,
+		`UPDATE occurrence_stages SET general_state = CASE WHEN is_closing THEN 'resolved' WHEN is_initial THEN 'new' WHEN lower(name) = 'aguardando cliente' THEN 'waiting_customer' ELSE 'in_progress' END WHERE general_state = '' OR general_state IS NULL`,
+		`UPDATE occurrences o SET general_state = s.general_state FROM occurrence_stages s WHERE s.id = o.stage_id AND (o.general_state = '' OR o.general_state IS NULL)`,
+		// Cases attended by a team keep that team as their scope: a fact recorded on the
+		// source transfer, filled only where still empty. Cases without one stay restricted.
+		`UPDATE occurrences o SET team_id = t.team_id FROM agent_transfers t WHERE o.source_transfer_id = t.id AND o.team_id IS NULL AND t.team_id IS NOT NULL`,
+		`UPDATE occurrences o SET unit_id = t.unit_id FROM teams t WHERE o.team_id = t.id AND o.unit_id IS NULL AND t.unit_id IS NOT NULL`,
+		// One internal discussion per case.
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_channel_occurrence ON chat_channels(organization_id, occurrence_id) WHERE occurrence_id IS NOT NULL AND deleted_at IS NULL`,
 		// Indexes
 		`CREATE INDEX IF NOT EXISTS idx_messages_contact_created ON messages(contact_id, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id)`,
@@ -516,6 +569,39 @@ func MigrateUserOrganizations(db *gorm.DB) error {
 		FROM users u
 		LEFT JOIN user_organizations uo ON uo.user_id = u.id AND uo.organization_id = u.organization_id AND uo.deleted_at IS NULL
 		WHERE uo.id IS NULL AND u.deleted_at IS NULL
+	`).Error
+}
+
+// CommercialColumnsExist reports whether teams.commercial and departments.commercial are already in the schema.
+// It must be read BEFORE AutoMigrate adds them.
+func CommercialColumnsExist(db *gorm.DB) bool {
+	m := db.Migrator()
+	return m.HasColumn(&models.Team{}, "commercial") && m.HasColumn(&models.Department{}, "commercial")
+}
+
+// ApplyCommercialBackfill classifies existing teams and departments named Vendas/Comercial as commercial, but only
+// in the boot that introduces the columns (existedBefore == false). Every later boot does nothing, so flipping the
+// flag off (or on) from the screens is never undone by a restart.
+func ApplyCommercialBackfill(db *gorm.DB, existedBefore bool) error {
+	if existedBefore {
+		return nil
+	}
+	return BackfillCommercialDepartments(db)
+}
+
+// BackfillCommercialDepartments flags the departments named Vendas/Comercial as commercial, only in
+// organizations where no department is flagged yet, and the teams named alike. Call it through
+// ApplyCommercialBackfill: on its own it is NOT safe to run at every boot (it would redo the classification).
+func BackfillCommercialDepartments(db *gorm.DB) error {
+	// teams: the ones named like sales teams (the server also treats those as commercial when they have no department)
+	if err := db.Exec(`UPDATE teams SET commercial = true WHERE deleted_at IS NULL AND commercial = false AND (name ILIKE 'vendas%' OR name ILIKE 'comercial%')`).Error; err != nil {
+		return err
+	}
+	return db.Exec(`
+		UPDATE departments d SET commercial = true
+		WHERE d.deleted_at IS NULL AND d.commercial = false
+		  AND (d.name ILIKE 'vendas%' OR d.name ILIKE 'comercial%')
+		  AND NOT EXISTS (SELECT 1 FROM departments x WHERE x.organization_id = d.organization_id AND x.deleted_at IS NULL AND x.commercial = true)
 	`).Error
 }
 
@@ -811,7 +897,7 @@ func SeedSystemRolesForOrg(db *gorm.DB, orgID uuid.UUID) error {
 	}
 
 	if roleCount > 0 {
-		return nil // Already seeded
+		return SeedTeamProfilesForOrg(db, orgID)
 	}
 
 	// Get all permissions from database
@@ -863,6 +949,47 @@ func SeedSystemRolesForOrg(db *gorm.DB, orgID uuid.UUID) error {
 		}
 	}
 
+	return SeedTeamProfilesForOrg(db, orgID)
+}
+
+// SeedTeamProfilesForOrg creates the preset team roles the organization is
+// missing. It matches by name and never touches an existing role, so edits an
+// admin made to a profile survive every restart.
+func SeedTeamProfilesForOrg(db *gorm.DB, orgID uuid.UUID) error {
+	var permissions []models.Permission
+	if err := db.Find(&permissions).Error; err != nil {
+		return fmt.Errorf("failed to fetch permissions: %w", err)
+	}
+	permMap := make(map[string]models.Permission, len(permissions))
+	for _, p := range permissions {
+		permMap[p.Resource+":"+p.Action] = p
+	}
+
+	for _, tp := range models.TeamProfiles() {
+		var n int64
+		if err := db.Model(&models.CustomRole{}).Where("organization_id = ? AND name = ?", orgID, tp.Name).Count(&n).Error; err != nil {
+			return fmt.Errorf("failed to look up role %s: %w", tp.Name, err)
+		}
+		if n > 0 {
+			continue
+		}
+		role := models.CustomRole{
+			BaseModel:      models.BaseModel{ID: uuid.New()},
+			OrganizationID: orgID,
+			Name:           tp.Name,
+			Description:    tp.Description,
+		}
+		seen := map[string]bool{}
+		for _, key := range tp.Permissions {
+			if perm, ok := permMap[key]; ok && !seen[key] {
+				seen[key] = true
+				role.Permissions = append(role.Permissions, perm)
+			}
+		}
+		if err := db.Create(&role).Error; err != nil {
+			return fmt.Errorf("failed to create %s role: %w", tp.Name, err)
+		}
+	}
 	return nil
 }
 
