@@ -35,6 +35,10 @@ type AgentAssignmentConfig struct {
 	// released. Read from the organization's default row (whats_app_account = '').
 	AwayReassignEnabled   bool `gorm:"column:away_reassign_enabled;not null;default:false" json:"away_reassign_enabled"`
 	AwayReassignAfterMins int  `gorm:"column:away_reassign_after_mins;not null;default:10" json:"away_reassign_after_mins"`
+	// OfflineReleaseAfterMins is how long an agent may stay DISCONNECTED (closed tab, dropped
+	// network, sleeping laptop) before their attendances go back to the queue. Independent of
+	// the away tolerance above. Default 1 = the original fixed 60 s window.
+	OfflineReleaseAfterMins int `gorm:"column:offline_release_after_mins;not null;default:1" json:"offline_release_after_mins"`
 }
 
 // SLAConfig holds SLA tracking settings
