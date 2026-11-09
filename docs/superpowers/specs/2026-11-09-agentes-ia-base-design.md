@@ -1,131 +1,82 @@
-# Agentes de IA — Projeto 1: agente base (design)
+# Agentes de IA — MVP (design, rev. 2)
 
-Data: 2026-11-09. Base: `origin/development` @ `217f48b3`. Branch: `feature/agente-ia-base`.
+Data: 2026-11-09. Base: `origin/development` @ `217f48b3`. Branch local: `feature/agente-ia-base` (sem push).
 
-> Este é o **projeto 1 de 4** da iniciativa "levar o melhor do DeskcommCRM (MIT, `melgarafael/DeskcommCRM`) para o WhATC". Os outros três têm desenho próprio e dependem deste:
-> 2. Conhecimento e ferramentas (base de conhecimento, extensões HTTP do catálogo, consultas ao X2).
-> 3. Qualificação e região (endereço nas Unidades, CEP/localização, mover a oportunidade no funil de vendas).
-> 4. Copiloto do atendente (resumo na transferência, sugestão de resposta).
+> Rev. 2 reduz o escopo da rev. 1 a um **MVP demonstrável à diretoria e liberável em piloto**: um agente de IA que atende no WhatsApp, qualifica a intenção de compra, registra a oportunidade no CRM, transfere para a equipe da unidade e cala quando um humano assume. Tudo que não serve a esse caminho foi para a Fase 2 (§4).
 >
-> Marcação: **[decidido]** = dito pelo Ivan; **[minha escolha]** = decisão tomada por mim a pedido dele ("a partir da expertise em sistemas dessa natureza"), sujeita a revisão.
+> Marcação: **[decidido]** = dito pelo Ivan; **[minha escolha]** = decisão minha, sujeita a revisão. Contexto: iniciativa "levar o melhor do DeskcommCRM (MIT, `melgarafael/DeskcommCRM`) para o WhATC".
 
 ## 1. Intenção
 
-O WhATC já responde com IA dentro do chatbot, mas como um prompt livre único por organização/conta. Falta o que o Deskcomm tem de melhor: **agentes** com instruções estruturadas, que o modelo é obrigado a seguir, vários por organização, que **param no instante em que um humano assume**, com **teto de uso** por organização.
+O chatbot do WhATC já responde com IA, mas com um prompt livre. O MVP dá a ele a forma de **agente**: instruções estruturadas, qualificação de venda, registro no CRM, transferência à unidade certa, desligamento imediato quando um humano assume e controle de consumo. A estrutura existente é a prioridade: nada de módulo paralelo. **[decidido]**
 
-O objetivo comercial (Atacadão dos Pisos) é um agente que atende no WhatsApp, entende a intenção de compra e, nos projetos seguintes, qualifica e entrega ao vendedor da loja certa. Este projeto entrega o alicerce: o agente existe, é configurável, é seguro e é desligável.
+## 2. O que o agente faz (Fase 1) **[decidido]**
 
-## 2. O que já existe (não refazer)
+Recebe mensagens do WhatsApp; responde com IA mantendo o contexto; identifica a necessidade; pergunta para qualificar (produto, categoria, quantidade, metragem, ambiente e intenção de compra, conforme aplicável); registra o que coletou numa oportunidade do CRM; transfere ao vendedor/equipe da unidade com o histórico; para de responder quando um humano assume; registra consumo de IA e histórico das ações.
 
-Verificado em `origin/development`:
+## 3. Reaproveitado (verificado em `origin/development`)
 
-- `internal/ai`: interface `Provider` com OpenAI, Anthropic, Google e Groq; laço de ferramentas limitado (`toolloop`).
-- `ChatbotSettings.AI` (`models.AIConfig`): provedor, modelo, chave **por organização** (criptografada, só `resolveAIAPIKey` decifra), temperatura, `SystemPrompt`, histórico. A linha de `chatbot_settings` pode ser da organização (`whats_app_account = ''`) ou de uma conta de WhatsApp.
-- `completeAI` (`internal/handlers/ai_runtime.go`): **única porta** de toda chamada de IA; grava `AIUsageLog` (tokens, latência, erro, fontes de conhecimento).
-- `generateAIReply` (`chatbot_processor.go`): monta `SystemPrompt` + `AIContext` + bloco de conhecimento + histórico.
-- `AIContext` (texto fixo ou chamada de API), `internal/knowledge` (busca textual Postgres), `internal/aitools` (ferramentas governadas, confirmação do cliente, auditoria; inclui `request_agent_transfer`).
-- Nó `ai_response` nos fluxos do chatbot (`chatbot_graph_runner.go`).
-- `hasActiveAgentTransfer`: com transferência ativa o chatbot não processa a mensagem; existe `TransferSourceAgentInitiated` (humano que escreve primeiro cria transferência).
+- Chatbot, nó `ai_response`, `generateAIReply` (`chatbot_processor.go`), `completeAI` (única porta de IA) e `AIUsageLog` (`ai_usage.go`).
+- Provedores OpenAI, Anthropic, Google e Groq; chave **por organização**, criptografada (`resolveAIAPIKey`).
+- `AIContext` (contextos de IA), `internal/knowledge` (busca textual).
+- Oportunidades: `createOrRetriggerSalesOpportunity` (`sales_opportunities.go:38`) cria ou reabre sem duplicar; campos `Interest` (texto), `EstimatedQuantity` e `UnitOfMeasure` (UN, M, M2, KG, PCT, CX). Produto, categoria, ambiente e intenção cabem em `Interest`; **sem migração no CRM**.
+- Transferência: `transferToQueue` (devolve `TransferResult` com `Outcome`), índice único `idx_agent_transfers_one_active_per_contact` (um atendimento ativo por contato), `hasActiveAgentTransfer`, `createTransferToTeam`, `Assigner.AssignToTeam`, `TransferSourceAgentInitiated`.
+- Equipes (`Team.UnitID`), unidades (`Unit`), `WhatsAppAccount.DefaultTeamID`, permissões do chatbot, isolamento por organização.
 
-## 3. Objetivos
+## 4. Fora do MVP (Fase 2) **[decidido]**
 
-1. **Vários agentes de IA por organização**, dentro do chatbot de IA atual, sem módulo novo. **[decidido]**
-2. Cada agente tem **campos de instrução estruturados**, seguidos à risca. **[decidido]**
-3. **Humano assume → agente desliga imediatamente** naquela conversa e não volta sozinho. **[decidido]**
-4. O agente **nunca promete** preço, prazo, estoque ou reserva. **[decidido]**
-5. **Teto de uso por organização**, com parada segura ao estourar. **[minha escolha]**
-6. Compatibilidade total: quem não criar agente continua com o `SystemPrompt` de hoje, sem mudança de comportamento.
+Integração avançada com o Deskcomm; agentes por departamento; agente por nó de fluxo ou por conta; consulta de produtos e estoque (X2, catálogo); pedidos; multiagente; memória de longo prazo; autonomia avançada; analytics de agentes; construtor visual; roteamento por CEP ou região; copiloto do atendente. A arquitetura só **não impede** esses itens: a tabela de agentes aceita vários, e a montagem do prompt é um ponto único onde ferramentas entrarão.
 
-## 4. Não-objetivos (neste projeto)
+## 5. Decisões
 
-- RAG com vetores, extensões HTTP novas, consultas ao X2, endereço nas Unidades, mover oportunidade no funil, sugestão de resposta ao atendente: projetos 2–4.
-- Histórico/versionamento de instruções com "voltar versão" (o Deskcomm tem; fica para depois, **[minha escolha]**).
-- Módulo, menu ou tela de "Agentes de IA" separada do chatbot **[decidido]**.
-- Custo em reais por chamada (exige tabela de preços por modelo; ver §6.5).
+### 5.1 Agente **[decidido]** + **[minha escolha]**
+Tabela `ai_agents` por organização, com: nome, objetivo, instruções/comportamento, dados da empresa, tom, regras e situações de transferência, ativo. O **agente padrão** é um campo de `ChatbotSettings` (`default_ai_agent_id`) e vale para a conta daquela linha. Modelo, temperatura e tokens vêm de `ChatbotSettings.AI`. Sem agente padrão ativo, o caminho atual (`SystemPrompt` livre) fica **idêntico**.
 
-## 5. Anti-objetivos (seria fracasso mesmo que "funcione")
+### 5.2 Roteamento comercial por unidade **[decidido: respeitar a unidade; sem CEP]**
+Verificado: a distribuição existente (`createTransferToTeam`) leva o atendimento a uma **equipe**, que pertence a uma **unidade**, e escolhe o atendente da equipe. O roteamento "por posição do contato" só funciona para colaboradores (`resolveContactPlacementTeam`), não para clientes. Por isso, **[minha escolha]**:
+- A unidade de um atendimento do agente é a da **equipe padrão do número** (`WhatsAppAccount.DefaultTeamID`, que já existe e já "escopa" o número a uma equipe), e essa equipe precisa ter `UnitID`.
+- **O agente só atua em número cuja equipe padrão esteja ativa e vinculada a uma unidade.** Sem isso, `resolveAIAgent` devolve nada e o número se comporta como hoje. A tela avisa quais números ficaram de fora. Assim, oportunidade do agente nunca nasce sem unidade responsável.
+- Se a equipe for desativada no meio do caminho, a transferência cai na fila geral, **marcada** com o motivo de roteamento `ai_no_unit_team` e registrada em log. O cliente nunca fica sem atendimento.
+- Cada unidade com número próprio é o cenário coberto. Um único número atendendo várias unidades exigiria saber a unidade do cliente (CEP/região): Fase 2.
+- Pontos a **verificar na construção**: se a oportunidade chega ao vendedor certo (hoje `assignOpenSalesOpportunityToAgent` depende de `AssignToSameAgent`) e que transferir fora do expediente produza o aviso de fora de horário existente, sem duplicar.
 
-- O agente enviar **qualquer** mensagem depois de um humano ter assumido a conversa, inclusive uma resposta que já estava sendo gerada. **[decidido: este é o pior cenário para o Ivan]**
-- O agente afirmar preço, prazo, estoque ou reserva como compromisso.
-- Uma organização consumir IA sem teto e sem aviso.
-- A chave de IA de uma organização ser usada, vista ou logada por outra.
+### 5.3 Segurança comercial **[decidido]**
+Sem fonte confiável de preço e estoque, o agente **não informa valor, desconto, disponibilidade nem prazo como confirmados**; qualifica e encaminha essas dúvidas ao vendedor.
+- Regras fixas da plataforma no prompt (não editáveis pela organização).
+- Filtro de saída **[minha escolha]**: bloqueia compromissos ("garanto", "prometo", "reservei"…, exceto negados como "não garanto"), valor em reais que não conste do texto configurado do agente, percentual de desconto, afirmação de disponibilidade/estoque e prazo em dias. Resposta bloqueada **não é enviada**: uma nova tentativa com instrução corretiva ("reescreva sem informar preço, estoque ou prazo; diga que o vendedor confirma"); se bloquear de novo, transfere. Teto conhecido: heurística; falso positivo custa uma regeneração.
 
-## 6. Desenho
+### 5.4 Qualificação e oportunidade **[decidido: chamada extra aprovada]**
+Quando o agente decide transferir (intenção de compra qualificada, pedido de humano ou regra de transferência), o servidor faz **uma chamada extra de IA** sobre o histórico, pedindo JSON com os campos produto, categoria, quantidade, unidade, metragem, ambiente, intenção e resumo. **[minha escolha]** para não inventar:
+- Cada campo é `{valor, evidencia}` ou nulo. `evidencia` é uma **citação literal** de mensagem **do cliente**; o servidor confere que a citação existe nas mensagens do cliente. Sem citação válida (ou valor numérico ausente da citação), o campo é tratado como **não informado**.
+- `Interest` recebe duas seções: "Informado pelo cliente" e "Ainda não coletado", mais o resumo. `EstimatedQuantity`/`UnitOfMeasure` só são preenchidos com quantidade validada e unidade reconhecida.
+- Criação via `createOrRetriggerSalesOpportunity` (sem duplicar), fonte `system`, com `SourceTransferID` da transferência quando houver.
+- Falha ou resposta inválida da extração: a oportunidade é criada **só com o resumo e a pendência "qualificação não extraída"**; a transferência segue. Nunca bloqueia o atendimento.
 
-### 6.1 Modelo de dados — tabela `ai_agents` **[minha escolha]**
+### 5.5 Humano assume → agente cala **[decidido: pior cenário do Ivan]**
+"Humano assumiu" = `AgentTransfer` ativo. `Contact.AssignedUserID` é carteira e não conta. Um helper `humanTookOver` é chamado **imediatamente antes de cada envio do agente**, nos dois caminhos (resposta direta e nó `ai_response`), e a resposta é descartada com registro. Auditoria dos caminhos de envio do atendente para garantir que todo envio cria o atendimento (`agent_initiated`); só corrige lacunas. Corrida residual de milissegundos antes da chamada ao WhatsApp é aceita. O agente não volta sozinho.
 
-Por organização (`organization_id`, com isolamento igual ao das demais tabelas), campos:
+### 5.6 Falhas, mensagem de espera e duplicidade **[decidido]** + **[minha escolha]**
+- A mensagem de espera ("Vou chamar um atendente…", texto fixo) só é enviada quando a transferência **resulta em `TransferCreated`**. `AlreadyActive` (índice único) não envia nada. Isso impede mensagem e transferência duplicadas, mesmo com mensagens simultâneas.
+- Falha do provedor de IA (erro, limite, timeout): **nenhuma** mensagem de espera; vale o comportamento atual (resposta padrão do chatbot, se houver). Duas falhas seguidas na mesma sessão disparam uma transferência (uma vez, pelo mesmo caminho acima).
+- Falha de IA nunca altera atendimento humano em curso: com transferência ativa o chatbot nem processa a mensagem.
+- Fora do expediente: vale a regra existente (mensagem de fora de horário), uma vez por sessão (sinalizador na sessão), e a oportunidade ainda é registrada.
 
-| Campo | Uso |
-|---|---|
-| `name`, `is_enabled` | identificação e liga/desliga |
-| `role_objective` | papel e objetivo do agente |
-| `tone` | tom de voz |
-| `always_rules` (lista) | "sempre faça" |
-| `never_rules` (lista) | "nunca faça" (default já traz as proibições de promessa) |
-| `handoff_rules` (lista) | quando transferir para humano |
-| `company_info` | informações fixas da empresa |
-| `model`, `temperature`, `max_tokens` | opcionais; vazio herda de `ChatbotSettings.AI` |
+### 5.7 Teto mensal de tokens **[decidido: mantém no MVP]** + **[minha escolha]**
+Campo `ai_monthly_token_limit` em `ChatbotSettings` (0 = sem teto), por organização, mês civil em `America/Sao_Paulo`.
+- Consumo = soma de `TotalTokens` do `AIUsageLog` das features `chatbot_reply`, `chatbot_flow_node` e `agent_qualification`, **mais reservas em voo**.
+- **Sem ultrapassagem silenciosa em chamadas simultâneas:** antes de cada chamada, uma transação com `pg_advisory_xact_lock` por organização soma o consumo, e, se `consumo + reserva ≤ teto`, insere uma linha de reserva no próprio `AIUsageLog` (feature `ai_reservation`; reserva = `MaxTokens` + estimativa da entrada). Ao terminar a chamada, a reserva é removida e vale a linha real. Reservas com mais de 10 minutos são ignoradas (autocorreção se o processo cair).
+- Teto atingido: o agente não chama o provedor; transfere pelo caminho 5.6 com nota "limite de IA atingido"; sem extração (não gasta mais); o admin vê o aviso no mecanismo existente. Nada de erro técnico ao cliente.
 
-Provedor e **chave continuam únicos por organização** em `ChatbotSettings.AI`; o agente não guarda segredo.
-
-### 6.2 Escolha do agente **[minha escolha, confirmada pelo Ivan como "sim"]**
-
-- `ChatbotSettings` ganha `default_ai_agent_id` (por organização e, opcionalmente, por conta de WhatsApp, herdando do padrão da organização).
-- O nó `ai_response` do fluxo ganha `agent_id` opcional; se vazio, usa o padrão da conta/organização.
-- Sem agente resolvido: caminho atual, com `SystemPrompt` livre.
-
-### 6.3 Montagem do prompt
-
-Ordem fixa em um único ponto (`generateAIReply`):
-1. **Camada da plataforma** (não editável por organização): regras invioláveis, incluindo "nunca prometa preço, prazo, estoque ou reserva; confirmar é papel do vendedor", "não invente informação", "pedido de humano = transferir".
-2. Campos do agente, em seções rotuladas (papel, tom, sempre, nunca, quando transferir, empresa).
-3. `AIContext` e bloco de conhecimento (como hoje).
-
-As regras de "nunca" vêm **depois** das de "sempre" e em bloco próprio, para pesar mais.
-
-### 6.4 Humano assume → agente desliga **[decidido]**
-
-- Reaproveitar `hasActiveAgentTransfer`: transferência ativa impede o agente de processar a mensagem recebida.
-- **Fechar a janela em andamento:** logo antes de enviar a resposta do agente, reconsultar se há transferência ativa ou atendente atribuído; se houver, **descartar** a resposta (registrar em `AIUsageLog` como descartada).
-- "Humano assumiu" = **existe `AgentTransfer` ativo** para o contato. `Contact.AssignedUserID` é carteira/dono, não assunção, e **não** liga nem desliga o agente.
-- Cobrir também: atendente que **envia mensagem** em conversa sem transferência. Hoje a transferência `agent_initiated` nasce em um único ponto (`agent_transfers.go`); a tarefa é **auditar os caminhos de envio do atendente** (inbox, API, fila) e garantir que todos passem por ele, corrigindo só as lacunas.
-- O agente **não reassume sozinho**. Só volta se uma pessoa devolver a conversa ao bot (ação já existente de encerrar a transferência; não criar nova).
-
-### 6.5 Teto de uso **[minha escolha]**
-
-- Limite mensal de **tokens** por organização (soma do `AIUsageLog` do mês; já existe o dado). Campo em `ChatbotSettings`. Vazio = sem teto.
-- Ao atingir: o agente para de responder, a conversa é transferida a um humano e o admin é avisado. Nunca responde com erro técnico ao cliente.
-- Custo em reais fica para depois, por exigir tabela de preço por modelo e provedor.
-
-### 6.6 Verificação antes do envio **[minha escolha]**
-
-Filtro determinístico no texto de saída contra uma lista de expressões de compromisso configurável por organização (padrão: "garanto", "prometo", "reservei", "está garantido", etc.). Se casar, a resposta é bloqueada e a conversa vai para um humano. Teto conhecido: não pega todas as formas de prometer; checagem por um segundo modelo é a evolução, se a prática mostrar necessidade.
-
-### 6.7 Interface
-
-Dentro de Chatbot → IA: lista de agentes, formulário com os campos de §6.1, escolha do agente padrão, teto de uso e a lista de expressões bloqueadas. Textos em PT-BR e EN (padrão do projeto). Permissões: reaproveitar a de configurações do chatbot.
+## 6. Interface mínima **[decidido]**
+Uma tela dentro de Chatbot → IA: lista de agentes com formulário em diálogo (nome, objetivo, instruções, empresa, tom, regras de transferência, ativo), seletor de agente padrão e campo do teto mensal, mais o aviso dos números sem equipe de unidade. PT-BR e EN. Permissão: a de configurações do chatbot.
 
 ## 7. Restrições
+Isolamento por organização em tudo; chave de IA nunca em log, API ou cache em claro; migração aditiva e idempotente; sem mudança de comportamento para quem não usa agente; todo uso de IA via `completeAI`; sem push, merge ou deploy sem o Ivan.
 
-- Isolamento por organização em tudo; chave nunca em log, resposta de API ou cache em claro.
-- Migração aditiva e idempotente; nenhuma coluna existente muda. Organizações atuais não mudam de comportamento.
-- Branch a partir de `development`; PR com a linha `Roadmap:` conforme o fluxo de roadmap automático; sem deploy sem confirmação do Ivan.
-- Testes de Go exigem `TEST_DATABASE_URL` e `TEST_REDIS_URL`.
+## 8. Critérios de liberação (os 10 do Ivan) e prova
+1. Cliente conversa com o agente pelo WhatsApp. 2. Responde dentro do contexto configurado. 3. Qualifica intenção de compra. 4. Registra oportunidade com os dados. 5. Transfere ao vendedor da unidade. 6. Não responde após o humano assumir. 7. Não expõe dados de outro cliente/organização. 8. Não envia marcador técnico nem mensagem indevida. 9. Controle de consumo e tratamento de falhas. 10. Validado em homologação antes da produção.
 
-## 8. Deixado para quem construir
+**Prova obrigatória:** um teste de ponta a ponta automatizado (§plano, Tarefa 6) e o mesmo roteiro executado à mão em homologação com um número de WhatsApp de teste, que serve de demonstração à diretoria.
 
-- Nomes de rotas, estrutura exata de migração e layout das telas.
-- Se `request_agent_transfer` (aitools, hoje atrás de `ai_tools.enabled` e provedor validado) é o caminho do "quando transferir" ou se basta um marcador no texto da resposta; avaliar o custo de habilitar a camada de ferramentas só para isso.
-- Formato de armazenamento das listas (JSONB) e limites de tamanho dos campos.
-- Como registrar respostas descartadas e bloqueadas para auditoria.
-
-## 9. Decisões de detalhe (todas **[minha escolha]**, vindas da revisão do desenho)
-
-- **Pontos de envio do agente:** são dois, `chatbot_processor.go` (resposta direta) e o nó `ai_response` (`chatbot_graph_runner.go`). Criar um helper único `humanTookOver(org, contato)` e chamá-lo imediatamente antes de cada envio. A corrida residual entre o recheck e a chamada à API do WhatsApp (milissegundos) é aceita; sem lock nem transação.
-- **Quando o agente bloqueia** (teto, filtro de promessa, regra de transferência): o cliente recebe uma mensagem fixa de espera, configurável por organização (padrão: "Vou chamar um atendente para continuar com você."), a conversa vai para a fila padrão pelo mecanismo existente (`createTransferToQueue`) e o admin é avisado pelo mecanismo de aviso que já exista; não criar canal novo.
-- **Teto de uso:** conta os tokens de `chatbot_reply` e `chatbot_flow_node` da organização no mês civil em `America/Sao_Paulo`. A chamada que cruza o limite é permitida; o corte vale a partir da seguinte. Sem teto configurado, nada muda (a checagem só roda quando há teto).
-- **Filtro de promessa:** vale só quando há agente. Casa por palavra inteira, sem diferenciar caixa nem acento, e ignora ocorrência precedida de "não"/"nao" nas três palavras anteriores (evita bloquear "não garanto estoque"). A lista padrão vive no código; a organização grava só as adições e remoções dela, para que melhorias do padrão cheguem a todas.
-- **Agente padrão por conta de WhatsApp:** disponível já nesta entrega (a estrutura por conta de `chatbot_settings` existe). Agente desativado ou apagado cai no `SystemPrompt` livre de hoje, nunca em silêncio.
-- **Quando transferir:** marcador no texto da resposta (por exemplo `[[TRANSFERIR]]`), que o servidor lê, remove e converte em transferência. Funciona com qualquer provedor e não exige ligar `ai_tools`. A ferramenta `request_agent_transfer` fica como evolução.
-- **Migração e permissões:** seguir o padrão de `internal/database` para tabelas novas; reaproveitar a permissão de configurações do chatbot, sem permissão nova.
+## 9. Deixado para quem constrói
+Nomes de rotas e colunas; formato exato do JSON de extração além dos campos de §5.4; layout das telas; estimativa de tokens de entrada; texto das regras fixas da plataforma (a partir de §5.3).

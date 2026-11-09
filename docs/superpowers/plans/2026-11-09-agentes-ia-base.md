@@ -1,149 +1,153 @@
-# Agentes de IA — Projeto 1 (agente base) Implementation Plan
+# Agentes de IA — MVP (rev. 2) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Vários agentes de IA configuráveis dentro do chatbot atual, com instruções estruturadas, desligamento imediato quando um humano assume, teto mensal de tokens e filtro de promessas.
+**Goal:** Agente de IA no chatbot que atende, qualifica, registra a oportunidade no CRM, transfere à equipe da unidade e cala quando um humano assume, com teto mensal de tokens.
 
-**Architecture:** Nova tabela `ai_agents` por organização; `chatbot_settings` aponta o agente padrão (por organização ou conta) e o nó `ai_response` pode escolher outro. `generateAIReply` monta o prompt em camadas (plataforma → agente → `AIContext` → conhecimento) e passa a devolver um motivo de transferência (`Handoff`) quando o marcador, o filtro ou o teto dispararem. Um helper único `humanTookOver` é chamado antes de cada envio do agente. Sem agente resolvido, o caminho atual (`SystemPrompt` livre) fica intacto.
+**Architecture:** Tabela `ai_agents` + agente padrão em `ChatbotSettings`. `generateAIReply` monta o prompt em camadas e passa a devolver um motivo de transferência. Um único ponto (`handoffFromAI`) faz extração → oportunidade → transferência à equipe do número. `humanTookOver` guarda cada envio. O teto reserva tokens no próprio `AIUsageLog` sob `pg_advisory_xact_lock`. Nenhum módulo paralelo.
 
 **Tech Stack:** Go (fastglue, GORM, Postgres), Vue 3 + TypeScript, vue-i18n (PT-BR e EN).
 
-**Spec:** `docs/superpowers/specs/2026-11-09-agentes-ia-base-design.md`
+**Spec:** `docs/superpowers/specs/2026-11-09-agentes-ia-base-design.md` (rev. 2). Seções citadas como §.
 
 ## Global Constraints
 
-- Base `origin/development`; branch `feature/agente-ia-base`; worktree `../whatc-agente-ia`. Nunca tocar `main`. Sem push e sem deploy sem confirmação do Ivan.
-- Isolamento por `organization_id` em toda consulta e rota nova; a chave de IA continua só em `ChatbotSettings.AI` (criptografada, só `resolveAIAPIKey` decifra) e nunca aparece em log, resposta de API ou cache em claro.
-- Migração aditiva e idempotente (registro em `internal/database/postgres.go` e `test/testutil/db.go`); nenhuma coluna existente muda.
-- Organização sem agente configurado: comportamento idêntico ao de hoje.
-- Toda chamada de IA continua passando por `completeAI` (grava `AIUsageLog`).
-- Textos de interface em PT-BR e EN. Reaproveitar a permissão de configurações do chatbot; sem permissão nova.
-- Testes Go: precisam de `TEST_DATABASE_URL` e `TEST_REDIS_URL` (containers `whatomate_test_pg` e `whatomate_test_redis`); rodar com `-p 1`.
-- Commits terminam com a linha `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`. PR para `development` leva a linha `Roadmap: id=status` do fluxo de roadmap automático.
+- Base `origin/development`; branch local `feature/agente-ia-base`, worktree `../whatc-agente-ia`. Sem push, merge ou deploy sem o Ivan.
+- Isolamento por `organization_id` em toda consulta e rota; chave de IA só em `ChatbotSettings.AI`, nunca em log, API ou cache em claro.
+- Migração aditiva e idempotente (registrar em `internal/database/postgres.go` e `test/testutil/db.go`); nenhuma coluna existente muda.
+- Sem agente padrão ativo, comportamento idêntico ao atual. Toda chamada de IA passa por `completeAI`.
+- Interface em PT-BR e EN; permissão de configurações do chatbot; sem permissão nova.
+- Testes Go: `TEST_DATABASE_URL` e `TEST_REDIS_URL` (containers `whatomate_test_pg` e `whatomate_test_redis`), com `-p 1`, direcionados com `-run`.
+- Commits terminam com `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`; PR para `development` leva a linha `Roadmap: id=status`.
 
 ## Review Focus
 
-1. Mensagem do cliente chega com o agente ainda gerando e um atendente assume no meio: nada é enviado.
-2. Resposta do agente com "não garanto estoque": não é bloqueada; "garanto o preço" é.
-3. Agente padrão desativado ou apagado: cai no `SystemPrompt` livre, nunca em silêncio.
-4. Teto estourado: cliente recebe a mensagem de espera e a conversa vai para a fila; nunca erro técnico.
-5. Marcador `[[TRANSFERIR]]` nunca chega ao cliente, nem quando vem no meio do texto ou repetido.
+1. Duas mensagens do cliente quase simultâneas: uma transferência, uma mensagem de espera, uma oportunidade.
+2. Atendente assume durante a geração da resposta ou durante a extração: nada é enviado, nada é duplicado.
+3. A extração devolve metragem ou produto que o cliente nunca disse: o campo vira "não informado".
+4. Número sem equipe de unidade: o agente não atua. Equipe desativada no meio do caminho: fila geral marcada, cliente atendido.
+5. Duas chamadas simultâneas perto do teto: a soma não passa do teto; falha do provedor libera a reserva.
+6. Marcador `[[TRANSFERIR]]` e JSON de extração nunca chegam ao cliente.
 
 ---
 
-### Task 1: Modelo `AIAgent` e API CRUD
+### Task 1: Agente, configurações e resolução (complexidade: média)
 
 **Files:**
 - Create: `internal/models/ai_agent.go`, `internal/handlers/ai_agents.go`, `internal/handlers/ai_agents_test.go`
-- Modify: `internal/database/postgres.go` (lista de modelos, perto da linha 108), `test/testutil/db.go` (perto da linha 127), `cmd/whatomate/main.go` (rotas, perto da linha 1188)
+- Modify: `internal/models/chatbot.go` (`ChatbotSettings`), `internal/handlers/chatbot.go` (`GetChatbotSettings`:128, `UpdateChatbotSettings`:308, padrão dos campos `ai_*`), `internal/database/postgres.go` (~108), `test/testutil/db.go` (~127), `cmd/whatomate/main.go` (rotas, ~1188)
 
-**Interfaces:**
-- Produces: `models.AIAgent` (tabela `ai_agents`: `BaseModel`, `OrganizationID uuid.UUID`, `Name string`, `IsEnabled bool`, `RoleObjective string`, `Tone string`, `AlwaysRules StringArray`, `NeverRules StringArray`, `HandoffRules StringArray`, `CompanyInfo string`, `Model string`, `Temperature *float64`, `MaxTokens *int`); rotas `GET/POST /api/chatbot/ai-agents`, `GET/PUT/DELETE /api/chatbot/ai-agents/{id}`; `func (a *App) getAIAgent(orgID, id uuid.UUID) (*models.AIAgent, error)`.
+**Interfaces — Produces:**
+- `models.AIAgent` (`ai_agents`: `BaseModel`, `OrganizationID`, `Name`, `Objective`, `Instructions`, `CompanyInfo`, `Tone`, `HandoffRules` — todos `string` —, `IsEnabled bool`); rotas `GET/POST /api/chatbot/ai-agents`, `GET/PUT/DELETE /api/chatbot/ai-agents/{id}`.
+- `ChatbotSettings.DefaultAIAgentID *uuid.UUID` (`default_ai_agent_id`), `ChatbotSettings.AIMonthlyTokenLimit int64` (`ai_monthly_token_limit`, 0 = sem teto).
+- `func (a *App) resolveAIAgent(settings *models.ChatbotSettings, account *models.WhatsAppAccount) *models.AIAgent` — nil se: sem padrão, agente apagado/desativado/de outra organização, ou `account.DefaultTeamID` nulo, equipe inativa/de outra organização, ou equipe sem `UnitID` (§5.2).
+- `func (a *App) accountsWithoutUnitTeam(orgID uuid.UUID) []string` (nomes dos números sem equipe de unidade, para o aviso da tela; exposto em `GET /api/chatbot/ai-agents/readiness`).
 
-- [ ] **Step 1: Escrever os testes** em `ai_agents_test.go`, no estilo de `chatbot_test.go` (AIContext): `TestAIAgents_CreateListGetUpdateDelete`; `TestAIAgents_OrgIsolation` (agente da org A dá 404 para a org B em GET, PUT e DELETE); `TestAIAgents_NeverRulesDefault` (criar sem `never_rules` devolve as proibições padrão de promessa de preço, prazo, estoque e reserva).
-- [ ] **Step 2: Rodar e ver falhar:** `go test ./internal/handlers -run TestAIAgents -p 1 -v` → FAIL (símbolos inexistentes).
-- [ ] **Step 3: Implementar** o modelo e os handlers copiando o padrão de `ListAIContexts`/`CreateAIContext`/`UpdateAIContext`/`DeleteAIContext` (`internal/handlers/chatbot.go:1235-1466`), incluindo validação de tamanho dos campos (nome ≤ 255; listas ≤ 50 itens de ≤ 500 caracteres; textos ≤ 4000). Padrão de `NeverRules` fica em constante exportada `models.DefaultAINeverRules`. Registrar modelo e rotas.
-- [ ] **Step 4: Rodar e ver passar** (mesmo comando) → PASS.
-- [ ] **Step 5: Commit** `feat(ai): AIAgent model and CRUD API`.
+- [ ] **Step 1: Testes** (estilo `chatbot_test.go`, AIContext): `TestAIAgents_CRUD`; `TestAIAgents_OrgIsolation` (404 cruzado em GET/PUT/DELETE); `TestResolveAIAgent` (tabela: ok; sem padrão; desativado; apagado; outra organização; número sem equipe; equipe inativa; equipe sem unidade → nil nos cinco últimos); `TestChatbotSettings_AgentFieldsRoundTrip`; `TestAccountsWithoutUnitTeam`.
+- [ ] **Step 2:** `go test ./internal/handlers -run "TestAIAgents|TestResolveAIAgent|TestChatbotSettings_AgentFields|TestAccountsWithoutUnitTeam" -p 1 -v` → FAIL.
+- [ ] **Step 3: Implementar**, copiando o padrão de `ListAIContexts`…`DeleteAIContext` (`chatbot.go:1235-1466`); validar tamanhos (nome ≤ 255, demais textos ≤ 4000) e que `default_ai_agent_id` é da organização.
+- [ ] **Step 4:** mesmo comando → PASS. **Step 5:** commit `feat(ai): agent model, settings and resolution`.
 
-### Task 2: Campos novos em `ChatbotSettings`
-
-**Files:**
-- Modify: `internal/models/chatbot.go` (struct `ChatbotSettings`, perto da linha 133), `internal/handlers/chatbot.go` (`GetChatbotSettings` linha 128 e `UpdateChatbotSettings` linha 308; os campos `ai_*` seguem o padrão das linhas 38, 205, 337, 553)
-- Test: `internal/handlers/chatbot_test.go`
-
-**Interfaces:**
-- Consumes: `models.AIAgent` (Task 1).
-- Produces em `ChatbotSettings`: `DefaultAIAgentID *uuid.UUID` (`default_ai_agent_id`), `AIMonthlyTokenLimit int` (`ai_monthly_token_limit`, 0 = sem teto), `AIHandoffMessage string` (`ai_handoff_message`, vazio = padrão "Vou chamar um atendente para continuar com você."), `AIPromiseTermsAdd StringArray` e `AIPromiseTermsRemove StringArray` (`ai_promise_terms_add/remove`); `func (a *App) resolveAIAgent(settings *models.ChatbotSettings, nodeAgentID *uuid.UUID) *models.AIAgent` (ordem: id do nó → `DefaultAIAgentID` da linha da conta → `DefaultAIAgentID` da linha padrão da organização; ignora agente inexistente, de outra organização ou desativado; devolve nil se nada servir) e `func aiHandoffMessage(settings *models.ChatbotSettings) string`.
-
-- [ ] **Step 1: Escrever testes:** `TestChatbotSettings_AgentFieldsRoundTrip`; `TestResolveAIAgent` com casos nó vence conta, conta vence organização, agente desativado → nil, agente apagado → nil, agente de outra organização → nil; `TestAIHandoffMessage_Default`.
-- [ ] **Step 2: Rodar e ver falhar:** `go test ./internal/handlers -run "TestChatbotSettings_AgentFields|TestResolveAIAgent|TestAIHandoffMessage" -p 1 -v`.
-- [ ] **Step 3: Implementar** os campos (colunas novas, `NOT NULL DEFAULT` onde couber), leitura e escrita nos dois handlers e as duas funções. Validar `default_ai_agent_id` pertencente à organização.
-- [ ] **Step 4: Rodar e ver passar.**
-- [ ] **Step 5: Commit** `feat(ai): agent selection and limits fields on chatbot settings`.
-
-### Task 3: Montagem do prompt em camadas
+### Task 2: Prompt em camadas e proteção comercial (complexidade: média)
 
 **Files:**
-- Create: `internal/handlers/ai_agent_prompt.go`, `internal/handlers/ai_agent_prompt_test.go`
-- Modify: `internal/handlers/chatbot_processor.go` (`generateAIReply`, linha 888)
+- Create: `internal/handlers/ai_agent_prompt.go`, `internal/handlers/ai_guardrails.go` e os dois `_test.go`
+- Modify: `internal/handlers/chatbot_processor.go` (`generateAIReply`:888, chamadores nas linhas ~414 e ~874), `internal/handlers/chatbot_graph_runner.go` (`execChatAIResponse`:~707)
 
 **Interfaces:**
-- Consumes: `resolveAIAgent` (Task 2).
-- Produces: `const aiPlatformRules string` (camada fixa: nunca prometer preço, prazo, estoque ou reserva; confirmar é papel do vendedor; não inventar; pedido de humano → emitir o marcador `[[TRANSFERIR]]`); `func buildAgentPrompt(agent *models.AIAgent) string` (seções rotuladas na ordem papel, tom, empresa, sempre, nunca, quando transferir; "nunca" por último e em bloco próprio); `generateAIReply` passa a usar: plataforma + `buildAgentPrompt` quando há agente, e `settings.AI.SystemPrompt` como hoje quando não há; `Model`, `Temperature` e `MaxTokens` do agente, quando preenchidos, sobrescrevem os de `settings.AI`. Assinatura ganha o id de agente opcional do nó: `generateAIReply(settings, session, userMessage, feature string, nodeAgentID *uuid.UUID)`; atualizar os chamadores existentes.
+- Produces: `const aiPlatformRules string` (§5.3 + roteiro de qualificação + "pedido de humano ou qualificação concluída → emitir `[[TRANSFERIR]]`"); `func buildAgentPrompt(agent *models.AIAgent) string` (seções rotuladas: objetivo, tom, empresa, instruções, quando transferir); `const handoffMarker = "[[TRANSFERIR]]"`; `func extractHandoff(text string) (clean string, handoff bool)`; `func violatesCommercialSafety(text, allowedText string) bool` (compromissos fora de negação; "R$ n" ausente de `allowedText`; "n% de desconto"; afirmação de estoque/disponibilidade; "prazo/entrega em n dias"); `aiReply` ganha `Handoff string` (`""`, `"marker"`, `"unsafe"`).
+- `generateAIReply` passa a resolver o agente (`resolveAIAgent`); com agente: plataforma + `buildAgentPrompt` no lugar de `SystemPrompt`, depois `AIContext` e conhecimento como hoje; resposta passa por `extractHandoff` e `violatesCommercialSafety`; violação → **uma** nova chamada com a instrução corretiva de §5.3 e, se violar de novo, `Handoff="unsafe"` sem texto. Sem agente: caminho atual intacto.
 
-- [ ] **Step 1: Testes** (função pura): `TestBuildAgentPrompt_SectionOrder` (a posição de "NUNCA" é maior que a de "SEMPRE"), `TestBuildAgentPrompt_OmitsEmptySections`, `TestGenerateAIReply_NoAgentKeepsLegacyPrompt` (prompt enviado ao provedor falso é exatamente `SystemPrompt` + contexto, como antes).
-- [ ] **Step 2: Rodar e ver falhar:** `go test ./internal/handlers -run "TestBuildAgentPrompt|TestGenerateAIReply_NoAgent" -p 1 -v`.
-- [ ] **Step 3: Implementar** conforme as assinaturas. Provedor falso: reaproveitar o usado em `ai_runtime_test.go`.
-- [ ] **Step 4: Rodar e ver passar**, e rodar a suíte `-run "AI|Chatbot"` para garantir que nada mudou sem agente.
-- [ ] **Step 5: Commit** `feat(ai): layered agent prompt`.
+- [ ] **Step 1: Testes:** `TestBuildAgentPrompt`; `TestExtractHandoff` (fim, meio, repetido, sozinho); `TestViolatesCommercialSafety` (tabela: "garanto o preço" sim; "Não garanto estoque" não; "R$ 25,99" fora do texto configurado sim, dentro não; "10% de desconto" sim; "temos em estoque" sim; "o vendedor confirma o prazo" não; "prazo de 5 dias" sim); `TestGenerateAIReply_NoAgentIsUnchanged` (prompt enviado é exatamente o atual); `TestGenerateAIReply_UnsafeRetryThenHandoff` (provedor falso conta 2 chamadas).
+- [ ] **Step 2:** `go test ./internal/handlers -run "TestBuildAgentPrompt|TestExtractHandoff|TestViolatesCommercialSafety|TestGenerateAIReply_" -p 1 -v` → FAIL.
+- [ ] **Step 3: Implementar.** Normalização de caixa/acento e palavra inteira; "não/nao" até 3 palavras antes anula o compromisso. Provedor falso: o de `ai_runtime_test.go`.
+- [ ] **Step 4:** PASS, depois `-run "AI|Chatbot"` sem regressão. **Step 5:** commit `feat(ai): layered prompt and commercial safety`.
 
-### Task 4: Filtro de promessas e marcador de transferência
+### Task 3: Humano assumiu → agente cala (complexidade: média/alta; revisor independente)
 
 **Files:**
-- Create: `internal/handlers/ai_guardrails.go`, `internal/handlers/ai_guardrails_test.go`
+- Modify: `internal/handlers/agent_transfers.go` (helper junto de `hasActiveAgentTransfer`:1422), `chatbot_processor.go` (envio ~414-424), `chatbot_graph_runner.go` (`execChatAIResponse`), e os caminhos de envio do atendente que a auditoria apontar
+- Test: `agent_transfers_test.go`, `chatbot_processor_test.go`, `chatbot_graph_runner_test.go`
 
-**Interfaces:**
-- Produces: `var defaultPromiseTerms []string` (inclui "garanto", "prometo", "reservei", "está garantido", "garantido", "fica reservado"); `func effectivePromiseTerms(add, remove []string) []string`; `func containsPromise(text string, terms []string) bool` (palavra inteira, sem diferenciar caixa e acento, ignora termo precedido de "não"/"nao" em até 3 palavras antes); `const handoffMarker = "[[TRANSFERIR]]"`; `func extractHandoff(text string) (clean string, handoff bool)` (remove todas as ocorrências, em qualquer posição, e faz trim).
+**Interfaces — Produces:** `func (a *App) humanTookOver(orgID, contactID uuid.UUID) bool` (true com `AgentTransfer` ativo; **ignora** `AssignedUserID`). O envio do agente chama o helper imediatamente antes de enviar; se true, descarta e grava `AIUsageLog` com `ErrorKind="discarded_human"`.
 
-- [ ] **Step 1: Testes:** `TestContainsPromise` com tabela: "garanto o preço" → true; "Não garanto estoque" → false; "nao garanto" → false; "GARANTO" → true; "garantos" → false (palavra inteira); "garantia de fábrica" → false; remoção via `remove` torna "prometo" aceitável; adição via `add` passa a bloquear. `TestExtractHandoff`: marcador no fim, no meio, repetido e sozinho (clean vazio, handoff true).
-- [ ] **Step 2: Rodar e ver falhar:** `go test ./internal/handlers -run "TestContainsPromise|TestExtractHandoff" -p 1 -v`.
-- [ ] **Step 3: Implementar** com normalização via `golang.org/x/text` se já estiver no `go.mod`, senão com tabela de acentos própria.
-- [ ] **Step 4: Rodar e ver passar.**
-- [ ] **Step 5: Commit** `feat(ai): promise filter and handoff marker`.
-
-### Task 5: Guarda "humano assumiu" e auditoria dos caminhos do atendente
-
-**Files:**
-- Modify: `internal/handlers/agent_transfers.go` (helper junto de `hasActiveAgentTransfer`, linha 1422), `internal/handlers/chatbot_processor.go` (envio na linha ~414-424), `internal/handlers/chatbot_graph_runner.go` (`execChatAIResponse`, linha ~707-745), e os pontos de envio de atendente que a auditoria apontar
-- Test: `internal/handlers/agent_transfers_test.go`, `internal/handlers/chatbot_processor_test.go`
-
-**Interfaces:**
-- Produces: `func (a *App) humanTookOver(orgID, contactID uuid.UUID) bool` (verdadeiro quando há `AgentTransfer` ativo; **não** considera `Contact.AssignedUserID`); o envio do agente nos dois caminhos chama o helper imediatamente antes de enviar e, se verdadeiro, descarta a resposta e grava `AIUsageLog` com `ErrorKind = "discarded_human"`.
-
-- [ ] **Step 1: Testes:** `TestHumanTookOver_ActiveTransfer` (true com transferência ativa, false sem, false só com `AssignedUserID`); `TestAIReply_DiscardedWhenTransferBecomesActive` (provedor falso cria a transferência durante a chamada; nada é enviado; `AIUsageLog` marcado); mesmo cenário para o nó `ai_response`.
-- [ ] **Step 2: Rodar e ver falhar:** `go test ./internal/handlers -run "TestHumanTookOver|TestAIReply_Discarded" -p 1 -v`.
+- [ ] **Step 1: Testes:** `TestHumanTookOver` (ativo true; sem false; só `AssignedUserID` false); `TestAIReply_DiscardedWhenHumanTakesOverMidCall` (o provedor falso cria a transferência durante a chamada; nada é enviado); idem no nó `ai_response`; `TestAIReply_DiscardedDuringHandoffExtraction` fica na Tarefa 5.
+- [ ] **Step 2:** `go test ./internal/handlers -run "TestHumanTookOver|TestAIReply_Discarded" -p 1 -v` → FAIL.
 - [ ] **Step 3: Implementar** o helper e plugar nos dois caminhos.
-- [ ] **Step 4: Auditar** todo caminho em que um atendente envia mensagem (inbox, API, fila; `grep` por `sendAndSave` e pelo handler de envio de mensagens) em conversa sem transferência ativa. A criação de `TransferSourceAgentInitiated` hoje está só em `agent_transfers.go:1689`. Escrever `TestAgentSend_CreatesAgentInitiatedTransfer` para cada caminho que não a criar e corrigir só essas lacunas.
-- [ ] **Step 5: Rodar e ver passar**, depois `-run "AgentTransfer|Chatbot"`.
-- [ ] **Step 6: Commit** `feat(ai): stop the agent as soon as a human takes over`.
+- [ ] **Step 4: Auditar** todo envio de atendente em conversa sem atendimento ativo (inbox, API, fila; buscar `sendAndSave*` e o handler de mensagens). Hoje `openAgentInitiatedTransfer` (`agent_transfers.go:~1670`) é o único criador de `agent_initiated`. Para cada caminho sem ele, escrever `TestAgentSend_OpensAttendance_<caminho>` e corrigir só essa lacuna.
+- [ ] **Step 5:** PASS e `-run "AgentTransfer|Chatbot"`. **Step 6:** commit `feat(ai): stop the agent when a human takes over`.
 
-### Task 6: Transferência do agente, teto de tokens e filtro no fluxo
+### Task 4: Teto mensal de tokens com reserva (complexidade: média/alta; revisor independente)
 
 **Files:**
-- Create: `internal/handlers/ai_handoff.go`, `internal/handlers/ai_handoff_test.go`
-- Modify: `internal/handlers/chatbot_processor.go` (`aiReply` linha ~881, `generateAIReply`, envio da linha ~414), `internal/handlers/chatbot_graph_runner.go` (`execChatAIResponse`)
+- Create: `internal/handlers/ai_token_cap.go`, `internal/handlers/ai_token_cap_test.go`
+- Modify: `internal/handlers/ai_runtime.go` (`completeAI`)
+
+**Interfaces — Produces:** `func (a *App) reserveAITokens(orgID uuid.UUID, limit, tokens int64, now time.Time) (release func(), err error)` (`ErrAICapReached` quando `consumo + tokens > limit`; transação com `pg_advisory_xact_lock(hashtext(org))`; consumo = soma de `TotalTokens` das features `chatbot_reply`, `chatbot_flow_node`, `agent_qualification` e de `ai_reservation` com menos de 10 minutos, no mês civil em `America/Sao_Paulo`; insere linha `ai_reservation`; `release` a remove). `completeAI` reserva (`MaxTokens` + len(prompt)/3) quando há agente e teto > 0, e libera ao terminar, com sucesso ou erro. Teto 0 ou sem agente: nenhuma consulta nova.
+
+- [ ] **Step 1: Testes:** `TestReserveAITokens_BelowAndAboveLimit`; `TestReserveAITokens_ConcurrentNeverExceeds` (N goroutines, soma reservada ≤ teto); `TestReserveAITokens_ReleasedOnProviderError`; `TestReserveAITokens_IgnoresStaleReservationsAndOtherMonthsAndOrgs`; `TestCompleteAI_NoLimitNoExtraQueries`.
+- [ ] **Step 2:** `go test ./internal/handlers -run "TestReserveAITokens|TestCompleteAI_" -p 1 -v` → FAIL.
+- [ ] **Step 3: Implementar.** **Step 4:** PASS. **Step 5:** commit `feat(ai): monthly token cap with reservations`.
+
+### Task 5: Transferência do agente, qualificação e oportunidade (complexidade: alta; revisor independente)
+
+**Files:**
+- Create: `internal/handlers/ai_handoff.go`, `internal/handlers/ai_qualification.go` e os dois `_test.go`
+- Modify: `internal/handlers/agent_transfers.go` (`transferToTeam` com resultado), `chatbot_processor.go`, `chatbot_graph_runner.go`
 
 **Interfaces:**
-- Consumes: `extractHandoff`, `containsPromise`, `effectivePromiseTerms` (Task 4); `aiHandoffMessage` (Task 2); `humanTookOver` (Task 5).
-- Produces: `aiReply` ganha `Handoff string` (`""`, `"marker"`, `"promise"` ou `"cap"`); `func (a *App) aiTokensThisMonth(orgID uuid.UUID, now time.Time) (int64, error)` (soma `TotalTokens` de `chatbot_reply` e `chatbot_flow_node`, mês civil em `America/Sao_Paulo`); `func (a *App) handoffFromAI(account *models.WhatsAppAccount, contact *models.Contact, settings *models.ChatbotSettings, reason string)` (envia `aiHandoffMessage` e chama `createTransferToQueue(account, contact, models.TransferSourceAI...)`; usar a origem existente que melhor couber, ou criar `TransferSourceAIHandoff`, e registrar o motivo).
-- Regras: só com agente resolvido. Teto: limite > 0 e consumo ≥ limite → `Handoff="cap"` **antes** da chamada ao provedor (a chamada que cruza o limite passa; a seguinte é cortada). Marcador → texto limpo é enviado se não vazio e depois transfere. Filtro de promessa casa → resposta **não** é enviada, transfere.
+- Consumes: `aiReply.Handoff` (T2), `humanTookOver` (T3), `reserveAITokens` (T4), `resolveAIAgent` (T1), `createOrRetriggerSalesOpportunity`.
+- Produces: `func (a *App) transferToTeam(ctx, account, contact, teamID, source, notes, routingReason string) (TransferResult, error)` — extrai o miolo de `createTransferToTeam` (`agent_transfers.go:1766`), que passa a delegar a ele sem mudar comportamento; `type Qualification struct` com `Produto, Categoria, Ambiente, Intencao string`, `Quantidade *float64`, `Unidade *models.SalesUnitOfMeasure`, `Metragem *float64`, `Resumo string` e `NaoInformado []string`; `func (a *App) extractQualification(ctx, settings, account, contact, session) (*Qualification, error)` (feature `agent_qualification`, JSON `{campo:{valor,evidencia}}`, descarta campo cuja `evidencia` não é substring normalizada de uma mensagem do **cliente**, ou cujo número não aparece na evidência); `func formatInterest(q *Qualification) string` (seções "Informado pelo cliente" e "Ainda não coletado" + resumo); `func (a *App) handoffFromAI(ctx, account, contact, session, settings, reason string)`.
+- Regras de `handoffFromAI` (§5.4–5.6): 1) `humanTookOver` → retorna; 2) extrai (pula se `reason=="cap"`; erro → qualificação vazia com a pendência "qualificação não extraída"); 3) `createOrRetriggerSalesOpportunity(contact, nil, models.SalesOpportunityEventSourceSystem, formatInterest(q), nil, nil, apply)` com quantidade/unidade só se validadas; 4) `humanTookOver` de novo; 5) transfere com `transferToTeam` para `account.DefaultTeamID`; equipe inválida → `transferToQueue` com `routingReason="ai_no_unit_team"` e log de aviso; 6) **só com `TransferCreated`** envia a mensagem de espera fixa; `AlreadyActive` não envia nada; `OutsideHours` envia a mensagem de fora de horário existente uma vez (sinalizador `ai_handed_off` em `SessionData`) e a oportunidade já foi registrada.
+- Falha do provedor em `generateAIReply`: sem mensagem de espera, comportamento atual de resposta padrão; contador `ai_failures` em `SessionData`; na 2ª falha seguida chama `handoffFromAI(..., "ai_failure")`. Sucesso zera o contador.
 
-- [ ] **Step 1: Testes:** `TestAITokensThisMonth` (ignora outros meses, outras organizações e outras features); `TestGenerateAIReply_CapReached` (provedor falso não é chamado); `TestGenerateAIReply_CapCrossingCallAllowed`; `TestGenerateAIReply_PromiseBlocked`; `TestGenerateAIReply_MarkerStrippedAndHandoff` (marcador no meio e repetido nunca chega ao cliente); `TestHandoffFromAI_SendsWaitMessageAndTransfers`; `TestNoAgent_NoCapNoFilter` (sem agente, nada disso roda).
-- [ ] **Step 2: Rodar e ver falhar:** `go test ./internal/handlers -run "TestAITokens|TestGenerateAIReply_|TestHandoffFromAI|TestNoAgent" -p 1 -v`.
-- [ ] **Step 3: Implementar** e ligar nos dois caminhos de envio (processador e nó `ai_response`, que passa a usar `generateAIReply` e lê `agent_id` da config do nó).
-- [ ] **Step 4: Rodar e ver passar**, depois a suíte `-run "AI|Chatbot|AgentTransfer"`.
-- [ ] **Step 5: Commit** `feat(ai): handoff, token cap and promise filter`.
+- [ ] **Step 1: Testes:** `TestExtractQualification_DropsUnsupportedFields` (cliente disse "uns 40 m²" e "porcelanato"; o modelo devolve também "ambiente: cozinha" sem citação → ambiente fica não informado); `TestExtractQualification_RejectsQuoteFromAssistantMessage`; `TestFormatInterest_SeparatesProvidedFromMissing`; `TestHandoffFromAI_CreatesOpportunityThenTeamTransfer`; `TestHandoffFromAI_ExtractionFailureStillTransfers`; `TestHandoffFromAI_CapSkipsExtraction`; `TestHandoffFromAI_NoDuplicateOnConcurrentCalls` (duas chamadas: 1 transferência, 1 mensagem de espera, 1 oportunidade); `TestHandoffFromAI_HumanTakesOverDuringExtraction`; `TestHandoffFromAI_InactiveTeamFallsBackToMarkedQueue`; `TestHandoffFromAI_OutsideHoursMessageOnce`; `TestProviderFailure_NoWaitMessageThenHandoffOnSecond`; `TestCreateTransferToTeam_BehaviourUnchanged`.
+- [ ] **Step 2:** `go test ./internal/handlers -run "TestExtractQualification|TestFormatInterest|TestHandoffFromAI|TestProviderFailure|TestCreateTransferToTeam" -p 1 -v` → FAIL.
+- [ ] **Step 3: Implementar** e ligar `Handoff` nos dois caminhos de envio (processador e nó `ai_response`, que passa a usar `generateAIReply`). Verificar e cobrir com teste que, após o vendedor pegar o atendimento, a oportunidade fica visível e atribuída a ele (`assignOpenSalesOpportunityToAgent` hoje depende de `AssignToSameAgent`); se não ficar, ajustar o mínimo.
+- [ ] **Step 4:** PASS; depois `-run "AI|Chatbot|AgentTransfer|Sales"`. **Step 5:** commit `feat(ai): handoff with qualification and CRM opportunity`.
 
-### Task 7: Interface
+### Task 6: Interface mínima (complexidade: média)
 
 **Files:**
-- Create: `frontend/src/views/chatbot/AIAgentsView.vue`, `frontend/src/views/chatbot/AIAgentDetailView.vue`
-- Modify: `frontend/src/services/api.ts` (perto de `listAIContexts`, linha 445), `frontend/src/router/index.ts`, `frontend/src/views/chatbot/ChatbotView.vue` (cartão de acesso ao lado de "Contextos de IA", linha ~263), `frontend/src/i18n/locales/pt-BR.json` e `en.json`, tela de configurações de IA existente (agente padrão, teto de tokens, mensagem de espera, expressões bloqueadas), editor do nó `ai_response` no `ChatbotFlowBuilderView.vue` (seletor de agente)
-- Test: specs Vitest ao lado de cada view nova (padrão dos `*.spec.ts` do projeto)
+- Create: `frontend/src/views/chatbot/AIAgentsView.vue` e `AIAgentsView.spec.ts`
+- Modify: `frontend/src/services/api.ts` (~445), `frontend/src/router/index.ts`, `frontend/src/views/chatbot/ChatbotView.vue` (cartão ~263), `frontend/src/i18n/locales/pt-BR.json` e `en.json`
 
-- [ ] **Step 1: Testes:** `AIAgentsView.spec.ts` (lista, criar e apagar chamam a API); `AIAgentDetailView.spec.ts` (editar listas "sempre"/"nunca"/"transferir" e salvar envia os campos do contrato da Task 1; "nunca" já vem com o padrão); spec do seletor de agente do nó (envia `agent_id`).
-- [ ] **Step 2: Rodar e ver falhar:** `npm --prefix frontend run test -- AIAgent`.
-- [ ] **Step 3: Implementar** seguindo `AIContextsView.vue`/`AIContextDetailView.vue`; rotas sob `/chatbot/agents`; chaves i18n nos dois idiomas.
-- [ ] **Step 4: Rodar e ver passar**, mais `npm --prefix frontend run typecheck` e `npm --prefix frontend run lint`.
-- [ ] **Step 5: Commit** `feat(ai): agents UI`.
+- [ ] **Step 1: Testes** (`AIAgentsView.spec.ts`): lista; criar/editar/apagar chamam a API com os campos de T1; ativar/desativar; escolher o agente padrão e salvar o teto; o aviso lista os números sem equipe de unidade.
+- [ ] **Step 2:** `npm --prefix frontend run test -- AIAgentsView` → FAIL.
+- [ ] **Step 3: Implementar** uma view com diálogo de formulário, seguindo `AIContextsView.vue`; rota `/chatbot/agents`.
+- [ ] **Step 4:** PASS + `npm --prefix frontend run typecheck` + `npm --prefix frontend run lint`. **Step 5:** commit `feat(ai): agents screen`.
 
-### Task 8: Verificação final
+### Task 7: Ponta a ponta e homologação (complexidade: média)
 
-- [ ] **Step 1:** `go build ./...`, `go vet ./...` e `go test ./... -p 1` com as variáveis de teste; anotar falhas preexistentes separadamente (CI de `development` já tem falhas conhecidas).
-- [ ] **Step 2:** Subir o app local e conferir no navegador: criar agente, definir como padrão, simular conversa com provedor falso ou real de teste, assumir como atendente e ver o agente calar.
-- [ ] **Step 3:** Abrir o PR para `development` com `Roadmap:`, sem deploy.
+**Files:** Create `internal/handlers/ai_agent_e2e_test.go`, `docs/homologacao/agentes-ia-roteiro.md`.
+
+- [ ] **Step 1: Teste E2E automatizado** `TestAIAgent_EndToEnd` (fixtures de `newGraphTestFixtures`, provedor de IA falso com respostas roteirizadas, envio do WhatsApp capturado): organização com equipe de unidade e número; agente padrão; (1) cliente inicia → agente responde e pergunta; (2) cliente informa produto, metragem e ambiente → agente emite o marcador; (3) existe 1 oportunidade com os campos "informado" e "não coletado" corretos, 1 transferência ativa para a equipe da unidade, 1 mensagem de espera, nenhum marcador no texto enviado; (4) novo cliente-mensagem com transferência ativa → o agente não responde; (5) atendente assume (envio) → `agent_initiated`/transferência ativa preservada e o agente segue calado; (6) outra organização não vê nada disso.
+- [ ] **Step 2:** `go test ./internal/handlers -run TestAIAgent_EndToEnd -p 1 -v` → FAIL, implementar o que faltar, PASS.
+- [ ] **Step 3: Roteiro de homologação** (`agentes-ia-roteiro.md`): um cenário por critério de liberação (1–10) mais os casos de §Review Focus; cada um com passos, resultado esperado e evidência (captura da conversa, linha do CRM, registro do `AIUsageLog`); a sequência completa vira o roteiro da demonstração à diretoria.
+- [ ] **Step 4: Execução manual** em homologação com um número de WhatsApp de teste (organização de teste, unidade e equipe criadas): rodar o roteiro inteiro, anexar evidências, abrir defeitos. **Pedir revisão independente** das Tarefas 3, 4 e 5 (atendimento e segurança: isolamento por organização, vazamento de chave, envio indevido, duplicidade) antes do PR.
+- [ ] **Step 5:** `go build ./... && go vet ./...`; suíte completa com `-p 1` (separar falhas preexistentes); commit `test(ai): agent end-to-end and homologation script`.
 
 ---
 
-**Cobertura da spec:** §3.1 e §6.1 → Tasks 1, 7; §3.2 e §6.3 → Task 3; §3.3 e §6.4 → Task 5; §3.4 e §6.6 → Tasks 3, 4, 6; §3.5 e §6.5 → Task 6; §3.6 → Tasks 2, 3 (testes de compatibilidade); §6.2 → Tasks 2, 3, 6, 7; §6.7 → Task 7; §9 → distribuído nas tarefas acima.
+## Complexidade e esforço
+
+| Tarefa | Complexidade | Revisor independente |
+|---|---|---|
+| 1 Agente, configurações, resolução | Média | não |
+| 2 Prompt e proteção comercial | Média | não |
+| 3 Humano assume | Média/alta | **sim** |
+| 4 Teto com reserva | Média/alta | **sim** |
+| 5 Transferência, qualificação, oportunidade | Alta | **sim** |
+| 6 Interface | Média | não |
+| 7 Ponta a ponta e homologação | Média | revisão final da branch |
+
+## Entrada em produção
+
+1. **Homologação:** roteiro da Tarefa 7 com número de teste; sem defeito de severidade alta aberto; evidências arquivadas.
+2. **Piloto controlado:** uma unidade, **um número** (com equipe de unidade configurada), agente padrão só nessa linha de configurações, teto baixo, acompanhamento diário de `AIUsageLog`, transferências e oportunidades. Demais números e organizações seguem como hoje.
+3. **Desligar:** limpar o agente padrão ou desativar o agente interrompe tudo na hora, sem deploy.
+4. **Deploy:** só com confirmação do Ivan, pelo script de deploy vigente. Ampliação para outras unidades só depois de uma semana de piloto sem incidente de atendimento.
+
+## Cobertura da spec
+
+§5.1 → T1; §5.2 → T1, T5; §5.3 → T2; §5.4 → T5; §5.5 → T3, T5; §5.6 → T5; §5.7 → T4; §6 → T6; §8 → T7.
