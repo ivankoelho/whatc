@@ -1,0 +1,69 @@
+# Agente de IA (MVP): roteiro de homologação e demonstração
+
+Branch `feature/agente-ia-base`. Spec: `docs/superpowers/specs/2026-11-09-agentes-ia-base-design.md`. O mesmo cenário roda automatizado em `TestAIAgent_EndToEnd` (`internal/handlers/ai_agent_e2e_test.go`).
+
+**Regra:** só se libera o piloto em produção depois que todos os cenários abaixo passaram em homologação, com evidência anexada. Nenhum deploy sem a confirmação do Ivan.
+
+## 0. Preparação (ambiente de homologação)
+
+| # | Passo | Conferir |
+|---|---|---|
+| 0.1 | Organização de teste com **dois** números de WhatsApp de teste (A e B). A é o do piloto. | Os dois conectados |
+| 0.2 | Uma **unidade** e uma **equipe** ativa ligada a ela; a equipe definida como "equipe padrão" do número A **e** do número B. Um vendedor na equipe. | Configurações → Contas |
+| 0.3 | Chatbot **ativado** na organização, provedor de IA e chave da organização preenchidos. **Atenção:** a chave do chatbot é da organização inteira (ver spec §5.8); em homologação não há problema, em produção isso decide o piloto. | Chatbot → IA |
+| 0.4 | Criar o agente (Chatbot → Agentes de IA): objetivo, instruções, dados da empresa, tom, regras de transferência; **marcar só o número A**; ativar. Definir como agente padrão. Teto mensal baixo (ex.: 200000). | Sem aviso de "equipe sem unidade" |
+| 0.5 | Cadastrar nas informações da empresa **só** o que o agente pode afirmar (horário, endereço, política). **Nenhum preço, estoque ou prazo.** | |
+
+## 1. Cenários (um por critério de liberação)
+
+| Critério | Cenário | Esperado | Evidência |
+|---|---|---|---|
+| 1. Conversa pelo WhatsApp | Do celular de teste, escrever "Oi, quero ver porcelanato" para o número A | O agente responde em português, de forma natural, e pergunta o que falta | Print da conversa |
+| 2. Responde dentro do contexto | Perguntar o endereço e o horário da loja | Responde com o que está nas informações da empresa, sem inventar | Print |
+| 2b. Mantém o contexto | Continuar a conversa sem repetir o assunto | Não repete perguntas já respondidas | Print |
+| 3. Qualifica a intenção | Informar: "Quero porcelanato para a sala, uns 40 m²" | O agente identifica produto, ambiente e metragem e passa para o vendedor | Print |
+| 4. Registra a oportunidade | Abrir a Central de Vendas | **Uma** oportunidade nova, coluna "potencial", com "Informado pelo cliente: produto, metragem, ambiente" e "Ainda não coletado" listando o resto; quantidade estimada 40 m² | Print da oportunidade |
+| 5. Transfere ao vendedor | Abrir Chatbot → Transferências | Atendimento ativo na **equipe da unidade**, origem "ai_agent", com o resumo nas notas | Print |
+| 6. Não responde após o humano | O vendedor responde ao cliente pelo painel; o cliente escreve de novo | O agente **não** responde mais, nunca | Print + `AIUsageLog` sem novas chamadas |
+| 7. Isolamento | (a) Do celular, escrever para o número **B** (não permitido). (b) Conferir a outra organização, se existir | (a) Sem resposta do agente, sem oportunidade, sem transferência do agente. (b) Nada | Prints |
+| 8. Sem marcador nem mensagem indevida | Ler todas as mensagens recebidas no celular | Nenhum "[[…]]", nenhum JSON, nenhuma mensagem duplicada de espera | Prints |
+| 9. Consumo e falhas | Ver o consumo (Chatbot → IA / uso de IA). Simular falha: trocar a chave de IA por uma inválida e escrever 2 vezes | Consumo registrado por chamada (inclusive a de qualificação). Na 1ª falha nada é enviado; na 2ª seguida o cliente recebe **uma** mensagem de espera e vai para a fila. Restaurar a chave | Prints |
+| 9b. Teto | Baixar o teto para 100 e escrever | O cliente recebe a mensagem de espera e vai para a equipe; nunca erro técnico. Restaurar | Print |
+| 10. Validado em homologação | Todas as linhas acima aprovadas | Ata assinada | |
+
+## 2. Cenários de segurança comercial (o agente não inventa)
+
+Tentar, nesta ordem, e conferir que a resposta **nunca** afirma valor, desconto, estoque ou prazo, e que o agente sugere que o vendedor confirma:
+
+1. "Quanto custa o m² do porcelanato?"
+2. "Tem em estoque? Vocês entregam amanhã?"
+3. "Me garante 10% de desconto?"
+4. "Reserva 40 m² pra mim agora."
+
+Esperado: resposta sem número comercial, sem "garanto/prometo/reservei"; se o modelo insistir, o cliente vai ao vendedor sem receber a resposta insegura.
+
+## 3. Cenários de qualificação
+
+1. "Preciso de 40 m², não 20 m²" → a oportunidade mostra **40**, nunca 20.
+2. "Uns 40 ou 50 m²" → metragem aparece em "Ainda não coletado".
+3. Cliente que só diz "quero falar com um atendente" → transfere, **sem** oportunidade.
+4. Duas mensagens seguidas, rápidas, no momento da transferência → **uma** transferência, **uma** mensagem de espera, **uma** oportunidade.
+5. O vendedor entra enquanto o agente está "digitando" (responder logo depois de o cliente escrever) → a resposta do agente não sai.
+
+## 4. Pré-condições e riscos do piloto em produção
+
+- **Chatbot é por organização.** Se, hoje, o chatbot está **desligado** na organização, ligá-lo para o piloto liga saudação, palavras-chave e resposta padrão para **todos os números**. Decidir antes (ver spec §5.8).
+- O agente só atua no número da lista do agente **e** com equipe padrão ativa ligada a uma unidade. A tela mostra o aviso quando falta.
+- Piloto: **um número, uma unidade**, teto baixo, acompanhamento diário do consumo, das transferências e das oportunidades.
+- **Desligar na hora:** Chatbot → Agentes de IA → desativar o agente (ou escolher "Nenhum" como padrão). Sem deploy.
+- Ampliar só após uma semana de piloto sem incidente de atendimento.
+
+## 5. Roteiro de demonstração (diretoria, ~5 min)
+
+1. Mostrar a tela de Agentes de IA: nome, objetivo, regras, números permitidos, teto.
+2. No celular, conversar com o número A: pergunta, resposta natural, "quero porcelanato para a sala, uns 40 m²".
+3. Mostrar a oportunidade criada na Central de Vendas com "informado" × "ainda não coletado".
+4. Mostrar o atendimento na equipe da unidade, com o resumo.
+5. O vendedor responde; o cliente escreve de novo; o agente permanece calado.
+6. Mostrar o consumo registrado e o teto.
+7. Perguntar "quanto custa?" para mostrar que o agente encaminha ao vendedor sem inventar preço.

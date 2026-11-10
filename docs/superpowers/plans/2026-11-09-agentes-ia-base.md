@@ -161,3 +161,13 @@
 ## Cobertura da spec
 
 §5.1 → T1; §5.2 → T1, T5; §5.3 → T2; §5.4 → T5; §5.5 → T3, T5; §5.6 → T5; §5.7 → T4; §6 → T6; §8 → T7.
+
+---
+
+## Desvios em relação ao plano, registrados na construção
+
+- **Tarefa 1:** `default_ai_agent_id` e `ai_monthly_token_limit` ficaram dentro de `models.AIConfig` (`settings.AI.DefaultAgentID`, `settings.AI.MonthlyTokenLimit`), onde já estão os demais campos `ai_*`.
+- **Tarefa 3:** além da trava por contato, a revisão independente levou a: semáforo de envios simultâneos do agente, espera limitada em `createTransferRow`, parada do fluxo (`halt`) quando o nó `ai_response` descarta, e a resposta padrão passando pela trava (ver spec §5.5).
+- **Tarefa 4:** `aiReservation.Settle()` não recebe parâmetro; a falha de gravação do uso é avisada por `recordAIUsage` (que agora devolve erro) via `noteUsageFailure()`.
+- **Tarefa 5:** `claimTransfer` passou a atribuir a oportunidade aberta a quem assume um atendimento de origem `ai_agent`, independentemente da opção "atribuir ao mesmo agente" (sem isso o vendedor não veria a oportunidade no funil). `createTransferToTeam` delega a `transferToTeam`, que devolve o resultado.
+- **Tarefa 6:** uma única tela (`AIAgentsView.vue`) com diálogo; a escolha de números permitidos entrou na tela porque é ela que limita o piloto.
