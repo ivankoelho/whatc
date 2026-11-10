@@ -167,8 +167,6 @@ func registerScanTx(tx *gorm.DB, orgID uuid.UUID, source string, id uuid.UUID, s
 //     no use (scanIngress). When the bytes are then stored for serving, recordIngressClean files the
 //     verdict so the serving gate sees the same rule.
 
-var errScanUnavailable = errors.New("file scanning is unavailable")
-
 // scanIngress answers the request and returns false unless the bytes got a clean verdict now.
 func (a *App) scanIngress(r *fastglue.Request, orgID uuid.UUID, what string, data []byte) bool {
 	res, err := a.scanBuffer(context.Background(), data)
@@ -186,18 +184,6 @@ func (a *App) scanIngress(r *fastglue.Request, orgID uuid.UUID, what string, dat
 		return false
 	}
 	return true
-}
-
-// verifyBytes is scanIngress for code that is not answering a request (nil only on a clean verdict).
-func (a *App) verifyBytes(ctx context.Context, data []byte) error {
-	res, err := a.scanBuffer(ctx, data)
-	if err != nil {
-		return errScanUnavailable
-	}
-	if res.Infected {
-		return fmt.Errorf("malware detected: %s", res.Signature)
-	}
-	return nil
 }
 
 // recordIngressClean files the clean verdict of bytes that were just scanned and stored, replacing any

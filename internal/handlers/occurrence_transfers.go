@@ -292,7 +292,7 @@ func (a *App) applyTransfer(r *fastglue.Request, orgID, userID uuid.UUID, occ *m
 		}
 	}
 
-	var stageID uuid.UUID = occ.StageID
+	stageID := occ.StageID
 	var cur models.OccurrenceStage
 	if a.DB.Where("id = ?", occ.StageID).First(&cur).Error == nil && cur.TeamID != nil && (newTeamID == nil || *cur.TeamID != *newTeamID) {
 		// the current stage belongs to the previous team's own pipeline: enter the new owner's pipeline

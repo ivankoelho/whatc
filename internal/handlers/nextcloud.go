@@ -69,7 +69,7 @@ func validNextcloudBase(raw string, allowPrivate bool) (string, bool) {
 	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 		return "", false
 	}
-	if u.Scheme != "https" && !(allowPrivate && u.Scheme == "http") {
+	if u.Scheme != "https" && (!allowPrivate || u.Scheme != "http") {
 		return "", false
 	}
 	if !allowPrivate {

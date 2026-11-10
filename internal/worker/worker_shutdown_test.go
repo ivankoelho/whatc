@@ -205,7 +205,7 @@ func TestB3_ShutdownAfterTheClaimButBeforeTheRequestUndoesTheClaimAndTheJobRecov
 	require.Len(t, msgs, 1)
 	assert.Equal(t, models.MessageStatusFailed, msgs[0].Status)
 	assert.Contains(t, msgs[0].ErrorMessage, "worker_shutdown")
-	assert.True(t, got.TemplateParams != nil && len(got.TemplateParams) > 0, "the sealed code is kept")
+	assert.True(t, len(got.TemplateParams) > 0, "the sealed code is kept")
 
 	// The job comes back (the new process): it simply sends.
 	e.w.afterClaim = nil

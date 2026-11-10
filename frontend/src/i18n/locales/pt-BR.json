@@ -2666,6 +2666,8 @@
     "awayReassignDesc": "Desligado: ao marcar ausente, as conversas do agente voltam para a fila na hora. Ligado: elas ficam com o agente e só voltam para a fila depois do tempo abaixo.",
     "awayReassignAfter": "Devolver à fila após (minutos)",
     "awayReassignAfterDesc": "Contado a partir do momento em que o agente marcou ausente. Entre 1 e 1440.",
+    "offlineRelease": "Devolver à fila após desconexão (minutos)",
+    "offlineReleaseDesc": "Quanto tempo o agente pode ficar desconectado (aba fechada, queda de rede, computador em repouso) antes de as conversas voltarem para a fila. Entre 1 e 1440.",
     "businessHours": "Horário comercial",
     "businessHoursDesc": "Defina quando o chatbot está ativo e configure o comportamento fora do horário",
     "enableBusinessHours": "Ativar horário comercial",

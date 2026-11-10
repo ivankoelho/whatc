@@ -18,8 +18,6 @@ var (
 	colAccent = rgb{0.05, 0.50, 0.36}
 	colBand   = rgb{0.94, 0.96, 0.95}
 	colLine   = rgb{0.82, 0.85, 0.84}
-	colWarn   = rgb{0.72, 0.16, 0.16}
-	colWhite  = rgb{1, 1, 1}
 )
 
 const (
@@ -250,8 +248,5 @@ func (d *pdfDoc) timelineEntry(date, clock, author, kind, text string) {
 	d.hline(repLeft, d.y, repWidth, colLine)
 	d.y -= 7
 }
-
-// reportLines is the number of lines a text takes in a column; used by tests.
-func reportLines(text string, w float64) int { return len(wrapW(text, w, 9.5, false)) }
 
 var _ = utf8.RuneCountInString

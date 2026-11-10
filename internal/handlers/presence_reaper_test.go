@@ -189,3 +189,54 @@ func TestPresenceReaper_OnPresenceChangeTracksClock(t *testing.T) {
 	assert.Zero(t, reaper.Sweep(time.Now().Add(5*time.Minute)))
 	assert.NotNil(t, assignedTo(t, app, tr2.ID))
 }
+
+func TestPresenceReaper_GraceIsConfigurablePerOrganization(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+	agent := createTestAgent(t, app, org.ID)
+	tr := createTestTransfer(t, app, org.ID, testutil.CreateTestContact(t, app.DB, org.ID).ID, account.Name, models.TransferStatusActive, &agent.ID)
+	require.NoError(t, app.DB.Create(&models.ChatbotSettings{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		AgentAssignment: models.AgentAssignmentConfig{OfflineReleaseAfterMins: 5},
+	}).Error)
+
+	presence := newFakePresence()
+	presence.set(agent.ID, false)
+	reaper := handlers.NewPresenceReaper(app, 60*time.Second, time.Second)
+	reaper.SetConnectedForTest(presence.is)
+
+	t0 := time.Now()
+	reaper.Sweep(t0)
+	assert.Zero(t, reaper.Sweep(t0.Add(4*time.Minute)), "inside the configured 5 minutes")
+	assert.NotNil(t, assignedTo(t, app, tr.ID))
+	assert.Equal(t, 1, reaper.Sweep(t0.Add(6*time.Minute)))
+	assert.Nil(t, assignedTo(t, app, tr.ID))
+}
+
+func TestPresenceReaper_TeamlessAttendanceStaysVisibleToTheAgentsTeam(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+	agent := createTestAgent(t, app, org.ID)
+	team := models.Team{BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: org.ID, Name: "Suporte"}
+	require.NoError(t, app.DB.Create(&team).Error)
+	require.NoError(t, app.DB.Create(&models.TeamMember{BaseModel: models.BaseModel{ID: uuid.New()}, TeamID: team.ID, UserID: agent.ID}).Error)
+	tr := createTestTransfer(t, app, org.ID, testutil.CreateTestContact(t, app.DB, org.ID).ID, account.Name, models.TransferStatusActive, &agent.ID)
+	require.Nil(t, tr.TeamID)
+
+	presence := newFakePresence()
+	presence.set(agent.ID, false)
+	reaper := handlers.NewPresenceReaper(app, 60*time.Second, time.Second)
+	reaper.SetConnectedForTest(presence.is)
+	t0 := time.Now()
+	reaper.Sweep(t0)
+	require.Equal(t, 1, reaper.Sweep(t0.Add(2*time.Minute)))
+
+	var got models.AgentTransfer
+	require.NoError(t, app.DB.First(&got, "id = ?", tr.ID).Error)
+	assert.Nil(t, got.AgentID)
+	require.NotNil(t, got.TeamID, "a team-less queue entry would be invisible to everyone")
+	assert.Equal(t, team.ID, *got.TeamID)
+}

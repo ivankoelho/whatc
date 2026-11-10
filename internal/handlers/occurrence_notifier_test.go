@@ -83,7 +83,7 @@ func newFakeMeta(t *testing.T) *fakeMeta {
 			w.WriteHeader(500)
 			_, _ = w.Write([]byte(`{"error":{"message":"Internal error","code":2}}`))
 		default:
-			_, _ = w.Write([]byte(fmt.Sprintf(`{"messaging_product":"whatsapp","messages":[{"id":"wamid.%s-%d"}]}`, f.pfx, seq)))
+			_, _ = fmt.Fprintf(w, `{"messaging_product":"whatsapp","messages":[{"id":"wamid.%s-%d"}]}`, f.pfx, seq)
 		}
 	}))
 	t.Cleanup(f.srv.Close)

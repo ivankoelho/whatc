@@ -85,10 +85,8 @@ func TestHomologation_WhatsAppSimulation(t *testing.T) {
 			})
 
 			t.Run("histórico preservado", func(t *testing.T) {
-				code, body, _ := w.export(t, log, occ.ID, []string{"full"}, "csv")
-				_ = body
 				// "full" cannot be CSV: ask for the sections one by one
-				code, body, _ = w.export(t, log, occ.ID, []string{"whatsapp"}, "csv")
+				code, body, _ := w.export(t, log, occ.ID, []string{"whatsapp"}, "csv")
 				require.Equal(t, fasthttp.StatusOK, code)
 				text := string(body)
 				assert.Contains(t, text, "pode ligar?")

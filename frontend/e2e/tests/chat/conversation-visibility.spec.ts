@@ -104,7 +104,8 @@ test.describe.serial('Strict conversation visibility', () => {
     })
     manager = await createUserWithPermissions(api, scope, {
       userSlug: 'manager',
-      permissions: [...agentPermissions, { resource: 'conversations', action: 'view_all' }],
+      // chat:write is its own gate now (chat_write_required), separate from visibility.
+      permissions: [...agentPermissions, { resource: 'chat', action: 'write' }, { resource: 'conversations', action: 'view_all' }],
     })
 
     const orgRows = await execSQL(

@@ -1861,7 +1861,18 @@ func (a *App) returnAgentTransfers(userID, orgID uuid.UUID, reason string) int {
 		transfer := &transfers[i]
 		previousAgentID := transfer.AgentID
 
-		moved, err := a.moveTransfer(a.DB, transfer.ID, previousAgentID, map[string]any{"agent_id": nil})
+		updates := map[string]any{"agent_id": nil}
+		// A queue entry with no team is visible to nobody but conversations:view_all, so an
+		// attendance the agent opened themselves would vanish when it is returned. Park it in
+		// the agent's own team so their colleagues (and they, on return) still see and can take it.
+		if transfer.TeamID == nil && previousAgentID != nil {
+			var m models.TeamMember
+			if a.DB.Where("user_id = ?", *previousAgentID).Order("created_at").Limit(1).Find(&m).RowsAffected == 1 {
+				updates["team_id"] = m.TeamID
+				transfer.TeamID = &m.TeamID
+			}
+		}
+		moved, err := a.moveTransfer(a.DB, transfer.ID, previousAgentID, updates)
 		if err != nil {
 			a.Log.Error("Failed to return transfer to queue", "error", err, "transfer_id", transfer.ID)
 			continue

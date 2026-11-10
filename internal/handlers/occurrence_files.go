@@ -320,7 +320,7 @@ func (a *App) UploadOccurrenceFile(r *fastglue.Request) error {
 	if rerr != nil {
 		return a.sendChatError(r, errOccFileInvalid, "attach the document")
 	}
-	restricted := !(len(form.Value["restricted"]) > 0 && form.Value["restricted"][0] == "false")
+	restricted := len(form.Value["restricted"]) == 0 || form.Value["restricted"][0] != "false"
 	return a.storeOccurrenceFile(r, orgID, userID, occ, data, fh.Filename, restricted, "upload")
 }
 

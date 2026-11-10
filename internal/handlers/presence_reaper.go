@@ -31,6 +31,22 @@ func (p OfflineReleasePolicy) ShouldRelease(disconnectedFor time.Duration) bool 
 	return disconnectedFor >= p.Grace
 }
 
+// Bounds of the organization's offline grace, in minutes (Settings > Chatbot > Agents).
+const (
+	minOfflineReleaseMins = 1
+	maxOfflineReleaseMins = 1440
+)
+
+// policyFor is the release policy of one organization: its configured grace, or the reaper's
+// default when it has no settings row yet.
+func (r *PresenceReaper) policyFor(orgID uuid.UUID) OfflineReleasePolicy {
+	s, err := r.app.getChatbotSettingsCached(orgID, "")
+	if err != nil || s == nil || s.AgentAssignment.OfflineReleaseAfterMins < minOfflineReleaseMins {
+		return r.policy
+	}
+	return OfflineReleasePolicy{Grace: time.Duration(s.AgentAssignment.OfflineReleaseAfterMins) * time.Minute}
+}
+
 type agentKey struct{ org, user uuid.UUID }
 
 // PresenceReaper returns an agent's attendances to the queue once they have
@@ -153,7 +169,7 @@ func (r *PresenceReaper) Sweep(now time.Time) int {
 		}
 		r.mu.Unlock()
 
-		if !r.policy.ShouldRelease(now.Sub(since)) {
+		if !r.policyFor(k.org).ShouldRelease(now.Sub(since)) {
 			continue
 		}
 		// Re-check right before acting: the agent may have just reconnected.

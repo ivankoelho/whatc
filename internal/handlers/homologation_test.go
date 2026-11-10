@@ -47,7 +47,7 @@ func homologStorage(t *testing.T, app *handlers.App) string {
 	t.Helper()
 	dir := os.Getenv("HOMOLOG_STORAGE")
 	if dir == "" {
-		dir = "/state/uploads"
+		dir = t.TempDir()
 	}
 	require.NoError(t, os.MkdirAll(dir, 0o755))
 	app.Config.Storage.LocalPath = dir

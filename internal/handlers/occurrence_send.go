@@ -122,7 +122,7 @@ func (a *App) SendOccurrenceProtocol(r *fastglue.Request) error {
 
 	found := account != nil
 	// Direct Send lets Meta carry free text outside the window.
-	if !serviceWindowOpen(contact) && !(found && account.DirectSendEnabled) {
+	if !serviceWindowOpen(contact) && (!found || !account.DirectSendEnabled) {
 		return answer(protocolResultFailed, fasthttp.StatusUnprocessableEntity,
 			"The 24-hour service window is closed; only templates can be sent", "")
 	}
