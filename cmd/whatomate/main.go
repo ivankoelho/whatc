@@ -1191,6 +1191,14 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.PUT("/api/chatbot/ai-contexts/{id}", app.UpdateAIContext)
 	g.DELETE("/api/chatbot/ai-contexts/{id}", app.DeleteAIContext)
 
+	// AI Agents
+	g.GET("/api/chatbot/ai-agents", app.ListAIAgents)
+	g.POST("/api/chatbot/ai-agents", app.CreateAIAgent)
+	g.GET("/api/chatbot/ai-agents/{id}", app.GetAIAgent)
+	g.PUT("/api/chatbot/ai-agents/{id}", app.UpdateAIAgent)
+	g.DELETE("/api/chatbot/ai-agents/{id}", app.DeleteAIAgent)
+	g.GET("/api/chatbot/ai-agents/{id}/readiness", app.GetAIAgentReadiness)
+
 	// Agent Transfers
 	g.GET("/api/chatbot/transfers", app.ListAgentTransfers)
 	g.POST("/api/chatbot/transfers", app.CreateAgentTransfer)

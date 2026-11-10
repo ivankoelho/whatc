@@ -125,6 +125,7 @@ func runMigrations(db *gorm.DB) error {
 		&models.ChatbotSession{},
 		&models.ChatbotSessionMessage{},
 		&models.AIContext{},
+		&models.AIAgent{},
 		&models.AgentTransfer{},
 		// Bulk message models
 		&models.BulkMessageCampaign{},
