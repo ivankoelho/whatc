@@ -214,32 +214,3 @@ func (a *App) scopeVisibleConversations(query *gorm.DB, userID, orgID uuid.UUID)
 	return query.Where(cond)
 }
 
-// userOwnsContact mirrors the old assigned-contact "mine" condition, for
-// the flag-off path: the contact is assigned to the user, or an active transfer
-// is assigned to them.
-//
-// With ownerWins (the organization turned the away tolerance on) the carteira alone
-// is not enough when an active attendance belongs to ANOTHER agent: after a
-// reassignment the former agent keeps the relationship, not access to a
-// conversation someone else now owns. Without it the original rule stands.
-func (a *App) userOwnsContact(userID, orgID uuid.UUID, contact *models.Contact, ownerWins bool) bool {
-	if contact.AssignedUserID != nil && *contact.AssignedUserID == userID {
-		if !ownerWins {
-			return true
-		}
-		var other int64
-		a.DB.Model(&models.AgentTransfer{}).
-			Where("organization_id = ? AND contact_id = ? AND status = ? AND agent_id IS NOT NULL AND agent_id <> ?",
-				orgID, contact.ID, models.TransferStatusActive, userID).
-			Count(&other)
-		if other == 0 {
-			return true
-		}
-	}
-	var count int64
-	a.DB.Model(&models.AgentTransfer{}).
-		Where("organization_id = ? AND contact_id = ? AND agent_id = ? AND status = ?",
-			orgID, contact.ID, userID, models.TransferStatusActive).
-		Count(&count)
-	return count > 0
-}

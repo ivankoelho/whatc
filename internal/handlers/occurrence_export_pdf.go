@@ -135,26 +135,11 @@ func wrap(text string, n int) []string {
 	return out
 }
 
-func (d *pdfDoc) heading(text string) {
-	d.y -= 6
-	d.put(text, 12, true, 0)
-	d.y -= 2
-}
-
 func (d *pdfDoc) paragraph(text string, indent float64) {
 	for _, l := range wrap(text, pdfCharsMax-int(indent/5)) {
 		d.put(l, 9.5, false, indent)
 	}
 }
-
-func (d *pdfDoc) kv(k, v string) {
-	if strings.TrimSpace(v) == "" {
-		return
-	}
-	d.put(k+": "+v, 9.5, false, 0)
-}
-
-func (d *pdfDoc) space(h float64) { d.y -= h }
 
 // bytes renders the file. Each page carries the document title and "page n of m".
 func (d *pdfDoc) bytes() []byte {
