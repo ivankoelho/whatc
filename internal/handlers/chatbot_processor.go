@@ -881,6 +881,9 @@ func (a *App) generateAIResponse(settings *models.ChatbotSettings, session *mode
 type aiReply struct {
 	Text    string
 	Buttons []map[string]any
+	// Handoff is set only when an AI agent answered and asks for a human (aiHandoff* constants).
+	// Text is then what to say before handing over (possibly empty), never containing the marker.
+	Handoff string
 }
 
 // generateAIReply is generateAIResponse with the confirmation case (Fase 9D). Only chatbot_reply can
@@ -889,7 +892,13 @@ func (a *App) generateAIReply(settings *models.ChatbotSettings, session *models.
 	// Build context from AIContext entries
 	contextData := a.buildAIContext(settings.OrganizationID, session, userMessage)
 
+	// An AI agent, when one may answer on this number, replaces the free-text SystemPrompt with the
+	// platform rules plus its own fields. No agent: the SystemPrompt path is exactly as before.
+	agent := a.agentForSession(settings, session)
 	system := settings.AI.SystemPrompt
+	if agent != nil {
+		system = aiPlatformRules + "\n\n" + buildAgentPrompt(agent)
+	}
 	if contextData != "" {
 		if system != "" {
 			system += "\n\n" + contextData
@@ -910,6 +919,9 @@ func (a *App) generateAIReply(settings *models.ChatbotSettings, session *models.
 			system += "\n\n"
 		}
 		system += kb.Text
+	}
+	if agent != nil {
+		system += "\n\n" + aiPlatformReminder
 	}
 
 	var messages []ai.Message
@@ -938,13 +950,14 @@ func (a *App) generateAIReply(settings *models.ChatbotSettings, session *models.
 		}
 	}
 
-	resp, err := a.completeAI(context.Background(), settings, meta, ai.Request{
+	aiReq := ai.Request{
 		Model:       settings.AI.Model,
 		System:      system,
 		Messages:    messages,
 		MaxTokens:   settings.AI.MaxTokens,
 		Temperature: settings.AI.Temperature,
-	})
+	}
+	resp, err := a.completeAI(context.Background(), settings, meta, aiReq)
 	if out.Pending != nil && feature == aiFeatureChatbotReply {
 		// the AI proposed an action: what the customer sees is the server's confirmation, never the
 		// model's words (it may not claim the action happened). It also wins over an error in a later
@@ -955,7 +968,40 @@ func (a *App) generateAIReply(settings *models.ChatbotSettings, session *models.
 	if err != nil {
 		return aiReply{}, err
 	}
+	if agent != nil {
+		allowed := agentAllowedText(agent, contextData, kb.Text, userMessage)
+		return a.finishAgentReply(settings, meta, aiReq, resp.Text, allowed)
+	}
 	return aiReply{Text: resp.Text}, nil
+}
+
+// finishAgentReply applies the agent's output rules to the model's first answer: it strips the
+// handoff marker (which never reaches the customer) and blocks an answer that states price,
+// stock or a deadline as confirmed, or promises something. A blocked answer is regenerated once
+// with a corrective instruction; if that one is blocked too, the agent hands over to a human
+// without saying anything unsafe.
+func (a *App) finishAgentReply(settings *models.ChatbotSettings, meta aiCallMeta, req ai.Request, text, allowed string) (aiReply, error) {
+	for attempt := 0; ; attempt++ {
+		clean, handoff := extractHandoff(text)
+		if !violatesCommercialSafety(clean, allowed) {
+			reply := aiReply{Text: clean}
+			if handoff {
+				reply.Handoff = aiHandoffMarker
+			}
+			return reply, nil
+		}
+		if attempt == 1 {
+			return aiReply{Handoff: aiHandoffUnsafe}, nil
+		}
+		req.Messages = append(append([]ai.Message{}, req.Messages...),
+			ai.Message{Role: ai.RoleAssistant, Content: text},
+			ai.Message{Role: ai.RoleUser, Content: aiUnsafeRetryInstruction})
+		again, err := a.completeAI(context.Background(), settings, meta, req)
+		if err != nil {
+			return aiReply{}, err
+		}
+		text = again.Text
+	}
 }
 
 // buildAIContext fetches and combines all AI context data
