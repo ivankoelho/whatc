@@ -78,6 +78,21 @@ async function seedTransfer(contactId: string, agentId: string | null): Promise<
   return rows[0]!.id as string
 }
 
+// Conversation visibility is strict: an attendance with no team is visible to nobody but
+// conversations:view_all. Put it in a team that holds the agents who must be able to act on it.
+async function shareTeam(transferId: string, agents: TestUserHandle[]): Promise<void> {
+  const teamResp = await admin.post('/api/teams', {
+    name: scope.name('shared-team'), description: 'distribution e2e', assignment_strategy: 'round_robin', is_active: true,
+  })
+  expect(teamResp.ok(), await teamResp.text()).toBe(true)
+  const teamId = (await teamResp.json()).data.team.id
+  for (const a of agents) {
+    const r = await admin.post(`/api/teams/${teamId}/members`, { user_id: a.user.id, role: 'agent' })
+    expect(r.ok(), await r.text()).toBe(true)
+  }
+  await execSQL(`UPDATE agent_transfers SET team_id = '${teamId}' WHERE id = '${transferId}'`)
+}
+
 async function transferAgent(transferId: string): Promise<string | null> {
   const rows = await execSQL(`SELECT agent_id::text AS agent_id FROM agent_transfers WHERE id = '${transferId}'`)
   return (rows[0]!.agent_id as string | null) ?? null
@@ -183,6 +198,7 @@ test.describe('Concurrency and ownership', () => {
     const b = await makeAgent('race-b')
     const contactId = await newContact('race')
     const transferId = await seedTransfer(contactId, null)
+    await shareTeam(transferId, [a, b])
     const sa = await apiAs(a)
     const sb = await apiAs(b)
     try {
@@ -206,10 +222,12 @@ test.describe('Concurrency and ownership', () => {
 
   test('replying in another agent\'s conversation returns 409; a supervisor is not blocked', async () => {
     const owner = await makeAgent('own-owner')
-    const other = await makeAgent('own-other')
+    // view_team is what lets a teammate SEE (and so be refused with 409) someone else's attendance; without it the answer is 403.
+    const other = await makeAgent('own-other', [{ resource: 'conversations', action: 'view_team' }])
     const supervisor = await makeAgent('own-sup', [{ resource: 'transfers', action: 'write' }])
     const contactId = await newContact('own')
     const transferId = await seedTransfer(contactId, owner.user.id)
+    await shareTeam(transferId, [owner, other, supervisor])
     const msg = { type: 'text', content: { body: 'hello from the wrong agent' } }
 
     const so = await apiAs(other)

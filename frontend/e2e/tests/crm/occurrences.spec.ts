@@ -86,9 +86,12 @@ test.describe('CRM Occurrences', () => {
 
     await occurrencesPage.openOccurrenceDetail(title)
     const noteText = scope.name('note')
-    await occurrencesPage.addNote(noteText)
-
-    await occurrencesPage.expectToast('Note added')
+    // The unified case screen has no note box any more (internal discussion replaced it), but notes
+    // are still timeline events written through the API: the timeline must show one.
+    const id = page.url().split('/').pop()
+    const res = await api.post(`/api/occurrences/${id}/events`, { content: noteText })
+    expect(res.ok()).toBe(true)
+    await page.reload()
     await expect(occurrencesPage.timelineEntry(noteText)).toBeVisible()
   })
 
