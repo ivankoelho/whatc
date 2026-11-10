@@ -47,3 +47,17 @@ Resumo das linhas de espera da homologação: 16 `replied`, 2 `send_failed`, 1 `
 ## Pendências para produção (inalteradas)
 Transferência interrompida após a resposta; apresentação de `ambiguous_send`; resposta um turno atrasada;
 política de retenção de `ai_pending_replies`; janela de 24 h e cobrança do indicador na Meta; `-race` com CGO.
+
+## Homologação pontual da correção `7293a694` (defeito 1)
+
+Mesmo ambiente, binário do commit `7293a694`, histórico da IA **desligado**, espera de 5 s. O simulador da Meta
+recusou **somente a primeira** resposta ao número de teste (`#131009`).
+
+| Passo | Evidência |
+|---|---|
+| Cliente envia A ("A: quero porcelanato") | 10:19:52; chamada à IA com `"A: quero porcelanato"`; resposta enviada à Meta e **recusada** 10:19:58; linha `send_failed`, mensagem `failed`. |
+| Cliente envia B ("B: para a sala") | 10:20:02. |
+| Turno seguinte | 10:20:07: **uma** chamada à IA com `"A: quero porcelanato\nB: para a sala"`; **uma** resposta enviada e aceita; linha `replied`. |
+| Contagem | 2 chamadas à IA e 2 envios (o recusado e o aceito) em todo o cenário; nenhum reenvio automático. |
+
+**Decisão: defeito 1 aprovado como corrigido.** O sistema local foi devolvido ao estado inicial (histórico ligado).
