@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -158,6 +157,7 @@ func chatbotInput(messageText, buttonID string, media *MediaInfo) (input string,
 
 // processIncomingMessageFull processes incoming WhatsApp messages with chatbot logic
 func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextMessage, profileName string) {
+	receivedAt := time.Now() // before anything is logged: bounds the history of a grouped turn (see aiTurn)
 	a.Log.Info("Processing incoming message",
 		"phone_number_id", phoneNumberID,
 		"from", msg.From,
@@ -409,95 +409,19 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 		return
 	}
 
-	// If no keyword matched, try AI response if enabled
-	agentTurn := false // an AI agent is answering this message: everything it says goes through the takeover guard
+	// If no keyword matched, the AI answers. An agent configured with a wait does not answer now: the
+	// message joins the contact's pending reply and the agent answers once the customer paused (ai_wait.go).
+	// Anything that prevents queuing falls through to the immediate answer, so no message is lost.
 	if settings.AI.Enabled && settings.AI.Provider != "" && settings.AI.APIKey != "" {
-		a.Log.Info("Attempting AI response", "provider", settings.AI.Provider, "model", settings.AI.Model)
-		reply, err := a.generateAIReply(settings, session, messageText, aiFeatureChatbotReply)
-		agentTurn = reply.ByAgent
-		aiResponse := reply.Text
-		if err != nil {
-			a.Log.Error("AI response failed", "error", err, "provider", settings.AI.Provider, "model", settings.AI.Model)
-			if reply.ByAgent {
-				// The agent's own failures: the monthly cap hands over at once; any other failure
-				// hands over on the second one in a row. No waiting message for a single failure.
-				if errors.Is(err, ErrAICapReached) {
-					a.handoffFromAI(account, contact, session, settings, aiHandoffCap)
-					return
-				}
-				if a.noteAIFailure(session) >= aiFailuresBeforeHandoff {
-					if a.handoffFromAI(account, contact, session, settings, aiHandoffFailure) {
-						return
-					}
-				}
-			}
-			// Fall through to default response
-		} else if aiResponse != "" || reply.Handoff != "" {
-			if reply.ByAgent {
-				a.clearAIFailures(session)
-			}
-			if aiResponse == "" { // the agent only asks for a human: there is no text to send first
-				a.handoffFromAI(account, contact, session, settings, reply.Handoff)
+		if agent, wait := a.aiAgentWait(settings, account); wait > 0 {
+			if err := a.enqueueAIWait(agent, account, contact, session, msg.ID, receivedAt, isNewSession); err != nil {
+				a.Log.Error("Failed to queue the AI wait; answering at once", "error", err, "contact_id", contact.ID)
+			} else {
 				return
 			}
-			a.Log.Info("AI response generated successfully", "response_length", len(aiResponse))
-			sent, sendErr := a.sendAIReply(aiCtx("chatbot_reply"), reply.ByAgent, account.OrganizationID, contact.ID,
-				func(ctx context.Context) error {
-					if len(reply.Buttons) > 0 { // the server's confirmation message, with its buttons
-						return a.sendAndSaveInteractiveButtons(ctx, account, contact, aiResponse, reply.Buttons)
-					}
-					return a.sendAndSaveAgentText(ctx, account, contact, aiResponse, reply.Sender)
-				})
-			if sendErr != nil {
-				a.Log.Error("Failed to send AI response", "error", sendErr, "contact", contact.PhoneNumber)
-			} else if !sent {
-				// not sent on purpose (a human took over while the reply was being written, or the
-				// guard could not be had in time): say nothing, and do not fall through to the
-				// default response either. The reason is in the AIUsageLog row of the discard.
-				a.Log.Info("AI reply not sent", "contact", contact.PhoneNumber)
-				return
-			}
-			a.logSessionMessage(session.ID, models.DirectionOutgoing, aiResponse, "ai_response")
-			if reply.Handoff != "" { // the agent said its last words; now hand over
-				a.handoffFromAI(account, contact, session, settings, reply.Handoff)
-			}
-			return
-		} else {
-			a.Log.Warn("AI returned empty response")
 		}
-	} else {
-		a.Log.Info("AI not configured", "ai_enabled", settings.AI.Enabled, "has_provider", settings.AI.Provider != "", "has_api_key", settings.AI.APIKey != "")
 	}
-
-	// If no AI response or AI not enabled, send fallback message (for existing sessions)
-	// Greeting is already sent for new sessions above
-	if settings.FallbackMessage != "" && !isNewSession {
-		a.Log.Info("Sending fallback message", "response", settings.FallbackMessage)
-		fallbackButtons := make([]map[string]any, 0)
-		for _, btn := range settings.FallbackButtons {
-			if btnMap, ok := btn.(map[string]any); ok {
-				fallbackButtons = append(fallbackButtons, btnMap)
-			}
-		}
-		// After an agent turn (the model may have taken up to aiCallDeadline) the fallback is part
-		// of that turn: it goes through the same takeover guard. Otherwise it is sent as always.
-		sent, err := a.sendAIReply(botCtx("fallback"), agentTurn, account.OrganizationID, contact.ID,
-			func(ctx context.Context) error {
-				if len(fallbackButtons) > 0 {
-					return a.sendAndSaveInteractiveButtons(ctx, account, contact, settings.FallbackMessage, fallbackButtons)
-				}
-				return a.sendAndSaveTextMessage(ctx, account, contact, settings.FallbackMessage)
-			})
-		if err != nil {
-			a.Log.Error("Failed to send fallback message", "error", err, "contact", contact.PhoneNumber)
-		} else if !sent {
-			a.Log.Info("Fallback message not sent", "contact", contact.PhoneNumber)
-			return
-		}
-		a.logSessionMessage(session.ID, models.DirectionOutgoing, settings.FallbackMessage, "fallback_response")
-	} else if !isNewSession {
-		a.Log.Info("No fallback message configured for existing session")
-	}
+	a.answerWithAI(account, contact, session, settings, messageText, isNewSession, aiTurn{})
 }
 
 // KeywordResponse holds the response content and optional buttons
@@ -943,6 +867,17 @@ type aiReply struct {
 // generateAIReply is generateAIResponse with the confirmation case (Fase 9D). Only chatbot_reply can
 // produce buttons; the flow's ai_response node keeps going through generateAIResponse and gets text.
 func (a *App) generateAIReply(settings *models.ChatbotSettings, session *models.ChatbotSession, userMessage string, feature string) (aiReply, error) {
+	return a.generateAIReplyWith(settings, session, userMessage, feature, aiReplyOpts{})
+}
+
+// aiReplyOpts is what only a turn with grouped messages changes about the prompt.
+type aiReplyOpts struct {
+	// historyBefore, when set, drops from the history the customer's messages received at or after it:
+	// those are the grouped messages, already in userMessage.
+	historyBefore time.Time
+}
+
+func (a *App) generateAIReplyWith(settings *models.ChatbotSettings, session *models.ChatbotSession, userMessage string, feature string, opts aiReplyOpts) (aiReply, error) {
 	// Build context from AIContext entries
 	contextData := a.buildAIContext(settings.OrganizationID, session, userMessage)
 
@@ -980,7 +915,7 @@ func (a *App) generateAIReply(settings *models.ChatbotSettings, session *models.
 
 	var messages []ai.Message
 	if settings.AI.IncludeHistory && session != nil {
-		for _, msg := range a.getSessionHistory(session.ID, settings.AI.HistoryLimit) {
+		for _, msg := range a.getSessionHistoryBefore(session.ID, settings.AI.HistoryLimit, opts.historyBefore) {
 			role := ai.RoleUser
 			if msg.Direction == models.DirectionOutgoing {
 				role = ai.RoleAssistant
@@ -1155,9 +1090,19 @@ func (a *App) fetchAPIContext(apiConfig models.JSONB, session *models.ChatbotSes
 
 // getSessionHistory retrieves recent messages from the session
 func (a *App) getSessionHistory(sessionID uuid.UUID, limit int) []models.ChatbotSessionMessage {
+	return a.getSessionHistoryBefore(sessionID, limit, time.Time{})
+}
+
+// getSessionHistoryBefore is getSessionHistory without the customer's messages received at or after
+// the cut (zero = no cut): those are the grouped messages of the turn being answered, already in the
+// prompt as the user message. The agent's own earlier answers are kept whatever their time.
+func (a *App) getSessionHistoryBefore(sessionID uuid.UUID, limit int, before time.Time) []models.ChatbotSessionMessage {
 	var messages []models.ChatbotSessionMessage
-	a.DB.Where("session_id = ?", sessionID).
-		Order("created_at DESC").
+	q := a.DB.Where("session_id = ?", sessionID)
+	if !before.IsZero() {
+		q = q.Where("NOT (direction = ? AND created_at >= ?)", models.DirectionIncoming, before)
+	}
+	q.Order("created_at DESC").
 		Limit(limit).
 		Find(&messages)
 

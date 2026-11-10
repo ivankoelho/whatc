@@ -493,6 +493,8 @@ func runServer(args []string) {
 	notifierCtx, notifierCancel := context.WithCancel(context.Background())
 	go app.StartOccurrenceNotifier(notifierCtx)
 	go app.StartSendIntentReconciler(notifierCtx)
+	// AI agent wait: answers customers once they paused; recovers waits left by a previous run
+	go app.StartAIWaitWorker(notifierCtx)
 
 	// Start presence reaper (sweeps every 10s; grace is 60s)
 	presenceCtx, presenceCancel := context.WithCancel(context.Background())

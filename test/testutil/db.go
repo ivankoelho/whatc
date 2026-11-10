@@ -126,6 +126,7 @@ func runMigrations(db *gorm.DB) error {
 		&models.ChatbotSessionMessage{},
 		&models.AIContext{},
 		&models.AIAgent{},
+		&models.AIPendingReply{},
 		&models.AgentTransfer{},
 		// Bulk message models
 		&models.BulkMessageCampaign{},
@@ -213,6 +214,7 @@ func runMigrations(db *gorm.DB) error {
 // Uses TRUNCATE CASCADE to handle foreign key constraints properly.
 func cleanupTables(db *gorm.DB) {
 	tables := []string{
+		"ai_pending_replies",
 		// Antimalware verdicts
 		"file_scans",
 		"meta_media_uploads",

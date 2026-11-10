@@ -53,6 +53,27 @@ Esperado: resposta sem número comercial, sem "garanto/prometo/reservei"; se o m
 7. **Nem a fila geral aceita (falha total).** Só em homologação com apoio técnico (exige derrubar o banco de transferências): o cliente recebe "Tive um problema para te encaminhar agora. Pode me mandar uma nova mensagem em instantes?", nunca silêncio nem a promessa de atendente; ao voltar, uma nova mensagem do cliente conclui o encaminhamento sem nova qualificação. (Coberto por `TestHandoffFromAI_BothTransfersFail_CustomerIsToldAndTheNextAttemptRecovers`.)
 8. **Piloto restrito a um número.** Conferir na tela de Agentes de IA que **só o número A** está marcado, que o aviso de "equipe sem unidade" não aparece para ele, e repetir o cenário 7 do critério 7 (mensagem ao número B não recebe o agente). Nunca marcar mais de um número no piloto.
 
+## 3b. Espera inteligente e indicador de digitação
+
+Pré-condição: na tela do agente, "Tempo de espera antes de responder" = **8** segundos (0 desliga). O
+aparelho do cliente é o de teste autorizado. O banco de homologação é o da organização isolada.
+
+1. **Agrupamento.** Mandar 3 mensagens curtas seguidas ("oi", "quero porcelanato", "para a sala"), cada uma
+   antes de 8 s da anterior → o cliente recebe **uma** resposta, 8 s depois da **última**; `evidence.sql`,
+   seção 5, mostra **uma** chamada `chatbot_reply` para as três.
+2. **Indicador.** Depois dos 8 s, o aparelho mostra "digitando…" até a resposta chegar; ao chegar, some.
+3. **Mensagem durante a geração.** Mandar outra mensagem logo depois de o "digitando…" aparecer → a primeira
+   resposta sai normalmente e a nova mensagem é respondida em seguida (uma resposta cada, nunca duas para a mesma).
+4. **Vendedor assume durante a espera** (nos 8 s) → o agente não responde e a seção 5 do `evidence.sql`
+   não mostra chamada de IA nova.
+5. **Vendedor assume durante a geração** → a resposta do agente não sai (seção 5: `ai_reply_discarded`) e o
+   "digitando…" para de ser renovado (pode ficar até ~25 s na tela: a Meta não permite recolhê-lo).
+6. **Reinício do serviço.** Mandar uma mensagem e reiniciar o serviço antes de passarem os 8 s → depois de subir, a resposta
+   sai **uma vez**, sem a mensagem ter se perdido.
+7. **Falha do indicador.** Num teste normal, `typing_failures` (item 8) deve ser 0. A falha e o tempo esgotado da API da Meta são cobertos por teste automatizado: a resposta sai igual.
+8. **Auditoria.** `select outcome, wait_seconds, jsonb_array_length(message_ids) msgs, typing_starts, typing_renewals, typing_failures from ai_pending_replies where contact_id = '...' order by created_at;`
+   mostra cada espera: o resultado, quantas mensagens foram agrupadas e o que o indicador fez. Não há texto de mensagem nem token nessa tabela.
+
 ## 4. Pré-condições e riscos do piloto em produção
 
 - **Chatbot é por organização.** Se, hoje, o chatbot está **desligado** na organização, ligá-lo para o piloto liga saudação, palavras-chave e resposta padrão para **todos os números**. Decidir antes (ver spec §5.8).

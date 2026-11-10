@@ -49,3 +49,9 @@ SELECT date_trunc('month', l.created_at) AS mes, sum(l.total_tokens) AS tokens
 FROM ai_usage_logs l
 WHERE l.feature IN ('chatbot_reply', 'chatbot_flow_node', 'agent_qualification', 'ai_reservation_unreconciled')
 GROUP BY 1 ORDER BY 1 DESC LIMIT 3;
+
+\echo '== 8. Espera do agente (agrupamento, resultado e indicador de digitação; sem texto de mensagem)'
+SELECT r.created_at, r.status, r.outcome, r.wait_seconds, jsonb_array_length(r.message_ids) AS mensagens,
+       r.due_at, r.finished_at, r.attempts, r.typing_starts, r.typing_renewals, r.typing_failures, r.typing_last_error
+FROM ai_pending_replies r JOIN contacts c ON c.id = r.contact_id AND c.phone_number = :'phone'
+WHERE r.deleted_at IS NULL ORDER BY r.created_at;
