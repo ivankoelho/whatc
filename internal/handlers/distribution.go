@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -72,6 +73,10 @@ func isActiveTransferConflict(err error) bool {
 // silent. Keep it that way: any other INSERT of an active AgentTransfer would bypass the lock.
 func (a *App) createTransferRow(transfer *models.AgentTransfer) error {
 	err := a.DB.Transaction(func(tx *gorm.DB) error {
+		// An AI send in flight may hold the lock for a moment; never wait for it forever.
+		if err := tx.Exec(fmt.Sprintf("SET LOCAL lock_timeout = %d", createTransferLockTimeout/time.Millisecond)).Error; err != nil {
+			return err
+		}
 		if err := lockContact(tx, transfer.OrganizationID, transfer.ContactID); err != nil {
 			return err
 		}

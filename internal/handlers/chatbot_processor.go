@@ -409,9 +409,11 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	}
 
 	// If no keyword matched, try AI response if enabled
+	agentTurn := false // an AI agent is answering this message: everything it says goes through the takeover guard
 	if settings.AI.Enabled && settings.AI.Provider != "" && settings.AI.APIKey != "" {
 		a.Log.Info("Attempting AI response", "provider", settings.AI.Provider, "model", settings.AI.Model)
 		reply, err := a.generateAIReply(settings, session, messageText, aiFeatureChatbotReply)
+		agentTurn = reply.ByAgent
 		aiResponse := reply.Text
 		if err != nil {
 			a.Log.Error("AI response failed", "error", err, "provider", settings.AI.Provider, "model", settings.AI.Model)
@@ -428,9 +430,10 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 			if sendErr != nil {
 				a.Log.Error("Failed to send AI response", "error", sendErr, "contact", contact.PhoneNumber)
 			} else if !sent {
-				// a human took over while the reply was being written: say nothing, and do not
-				// fall through to the default response either
-				a.Log.Info("AI reply dropped: a human took over", "contact", contact.PhoneNumber)
+				// not sent on purpose (a human took over while the reply was being written, or the
+				// guard could not be had in time): say nothing, and do not fall through to the
+				// default response either. The reason is in the AIUsageLog row of the discard.
+				a.Log.Info("AI reply not sent", "contact", contact.PhoneNumber)
 				return
 			}
 			a.logSessionMessage(session.ID, models.DirectionOutgoing, aiResponse, "ai_response")
@@ -446,26 +449,26 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	// Greeting is already sent for new sessions above
 	if settings.FallbackMessage != "" && !isNewSession {
 		a.Log.Info("Sending fallback message", "response", settings.FallbackMessage)
-		if len(settings.FallbackButtons) > 0 {
-			fallbackButtons := make([]map[string]any, 0)
-			for _, btn := range settings.FallbackButtons {
-				if btnMap, ok := btn.(map[string]any); ok {
-					fallbackButtons = append(fallbackButtons, btnMap)
-				}
+		fallbackButtons := make([]map[string]any, 0)
+		for _, btn := range settings.FallbackButtons {
+			if btnMap, ok := btn.(map[string]any); ok {
+				fallbackButtons = append(fallbackButtons, btnMap)
 			}
-			if len(fallbackButtons) > 0 {
-				if err := a.sendAndSaveInteractiveButtons(botCtx("fallback"), account, contact, settings.FallbackMessage, fallbackButtons); err != nil {
-					a.Log.Error("Failed to send fallback buttons", "error", err, "contact", contact.PhoneNumber)
+		}
+		// After an agent turn (the model may have taken up to aiCallDeadline) the fallback is part
+		// of that turn: it goes through the same takeover guard. Otherwise it is sent as always.
+		sent, err := a.sendAIReply(botCtx("fallback"), agentTurn, account.OrganizationID, contact.ID,
+			func(ctx context.Context) error {
+				if len(fallbackButtons) > 0 {
+					return a.sendAndSaveInteractiveButtons(ctx, account, contact, settings.FallbackMessage, fallbackButtons)
 				}
-			} else {
-				if err := a.sendAndSaveTextMessage(botCtx("fallback"), account, contact, settings.FallbackMessage); err != nil {
-					a.Log.Error("Failed to send fallback message", "error", err, "contact", contact.PhoneNumber)
-				}
-			}
-		} else {
-			if err := a.sendAndSaveTextMessage(botCtx("fallback"), account, contact, settings.FallbackMessage); err != nil {
-				a.Log.Error("Failed to send fallback message", "error", err, "contact", contact.PhoneNumber)
-			}
+				return a.sendAndSaveTextMessage(ctx, account, contact, settings.FallbackMessage)
+			})
+		if err != nil {
+			a.Log.Error("Failed to send fallback message", "error", err, "contact", contact.PhoneNumber)
+		} else if !sent {
+			a.Log.Info("Fallback message not sent", "contact", contact.PhoneNumber)
+			return
 		}
 		a.logSessionMessage(session.ID, models.DirectionOutgoing, settings.FallbackMessage, "fallback_response")
 	} else if !isNewSession {
@@ -973,10 +976,10 @@ func (a *App) generateAIReply(settings *models.ChatbotSettings, session *models.
 		// model's words (it may not claim the action happened). It also wins over an error in a later
 		// step of the run: the proposal already exists and the customer must be able to answer it.
 		text, buttons := aiConfirmationButtons(out.Pending)
-		return aiReply{Text: text, Buttons: buttons}, nil
+		return aiReply{Text: text, Buttons: buttons, ByAgent: agent != nil}, nil
 	}
 	if err != nil {
-		return aiReply{}, err
+		return aiReply{ByAgent: agent != nil}, err
 	}
 	if agent != nil {
 		allowed := agentAllowedText(agent, contextData, kb.Text, userMessage)
@@ -1008,7 +1011,7 @@ func (a *App) finishAgentReply(settings *models.ChatbotSettings, meta aiCallMeta
 			ai.Message{Role: ai.RoleUser, Content: aiUnsafeRetryInstruction})
 		again, err := a.completeAI(context.Background(), settings, meta, req)
 		if err != nil {
-			return aiReply{}, err
+			return aiReply{ByAgent: true}, err
 		}
 		text = again.Text
 	}

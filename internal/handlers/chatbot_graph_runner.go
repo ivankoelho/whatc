@@ -52,6 +52,10 @@ type chatNodeCtx struct {
 type nodeOutcome struct {
 	outcome string
 	yield   bool
+	// halt stops the run right here, persisting nothing and sending nothing more. Used when a human
+	// took over the conversation while the node was working: the attendance already ended the
+	// chatbot session in the database, and saving this stale in-memory copy would reopen it.
+	halt bool
 }
 
 // runChatGraph executes the v2 graph for a session against a single inbound
@@ -142,6 +146,9 @@ func (a *App) runChatGraph(
 		if err != nil {
 			_ = a.persistChatSession(session)
 			return err
+		}
+		if res.halt {
+			return nil
 		}
 
 		appendChatPath(session, node, res.outcome)
@@ -746,9 +753,11 @@ func (a *App) execChatAIResponse(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome,
 		return nodeOutcome{}, fmt.Errorf("send ai response: %w", err)
 	}
 	if !sent {
-		// a human took over while the reply was being written: nothing is said
-		a.Log.Info("ai_response node: AI reply dropped, a human took over", "node", node.ID, "session", ctx.session.ID)
-		return nodeOutcome{outcome: "default"}, nil
+		// A human took over while the reply was being written (or the guard could not be had): the
+		// reply is dropped AND the flow stops here, so no later node speaks over the human and the
+		// session the attendance ended is not saved back as active.
+		a.Log.Info("ai_response node: AI reply not sent, stopping the flow", "node", node.ID, "session", ctx.session.ID)
+		return nodeOutcome{halt: true}, nil
 	}
 	a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, answer, node.ID)
 	return nodeOutcome{outcome: "default"}, nil

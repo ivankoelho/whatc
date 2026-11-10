@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -31,7 +32,42 @@ import (
 // aiSendLockTimeout is how long the AI waits for the contact lock. Without it the reply is
 // discarded (fail safe): silence is better than talking over a human. A variable only so a test
 // can shorten it.
-var aiSendLockTimeout = 3 * time.Second
+var aiSendLockTimeout = 5 * time.Second
+
+// Each in-flight AI send holds one database connection (the transaction that owns the lock) while
+// the send itself needs more connections to save the message. If every connection of the pool were
+// held by sends waiting for another, the whole application would freeze, and Postgres cannot see
+// that deadlock. So the number of concurrent AI sends is capped well below the pool size; a send
+// that cannot get a slot within aiSendLockTimeout is discarded like any other guard failure.
+const aiSendMaxConcurrent = 6
+
+var (
+	aiSendSlotsOnce sync.Once
+	aiSendSlots     chan struct{}
+)
+
+// aiSendSlotsFor returns the semaphore, sized once: aiSendMaxConcurrent, or a quarter of the
+// connection pool when the pool is small.
+func aiSendSlotsFor(db *gorm.DB) chan struct{} {
+	aiSendSlotsOnce.Do(func() {
+		n := aiSendMaxConcurrent
+		if sqlDB, err := db.DB(); err == nil {
+			if max := sqlDB.Stats().MaxOpenConnections; max > 0 && max/4 < n {
+				n = max / 4
+			}
+		}
+		if n < 1 {
+			n = 1
+		}
+		aiSendSlots = make(chan struct{}, n)
+	})
+	return aiSendSlots
+}
+
+// createTransferLockTimeout bounds how long an attendant's action may wait for an AI send that is
+// in flight (milliseconds). It is far above aiSendMaxHold; reaching it means something is stuck,
+// and the action then fails instead of hanging forever.
+const createTransferLockTimeout = 30 * time.Second
 
 const (
 	// aiSendMaxHold bounds how long a send may keep the lock, so a stuck WhatsApp call cannot
@@ -42,6 +78,7 @@ const (
 	aiFeatureReplyDiscarded = "ai_reply_discarded"
 	aiDiscardHumanTookOver  = "discarded_human"
 	aiDiscardLockTimeout    = "discarded_lock_timeout"
+	aiDiscardBusy           = "discarded_busy"
 )
 
 // contactLockKey is the advisory-lock key of one contact of one organization.
@@ -85,6 +122,17 @@ func (a *App) sendAIReply(ctx context.Context, byAgent bool, orgID, contactID uu
 // sendAIReplyIfNoHuman runs send under the contact lock after re-checking that no human has taken
 // over. See the comment at the top of this file.
 func (a *App) sendAIReplyIfNoHuman(ctx context.Context, orgID, contactID uuid.UUID, send func(context.Context) error) (bool, error) {
+	slots := aiSendSlotsFor(a.DB)
+	select {
+	case slots <- struct{}{}:
+		defer func() { <-slots }()
+	case <-time.After(aiSendLockTimeout):
+		a.recordAIDiscard(orgID, contactID, aiDiscardBusy)
+		return false, nil
+	case <-ctx.Done():
+		return false, ctx.Err()
+	}
+
 	sent := false
 	var sendErr error
 	err := a.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -118,6 +166,11 @@ func (a *App) sendAIReplyIfNoHuman(ctx context.Context, orgID, contactID uuid.UU
 	case isLockTimeout(err):
 		a.recordAIDiscard(orgID, contactID, aiDiscardLockTimeout)
 		return false, nil
+	case err != nil && sent:
+		// The message already went out and only the (empty) transaction failed to commit: it was
+		// sent, and saying otherwise would make the caller report a failure that did not happen.
+		a.Log.Error("AI reply sent, but the guard transaction did not commit", "error", err, "contact_id", contactID)
+		return true, sendErr
 	case err != nil:
 		return false, err
 	}

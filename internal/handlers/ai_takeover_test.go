@@ -87,6 +87,7 @@ func newWiring(t *testing.T, replies ...string) *wiring {
 	enc, err := crypto.Encrypt("sk-test", app.Config.App.EncryptionKey)
 	require.NoError(t, err)
 	f.settings.IsEnabled = true
+	f.settings.FallbackMessage = "Não entendi, pode repetir?"
 	f.settings.AI = models.AIConfig{
 		Enabled: true, Provider: models.AIProvider("openai"), Model: "gpt-test", APIKey: enc, MaxTokens: 200,
 		DefaultAgentID: &f.agent.ID,
@@ -421,7 +422,9 @@ func TestGraphNode_AgentReplySent_WhenNobodyTakesOver(t *testing.T) {
 // Any other INSERT of an active AgentTransfer would bypass the contact lock and reopen the race.
 func TestNoOtherActiveTransferInsertPath(t *testing.T) {
 	literal := regexp.MustCompile(`models\.AgentTransfer\{[^}\n]`)
-	insert := regexp.MustCompile(`\.Create\(&?(transfer|t|tr)\)`)
+	// inserts only: Save/Update on a transfer that is already active (queue pick, claim, assign)
+	// changes who owns an attendance that already silences the AI
+	insert := regexp.MustCompile(`(Create|FirstOrCreate)\(&?(transfer|t|tr|agentTransfer|newTransfer)\b|Create\(&models\.AgentTransfer\{`)
 	root := filepath.Join("..", "..", "internal")
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
@@ -440,4 +443,127 @@ func TestNoOtherActiveTransferInsertPath(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
+}
+
+// --- review follow-ups -------------------------------------------------------------------------
+
+// After a dropped ai_response node the flow must STOP: no later node may speak, and the session
+// that the attendance ended must not be saved back as active.
+func TestGraphNode_DroppedReply_StopsFlowAndKeepsSessionEnded(t *testing.T) {
+	w := newWiring(t, "Qual ambiente você quer revestir?")
+	contact := testutil.CreateTestContact(t, w.app.DB, w.f.org.ID)
+	session := &models.ChatbotSession{BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: w.f.org.ID, ContactID: contact.ID,
+		WhatsAppAccount: w.f.account.Name, PhoneNumber: contact.PhoneNumber, Status: models.SessionStatusActive,
+		SessionData: models.JSONB{}, StartedAt: time.Now(), LastActivityAt: time.Now()}
+	require.NoError(t, w.app.DB.Create(session).Error)
+	flow := &models.ChatbotFlow{BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: w.f.org.ID,
+		WhatsAppAccount: w.f.account.Name, Name: "ai-then-message", IsEnabled: true,
+		Graph: models.JSONB{"version": 2, "entry_node": "ai",
+			"nodes": []any{
+				map[string]any{"id": "ai", "type": "ai_response", "label": "ask", "config": map[string]any{}},
+				map[string]any{"id": "after", "type": "message", "label": "after", "config": map[string]any{"text": "MENSAGEM POSTERIOR DO FLUXO"}},
+				map[string]any{"id": "end", "type": "end"},
+			},
+			"edges": []any{
+				map[string]any{"from": "ai", "to": "after", "condition": "default"},
+				map[string]any{"from": "after", "to": "end", "condition": "default"},
+			}}}
+	require.NoError(t, w.app.DB.Create(flow).Error)
+
+	w.ai.onCall = func(int) {
+		agent := testutil.CreateTestUser(t, w.app.DB, w.f.org.ID)
+		// the real takeover: opens the attendance AND ends the chatbot session
+		require.NoError(t, w.app.openAgentInitiatedTransfer(w.f.account, contact, agent.ID))
+	}
+	require.NoError(t, w.app.runChatGraph(w.f.account, contact, session, flow, "quero porcelanato", "", nil))
+
+	assert.Equal(t, 0, w.wa.count(), "neither the AI reply nor the next node may be sent")
+	var stored models.ChatbotSession
+	require.NoError(t, w.app.DB.First(&stored, "id = ?", session.ID).Error)
+	assert.NotEqual(t, models.SessionStatusActive, stored.Status, "the session the attendance ended must stay ended")
+}
+
+// The fallback after an agent turn is part of that turn: a human who took over while the model was
+// working must not be followed by a "did not understand" message.
+func TestProcessor_FallbackAfterAgentTurn_NotSentWhenHumanTookOver(t *testing.T) {
+	w := newWiring(t, "ok", "") // second answer is empty -> the processor falls to the fallback message
+	const from = "5511900000004"
+	w.inbound(t, from, "primeira") // new session; the agent answers "ok"
+	before := w.wa.count()
+	require.Equal(t, 1, before)
+
+	w.ai.onCall = func(i int) {
+		if i == 1 {
+			w.openAttendance(t, w.contactFor(t, from).ID)
+		}
+	}
+	w.inbound(t, from, "segunda")
+
+	assert.Equal(t, before, w.wa.count(), "the fallback must not be sent over a human")
+}
+
+// Control: with nobody taking over, an empty agent answer does fall to the fallback message.
+func TestProcessor_FallbackAfterAgentTurn_SentWhenNobodyTookOver(t *testing.T) {
+	w := newWiring(t, "ok", "")
+	const from = "5511900000005"
+	w.inbound(t, from, "primeira")
+	w.inbound(t, from, "segunda")
+	require.Equal(t, 2, w.wa.count())
+	assert.Contains(t, w.wa.all()[1], "Não entendi")
+}
+
+// More concurrent AI sends than the connection pool can serve must not freeze the database: each
+// send holds a connection while its callback needs another.
+func TestSendAIReply_ManyConcurrentSendsDoNotExhaustThePool(t *testing.T) {
+	app := newSLATestApp(t)
+	sqlDB, err := app.DB.DB()
+	require.NoError(t, err)
+	oldMax := sqlDB.Stats().MaxOpenConnections
+	sqlDB.SetMaxOpenConns(8)
+	aiSendSlotsOnce, aiSendSlots = sync.Once{}, nil // size the semaphore for this small pool
+	t.Cleanup(func() {
+		sqlDB.SetMaxOpenConns(oldMax)
+		aiSendSlotsOnce, aiSendSlots = sync.Once{}, nil
+	})
+	old := aiSendLockTimeout
+	aiSendLockTimeout = 2 * time.Second
+	t.Cleanup(func() { aiSendLockTimeout = old })
+
+	org := testutil.CreateTestOrganization(t, app.DB)
+	var done sync.WaitGroup
+	var sent, discarded atomic.Int64
+	for i := 0; i < 40; i++ {
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		done.Add(1)
+		go func() {
+			defer done.Done()
+			ok, err := app.sendAIReplyIfNoHuman(context.Background(), org.ID, contact.ID, func(ctx context.Context) error {
+				// what a real send does: more database work on other connections
+				var n int64
+				if err := app.DB.WithContext(ctx).Model(&models.Contact{}).Count(&n).Error; err != nil {
+					return err
+				}
+				time.Sleep(30 * time.Millisecond)
+				return nil
+			})
+			assert.NoError(t, err)
+			if ok {
+				sent.Add(1)
+			} else {
+				discarded.Add(1)
+			}
+		}()
+	}
+	finished := make(chan struct{})
+	go func() { done.Wait(); close(finished) }()
+	select {
+	case <-finished:
+	case <-time.After(30 * time.Second):
+		t.Fatal("deadlock: AI sends exhausted the connection pool")
+	}
+	assert.EqualValues(t, 40, sent.Load()+discarded.Load())
+	assert.Greater(t, sent.Load(), int64(0))
+	// and an attendant can still take over afterwards
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.createTransferRow(attendance(&models.Organization{BaseModel: models.BaseModel{ID: org.ID}}, contact)))
 }
