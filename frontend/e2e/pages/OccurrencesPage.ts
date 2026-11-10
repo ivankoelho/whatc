@@ -217,7 +217,7 @@ export class OccurrencesPage extends BasePage {
   }
 
   get timelineItems(): Locator {
-    return this.page.locator('.pl-9.pb-6')
+    return this.page.locator('[data-testid="case-history"] ol > li')
   }
 
   timelineEntry(text: string | RegExp): Locator {
@@ -232,7 +232,7 @@ export class OccurrencesPage extends BasePage {
   }
 
   getStageRow(name: string): Locator {
-    return this.page.locator('tbody tr').filter({ hasText: name })
+    return this.page.getByTestId('stage-list').locator('li').filter({ hasText: name })
   }
 
   /** Clicks the row's delete action (last button in the actions cell) and
@@ -241,7 +241,7 @@ export class OccurrencesPage extends BasePage {
   async deleteStage(name: string) {
     const row = this.getStageRow(name)
     await expect(row).toBeVisible({ timeout: 10000 })
-    await row.locator('td:last-child button').last().click()
+    await row.getByRole('button').last().click()
     await this.alertDialog.waitFor({ state: 'visible' })
     await this.alertDialog.getByRole('button', { name: /^Delete$/i }).click()
   }

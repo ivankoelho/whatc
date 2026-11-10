@@ -142,7 +142,7 @@ test.describe('CRM permissions', () => {
     // permissao de stages) deixaria o h1 visivel e este teste verde mesmo
     // assim. A linha da etapa semeada "Aberto" e a prova de que a tela
     // funcionou de fato.
-    await expect(page.getByRole('cell', { name: 'Aberto' })).toBeVisible()
+    await expect(page.getByTestId('stage-list').getByText('Aberto')).toBeVisible()
 
     // E pelo menu: este papel só tem occurrences.stages entre as
     // permissões que controlam a visibilidade dos grupos de Settings, então
