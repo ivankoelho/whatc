@@ -3538,6 +3538,8 @@
     "noAccountsWarning": "This agent will not act on any number.",
     "displayName": "Display name shown to the customer",
     "displayNameHelp": "Shown before each message of the agent (for example: *Assistente Virtual:*). Leave empty to use \"Assistente Virtual\". Use a name that makes clear it is automated, not a person's name.",
+    "waitSeconds": "Wait before answering (seconds)",
+    "waitSecondsHelp": "How long the agent waits after the customer's last message before answering. If the customer writes more in that time the count restarts and the answer considers everything they said. 0 answers at once. Maximum: 60.",
     "aiBadge": "AI",
     "enabled": "Agent enabled",
     "nameRequired": "Enter the agent name",

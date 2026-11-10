@@ -28,7 +28,11 @@ type aiAgentRequest struct {
 	HandoffRules     *string   `json:"handoff_rules"`
 	IsEnabled        *bool     `json:"is_enabled"`
 	WhatsAppAccounts *[]string `json:"whatsapp_accounts"`
+	WaitSeconds      *int      `json:"wait_seconds"`
 }
+
+// Bounds of the agent's wait before answering (seconds). 0 means "answer at once".
+const aiAgentWaitMax = 60
 
 // validate checks lengths and, for the number list, that every name is a WhatsApp account of
 // the organization (an agent must never be pointed at another organization's number).
@@ -38,6 +42,9 @@ func (a *App) validateAIAgentRequest(orgID uuid.UUID, req *aiAgentRequest) strin
 	}
 	if req.DisplayName != nil && len([]rune(strings.TrimSpace(*req.DisplayName))) > maxAIDisplayName {
 		return "Display name accepts at most 60 characters"
+	}
+	if req.WaitSeconds != nil && (*req.WaitSeconds < 0 || *req.WaitSeconds > aiAgentWaitMax) {
+		return "Wait must be between 0 and 60 seconds"
 	}
 	for _, f := range []*string{req.Objective, req.Instructions, req.CompanyInfo, req.Tone, req.HandoffRules} {
 		if f != nil && len(*f) > aiAgentTextMax {
@@ -83,6 +90,9 @@ func applyAIAgentRequest(agent *models.AIAgent, req *aiAgentRequest) {
 	}
 	if req.IsEnabled != nil {
 		agent.IsEnabled = *req.IsEnabled
+	}
+	if req.WaitSeconds != nil {
+		agent.WaitSeconds = *req.WaitSeconds
 	}
 	if req.WhatsAppAccounts != nil {
 		agent.WhatsAppAccounts = models.StringArray(*req.WhatsAppAccounts)

@@ -78,14 +78,31 @@ describe('AIAgentsView', () => {
     await w.find('[data-testid="field-objective"]').setValue('Qualificar compras')
     await w.find('[data-testid="field-handoff"]').setValue('Transferir se pedir humano')
     await w.find('[data-testid="account-loja-norte"]').setValue(true)
+    await w.find('[data-testid="field-wait-seconds"]').setValue('8')
     await w.find('[data-testid="field-enabled"]').setValue(true)
     await w.find('[data-testid="submit"]').trigger('click')
     await flushPromises()
 
     expect(svc.createAIAgent).toHaveBeenCalledWith(expect.objectContaining({
       name: 'Novo', display_name: 'Atendente Virtual Loja Centro', objective: 'Qualificar compras', handoff_rules: 'Transferir se pedir humano',
-      is_enabled: true, whatsapp_accounts: ['loja-norte'],
+      is_enabled: true, whatsapp_accounts: ['loja-norte'], wait_seconds: 8,
     }))
+  })
+
+  it('keeps the wait inside 0..60 whole seconds', async () => {
+    svc.createAIAgent.mockResolvedValue({ data: { data: {} } })
+    for (const [typed, sent] of [['500', 60], ['-4', 0], ['7.9', 7]] as const) {
+      svc.createAIAgent.mockClear()
+      const w = mountView()
+      await flushPromises()
+      await w.find('[data-testid="new-agent"]').trigger('click')
+      await w.find('[data-testid="field-name"]').setValue('Agente')
+      await w.find('[data-testid="field-wait-seconds"]').setValue(typed)
+      await w.find('[data-testid="submit"]').trigger('click')
+      await flushPromises()
+      expect(svc.createAIAgent).toHaveBeenCalledWith(expect.objectContaining({ wait_seconds: sent }))
+      w.unmount()
+    }
   })
 
   it('does not submit without a name', async () => {

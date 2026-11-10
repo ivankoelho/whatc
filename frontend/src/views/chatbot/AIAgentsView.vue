@@ -23,6 +23,7 @@ interface AIAgent {
   id: string
   name: string
   display_name?: string
+  wait_seconds?: number
   objective: string
   instructions: string
   company_info: string
@@ -52,7 +53,7 @@ const editing = ref<AIAgent | null>(null)
 const isSubmitting = ref(false)
 const emptyForm = () => ({
   name: '', display_name: '', objective: '', instructions: '', company_info: '', tone: '', handoff_rules: '',
-  is_enabled: false, whatsapp_accounts: [] as string[],
+  is_enabled: false, whatsapp_accounts: [] as string[], wait_seconds: 0,
 })
 const form = ref(emptyForm())
 
@@ -129,6 +130,7 @@ function openEdit(agent: AIAgent) {
     name: agent.name, display_name: agent.display_name ?? '', objective: agent.objective ?? '', instructions: agent.instructions ?? '',
     company_info: agent.company_info ?? '', tone: agent.tone ?? '', handoff_rules: agent.handoff_rules ?? '',
     is_enabled: agent.is_enabled, whatsapp_accounts: [...(agent.whatsapp_accounts ?? [])],
+    wait_seconds: agent.wait_seconds ?? 0,
   }
   dialogOpen.value = true
 }
@@ -145,6 +147,8 @@ async function save() {
     toast.error(t('aiAgents.nameRequired'))
     return
   }
+  // whole seconds, 0..60 (the server enforces the same range)
+  form.value.wait_seconds = Math.min(60, Math.max(0, Math.floor(Number(form.value.wait_seconds) || 0)))
   isSubmitting.value = true
   try {
     if (editing.value) await chatbotService.updateAIAgent(editing.value.id, form.value)
@@ -297,6 +301,11 @@ const issueLabel = (i: Issue) => `${i.account}: ${t('aiAgents.issues.' + i.probl
           <Label>{{ $t('aiAgents.displayName') }}</Label>
           <Input v-model="form.display_name" maxlength="60" placeholder="Assistente Virtual" data-testid="field-display-name" />
           <p class="text-xs text-muted-foreground">{{ $t('aiAgents.displayNameHelp') }}</p>
+        </div>
+        <div class="space-y-2">
+          <Label>{{ $t('aiAgents.waitSeconds') }}</Label>
+          <Input v-model.number="form.wait_seconds" type="number" min="0" max="60" step="1" data-testid="field-wait-seconds" />
+          <p class="text-xs text-muted-foreground">{{ $t('aiAgents.waitSecondsHelp') }}</p>
         </div>
         <div class="space-y-2">
           <Label>{{ $t('aiAgents.objective') }}</Label>

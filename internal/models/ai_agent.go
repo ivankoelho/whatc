@@ -20,6 +20,10 @@ type AIAgent struct {
 	// HandoffRules says when the agent must hand the conversation to a human.
 	HandoffRules string `gorm:"type:text" json:"handoff_rules"`
 	IsEnabled    bool   `gorm:"default:false" json:"is_enabled"`
+	// WaitSeconds is how long this agent waits, after the customer's last message, before answering,
+	// so a customer who writes in several short messages gets one answer. 0 (the default) answers at
+	// once, exactly as before. Independent per agent.
+	WaitSeconds int `gorm:"not null;default:0" json:"wait_seconds"`
 
 	// WhatsAppAccounts are the names of the numbers (WhatsAppAccount.Name) where this agent may
 	// act. Fail-closed: empty means nowhere. This, not ChatbotSettings, is what limits a pilot to

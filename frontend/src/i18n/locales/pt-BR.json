@@ -3527,6 +3527,8 @@
     "noAccountsWarning": "Este agente não atuará em nenhum número.",
     "displayName": "Nome de exibição para o cliente",
     "displayNameHelp": "Aparece antes de cada mensagem do agente (por exemplo: *Assistente Virtual:*). Deixe vazio para usar \"Assistente Virtual\". Use um nome que deixe claro que é um atendimento automático, não o nome de uma pessoa.",
+    "waitSeconds": "Tempo de espera antes de responder (segundos)",
+    "waitSecondsHelp": "Quanto o agente espera depois da última mensagem do cliente antes de responder. Se o cliente escrever mais nesse intervalo, a contagem recomeça e a resposta considera tudo o que ele disse. 0 responde na hora. Máximo: 60.",
     "aiBadge": "IA",
     "enabled": "Agente ativo",
     "nameRequired": "Informe o nome do agente",
