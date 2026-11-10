@@ -45,8 +45,12 @@ type AIPendingReply struct {
 	LockedUntil *time.Time `json:"locked_until,omitempty"`
 	Attempts    int        `gorm:"not null;default:0" json:"attempts"`
 	StartedAt   *time.Time `json:"started_at,omitempty"`
-	FinishedAt  *time.Time `json:"finished_at,omitempty"`
-	Outcome     string     `gorm:"size:40" json:"outcome"`
+	// SendStartedAt is persisted, under the contact lock, right BEFORE the answer is handed to WhatsApp.
+	// It is the only fact that survives a crash between "Meta accepted" and "the database knows": a row
+	// that has it may have reached the customer, so it is never run again (see reclaimStaleAIReplies).
+	SendStartedAt *time.Time `json:"send_started_at,omitempty"`
+	FinishedAt    *time.Time `json:"finished_at,omitempty"`
+	Outcome       string     `gorm:"size:40" json:"outcome"`
 
 	TypingStarts    int    `gorm:"not null;default:0" json:"typing_starts"`
 	TypingRenewals  int    `gorm:"not null;default:0" json:"typing_renewals"`

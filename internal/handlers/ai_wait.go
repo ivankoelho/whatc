@@ -10,6 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // The agent's wait before answering ("espera inteligente").
@@ -49,19 +51,24 @@ var (
 
 // Outcomes recorded in AIPendingReply.Outcome.
 const (
-	aiOutcomeReplied     = "replied"      // the agent answered
-	aiOutcomeHandoff     = "handoff"      // the agent handed the conversation to the team
-	aiOutcomeNotSent     = "not_sent"     // an answer was produced but discarded (human took over meanwhile)
-	aiOutcomeFallback    = "fallback"     // the model failed or was empty: the configured fallback message
-	aiOutcomeNoAnswer    = "no_answer"    // nothing was sent (a single model failure, or AI not configured)
-	aiOutcomeHumanActive = "human_active" // a human owned the conversation: the model was not called
-	aiOutcomeFlowActive  = "flow_active"  // the customer entered a flow meanwhile
-	aiOutcomeNoText      = "no_text"      // the grouped messages could not be read
-	aiOutcomeGone        = "gone"         // the contact, account or session no longer exists
-	aiOutcomeRecovered   = "recovered"    // a dead worker had already answered: closed, not repeated
-	aiOutcomeAbandoned   = "abandoned"    // retries exhausted
-	aiOutcomeAIOff       = "ai_off"       // the chatbot or the AI was switched off while waiting
-	aiOutcomePanic       = "error"        // unexpected failure while answering
+	aiOutcomeReplied       = "replied"        // the agent answered
+	aiOutcomeHandoff       = "handoff"        // the agent handed the conversation to the team
+	aiOutcomeNotSent       = "not_sent"       // an answer was produced but discarded (human took over meanwhile)
+	aiOutcomeFallback      = "fallback"       // the model failed or was empty: the configured fallback message
+	aiOutcomeNoAnswer      = "no_answer"      // nothing was sent (a single model failure, or AI not configured)
+	aiOutcomeHumanActive   = "human_active"   // a human owned the conversation: the model was not called
+	aiOutcomeFlowActive    = "flow_active"    // the customer entered a flow meanwhile
+	aiOutcomeNoText        = "no_text"        // the grouped messages could not be read
+	aiOutcomeGone          = "gone"           // the contact, account or session no longer exists
+	aiOutcomeRecovered     = "recovered"      // a dead worker had already answered: closed, not repeated
+	aiOutcomeAbandoned     = "abandoned"      // retries exhausted
+	aiOutcomeAIOff         = "ai_off"         // the chatbot or the AI was switched off while waiting
+	aiOutcomePanic         = "error"          // unexpected failure while answering
+	aiOutcomeMerged        = "merged"         // taken back, but the customer had written again: its messages joined the newer pending reply
+	aiOutcomeAmbiguousSend = "ambiguous_send" // the send may or may not have reached the customer: never resent
+	aiOutcomeSendFailed    = "send_failed"    // the send provably did not reach the customer
+	aiOutcomeLostLease     = "lost_lease"     // another worker owns the reply now; this one sent nothing
+	aiOutcomeReclaimFailed = "reclaim_failed" // could not be taken back; closed so it cannot block the contact
 )
 
 // aiAgentWait reports the wait that applies to this number's agent, or 0 (answer at once). It
@@ -153,9 +160,17 @@ func (a *App) claimDueAIReplies(now time.Time, limit int) ([]models.AIPendingRep
 	return rows, err
 }
 
-// reclaimStaleAIReplies deals with rows whose worker died (lease expired). A row whose answer
-// already left is closed, never repeated; any other is put back to run again, up to
-// aiWaitMaxAttempts times. Safe to run on several instances at once (each update re-checks the row).
+// reclaimStaleAIReplies deals with rows whose worker died or stalled (lease expired). What it may do
+// depends on one persisted fact, SendStartedAt, written before the answer is handed to WhatsApp:
+//
+//   - no marker: nothing reached the customer. The row runs again (up to aiWaitMaxAttempts), or, if the
+//     customer wrote again meanwhile, its messages join that newer pending reply (aiOutcomeMerged);
+//   - marker: the message may have left. If a message of that contact with a WhatsApp id was recorded
+//     since, it did (recovered); otherwise nobody can know (ambiguous_send). Either way it is closed and
+//     NEVER sent again: a missing answer is recoverable, a duplicate is not.
+//
+// Every update names the attempt it saw, so two instances (or a worker that comes back to life) cannot
+// both act on the same row, and a failed update never leaves the row blocking its contact.
 func (a *App) reclaimStaleAIReplies(now time.Time) {
 	var stale []models.AIPendingReply
 	if err := a.DB.Where("status = ? AND locked_until < ?", models.AIPendingStatusProcessing, now).Find(&stale).Error; err != nil {
@@ -164,23 +179,93 @@ func (a *App) reclaimStaleAIReplies(now time.Time) {
 	}
 	for i := range stale {
 		row := &stale[i]
-		guard := a.DB.Model(&models.AIPendingReply{}).Where("id = ? AND status = ? AND locked_until < ?", row.ID, models.AIPendingStatusProcessing, now)
-		since := row.CreatedAt
-		if row.StartedAt != nil {
-			since = *row.StartedAt
-		}
-		var answered int64
-		a.DB.Model(&models.Message{}).Where("contact_id = ? AND direction = ? AND created_at >= ?", row.ContactID, models.DirectionOutgoing, since).Count(&answered)
 		switch {
-		case answered > 0:
-			guard.Updates(map[string]any{"status": models.AIPendingStatusDone, "outcome": aiOutcomeRecovered, "finished_at": now})
+		case row.SendStartedAt != nil:
+			var delivered int64
+			a.DB.Model(&models.Message{}).Where("contact_id = ? AND direction = ? AND created_at >= ? AND whats_app_message_id <> ''",
+				row.ContactID, models.DirectionOutgoing, *row.SendStartedAt).Count(&delivered)
+			outcome := aiOutcomeAmbiguousSend
+			if delivered > 0 {
+				outcome = aiOutcomeRecovered
+			}
+			a.closeStaleAIReply(row, outcome, now)
 		case row.Attempts >= aiWaitMaxAttempts:
-			guard.Updates(map[string]any{"status": models.AIPendingStatusDone, "outcome": aiOutcomeAbandoned, "finished_at": now})
+			a.closeStaleAIReply(row, aiOutcomeAbandoned, now)
 			a.Log.Warn("AI reply abandoned after repeated failures", "contact_id", row.ContactID)
 		default:
-			guard.Updates(map[string]any{"status": models.AIPendingStatusPending, "locked_until": nil, "due_at": now})
+			if err := a.requeueStaleAIReply(row, now); err != nil {
+				// It could not be put back (or merged). Leaving it in "processing" would block the contact's
+				// next reply for good, so it is closed; the customer's messages are still in the conversation.
+				a.Log.Error("Failed to take an AI reply back; closing it", "error", err, "contact_id", row.ContactID, "row_id", row.ID)
+				a.closeStaleAIReply(row, aiOutcomeReclaimFailed, now)
+			}
 		}
 	}
+}
+
+// closeStaleAIReply closes a row that is still the stale attempt that was seen.
+func (a *App) closeStaleAIReply(row *models.AIPendingReply, outcome string, now time.Time) {
+	res := a.DB.Model(&models.AIPendingReply{}).
+		Where("id = ? AND status = ? AND attempts = ?", row.ID, models.AIPendingStatusProcessing, row.Attempts).
+		Updates(map[string]any{"status": models.AIPendingStatusDone, "outcome": outcome, "finished_at": now, "locked_until": nil})
+	if res.Error != nil {
+		a.Log.Error("Failed to close a stale AI reply", "error", res.Error, "row_id", row.ID)
+	}
+}
+
+// requeueStaleAIReply puts a row that never started sending back to pending, or merges it into the
+// contact's newer pending row. Both happen in one transaction.
+func (a *App) requeueStaleAIReply(row *models.AIPendingReply, now time.Time) error {
+	return a.DB.Transaction(func(tx *gorm.DB) error {
+		// Still the attempt we saw? (another instance may have handled it already)
+		var current models.AIPendingReply
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND status = ? AND attempts = ?", row.ID, models.AIPendingStatusProcessing, row.Attempts).
+			First(&current).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
+		}
+		var newer models.AIPendingReply
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("contact_id = ? AND status = ? AND deleted_at IS NULL", row.ContactID, models.AIPendingStatusPending).
+			First(&newer).Error
+		switch {
+		case err == nil:
+			// The customer wrote again: one pending row per contact. The old messages came first, in order,
+			// then the newer ones; the newer row keeps its own timer, and starts from the old row's first
+			// message so the history sent to the model leaves out all of them.
+			merged := append(models.StringArray{}, current.MessageIDs...)
+			seen := map[string]bool{}
+			for _, id := range merged {
+				seen[id] = true
+			}
+			for _, id := range newer.MessageIDs {
+				if !seen[id] {
+					merged = append(merged, id)
+				}
+			}
+			attempts := newer.Attempts
+			if current.Attempts > attempts {
+				attempts = current.Attempts
+			}
+			if err := tx.Model(&models.AIPendingReply{}).Where("id = ?", newer.ID).Updates(map[string]any{
+				"message_ids": merged, "first_message_at": current.FirstMessageAt, "attempts": attempts, "updated_at": now,
+			}).Error; err != nil {
+				return err
+			}
+			return tx.Model(&models.AIPendingReply{}).Where("id = ?", current.ID).Updates(map[string]any{
+				"status": models.AIPendingStatusDone, "outcome": aiOutcomeMerged, "finished_at": now, "locked_until": nil,
+			}).Error
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			return tx.Model(&models.AIPendingReply{}).Where("id = ?", current.ID).Updates(map[string]any{
+				"status": models.AIPendingStatusPending, "locked_until": nil, "due_at": now, "send_started_at": nil,
+			}).Error
+		default:
+			return err
+		}
+	})
 }
 
 // StartAIWaitWorker runs until ctx ends: it recovers rows left behind by a previous run, then keeps
@@ -246,7 +331,9 @@ func (a *App) processAIPendingReply(row *models.AIPendingReply) {
 			a.Log.Error("AI pending reply panicked", "contact_id", row.ContactID, "panic", r)
 		}
 		now := time.Now()
-		a.DB.Model(&models.AIPendingReply{}).Where("id = ?", row.ID).Updates(map[string]any{
+		// only if this attempt still owns the row: a worker that lost its claim (or whose row was closed by
+		// someone else) must not overwrite what happened since
+		a.DB.Model(&models.AIPendingReply{}).Where("id = ? AND status = ? AND attempts = ?", row.ID, models.AIPendingStatusProcessing, row.Attempts).Updates(map[string]any{
 			"status": models.AIPendingStatusDone, "outcome": outcome, "finished_at": now, "locked_until": nil,
 			"typing_starts": typing.Starts, "typing_renewals": typing.Renewals,
 			"typing_failures": typing.Failures, "typing_last_error": typing.LastError,
@@ -284,7 +371,8 @@ func (a *App) runAIPendingReply(row *models.AIPendingReply, typing *aiTypingStat
 		return aiOutcomeNoText
 	}
 
-	turn := aiTurn{typingTo: row.LastMessageID, historyBefore: row.FirstMessageAt, typing: typing}
+	turn := aiTurn{typingTo: row.LastMessageID, historyBefore: row.FirstMessageAt, typing: typing,
+		fence: &aiSendFence{rowID: row.ID, attempt: row.Attempts}}
 	return a.answerWithAI(&account, &contact, &session, settings, text, row.IsNewSession, turn)
 }
 

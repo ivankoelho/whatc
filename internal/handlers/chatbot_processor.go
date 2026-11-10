@@ -522,7 +522,7 @@ func (a *App) sendAndSaveTextMessage(ctx context.Context, account *models.WhatsA
 		Contact: contact,
 		Type:    models.MessageTypeText,
 		Content: message,
-	}, ChatbotSendOptions())
+	}, chatbotSendOptions(ctx))
 	return err
 }
 
@@ -530,7 +530,7 @@ func (a *App) sendAndSaveTextMessage(ctx context.Context, account *models.WhatsA
 // with the agent's display name and recorded as sent by that AI agent (never as a user). Without a
 // sender (the chatbot's own AI path, no agent) it is exactly sendAndSaveTextMessage.
 func (a *App) sendAndSaveAgentText(ctx context.Context, account *models.WhatsAppAccount, contact *models.Contact, message string, sender *AISender) error {
-	opts := ChatbotSendOptions()
+	opts := chatbotSendOptions(ctx)
 	opts.AISender = sender
 	_, err := a.SendOutgoingMessage(ctx, OutgoingMessageRequest{
 		Account: account,
@@ -606,7 +606,7 @@ func (a *App) sendAndSaveInteractiveButtons(ctx context.Context, account *models
 				InteractiveType: interactiveType,
 				BodyText:        bodyText,
 				Buttons:         waButtons,
-			}, ChatbotSendOptions()); err != nil {
+			}, chatbotSendOptions(ctx)); err != nil {
 				return err
 			}
 		}
@@ -651,7 +651,7 @@ func (a *App) sendAndSaveCTAURLButton(ctx context.Context, account *models.Whats
 		BodyText:        bodyText,
 		ButtonText:      buttonText,
 		URL:             url,
-	}, ChatbotSendOptions())
+	}, chatbotSendOptions(ctx))
 	return err
 }
 

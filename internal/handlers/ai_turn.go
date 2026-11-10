@@ -18,6 +18,9 @@ type aiTurn struct {
 	historyBefore time.Time
 	// typing receives the indicator's counters for the audit trail (may be nil).
 	typing *aiTypingStats
+	// fence, when set, ties the answer's send to one claim of a pending reply: a worker that lost its
+	// claim sends nothing (see ai_send_track.go).
+	fence *aiSendFence
 }
 
 // answerWithAI is the AI step of an incoming text message: the agent (or the free-text AI) answers,
@@ -35,17 +38,19 @@ func (a *App) answerWithAI(account *models.WhatsAppAccount, contact *models.Cont
 
 		// The indicator starts only now that the agent is going to answer, and ends as soon as the
 		// model is done (the answer follows at once). It never delays or blocks the answer.
-		var stopTyping func() aiTypingStats
-		if turn.typingTo != "" && a.agentForSession(settings, session) != nil {
-			stopTyping = a.startAITyping(account, contact.ID, turn.typingTo)
-		}
-		reply, err := a.generateAIReplyWith(settings, session, messageText, aiFeatureChatbotReply, aiReplyOpts{historyBefore: turn.historyBefore})
-		if stopTyping != nil {
-			stats := stopTyping()
-			if turn.typing != nil {
-				*turn.typing = stats
+		// The stop is deferred so that it also runs if the generation panics: a renewal that outlived
+		// its answer would show "typing…" for a message that is never coming.
+		reply, err := func() (aiReply, error) {
+			if turn.typingTo != "" && a.agentForSession(settings, session) != nil {
+				stop := a.startAITyping(account, contact.ID, turn.typingTo)
+				defer func() {
+					if stats := stop(); turn.typing != nil {
+						*turn.typing = stats
+					}
+				}()
 			}
-		}
+			return a.generateAIReplyWith(settings, session, messageText, aiFeatureChatbotReply, aiReplyOpts{historyBefore: turn.historyBefore})
+		}()
 		agentTurn = reply.ByAgent
 		aiResponse := reply.Text
 		if err != nil {
@@ -73,15 +78,29 @@ func (a *App) answerWithAI(account *models.WhatsAppAccount, contact *models.Cont
 				return aiOutcomeHandoff
 			}
 			a.Log.Info("AI response generated successfully", "response_length", len(aiResponse))
+			track := &aiSendTrack{app: a, fence: turn.fence}
 			sent, sendErr := a.sendAIReply(aiCtx("chatbot_reply"), reply.ByAgent, account.OrganizationID, contact.ID,
 				func(ctx context.Context) error {
+					ctx = withAISendTrack(ctx, track)
 					if len(reply.Buttons) > 0 { // the server's confirmation message, with its buttons
 						return a.sendAndSaveInteractiveButtons(ctx, account, contact, aiResponse, reply.Buttons)
 					}
 					return a.sendAndSaveAgentText(ctx, account, contact, aiResponse, reply.Sender)
 				})
-			if sendErr != nil {
-				a.Log.Error("Failed to send AI response", "error", sendErr, "contact", contact.PhoneNumber)
+			if failure := track.failure(); failure == aiOutcomeLostLease {
+				return failure // another worker owns this reply now: it is theirs to send
+			} else if failure != "" || sendErr != nil {
+				// The answer did not (provably) reach the customer: it is not recorded as an answer in the
+				// session. The handoff, if the agent asked for one, still happens: the customer must not be
+				// left without a human because a text failed. Nothing is ever resent.
+				if failure == "" {
+					failure = aiOutcomeSendFailed // the message could not even be created: nothing left
+				}
+				a.Log.Error("Failed to send AI response", "error", sendErr, "outcome", failure, "contact", contact.PhoneNumber)
+				if reply.Handoff != "" {
+					a.handoffFromAI(account, contact, session, settings, reply.Handoff)
+				}
+				return failure
 			} else if !sent {
 				// not sent on purpose (a human took over while the reply was being written, or the
 				// guard could not be had in time): say nothing, and do not fall through to the
@@ -115,15 +134,21 @@ func (a *App) answerWithAI(account *models.WhatsAppAccount, contact *models.Cont
 		}
 		// After an agent turn (the model may have taken up to aiCallDeadline) the fallback is part
 		// of that turn: it goes through the same takeover guard. Otherwise it is sent as always.
+		track := &aiSendTrack{app: a, fence: turn.fence}
 		sent, err := a.sendAIReply(botCtx("fallback"), agentTurn, account.OrganizationID, contact.ID,
 			func(ctx context.Context) error {
+				ctx = withAISendTrack(ctx, track)
 				if len(fallbackButtons) > 0 {
 					return a.sendAndSaveInteractiveButtons(ctx, account, contact, settings.FallbackMessage, fallbackButtons)
 				}
 				return a.sendAndSaveTextMessage(ctx, account, contact, settings.FallbackMessage)
 			})
-		if err != nil {
+		if failure := track.failure(); failure != "" {
+			a.Log.Error("Failed to send fallback message", "error", err, "outcome", failure, "contact", contact.PhoneNumber)
+			return failure
+		} else if err != nil {
 			a.Log.Error("Failed to send fallback message", "error", err, "contact", contact.PhoneNumber)
+			return aiOutcomeSendFailed
 		} else if !sent {
 			a.Log.Info("Fallback message not sent", "contact", contact.PhoneNumber)
 			return aiOutcomeNotSent

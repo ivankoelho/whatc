@@ -230,7 +230,7 @@ func TestAIWait_NeverRepeatsAnAnswerThatAlreadyLeft(t *testing.T) {
 	// the worker "died" after sending but before closing the row
 	require.NoError(t, w.app.DB.Model(&models.AIPendingReply{}).Where("1 = 1").Updates(map[string]any{
 		"status": models.AIPendingStatusProcessing, "outcome": "", "locked_until": time.Now().Add(-time.Minute),
-		"started_at": time.Now().Add(-time.Hour)}).Error)
+		"started_at": time.Now().Add(-time.Hour), "send_started_at": time.Now().Add(-time.Hour)}).Error)
 	w.app.reclaimStaleAIReplies(time.Now())
 
 	rows := w.pendingRows(t)
