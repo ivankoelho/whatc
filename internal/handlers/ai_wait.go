@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"sync"
@@ -366,31 +367,94 @@ func (a *App) runAIPendingReply(row *models.AIPendingReply, typing *aiTypingStat
 	if session.CurrentFlowID != nil { // the customer was taken into a flow meanwhile: the flow owns the conversation
 		return aiOutcomeFlowActive
 	}
-	text := a.groupedCustomerText(row)
+	text, turnStart := a.turnCustomerText(row)
 	if text == "" {
 		return aiOutcomeNoText
 	}
 
-	turn := aiTurn{typingTo: row.LastMessageID, historyBefore: row.FirstMessageAt, typing: typing,
+	turn := aiTurn{typingTo: row.LastMessageID, historyBefore: turnStart, typing: typing,
 		fence: &aiSendFence{rowID: row.ID, attempt: row.Attempts}}
 	return a.answerWithAI(&account, &contact, &session, settings, text, row.IsNewSession, turn)
 }
 
-// groupedCustomerText joins, in the order received, the text of the messages the row grouped. They
-// are read from the messages table (the row keeps only their WhatsApp ids).
-func (a *App) groupedCustomerText(row *models.AIPendingReply) string {
-	if len(row.MessageIDs) == 0 {
-		return ""
+// aiAnsweredOutcomes are the outcomes of a pending reply whose customer messages must not be answered
+// again: the customer got an answer (or may have: ambiguous_send, never repeated).
+var aiAnsweredOutcomes = []string{aiOutcomeReplied, aiOutcomeHandoff, aiOutcomeFallback, aiOutcomeRecovered, aiOutcomeAmbiguousSend}
+
+// turnCustomerText rebuilds, from the messages table, what the customer said in the turn this row
+// answers, in the order it was said. The database of messages is the source of truth: the row's own
+// list of ids can be incomplete (a merge that failed, a row closed as reclaim_failed) and the
+// session history may be switched off, so neither is relied on.
+//
+// The turn is the customer's messages in the window (from, to]:
+//
+//   - to is the row's latest message. Whatever arrived after it belongs to a later turn (it has, or
+//     will have, its own pending reply): a message that comes while the answer is being generated is
+//     never folded into the answer being generated;
+//   - from is the latest of (a) the last message sent TO the contact before this turn began (the
+//     agent, the chatbot or a person: what the customer says after that is what has not been answered)
+//     and (b) the last message of the most recent pending reply that was answered. (b) is what keeps
+//     a message that arrived during the previous generation, before that answer went out, from being
+//     answered twice, and it keeps A and B out of the next turn after they were answered.
+//
+// Only the customer's own messages are used: direction incoming, no sender user, with text.
+// Messages sent by people or the system, and internal notes, are outgoing and never enter.
+//
+// It returns the text and the instant of the first message in it (the history sent to the model
+// stops before it, so those messages are not repeated there).
+func (a *App) turnCustomerText(row *models.AIPendingReply) (string, time.Time) {
+	base := a.DB.Model(&models.Message{}).Where("organization_id = ? AND contact_id = ? AND whats_app_account = ?",
+		row.OrganizationID, row.ContactID, row.WhatsAppAccount)
+
+	// to: the latest of this row's own messages (falls back to the time it was last extended)
+	to := row.LastMessageAt
+	if len(row.MessageIDs) > 0 {
+		var latest sql.NullTime
+		base.Session(&gorm.Session{}).Where("direction = ? AND whats_app_message_id IN ?", models.DirectionIncoming, []string(row.MessageIDs)).
+			Select("MAX(created_at)").Scan(&latest)
+		if latest.Valid {
+			to = latest.Time
+		}
+	}
+
+	// from
+	var from time.Time
+	var out sql.NullTime
+	base.Session(&gorm.Session{}).Where("direction = ? AND created_at < ?", models.DirectionOutgoing, row.FirstMessageAt).
+		Select("MAX(created_at)").Scan(&out)
+	if out.Valid {
+		from = out.Time
+	}
+	var answered sql.NullTime
+	a.DB.Raw(`SELECT MAX(m.created_at)
+		FROM ai_pending_replies r
+		CROSS JOIN LATERAL jsonb_array_elements_text(r.message_ids) AS w(id)
+		JOIN messages m ON m.whats_app_message_id = w.id AND m.contact_id = r.contact_id
+		WHERE r.contact_id = ? AND r.id <> ? AND r.status = ? AND r.outcome IN ? AND r.deleted_at IS NULL`,
+		row.ContactID, row.ID, models.AIPendingStatusDone, aiAnsweredOutcomes).Scan(&answered)
+	if answered.Valid && answered.Time.After(from) {
+		from = answered.Time
+	}
+
+	q := base.Session(&gorm.Session{}).Where("direction = ? AND sent_by_user_id IS NULL AND created_at <= ? AND content <> ''", models.DirectionIncoming, to)
+	if !from.IsZero() {
+		q = q.Where("created_at > ?", from)
 	}
 	var msgs []models.Message
-	a.DB.Where("organization_id = ? AND contact_id = ? AND direction = ? AND whats_app_message_id IN ?",
-		row.OrganizationID, row.ContactID, models.DirectionIncoming, []string(row.MessageIDs)).
-		Order("created_at ASC").Find(&msgs)
+	if err := q.Order("created_at ASC, id ASC").Find(&msgs).Error; err != nil {
+		a.Log.Error("Failed to read the customer messages of an AI turn", "error", err, "contact_id", row.ContactID)
+		return "", time.Time{}
+	}
+
 	parts := make([]string, 0, len(msgs))
+	var start time.Time
 	for _, m := range msgs {
 		if t := strings.TrimSpace(m.Content); t != "" {
+			if start.IsZero() {
+				start = m.CreatedAt
+			}
 			parts = append(parts, t)
 		}
 	}
-	return strings.Join(parts, "\n")
+	return strings.Join(parts, "\n"), start
 }
