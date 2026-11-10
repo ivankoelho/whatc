@@ -118,6 +118,12 @@ func (a *App) claimTransfer(db *gorm.DB, t *models.AgentTransfer, agentID uuid.U
 	}
 	t.AgentID = &agentID
 	t.SLA = sla.SLA
+	if t.Source == models.TransferSourceAIAgent {
+		// The opportunity an AI agent opened with this handoff belongs to whoever takes the
+		// attendance, whatever the "assign to the same agent" setting says: the seller sees only
+		// what is assigned to them in the sales funnel (and only if still unassigned).
+		a.assignOpenSalesOpportunityToAgent(db, &models.Contact{BaseModel: models.BaseModel{ID: t.ContactID}, OrganizationID: t.OrganizationID}, agentID)
+	}
 	return true, nil
 }
 

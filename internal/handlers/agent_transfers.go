@@ -1762,11 +1762,30 @@ func (a *App) createTransferFromKeyword(account *models.WhatsAppAccount, contact
 	)
 }
 
-// createTransferToTeam creates an agent transfer to a specific team with appropriate assignment
+// createTransferToTeam creates an agent transfer to a specific team with appropriate assignment.
+// It logs what happened and, outside business hours, sends the out-of-hours message; callers that
+// need the outcome (and want to decide what to say themselves) use transferToTeam.
 func (a *App) createTransferToTeam(account *models.WhatsAppAccount, contact *models.Contact, teamID uuid.UUID, notes string, source models.TransferSource, routingReason string) {
-	if a.hasActiveAgentTransfer(account.OrganizationID, contact.ID) {
+	res, err := a.transferToTeam(context.Background(), account, contact, teamID, notes, source, routingReason)
+	switch {
+	case err != nil:
+		a.Log.Error("Failed to create team transfer", "error", err, "contact_id", contact.ID, "team_id", teamID)
+	case res.Outcome == TransferAlreadyActive:
 		a.Log.Debug("Contact already has active transfer, skipping team transfer", "contact_id", contact.ID, "team_id", teamID)
-		return
+	case res.Outcome == TransferOutsideHours:
+		a.Log.Info("Outside business hours, sending out-of-hours message instead of team transfer", "contact_id", contact.ID, "team_id", teamID, "source", source)
+		if settings, _ := a.getChatbotSettingsCached(account.OrganizationID, account.Name); settings != nil && settings.BusinessHours.OutOfHoursMessage != "" {
+			_ = a.sendAndSaveTextMessage(botCtx("transfer_out_of_hours"), account, contact, settings.BusinessHours.OutOfHoursMessage)
+		}
+	}
+}
+
+// transferToTeam is the transfer service for an attendance in a specific team: it picks the
+// team's agent, creates the attendance and reports what happened, sending NOTHING to the customer.
+// "Already active" and "outside business hours" are outcomes, not errors.
+func (a *App) transferToTeam(_ context.Context, account *models.WhatsAppAccount, contact *models.Contact, teamID uuid.UUID, notes string, source models.TransferSource, routingReason string) (TransferResult, error) {
+	if a.hasActiveAgentTransfer(account.OrganizationID, contact.ID) {
+		return TransferResult{Outcome: TransferAlreadyActive}, nil
 	}
 
 	settings, _ := a.getChatbotSettingsCached(account.OrganizationID, account.Name)
@@ -1775,11 +1794,7 @@ func (a *App) createTransferToTeam(account *models.WhatsAppAccount, contact *mod
 	// createTransferToQueue / createTransferFromKeyword).
 	if settings != nil && settings.BusinessHours.Enabled && len(settings.BusinessHours.Hours) > 0 {
 		if !a.isWithinBusinessHours(settings.BusinessHours.Hours) {
-			a.Log.Info("Outside business hours, sending out-of-hours message instead of team transfer", "contact_id", contact.ID, "team_id", teamID, "source", source)
-			if settings.BusinessHours.OutOfHoursMessage != "" {
-				_ = a.sendAndSaveTextMessage(botCtx("transfer_out_of_hours"), account, contact, settings.BusinessHours.OutOfHoursMessage)
-			}
-			return
+			return TransferResult{Outcome: TransferOutsideHours}, nil
 		}
 	}
 
@@ -1805,11 +1820,9 @@ func (a *App) createTransferToTeam(account *models.WhatsAppAccount, contact *mod
 
 	if err := a.saveAndFinalizeTransfer(&transfer, account, contact, settings, true); err != nil {
 		if errors.Is(err, ErrTransferAlreadyActive) {
-			a.Log.Debug("Contact already has active transfer (concurrent create), skipping", "contact_id", contact.ID)
-			return
+			return TransferResult{Outcome: TransferAlreadyActive}, nil
 		}
-		a.Log.Error("Failed to create team transfer", "error", err, "contact_id", contact.ID, "team_id", teamID)
-		return
+		return TransferResult{}, err
 	}
 
 	var agentIDStrLog string
@@ -1824,6 +1837,7 @@ func (a *App) createTransferToTeam(account *models.WhatsAppAccount, contact *mod
 		"source", source,
 		"routing_reason", routingReason,
 	)
+	return TransferResult{Outcome: TransferCreated, TransferID: transfer.ID}, nil
 }
 
 // routingReasonPtr stores an empty reason as NULL.

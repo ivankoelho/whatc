@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -417,8 +418,28 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 		aiResponse := reply.Text
 		if err != nil {
 			a.Log.Error("AI response failed", "error", err, "provider", settings.AI.Provider, "model", settings.AI.Model)
+			if reply.ByAgent {
+				// The agent's own failures: the monthly cap hands over at once; any other failure
+				// hands over on the second one in a row. No waiting message for a single failure.
+				if errors.Is(err, ErrAICapReached) {
+					a.handoffFromAI(account, contact, session, settings, aiHandoffCap)
+					return
+				}
+				if a.noteAIFailure(session) >= aiFailuresBeforeHandoff {
+					if a.handoffFromAI(account, contact, session, settings, aiHandoffFailure) {
+						return
+					}
+				}
+			}
 			// Fall through to default response
-		} else if aiResponse != "" {
+		} else if aiResponse != "" || reply.Handoff != "" {
+			if reply.ByAgent {
+				a.clearAIFailures(session)
+			}
+			if aiResponse == "" { // the agent only asks for a human: there is no text to send first
+				a.handoffFromAI(account, contact, session, settings, reply.Handoff)
+				return
+			}
 			a.Log.Info("AI response generated successfully", "response_length", len(aiResponse))
 			sent, sendErr := a.sendAIReply(aiCtx("chatbot_reply"), reply.ByAgent, account.OrganizationID, contact.ID,
 				func(ctx context.Context) error {
@@ -437,6 +458,9 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 				return
 			}
 			a.logSessionMessage(session.ID, models.DirectionOutgoing, aiResponse, "ai_response")
+			if reply.Handoff != "" { // the agent said its last words; now hand over
+				a.handoffFromAI(account, contact, session, settings, reply.Handoff)
+			}
 			return
 		} else {
 			a.Log.Warn("AI returned empty response")

@@ -735,9 +735,30 @@ func (a *App) execChatAIResponse(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome,
 	if err != nil {
 		a.Log.Error("ai_response node generateAIResponse failed",
 			"node", node.ID, "session", ctx.session.ID, "error", err)
+		if reply.ByAgent {
+			// same policy as the direct reply: the cap hands over at once, other failures on the second in a row
+			if errors.Is(err, ErrAICapReached) || a.noteAIFailure(ctx.session) >= aiFailuresBeforeHandoff {
+				reason := aiHandoffFailure
+				if errors.Is(err, ErrAICapReached) {
+					reason = aiHandoffCap
+				}
+				if a.handoffFromAI(ctx.account, ctx.contact, ctx.session, settings, reason) {
+					return nodeOutcome{halt: true}, nil
+				}
+			}
+		}
 		return nodeOutcome{outcome: "default"}, nil
 	}
+	if reply.ByAgent {
+		a.clearAIFailures(ctx.session)
+	}
 	answer := reply.Text
+	if answer == "" && reply.Handoff != "" { // the agent only asks for a human
+		if a.handoffFromAI(ctx.account, ctx.contact, ctx.session, settings, reply.Handoff) {
+			return nodeOutcome{halt: true}, nil
+		}
+		return nodeOutcome{outcome: "default"}, nil
+	}
 	if answer == "" {
 		a.Log.Warn("ai_response node got empty answer from provider",
 			"node", node.ID, "session", ctx.session.ID)
@@ -760,6 +781,11 @@ func (a *App) execChatAIResponse(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome,
 		return nodeOutcome{halt: true}, nil
 	}
 	a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, answer, node.ID)
+	if reply.Handoff != "" { // the agent said its last words; now hand over
+		if a.handoffFromAI(ctx.account, ctx.contact, ctx.session, settings, reply.Handoff) {
+			return nodeOutcome{halt: true}, nil
+		}
+	}
 	return nodeOutcome{outcome: "default"}, nil
 }
 

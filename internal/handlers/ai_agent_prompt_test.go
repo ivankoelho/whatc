@@ -103,6 +103,9 @@ type seqTransport struct {
 	// onCall, when set, runs inside call i (0-based) before the reply is returned: a hook for
 	// simulating something that happens while the model is "thinking" (e.g. a human takes over).
 	onCall func(i int)
+	// failStatus, when not 0, makes every call answer with this HTTP status and no completion
+	// (a provider that is down or rejecting).
+	failStatus int
 }
 
 func (s *seqTransport) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -128,6 +131,10 @@ func (s *seqTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 		text = s.replies[len(s.replies)-1]
 	}
 	s.mu.Unlock()
+	if s.failStatus != 0 {
+		return &http.Response{StatusCode: s.failStatus, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"provider down"}}`)),
+			Header: http.Header{"Content-Type": []string{"application/json"}}, Request: r}, nil
+	}
 	out, _ := json.Marshal(map[string]any{
 		"choices": []any{map[string]any{"message": map[string]any{"content": text}}},
 		"usage":   map[string]any{"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
