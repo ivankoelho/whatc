@@ -418,12 +418,20 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 			// Fall through to default response
 		} else if aiResponse != "" {
 			a.Log.Info("AI response generated successfully", "response_length", len(aiResponse))
-			if len(reply.Buttons) > 0 { // the server's confirmation message, with its buttons
-				if err := a.sendAndSaveInteractiveButtons(aiCtx("chatbot_reply"), account, contact, aiResponse, reply.Buttons); err != nil {
-					a.Log.Error("Failed to send AI confirmation", "error", err, "contact", contact.PhoneNumber)
-				}
-			} else if err := a.sendAndSaveTextMessage(aiCtx("chatbot_reply"), account, contact, aiResponse); err != nil {
-				a.Log.Error("Failed to send AI response", "error", err, "contact", contact.PhoneNumber)
+			sent, sendErr := a.sendAIReply(aiCtx("chatbot_reply"), reply.ByAgent, account.OrganizationID, contact.ID,
+				func(ctx context.Context) error {
+					if len(reply.Buttons) > 0 { // the server's confirmation message, with its buttons
+						return a.sendAndSaveInteractiveButtons(ctx, account, contact, aiResponse, reply.Buttons)
+					}
+					return a.sendAndSaveTextMessage(ctx, account, contact, aiResponse)
+				})
+			if sendErr != nil {
+				a.Log.Error("Failed to send AI response", "error", sendErr, "contact", contact.PhoneNumber)
+			} else if !sent {
+				// a human took over while the reply was being written: say nothing, and do not
+				// fall through to the default response either
+				a.Log.Info("AI reply dropped: a human took over", "contact", contact.PhoneNumber)
+				return
 			}
 			a.logSessionMessage(session.ID, models.DirectionOutgoing, aiResponse, "ai_response")
 			return
@@ -884,6 +892,8 @@ type aiReply struct {
 	// Handoff is set only when an AI agent answered and asks for a human (aiHandoff* constants).
 	// Text is then what to say before handing over (possibly empty), never containing the marker.
 	Handoff string
+	// ByAgent says an AI agent wrote this reply, so its send goes through the human-takeover guard.
+	ByAgent bool
 }
 
 // generateAIReply is generateAIResponse with the confirmation case (Fase 9D). Only chatbot_reply can
@@ -984,14 +994,14 @@ func (a *App) finishAgentReply(settings *models.ChatbotSettings, meta aiCallMeta
 	for attempt := 0; ; attempt++ {
 		clean, handoff := extractHandoff(text)
 		if !violatesCommercialSafety(clean, allowed) {
-			reply := aiReply{Text: clean}
+			reply := aiReply{Text: clean, ByAgent: true}
 			if handoff {
 				reply.Handoff = aiHandoffMarker
 			}
 			return reply, nil
 		}
 		if attempt == 1 {
-			return aiReply{Handoff: aiHandoffUnsafe}, nil
+			return aiReply{Handoff: aiHandoffUnsafe, ByAgent: true}, nil
 		}
 		req.Messages = append(append([]ai.Message{}, req.Messages...),
 			ai.Message{Role: ai.RoleAssistant, Content: text},

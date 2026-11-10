@@ -100,6 +100,9 @@ type seqTransport struct {
 	mu      sync.Mutex
 	replies []string
 	bodies  []map[string]any
+	// onCall, when set, runs inside call i (0-based) before the reply is returned: a hook for
+	// simulating something that happens while the model is "thinking" (e.g. a human takes over).
+	onCall func(i int)
 }
 
 func (s *seqTransport) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -109,6 +112,12 @@ func (s *seqTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	s.mu.Lock()
 	n := len(s.bodies)
 	s.bodies = append(s.bodies, parsed)
+	hook := s.onCall
+	s.mu.Unlock()
+	if hook != nil {
+		hook(n)
+	}
+	s.mu.Lock()
 	text := "ok"
 	if n < len(s.replies) {
 		text = s.replies[n]

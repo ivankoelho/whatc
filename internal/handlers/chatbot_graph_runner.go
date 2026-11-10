@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -723,20 +724,31 @@ func (a *App) execChatAIResponse(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome,
 		userMessage = processTemplate(tmpl, ctx.session.SessionData)
 	}
 
-	answer, err := a.generateAIResponse(settings, ctx.session, userMessage, aiFeatureChatbotNode)
+	reply, err := a.generateAIReply(settings, ctx.session, userMessage, aiFeatureChatbotNode)
 	if err != nil {
 		a.Log.Error("ai_response node generateAIResponse failed",
 			"node", node.ID, "session", ctx.session.ID, "error", err)
 		return nodeOutcome{outcome: "default"}, nil
 	}
+	answer := reply.Text
 	if answer == "" {
 		a.Log.Warn("ai_response node got empty answer from provider",
 			"node", node.ID, "session", ctx.session.ID)
 		return nodeOutcome{outcome: "default"}, nil
 	}
 
-	if err := a.sendAndSaveTextMessage(a.nodeCtx(ctx, node, usage.ActorAI, "chatbot_flow_node"), ctx.account, ctx.contact, answer); err != nil {
+	sent, err := a.sendAIReply(a.nodeCtx(ctx, node, usage.ActorAI, "chatbot_flow_node"), reply.ByAgent,
+		ctx.account.OrganizationID, ctx.contact.ID,
+		func(c context.Context) error {
+			return a.sendAndSaveTextMessage(c, ctx.account, ctx.contact, answer)
+		})
+	if err != nil {
 		return nodeOutcome{}, fmt.Errorf("send ai response: %w", err)
+	}
+	if !sent {
+		// a human took over while the reply was being written: nothing is said
+		a.Log.Info("ai_response node: AI reply dropped, a human took over", "node", node.ID, "session", ctx.session.ID)
+		return nodeOutcome{outcome: "default"}, nil
 	}
 	a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, answer, node.ID)
 	return nodeOutcome{outcome: "default"}, nil

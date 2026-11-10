@@ -65,8 +65,19 @@ func isActiveTransferConflict(err error) bool {
 
 // createTransferRow inserts a new active transfer, translating the unique-index
 // violation into ErrTransferAlreadyActive.
+//
+// It is the single place where an active attendance comes into being, and it takes the contact's
+// advisory lock first (see ai_takeover.go): an AI reply that is being sent finishes before the
+// attendance is confirmed, and one that has not started its send finds the attendance and stays
+// silent. Keep it that way: any other INSERT of an active AgentTransfer would bypass the lock.
 func (a *App) createTransferRow(transfer *models.AgentTransfer) error {
-	if err := a.DB.Create(transfer).Error; err != nil {
+	err := a.DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockContact(tx, transfer.OrganizationID, transfer.ContactID); err != nil {
+			return err
+		}
+		return tx.Create(transfer).Error
+	})
+	if err != nil {
 		if isActiveTransferConflict(err) {
 			return ErrTransferAlreadyActive
 		}
