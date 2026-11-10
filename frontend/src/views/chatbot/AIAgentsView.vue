@@ -281,6 +281,9 @@ const issueLabel = (i: Issue) => `${i.account}: ${t('aiAgents.issues.' + i.probl
       :create-title="$t('aiAgents.createTitle')"
       :edit-description="$t('aiAgents.formDesc')"
       :create-description="$t('aiAgents.formDesc')"
+      :cancel-label="$t('common.cancel')"
+      :create-submit-label="$t('common.create')"
+      :edit-submit-label="$t('common.update')"
       max-width="max-w-2xl"
       @submit="save"
     >

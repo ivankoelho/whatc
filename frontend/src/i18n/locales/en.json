@@ -2832,6 +2832,7 @@
     "flow": "Flow",
     "keyword": "Keyword",
     "manual": "Manual",
+    "aiAgent": "AI agent",
     "slaBreached": "SLA Breached",
     "atRisk": "At Risk",
     "expired": "Expired",

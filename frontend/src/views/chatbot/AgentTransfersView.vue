@@ -295,6 +295,8 @@ function getSourceBadge(source: string) {
       return { label: t('agentTransfers.flow'), variant: 'secondary' as const }
     case 'keyword':
       return { label: t('agentTransfers.keyword'), variant: 'outline' as const }
+    case 'ai_agent':
+      return { label: t('agentTransfers.aiAgent'), variant: 'secondary' as const }
     default:
       return { label: t('agentTransfers.manual'), variant: 'default' as const }
   }
