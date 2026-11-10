@@ -282,7 +282,7 @@ func TestHomologation_CrossDepartmentLifecycle(t *testing.T) {
 				}
 				// a restricted file is listed but its bytes only go to those who work the case
 				f := w.upl2(t, to, occ, "interno.pdf", pdfBytes())
-				if !tc.fromInTeam && !(tc.from == "SupSAC") {
+				if !tc.fromInTeam && tc.from != "SupSAC" {
 					code, _, _ := w.fileCall(t, w.app.DownloadOccurrenceFile, from, occ, f.ID.String(), "")
 					assert.Equal(t, fasthttp.StatusForbidden, code, "restricted file for a follower")
 				}
