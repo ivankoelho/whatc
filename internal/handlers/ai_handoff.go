@@ -26,6 +26,9 @@ const (
 	aiHandoffShortMessage = "Vou chamar um atendente para continuar com você."
 )
 
+// aiHandoffErrorMessage is sent only when the attendance could not be created at all.
+const aiHandoffErrorMessage = "Tive um problema para te encaminhar agora. Pode me mandar uma nova mensagem em instantes?"
+
 func handoffMessageFor(reason string) string {
 	if reason == aiHandoffMarker {
 		return aiHandoffWaitMessage
@@ -224,7 +227,16 @@ func (a *App) handoffFromAI(account *models.WhatsAppAccount, contact *models.Con
 		res, err = a.transferToQueue(ctx, account, contact, models.TransferSourceAIAgent, notes, models.RoutingReasonAINoUnitTeam)
 	}
 	if err != nil {
-		a.Log.Error("AI handoff: transfer failed", "error", err, "contact_id", contact.ID)
+		// Neither the unit's team nor the general queue could take the attendance. The customer must
+		// not be left waiting for something that will not happen: tell them, and invite them to write
+		// again (the agent is still active, so the next message retries the handoff; the
+		// qualification is not paid for twice).
+		a.Log.Error("AI handoff: transfer failed, including the general queue", "error", err, "contact_id", contact.ID)
+		if !a.humanTookOver(orgID, contact.ID) {
+			if serr := a.sendAndSaveTextMessage(botCtx("ai_handoff_failed"), account, contact, aiHandoffErrorMessage); serr != nil {
+				a.Log.Error("AI handoff: could not tell the customer about the failure", "error", serr, "contact_id", contact.ID)
+			}
+		}
 		return false
 	}
 

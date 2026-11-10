@@ -28,7 +28,7 @@ Branch `feature/agente-ia-base`. Spec: `docs/superpowers/specs/2026-11-09-agente
 | 7. Isolamento | (a) Do celular, escrever para o número **B** (não permitido). (b) Conferir a outra organização, se existir | (a) Sem resposta do agente, sem oportunidade, sem transferência do agente. (b) Nada | Prints |
 | 8. Sem marcador nem mensagem indevida | Ler todas as mensagens recebidas no celular | Nenhum "[[…]]", nenhum JSON, nenhuma mensagem duplicada de espera | Prints |
 | 9. Consumo e falhas | Ver o consumo (Chatbot → IA / uso de IA). Simular falha: trocar a chave de IA por uma inválida e escrever 2 vezes | Consumo registrado por chamada (inclusive a de qualificação). Na 1ª falha nada é enviado; na 2ª seguida o cliente recebe **uma** mensagem de espera e vai para a fila. Restaurar a chave | Prints |
-| 9b. Teto | Baixar o teto para 100 e escrever | O cliente recebe a mensagem de espera e vai para a equipe; nunca erro técnico. Restaurar | Print |
+| 9b. Teto | Baixar o teto para 100 e escrever | **Nenhuma chamada de IA.** O cliente recebe só "Vou chamar um atendente para continuar com você." (sem "já passei o que conversamos", porque nada foi qualificado) e vai para a equipe; nunca erro técnico. Restaurar | Print + `AIUsageLog` sem chamada nova |
 | 10. Validado em homologação | Todas as linhas acima aprovadas | Ata assinada | |
 
 ## 2. Cenários de segurança comercial (o agente não inventa)
@@ -49,6 +49,9 @@ Esperado: resposta sem número comercial, sem "garanto/prometo/reservei"; se o m
 3. Cliente que só diz "quero falar com um atendente" → transfere, **sem** oportunidade.
 4. Duas mensagens seguidas, rápidas, no momento da transferência → **uma** transferência, **uma** mensagem de espera, **uma** oportunidade.
 5. O vendedor entra enquanto o agente está "digitando" (responder logo depois de o cliente escrever) → a resposta do agente não sai.
+6. **Equipe da unidade indisponível (fallback).** Com o agente ativo, desativar a "equipe padrão" do número (ou tirar a unidade dela) e repetir o cenário 3 → o cliente **continua atendido**: a conversa vai para a **fila geral**, com origem "Agente de IA", o motivo de roteamento `ai_no_unit_team` e o resumo nas notas; a oportunidade existe e aponta para esse atendimento; o cliente recebe **uma** mensagem de espera. Reativar a equipe ao final. (Coberto também por `TestHandoffFromAI_TeamTransferFails_FallsBackToTheGeneralQueueWithContext`.)
+7. **Nem a fila geral aceita (falha total).** Só em homologação com apoio técnico (exige derrubar o banco de transferências): o cliente recebe "Tive um problema para te encaminhar agora. Pode me mandar uma nova mensagem em instantes?", nunca silêncio nem a promessa de atendente; ao voltar, uma nova mensagem do cliente conclui o encaminhamento sem nova qualificação. (Coberto por `TestHandoffFromAI_BothTransfersFail_CustomerIsToldAndTheNextAttemptRecovers`.)
+8. **Piloto restrito a um número.** Conferir na tela de Agentes de IA que **só o número A** está marcado, que o aviso de "equipe sem unidade" não aparece para ele, e repetir o cenário 7 do critério 7 (mensagem ao número B não recebe o agente). Nunca marcar mais de um número no piloto.
 
 ## 4. Pré-condições e riscos do piloto em produção
 
