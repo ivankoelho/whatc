@@ -194,8 +194,9 @@ test.describe('Eligibility: presence decides who receives distribution', () => {
 
 test.describe('Concurrency and ownership', () => {
   test('two agents claiming the same attendance: exactly one wins, the other gets 409', async () => {
-    const a = await makeAgent('race-a')
-    const b = await makeAgent('race-b')
+    const viewTeam = [{ resource: 'conversations', action: 'view_team' }] // so the loser still sees it (409), not 403, once the winner owns it
+    const a = await makeAgent('race-a', viewTeam)
+    const b = await makeAgent('race-b', viewTeam)
     const contactId = await newContact('race')
     const transferId = await seedTransfer(contactId, null)
     await shareTeam(transferId, [a, b])
