@@ -117,6 +117,9 @@ func (s *seqTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	if hook != nil {
 		hook(n)
 	}
+	if err := r.Context().Err(); err != nil { // a real transport gives up when the request's context ends
+		return nil, err
+	}
 	s.mu.Lock()
 	text := "ok"
 	if n < len(s.replies) {

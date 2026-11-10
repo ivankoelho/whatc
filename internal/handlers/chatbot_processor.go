@@ -947,7 +947,7 @@ func (a *App) generateAIReply(settings *models.ChatbotSettings, session *models.
 	messages = append(messages, ai.Message{Role: ai.RoleUser, Content: userMessage})
 
 	out := &aiCallOut{}
-	meta := aiCallMeta{Feature: feature, OrgID: settings.OrganizationID, KnowledgeSources: kb.Sources, Out: out}
+	meta := aiCallMeta{Feature: feature, OrgID: settings.OrganizationID, KnowledgeSources: kb.Sources, Out: out, Agent: agent != nil}
 	if session != nil {
 		meta.Account = session.WhatsAppAccount
 		contactID, sessionID := session.ContactID, session.ID
