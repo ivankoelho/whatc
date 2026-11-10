@@ -446,7 +446,7 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 					if len(reply.Buttons) > 0 { // the server's confirmation message, with its buttons
 						return a.sendAndSaveInteractiveButtons(ctx, account, contact, aiResponse, reply.Buttons)
 					}
-					return a.sendAndSaveTextMessage(ctx, account, contact, aiResponse)
+					return a.sendAndSaveAgentText(ctx, account, contact, aiResponse, reply.Sender)
 				})
 			if sendErr != nil {
 				a.Log.Error("Failed to send AI response", "error", sendErr, "contact", contact.PhoneNumber)
@@ -599,6 +599,21 @@ func (a *App) sendAndSaveTextMessage(ctx context.Context, account *models.WhatsA
 		Type:    models.MessageTypeText,
 		Content: message,
 	}, ChatbotSendOptions())
+	return err
+}
+
+// sendAndSaveAgentText is sendAndSaveTextMessage for a text an AI agent wrote: with a sender it is signed
+// with the agent's display name and recorded as sent by that AI agent (never as a user). Without a
+// sender (the chatbot's own AI path, no agent) it is exactly sendAndSaveTextMessage.
+func (a *App) sendAndSaveAgentText(ctx context.Context, account *models.WhatsAppAccount, contact *models.Contact, message string, sender *AISender) error {
+	opts := ChatbotSendOptions()
+	opts.AISender = sender
+	_, err := a.SendOutgoingMessage(ctx, OutgoingMessageRequest{
+		Account: account,
+		Contact: contact,
+		Type:    models.MessageTypeText,
+		Content: message,
+	}, opts)
 	return err
 }
 
@@ -921,6 +936,8 @@ type aiReply struct {
 	Handoff string
 	// ByAgent says an AI agent wrote this reply, so its send goes through the human-takeover guard.
 	ByAgent bool
+	// Sender is the identity the agent signs its text with (nil when no agent wrote it).
+	Sender *AISender
 }
 
 // generateAIReply is generateAIResponse with the confirmation case (Fase 9D). Only chatbot_reply can
@@ -1007,7 +1024,9 @@ func (a *App) generateAIReply(settings *models.ChatbotSettings, session *models.
 	}
 	if agent != nil {
 		allowed := agentAllowedText(agent, contextData, kb.Text, userMessage)
-		return a.finishAgentReply(settings, meta, aiReq, resp.Text, allowed)
+		reply, err := a.finishAgentReply(settings, meta, aiReq, resp.Text, allowed)
+		reply.Sender = newAISender(agent)
+		return reply, err
 	}
 	return aiReply{Text: resp.Text}, nil
 }

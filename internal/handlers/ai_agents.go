@@ -20,6 +20,7 @@ const (
 // aiAgentRequest is the body of create and update. Pointers: an update only touches what it sends.
 type aiAgentRequest struct {
 	Name             *string   `json:"name"`
+	DisplayName      *string   `json:"display_name"`
 	Objective        *string   `json:"objective"`
 	Instructions     *string   `json:"instructions"`
 	CompanyInfo      *string   `json:"company_info"`
@@ -34,6 +35,9 @@ type aiAgentRequest struct {
 func (a *App) validateAIAgentRequest(orgID uuid.UUID, req *aiAgentRequest) string {
 	if req.Name != nil && (strings.TrimSpace(*req.Name) == "" || len(*req.Name) > aiAgentNameMax) {
 		return "Name is required (max 255 characters)"
+	}
+	if req.DisplayName != nil && len([]rune(strings.TrimSpace(*req.DisplayName))) > maxAIDisplayName {
+		return "Display name accepts at most 60 characters"
 	}
 	for _, f := range []*string{req.Objective, req.Instructions, req.CompanyInfo, req.Tone, req.HandoffRules} {
 		if f != nil && len(*f) > aiAgentTextMax {
@@ -58,6 +62,9 @@ func (a *App) validateAIAgentRequest(orgID uuid.UUID, req *aiAgentRequest) strin
 func applyAIAgentRequest(agent *models.AIAgent, req *aiAgentRequest) {
 	if req.Name != nil {
 		agent.Name = strings.TrimSpace(*req.Name)
+	}
+	if req.DisplayName != nil {
+		agent.DisplayName = cleanDisplayName(*req.DisplayName) // never stores characters that would format the signature
 	}
 	if req.Objective != nil {
 		agent.Objective = *req.Objective

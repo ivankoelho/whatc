@@ -768,7 +768,7 @@ func (a *App) execChatAIResponse(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome,
 	sent, err := a.sendAIReply(a.nodeCtx(ctx, node, usage.ActorAI, "chatbot_flow_node"), reply.ByAgent,
 		ctx.account.OrganizationID, ctx.contact.ID,
 		func(c context.Context) error {
-			return a.sendAndSaveTextMessage(c, ctx.account, ctx.contact, answer)
+			return a.sendAndSaveAgentText(c, ctx.account, ctx.contact, answer, reply.Sender)
 		})
 	if err != nil {
 		return nodeOutcome{}, fmt.Errorf("send ai response: %w", err)

@@ -22,6 +22,7 @@ const { t } = useI18n()
 interface AIAgent {
   id: string
   name: string
+  display_name?: string
   objective: string
   instructions: string
   company_info: string
@@ -50,7 +51,7 @@ const dialogOpen = ref(false)
 const editing = ref<AIAgent | null>(null)
 const isSubmitting = ref(false)
 const emptyForm = () => ({
-  name: '', objective: '', instructions: '', company_info: '', tone: '', handoff_rules: '',
+  name: '', display_name: '', objective: '', instructions: '', company_info: '', tone: '', handoff_rules: '',
   is_enabled: false, whatsapp_accounts: [] as string[],
 })
 const form = ref(emptyForm())
@@ -125,7 +126,7 @@ function openCreate() {
 function openEdit(agent: AIAgent) {
   editing.value = agent
   form.value = {
-    name: agent.name, objective: agent.objective ?? '', instructions: agent.instructions ?? '',
+    name: agent.name, display_name: agent.display_name ?? '', objective: agent.objective ?? '', instructions: agent.instructions ?? '',
     company_info: agent.company_info ?? '', tone: agent.tone ?? '', handoff_rules: agent.handoff_rules ?? '',
     is_enabled: agent.is_enabled, whatsapp_accounts: [...(agent.whatsapp_accounts ?? [])],
   }
@@ -291,6 +292,11 @@ const issueLabel = (i: Issue) => `${i.account}: ${t('aiAgents.issues.' + i.probl
         <div class="space-y-2">
           <Label>{{ $t('aiAgents.name') }} <span class="text-destructive">*</span></Label>
           <Input v-model="form.name" maxlength="255" data-testid="field-name" />
+        </div>
+        <div class="space-y-2">
+          <Label>{{ $t('aiAgents.displayName') }}</Label>
+          <Input v-model="form.display_name" maxlength="60" placeholder="Assistente Virtual" data-testid="field-display-name" />
+          <p class="text-xs text-muted-foreground">{{ $t('aiAgents.displayNameHelp') }}</p>
         </div>
         <div class="space-y-2">
           <Label>{{ $t('aiAgents.objective') }}</Label>

@@ -170,6 +170,8 @@ func (a *App) handoffFromAI(account *models.WhatsAppAccount, contact *models.Con
 	if a.humanTookOver(orgID, contact.ID) {
 		return true
 	}
+	// what the agent says during the handoff is signed like everything else it says
+	sender := newAISender(a.agentForSession(settings, session))
 	told := sessionFlag(session, aiSessionHandedOff) // the out-of-hours message was already given
 
 	var q *Qualification
@@ -233,7 +235,7 @@ func (a *App) handoffFromAI(account *models.WhatsAppAccount, contact *models.Con
 		// qualification is not paid for twice).
 		a.Log.Error("AI handoff: transfer failed, including the general queue", "error", err, "contact_id", contact.ID)
 		if !a.humanTookOver(orgID, contact.ID) {
-			if serr := a.sendAndSaveTextMessage(botCtx("ai_handoff_failed"), account, contact, aiHandoffErrorMessage); serr != nil {
+			if serr := a.sendAndSaveAgentText(aiCtx("ai_handoff_failed"), account, contact, aiHandoffErrorMessage, sender); serr != nil {
 				a.Log.Error("AI handoff: could not tell the customer about the failure", "error", serr, "contact_id", contact.ID)
 			}
 		}
@@ -249,7 +251,7 @@ func (a *App) handoffFromAI(account *models.WhatsAppAccount, contact *models.Con
 		if told { // the out-of-hours message is moot now; a later handoff may say it again
 			a.setSessionValue(session, aiSessionHandedOff, false)
 		}
-		if err := a.sendAndSaveTextMessage(botCtx("ai_handoff"), account, contact, handoffMessageFor(reason)); err != nil {
+		if err := a.sendAndSaveAgentText(aiCtx("ai_handoff"), account, contact, handoffMessageFor(reason), sender); err != nil {
 			a.Log.Error("AI handoff: could not send the waiting message", "error", err, "contact_id", contact.ID)
 		}
 		return true

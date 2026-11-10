@@ -10,10 +10,13 @@ type AIAgent struct {
 	BaseModel
 	OrganizationID uuid.UUID `gorm:"type:uuid;index;not null" json:"organization_id"`
 	Name           string    `gorm:"size:255;not null" json:"name"`
-	Objective      string    `gorm:"type:text" json:"objective"`
-	Instructions   string    `gorm:"type:text" json:"instructions"`
-	CompanyInfo    string    `gorm:"type:text" json:"company_info"`
-	Tone           string    `gorm:"type:text" json:"tone"`
+	// DisplayName is the name the customer sees before the agent's messages ("*Name:*"). Empty means
+	// "Assistente Virtual". It names a machine, never a person: the AI is not stored as a user.
+	DisplayName  string `gorm:"size:100" json:"display_name"`
+	Objective    string `gorm:"type:text" json:"objective"`
+	Instructions string `gorm:"type:text" json:"instructions"`
+	CompanyInfo  string `gorm:"type:text" json:"company_info"`
+	Tone         string `gorm:"type:text" json:"tone"`
 	// HandoffRules says when the agent must hand the conversation to a human.
 	HandoffRules string `gorm:"type:text" json:"handoff_rules"`
 	IsEnabled    bool   `gorm:"default:false" json:"is_enabled"`

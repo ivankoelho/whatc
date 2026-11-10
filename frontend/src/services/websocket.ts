@@ -409,6 +409,7 @@ class WebSocketService {
         // it — so dropping it here left every bubble unlabelled until reload.
         sent_by_user_id: payload.sent_by_user_id,
         sent_by_user_name: payload.sent_by_user_name,
+        sender_type: payload.sender_type,
         created_at: payload.created_at,
         updated_at: payload.updated_at
       })

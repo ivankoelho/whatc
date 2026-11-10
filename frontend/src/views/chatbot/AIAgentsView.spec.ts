@@ -74,6 +74,7 @@ describe('AIAgentsView', () => {
     await w.find('[data-testid="new-agent"]').trigger('click')
     expect(w.find('[data-testid="no-accounts-warning"]').exists()).toBe(true) // nothing ticked yet
     await w.find('[data-testid="field-name"]').setValue('Novo')
+    await w.find('[data-testid="field-display-name"]').setValue('Atendente Virtual Loja Centro')
     await w.find('[data-testid="field-objective"]').setValue('Qualificar compras')
     await w.find('[data-testid="field-handoff"]').setValue('Transferir se pedir humano')
     await w.find('[data-testid="account-loja-norte"]').setValue(true)
@@ -82,7 +83,7 @@ describe('AIAgentsView', () => {
     await flushPromises()
 
     expect(svc.createAIAgent).toHaveBeenCalledWith(expect.objectContaining({
-      name: 'Novo', objective: 'Qualificar compras', handoff_rules: 'Transferir se pedir humano',
+      name: 'Novo', display_name: 'Atendente Virtual Loja Centro', objective: 'Qualificar compras', handoff_rules: 'Transferir se pedir humano',
       is_enabled: true, whatsapp_accounts: ['loja-norte'],
     }))
   })
