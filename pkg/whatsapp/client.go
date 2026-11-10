@@ -455,6 +455,26 @@ func (c *Client) MarkMessageRead(ctx context.Context, account *Account, messageI
 	return nil
 }
 
+// SendTypingIndicator shows "typing…" to the customer who sent messageID (a message RECEIVED by the
+// number). It also marks that message as read. The indicator goes away when a message is sent, when
+// the customer writes again, or after about 25 s, so a long wait needs it sent again.
+//
+// Only the type "text" exists: the API answers HTTP 400 to anything else (checked on a real test
+// number on 10/11/2026, docs/homologacao/spike-digitacao/relatorio-2026-11-10.md). The call returns
+// no message id, so it creates nothing to bill. The type is fixed here on purpose.
+func (c *Client) SendTypingIndicator(ctx context.Context, account *Account, messageID string) error {
+	payload := map[string]any{
+		"messaging_product": "whatsapp",
+		"status":            "read",
+		"message_id":        messageID,
+		"typing_indicator":  map[string]any{"type": "text"},
+	}
+	if _, err := c.doRequest(ctx, "POST", c.buildMessagesURL(account), payload, account.AccessToken); err != nil {
+		return fmt.Errorf("failed to send typing indicator: %w", err)
+	}
+	return nil
+}
+
 // ResumableUploadResponse represents response from creating upload session
 type ResumableUploadResponse struct {
 	ID string `json:"id"` // Upload session ID
