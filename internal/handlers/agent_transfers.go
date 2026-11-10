@@ -1060,6 +1060,11 @@ func (a *App) AssignAgentTransfer(r *fastglue.Request) error {
 	// only pin the relationship manager when AssignToSameAgent is enabled and
 	// the contact has no existing manager. Active transfers already grant the
 	// assigned agent visibility, so we don't need to over-write contact.AssignedUserID.
+	if targetAgentID != nil {
+		// an attendance an AI agent opened carries the opportunity it created: it goes to whoever is
+		// assigned, whatever the setting below says (see assignAIOpportunity)
+		a.assignAIOpportunity(a.DB, &transfer, *targetAgentID)
+	}
 	if targetAgentID != nil && transfer.Contact != nil {
 		settings, _ := a.getChatbotSettingsCached(orgID, "")
 		if settings != nil && settings.AgentAssignment.AssignToSameAgent && transfer.Contact.AssignedUserID == nil {
