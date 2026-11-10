@@ -392,7 +392,9 @@ var aiAnsweredOutcomes = []string{aiOutcomeReplied, aiOutcomeHandoff, aiOutcomeF
 //     will have, its own pending reply): a message that comes while the answer is being generated is
 //     never folded into the answer being generated;
 //   - from is the latest of (a) the last message sent TO the contact before this turn began (the
-//     agent, the chatbot or a person: what the customer says after that is what has not been answered)
+//     agent, the chatbot or a person: what the customer says after that is what has not been answered;
+//     a message that FAILED to send does not count: nothing reached the customer, so what they said
+//     before it is still unanswered)
 //     and (b) the last message of the most recent pending reply that was answered. (b) is what keeps
 //     a message that arrived during the previous generation, before that answer went out, from being
 //     answered twice, and it keeps A and B out of the next turn after they were answered.
@@ -420,7 +422,7 @@ func (a *App) turnCustomerText(row *models.AIPendingReply) (string, time.Time) {
 	// from
 	var from time.Time
 	var out sql.NullTime
-	base.Session(&gorm.Session{}).Where("direction = ? AND created_at < ?", models.DirectionOutgoing, row.FirstMessageAt).
+	base.Session(&gorm.Session{}).Where("direction = ? AND status <> ? AND created_at < ?", models.DirectionOutgoing, models.MessageStatusFailed, row.FirstMessageAt).
 		Select("MAX(created_at)").Scan(&out)
 	if out.Valid {
 		from = out.Time
