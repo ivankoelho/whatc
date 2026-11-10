@@ -422,7 +422,7 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 		// A case forwarded to a team the creator is not part of is born
 		// unassigned: the receiving team claims it. Everything else keeps
 		// defaulting to the creator.
-		if !(explicitTeam && !a.userInTeam(userID, *teamID)) {
+		if !explicitTeam || a.userInTeam(userID, *teamID) {
 			occ.AssignedUserID = &userID
 		}
 	} else {
