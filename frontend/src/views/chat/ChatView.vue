@@ -627,8 +627,7 @@ onMounted(async () => {
   // Seed the "New" pill counter; WebSocket events trigger resyncs from here.
   // The 24h window ages conversations out without any event, so also re-read
   // it periodically and when the tab becomes visible again.
-  contactsStore.fetchStatusCounts()
-  countsInterval = setInterval(() => contactsStore.fetchStatusCounts(), STATUS_COUNTS_POLL_MS)
+  contactsStore.activateStatusCounts()
   document.addEventListener('visibilitychange', onCountsVisible)
 
   if (contactId.value) {
@@ -659,14 +658,12 @@ function onUserActive() {
   })
 }
 
-const STATUS_COUNTS_POLL_MS = 60_000
-let countsInterval: ReturnType<typeof setInterval> | null = null
 function onCountsVisible() {
   if (document.visibilityState === 'visible') contactsStore.scheduleStatusCountsRefresh()
 }
 
 onUnmounted(() => {
-  if (countsInterval) clearInterval(countsInterval)
+  contactsStore.deactivateStatusCounts()
   document.removeEventListener('visibilitychange', onCountsVisible)
   // Leaving the chat view entirely: the route-param watcher only clears the
   // *outgoing* contact when switching between conversations, so the one still

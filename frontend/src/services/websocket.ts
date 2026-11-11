@@ -824,7 +824,7 @@ class WebSocketService {
     // Refresh contacts list
     const contactsStore = useContactsStore()
     contactsStore.fetchContacts()
-    void contactsStore.fetchStatusCounts()
+    contactsStore.refreshStatusCountsIfActive()
 
     // Refresh transfers
     const transfersStore = useTransfersStore()

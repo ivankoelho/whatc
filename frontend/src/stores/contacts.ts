@@ -495,14 +495,51 @@ export const useContactsStore = defineStore('contacts', () => {
     }
   }
 
-  // Debounced resync: bursts of events (a flow of arrivals, a bulk transfer)
-  // collapse into one request.
-  function scheduleStatusCountsRefresh(delayMs = 500) {
-    if (countsTimer) clearTimeout(countsTimer)
+  // The counter is only kept fresh while the chat screen is active: outside it
+  // nobody sees the number, and every open session fetching it on every event
+  // would multiply server load by the number of connected users.
+  const COUNTS_DEBOUNCE_MS = 2000 // collapse bursts of events into one request
+  const COUNTS_MAX_WAIT_MS = 3000 // ...but never starve under continuous events
+  const COUNTS_POLL_MS = 60_000 // the 24h window ages conversations out with no event
+  let countsActive = false
+  let countsFirstQueuedAt = 0
+  let countsPoll: ReturnType<typeof setInterval> | null = null
+
+  // Debounced resync with a ceiling: waits COUNTS_DEBOUNCE_MS after the last
+  // event, but no longer than COUNTS_MAX_WAIT_MS after the first one. No-op
+  // while the chat screen is not active.
+  function scheduleStatusCountsRefresh() {
+    if (!countsActive) return
+    const now = Date.now()
+    if (!countsTimer) countsFirstQueuedAt = now
+    else clearTimeout(countsTimer)
+    const delay = Math.max(0, Math.min(COUNTS_DEBOUNCE_MS, countsFirstQueuedAt + COUNTS_MAX_WAIT_MS - now))
     countsTimer = setTimeout(() => {
       countsTimer = null
       void fetchStatusCounts()
-    }, delayMs)
+    }, delay)
+  }
+
+  // Chat screen mounted (also on coming back to it): sync now, then poll.
+  function activateStatusCounts() {
+    countsActive = true
+    void fetchStatusCounts()
+    if (countsPoll) clearInterval(countsPoll)
+    countsPoll = setInterval(() => void fetchStatusCounts(), COUNTS_POLL_MS)
+  }
+
+  // Chat screen left: stop the poll and drop anything still queued.
+  function deactivateStatusCounts() {
+    countsActive = false
+    if (countsPoll) { clearInterval(countsPoll); countsPoll = null }
+    if (countsTimer) { clearTimeout(countsTimer); countsTimer = null }
+    countsTicket++ // a response still in flight must not land after we left
+  }
+
+  // WebSocket reconnected: events may have been missed. Only matters if the
+  // chat screen is showing the number; otherwise activate() syncs on return.
+  function refreshStatusCountsIfActive() {
+    if (countsActive) void fetchStatusCounts()
   }
 
   async function updateContactStatus(id: string, status: ContactStatus) {
@@ -597,6 +634,9 @@ export const useContactsStore = defineStore('contacts', () => {
     setStatusFilter,
     fetchStatusCounts,
     scheduleStatusCountsRefresh,
+    activateStatusCounts,
+    deactivateStatusCounts,
+    refreshStatusCountsIfActive,
     updateContactStatus,
     applyStatusChange,
     replyingTo,
