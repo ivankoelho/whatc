@@ -82,6 +82,7 @@ import {
   X,
   SmilePlus,
   MapPin,
+  Pin,
   ExternalLink,
   Loader2,
   ShieldAlert,
@@ -654,6 +655,20 @@ function onUserActive() {
     }
   })
 }
+
+// Pinned conversations are grouped at the top unless a search is active.
+// Status/tag filters keep the grouping, applied to the filtered result.
+const MAX_PINNED = 3 // mirrors the backend limit (the server is the enforcer)
+const isSearching = computed(() => contactsStore.searchQuery.trim() !== '')
+const pinnedGroup = computed(() =>
+  isSearching.value ? [] : contactsStore.sortedContacts.filter(c => c.is_pinned))
+const restGroup = computed(() =>
+  isSearching.value ? contactsStore.sortedContacts : contactsStore.sortedContacts.filter(c => !c.is_pinned))
+// n/3 is only truthful when the list is not narrowed: under a filter the
+// group shows just the pins that match, so the counter would undercount.
+const pinnedCounterVisible = computed(() =>
+  contactsStore.statusFilter === 'all' && contactsStore.selectedTags.length === 0)
+const isCurrentPinned = computed(() => !!contactsStore.currentContact?.is_pinned)
 
 // Pin/unpin a conversation for the current user (max 3, enforced by the server).
 async function togglePin(contact: Contact) {
@@ -2079,8 +2094,35 @@ async function sendMediaMessage() {
       <!-- Contacts -->
       <ScrollArea :ref="(el: any) => contactsScroll.scrollAreaRef.value = el" orientation="vertical" class="flex-1">
         <div class="py-1 w-full">
+          <!-- Pinned group: header, the pinned rows, a hairline, then the rest.
+               No group while searching (a search is one flat result list; the
+               pin mark on the row still says which ones are pinned). -->
+          <div v-if="pinnedGroup.length" role="group" :aria-label="$t('chat.pinnedGroupLabel')">
+            <div class="flex items-center gap-1.5 px-3 pb-1 pt-1.5 text-[11px] tracking-wide text-white/50 light:text-gray-500">
+              <Pin class="h-3 w-3" aria-hidden="true" />
+              <span class="font-medium">{{ $t('chat.pinnedSection') }}</span>
+              <span
+                v-if="pinnedCounterVisible"
+                data-testid="pinned-counter"
+                class="ml-auto text-white/40 light:text-gray-500"
+                :aria-label="$t('chat.pinnedCounterLabel', { n: pinnedGroup.length, max: MAX_PINNED })"
+              >{{ pinnedGroup.length }}/{{ MAX_PINNED }}</span>
+            </div>
+            <ConversationListItem
+              v-for="contact in pinnedGroup"
+              :key="contact.id"
+              :contact="contact"
+              :active="contactsStore.currentContact?.id === contact.id"
+              :format-time="formatContactTime"
+              :get-initials="getInitials"
+              :get-avatar-gradient="getAvatarGradient"
+              @click="handleContactClick(contact)"
+              @toggle-pin="togglePin"
+            />
+            <div v-if="restGroup.length" data-testid="pinned-divider" class="mx-3 my-1 border-t border-white/[0.12] light:border-gray-300" role="separator" />
+          </div>
           <ConversationListItem
-            v-for="contact in contactsStore.sortedContacts"
+            v-for="contact in restGroup"
             :key="contact.id"
             :contact="contact"
             :active="contactsStore.currentContact?.id === contact.id"
@@ -2203,6 +2245,25 @@ async function sendMediaMessage() {
                 </Button>
               </TooltipTrigger>
               <TooltipContent>{{ action.name }}</TooltipContent>
+            </Tooltip>
+            <!-- Pin for the open conversation: the touch alternative to the list's
+                 hover action. 44px target on coarse pointers. -->
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  data-testid="header-pin-toggle"
+                  class="h-8 w-8 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11 text-white/50 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100"
+                  :class="isCurrentPinned && 'text-white light:text-gray-900'"
+                  :aria-pressed="isCurrentPinned"
+                  :aria-label="isCurrentPinned ? $t('chat.unpinConversation') : $t('chat.pinConversation')"
+                  @click="contactsStore.currentContact && togglePin(contactsStore.currentContact)"
+                >
+                  <Pin class="h-4 w-4" :class="isCurrentPinned && 'fill-current'" aria-hidden="true" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{{ isCurrentPinned ? $t('chat.unpinConversation') : $t('chat.pinConversation') }}</TooltipContent>
             </Tooltip>
             <!-- Labelled, not icon-only: resolving a conversation is a
                  consequential action and deserves a visible name. -->
