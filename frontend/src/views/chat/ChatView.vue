@@ -6,6 +6,7 @@ import { useI18n } from 'vue-i18n'
 import { useMediaScan } from '@/composables/useMediaScan'
 import { useContactsStore, type Contact, type Message } from '@/stores/contacts'
 import { useAuthStore } from '@/stores/auth'
+import { canChangeConversationStatus, statusChangeErrorKey } from '@/utils/conversationStatus'
 import { useUsersStore } from '@/stores/users'
 import { useTransfersStore } from '@/stores/transfers'
 import { useTeamsStore } from '@/stores/teams'
@@ -285,6 +286,8 @@ const isChangingStatus = ref(false)
 const isConversationResolved = computed(
   () => contactsStore.currentContact?.contact_status === 'resolved'
 )
+// Concluding is part of attending: chat:write is enough (see canSetContactStatus in the backend)
+const canChangeStatus = computed(() => canChangeConversationStatus((r, a) => authStore.hasPermission(r, a)))
 
 async function toggleConversationStatus() {
   const contact = contactsStore.currentContact
@@ -297,8 +300,8 @@ async function toggleConversationStatus() {
     toast.success(next === 'resolved'
       ? t('chat.conversationResolved')
       : t('chat.conversationReopened'))
-  } catch {
-    toast.error(t('chat.statusChangeFailed'))
+  } catch (e) {
+    toast.error(t(statusChangeErrorKey(e)))
   } finally {
     isChangingStatus.value = false
   }
@@ -2275,6 +2278,7 @@ async function sendMediaMessage() {
             <!-- Labelled, not icon-only: resolving a conversation is a
                  consequential action and deserves a visible name. -->
             <Button
+              v-if="canChangeStatus"
               variant="ghost"
               size="sm"
               class="h-8 gap-1.5 px-2 text-xs font-medium"

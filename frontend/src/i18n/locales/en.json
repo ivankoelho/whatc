@@ -864,6 +864,7 @@
     "conversationResolved": "Conversation resolved",
     "conversationReopened": "Conversation reopened",
     "statusChangeFailed": "Could not change the conversation status. Try again.",
+    "statusChangeForbidden": "You do not have permission to conclude or reopen this conversation.",
     "noTagsAvailable": "No tags available",
     "paused": "Paused",
     "assignedTo": "Assigned to",
@@ -5093,6 +5094,10 @@
       "chat_write": {
         "label": "Send messages",
         "description": "Reply to customers in the chat."
+      },
+      "chat_triage": {
+        "label": "Take over new conversations",
+        "description": "Start attending a conversation that is still waiting for attendance (triage), within the conversations they can access."
       },
       "chat_assign_write": {
         "label": "Assign conversations",

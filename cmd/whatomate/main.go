@@ -227,6 +227,11 @@ func runServer(args []string) {
 			lo.Fatal("Resolve-send permission backfill failed", "error", err)
 		}
 
+		// Team preset keys and the SAC triage permission (chat:triage): additive, once per organization.
+		if err := database.BackfillTeamProfileKeysAndChatTriage(db, lo); err != nil {
+			lo.Fatal("Chat triage permission backfill failed", "error", err)
+		}
+
 		// Same window: supervising cases became its own permission. Grant it to
 		// whoever could (conversations:view_all), THEN narrow the untouched preset.
 		if err := database.BackfillOccurrenceViewAll(db, lo); err != nil {

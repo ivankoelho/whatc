@@ -954,8 +954,10 @@ func SeedSystemRolesForOrg(db *gorm.DB, orgID uuid.UUID) error {
 }
 
 // SeedTeamProfilesForOrg creates the preset team roles the organization is
-// missing. It matches by name and never touches an existing role, so edits an
-// admin made to a profile survive every restart.
+// missing. A preset counts as present when a role carries its profile key (so a
+// renamed preset is not recreated) or, for roles created before keys existed,
+// has its name. It never touches an existing role, so edits an admin made to a
+// profile survive every restart.
 func SeedTeamProfilesForOrg(db *gorm.DB, orgID uuid.UUID) error {
 	var permissions []models.Permission
 	if err := db.Find(&permissions).Error; err != nil {
@@ -968,7 +970,7 @@ func SeedTeamProfilesForOrg(db *gorm.DB, orgID uuid.UUID) error {
 
 	for _, tp := range models.TeamProfiles() {
 		var n int64
-		if err := db.Model(&models.CustomRole{}).Where("organization_id = ? AND name = ?", orgID, tp.Name).Count(&n).Error; err != nil {
+		if err := db.Model(&models.CustomRole{}).Where("organization_id = ? AND (name = ? OR profile_key = ?)", orgID, tp.Name, tp.Key).Count(&n).Error; err != nil {
 			return fmt.Errorf("failed to look up role %s: %w", tp.Name, err)
 		}
 		if n > 0 {
@@ -979,6 +981,7 @@ func SeedTeamProfilesForOrg(db *gorm.DB, orgID uuid.UUID) error {
 			OrganizationID: orgID,
 			Name:           tp.Name,
 			Description:    tp.Description,
+			ProfileKey:     func() *string { k := tp.Key; return &k }(),
 		}
 		seen := map[string]bool{}
 		for _, key := range tp.Permissions {
