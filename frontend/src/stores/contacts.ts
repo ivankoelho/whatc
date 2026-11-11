@@ -485,14 +485,69 @@ export const useContactsStore = defineStore('contacts', () => {
     await fetchContacts({ search })
   }
 
+  // The server owns the "New" counter (visibility scope + 24h window); local
+  // deltas are only a hint. Every fetch takes a ticket and only the latest
+  // ticket may write, so a slow older response can never overwrite a newer one.
+  let countsTicket = 0
+  let countsTimer: ReturnType<typeof setTimeout> | null = null
+
   async function fetchStatusCounts() {
+    const ticket = ++countsTicket
     try {
       const response = await contactsService.statusCounts()
+      if (ticket !== countsTicket) return
       const data = response.data.data || response.data
       newCount.value = data.new ?? 0
     } catch (error) {
       console.error('Failed to fetch status counts:', error)
     }
+  }
+
+  // The counter is only kept fresh while the chat screen is active: outside it
+  // nobody sees the number, and every open session fetching it on every event
+  // would multiply server load by the number of connected users.
+  const COUNTS_DEBOUNCE_MS = 2000 // collapse bursts of events into one request
+  const COUNTS_MAX_WAIT_MS = 3000 // ...but never starve under continuous events
+  const COUNTS_POLL_MS = 60_000 // the 24h window ages conversations out with no event
+  let countsActive = false
+  let countsFirstQueuedAt = 0
+  let countsPoll: ReturnType<typeof setInterval> | null = null
+
+  // Debounced resync with a ceiling: waits COUNTS_DEBOUNCE_MS after the last
+  // event, but no longer than COUNTS_MAX_WAIT_MS after the first one. No-op
+  // while the chat screen is not active.
+  function scheduleStatusCountsRefresh() {
+    if (!countsActive) return
+    const now = Date.now()
+    if (!countsTimer) countsFirstQueuedAt = now
+    else clearTimeout(countsTimer)
+    const delay = Math.max(0, Math.min(COUNTS_DEBOUNCE_MS, countsFirstQueuedAt + COUNTS_MAX_WAIT_MS - now))
+    countsTimer = setTimeout(() => {
+      countsTimer = null
+      void fetchStatusCounts()
+    }, delay)
+  }
+
+  // Chat screen mounted (also on coming back to it): sync now, then poll.
+  function activateStatusCounts() {
+    countsActive = true
+    void fetchStatusCounts()
+    if (countsPoll) clearInterval(countsPoll)
+    countsPoll = setInterval(() => void fetchStatusCounts(), COUNTS_POLL_MS)
+  }
+
+  // Chat screen left: stop the poll and drop anything still queued.
+  function deactivateStatusCounts() {
+    countsActive = false
+    if (countsPoll) { clearInterval(countsPoll); countsPoll = null }
+    if (countsTimer) { clearTimeout(countsTimer); countsTimer = null }
+    countsTicket++ // a response still in flight must not land after we left
+  }
+
+  // WebSocket reconnected: events may have been missed. Only matters if the
+  // chat screen is showing the number; otherwise activate() syncs on return.
+  function refreshStatusCountsIfActive() {
+    if (countsActive) void fetchStatusCounts()
   }
 
   // Pin/unpin for the current user. The server enforces the limit (409).
@@ -531,6 +586,8 @@ export const useContactsStore = defineStore('contacts', () => {
     } else if (payload.old_status !== 'new' && status === 'new') {
       newCount.value += 1
     }
+    // The delta above is instant feedback; the server value is the truth.
+    scheduleStatusCountsRefresh()
 
     const contact = contacts.value.find(c => c.id === payload.contact_id)
     if (contact) {
@@ -598,6 +655,10 @@ export const useContactsStore = defineStore('contacts', () => {
     newCount,
     setStatusFilter,
     fetchStatusCounts,
+    scheduleStatusCountsRefresh,
+    activateStatusCounts,
+    deactivateStatusCounts,
+    refreshStatusCountsIfActive,
     setPinned,
     updateContactStatus,
     applyStatusChange,

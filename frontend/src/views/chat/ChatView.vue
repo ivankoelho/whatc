@@ -628,8 +628,11 @@ onMounted(async () => {
     tagsStore.fetchTags().catch(() => {})
   }
 
-  // Seed the "New" pill counter; WebSocket events keep it current from here
-  contactsStore.fetchStatusCounts()
+  // Seed the "New" pill counter; WebSocket events trigger resyncs from here.
+  // The 24h window ages conversations out without any event, so also re-read
+  // it periodically and when the tab becomes visible again.
+  contactsStore.activateStatusCounts()
+  document.addEventListener('visibilitychange', onCountsVisible)
 
   if (contactId.value) {
     await selectContact(contactId.value)
@@ -657,6 +660,10 @@ function onUserActive() {
       el.scrollIntoView({ behavior: 'smooth', block: 'start' })
     }
   })
+}
+
+function onCountsVisible() {
+  if (document.visibilityState === 'visible') contactsStore.scheduleStatusCountsRefresh()
 }
 
 // Pinned conversations are grouped at the top unless a search is active.
@@ -691,6 +698,8 @@ async function togglePin(contact: Contact) {
 }
 
 onUnmounted(() => {
+  contactsStore.deactivateStatusCounts()
+  document.removeEventListener('visibilitychange', onCountsVisible)
   // Leaving the chat view entirely: the route-param watcher only clears the
   // *outgoing* contact when switching between conversations, so the one still
   // open here would keep a live typing entry. The 3s TTL covers it in
