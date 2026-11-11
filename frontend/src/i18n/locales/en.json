@@ -5088,6 +5088,10 @@
         "label": "Send messages",
         "description": "Reply to customers in the chat."
       },
+      "chat_triage": {
+        "label": "Take over new conversations",
+        "description": "Start attending a conversation that is still waiting for attendance (triage), within the conversations they can access."
+      },
       "chat_assign_write": {
         "label": "Assign conversations",
         "description": "Choose which agent handles each conversation."

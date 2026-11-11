@@ -123,6 +123,11 @@ const (
 	// ActionResolveSend lets the holder settle a customer send whose outcome the system could not
 	// establish (a message that may or may not have reached the customer), after checking the conversation.
 	ActionResolveSend = "resolve_send"
+	// ActionTriage lets the holder take a conversation that is still "new" (waiting for attendance) into
+	// attendance by changing its status by hand, within the conversations they can already access. Replying to
+	// the customer already does this for any attendant; this is only the explicit status change, which an
+	// ordinary attendant (chat:write alone) cannot do.
+	ActionTriage = "triage"
 )
 
 // DefaultPermissions returns the list of all available permissions to seed
@@ -191,6 +196,7 @@ func DefaultPermissions() []Permission {
 		// Chat
 		{Resource: ResourceChat, Action: ActionRead, Description: "View chat conversations"},
 		{Resource: ResourceChat, Action: ActionWrite, Description: "Send messages"},
+		{Resource: ResourceChat, Action: ActionTriage, Description: "Take a new conversation into attendance (change its status from new to in progress), within the conversations the user can access"},
 		{Resource: ResourceChatAssign, Action: ActionWrite, Description: "Assign conversations to agents"},
 
 		// Chat interno entre usuários (separado do atendimento WhatsApp, "chat")
@@ -385,7 +391,7 @@ func SystemRolePermissions() map[string][]string {
 		"chatbot.keywords:read", "chatbot.keywords:write", "chatbot.keywords:delete",
 		"chatbot.ai:read", "chatbot.ai:write", "chatbot.ai:delete",
 		// Chat
-		"chat:read", "chat:write", "chat.assign:write",
+		"chat:read", "chat:write", "chat:triage", "chat.assign:write",
 		// Chat interno
 		"team_chat:read", "team_chat:write", "team_chat:manage", "team_chat:delete",
 		// CRM: o gestor usa e administra o funil, coerente com ter settings.general:write

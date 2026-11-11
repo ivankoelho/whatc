@@ -57,11 +57,12 @@ type UpdateContactStatusRequest struct {
 // contacts:write holders keep every transition. chat:write (attending) is deliberately narrower, so that
 // "conclude" does not turn into a general status editor:
 //   - conclude (-> resolved) from any status, for a conversation the user can already access;
-//   - reopen (-> in_progress) only from resolved: an attendant cannot take a conversation that is
-//     still "new" (waiting for attendance or distribution) just by clicking, without any real interaction;
+//   - reopen (-> in_progress) from resolved;
+//   - take a "new" conversation (new -> in_progress) only with chat:triage (the SAC profile): an ordinary
+//     attendant cannot assume a conversation that is waiting for attendance or distribution just by clicking;
 //   - never -> new.
 // WHO may act on WHICH conversation stays with canInteractWithConversation.
-func canSetContactStatus(from, to models.ContactStatus, canEditContacts, canAttend bool) bool {
+func canSetContactStatus(from, to models.ContactStatus, canEditContacts, canAttend, canTriage bool) bool {
 	if canEditContacts {
 		return true
 	}
@@ -72,7 +73,9 @@ func canSetContactStatus(from, to models.ContactStatus, canEditContacts, canAtte
 	case models.ContactStatusResolved:
 		return true
 	case models.ContactStatusInProgress:
-		return from == models.ContactStatusResolved
+		// Reopening a concluded conversation is part of attending. Taking a "new" one by status is triage,
+		// which needs its own permission (chat:triage, e.g. the SAC profile): chat:write alone does not.
+		return from == models.ContactStatusResolved || (from == models.ContactStatusNew && canTriage)
 	default:
 		return false
 	}
@@ -89,6 +92,7 @@ func (a *App) UpdateContactStatus(r *fastglue.Request) error {
 	// is nothing to decide and nothing about the request is read.
 	canEditContacts := a.HasPermission(userID, models.ResourceContacts, models.ActionWrite, orgID)
 	canAttend := a.HasPermission(userID, models.ResourceChat, models.ActionWrite, orgID)
+	canTriage := canAttend && a.HasPermission(userID, models.ResourceChat, models.ActionTriage, orgID)
 	if !canEditContacts && !canAttend {
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You do not have permission to change contact status", nil, "")
 	}
@@ -119,7 +123,7 @@ func (a *App) UpdateContactStatus(r *fastglue.Request) error {
 
 	// The transition rule needs the current status, so it runs once the contact is loaded and the caller
 	// is known to have access to it.
-	if !canSetContactStatus(contact.ContactStatus, req.ContactStatus, canEditContacts, canAttend) {
+	if !canSetContactStatus(contact.ContactStatus, req.ContactStatus, canEditContacts, canAttend, canTriage) {
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You do not have permission to change contact status", nil, "")
 	}
 

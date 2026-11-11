@@ -227,6 +227,11 @@ func runServer(args []string) {
 			lo.Fatal("Resolve-send permission backfill failed", "error", err)
 		}
 
+		// Taking a new conversation into attendance by status is its own permission (SAC triage; additive, once per organization).
+		if err := database.BackfillChatTriagePermission(db, lo); err != nil {
+			lo.Fatal("Chat triage permission backfill failed", "error", err)
+		}
+
 		// Same window: supervising cases became its own permission. Grant it to
 		// whoever could (conversations:view_all), THEN narrow the untouched preset.
 		if err := database.BackfillOccurrenceViewAll(db, lo); err != nil {

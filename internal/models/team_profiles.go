@@ -46,7 +46,9 @@ func TeamProfiles() []TeamProfile {
 		{
 			Name:        "SAC",
 			Description: "Atendimento ao cliente: recebe a conversa após o fluxo e a transfere para Vendas ou Logística",
-			Permissions: with("contacts:read", "tags:read", "templates:read"),
+			// chat:triage: the SAC receives the first contact and does the initial triage, so it may take a
+			// "new" conversation into attendance by status (the agent baseline may not).
+			Permissions: with("contacts:read", "tags:read", "templates:read", "chat:triage"),
 		},
 		{
 			Name:        "Vendas",

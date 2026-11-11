@@ -250,3 +250,81 @@ func TestConclude_ChatWriteTransitionRules(t *testing.T) {
 		assert.Equal(t, fasthttp.StatusForbidden, e.put(t, e.other, c, "in_progress"))
 	})
 }
+
+// The SAC does the initial triage: with the real SAC preset permissions it can take a "new" conversation of its
+// scope into attendance. The agent baseline, the Jurídico preset and users outside the scope cannot, and nobody
+// can send a conversation back to "new" with chat:write.
+func TestConclude_SACTriageTakesNewConversations(t *testing.T) {
+	t.Parallel()
+	e := newConcludeEnv(t)
+
+	presetRole := func(name string) *models.CustomRole {
+		for _, p := range models.TeamProfiles() {
+			if p.Name == name {
+				return testutil.CreateTestRoleWithKeys(t, e.app.DB, e.org.ID, name, p.Permissions)
+			}
+		}
+		t.Fatalf("preset %q not found", name)
+		return nil
+	}
+	member := func(role *models.CustomRole, inTeam bool) *models.User {
+		u := testutil.CreateTestUser(t, e.app.DB, e.org.ID, testutil.WithRoleID(&role.ID))
+		if inTeam {
+			require.NoError(t, e.app.DB.Create(&models.TeamMember{BaseModel: models.BaseModel{ID: uuid.New()}, TeamID: e.team.ID, UserID: u.ID, Role: models.TeamRoleAgent}).Error)
+		}
+		return u
+	}
+	sacRole := presetRole("SAC")
+	sac := member(sacRole, true)
+	sacOutside := member(sacRole, false)
+	juridico := member(presetRole("Jurídico"), true)
+
+	// A conversation waiting for attendance: nobody owns it, it belongs to the account's default team.
+	newConv := func(status models.ContactStatus) *models.Contact {
+		c := testutil.CreateTestContact(t, e.app.DB, e.org.ID)
+		require.NoError(t, e.app.DB.Model(c).Updates(map[string]any{"contact_status": status, "whats_app_account": e.acct.Name}).Error)
+		return c
+	}
+	status := func(c *models.Contact) models.ContactStatus {
+		var x models.Contact
+		require.NoError(t, e.app.DB.First(&x, "id = ?", c.ID).Error)
+		return x.ContactStatus
+	}
+
+	t.Run("SAC takes a new conversation, concludes it and reopens it", func(t *testing.T) {
+		c := newConv(models.ContactStatusNew)
+		assert.Equal(t, fasthttp.StatusOK, e.put(t, sac, c, "in_progress"))
+		assert.Equal(t, models.ContactStatusInProgress, status(c))
+		assert.Equal(t, fasthttp.StatusOK, e.put(t, sac, c, "resolved"))
+		assert.Equal(t, fasthttp.StatusOK, e.put(t, sac, c, "in_progress"))
+	})
+	t.Run("SAC can conclude a new conversation directly", func(t *testing.T) {
+		c := newConv(models.ContactStatusNew)
+		assert.Equal(t, fasthttp.StatusOK, e.put(t, sac, c, "resolved"))
+	})
+	t.Run("SAC cannot send a conversation back to new", func(t *testing.T) {
+		for _, from := range []models.ContactStatus{models.ContactStatusInProgress, models.ContactStatusResolved} {
+			c := newConv(from)
+			assert.Equal(t, fasthttp.StatusForbidden, e.put(t, sac, c, "new"), "from %s", from)
+			assert.Equal(t, from, status(c))
+		}
+	})
+	t.Run("the agent baseline still cannot take a new conversation", func(t *testing.T) {
+		c := newConv(models.ContactStatusNew)
+		assert.Equal(t, fasthttp.StatusForbidden, e.put(t, e.agent, c, "in_progress"))
+		assert.Equal(t, models.ContactStatusNew, status(c))
+	})
+	t.Run("a SAC outside the team's scope gets nothing, new or not", func(t *testing.T) {
+		c := newConv(models.ContactStatusNew)
+		assert.Equal(t, fasthttp.StatusForbidden, e.put(t, sacOutside, c, "in_progress"))
+		assert.Equal(t, fasthttp.StatusForbidden, e.put(t, sacOutside, c, "resolved"))
+		assert.Equal(t, models.ContactStatusNew, status(c))
+	})
+	t.Run("Jurídico has no chat access at all", func(t *testing.T) {
+		c := newConv(models.ContactStatusNew)
+		for _, to := range []string{"in_progress", "resolved", "new"} {
+			assert.Equal(t, fasthttp.StatusForbidden, e.put(t, juridico, c, to), to)
+		}
+		assert.Equal(t, models.ContactStatusNew, status(c))
+	})
+}

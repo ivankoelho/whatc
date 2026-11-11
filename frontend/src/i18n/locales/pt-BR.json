@@ -5077,6 +5077,10 @@
         "label": "Enviar mensagens",
         "description": "Responder clientes pelo atendimento."
       },
+      "chat_triage": {
+        "label": "Assumir conversas novas",
+        "description": "Iniciar o atendimento de uma conversa que ainda aguarda atendimento (triagem), nas conversas a que tem acesso."
+      },
       "chat_assign_write": {
         "label": "Atribuir conversas",
         "description": "Escolher qual atendente cuida de cada conversa."
