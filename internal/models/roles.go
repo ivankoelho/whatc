@@ -19,11 +19,15 @@ func (Permission) TableName() string {
 // CustomRole represents a role with specific permissions
 type CustomRole struct {
 	BaseModel
-	OrganizationID uuid.UUID    `gorm:"type:uuid;index;not null" json:"organization_id"`
+	OrganizationID uuid.UUID    `gorm:"type:uuid;index;not null;uniqueIndex:idx_custom_roles_org_profile_key,where:profile_key IS NOT NULL AND deleted_at IS NULL" json:"organization_id"`
 	Name           string       `gorm:"size:100;not null" json:"name"`
 	Description    string       `gorm:"size:500" json:"description"`
 	IsSystem       bool         `gorm:"default:false" json:"is_system"`  // true for default admin/manager/agent
 	IsDefault      bool         `gorm:"default:false" json:"is_default"` // default role for new users in org
+	// ProfileKey identifies a team preset (see TeamProfiles) independently of the name it is shown under, which
+	// an administrator can change. NULL for system roles and for roles made by hand. Unique per organization
+	// among the roles that are not deleted.
+	ProfileKey *string `gorm:"size:50;uniqueIndex:idx_custom_roles_org_profile_key,where:profile_key IS NOT NULL AND deleted_at IS NULL" json:"profile_key,omitempty"`
 	Permissions    []Permission `gorm:"many2many:role_permissions;" json:"permissions"`
 
 	// Relations
@@ -369,6 +373,11 @@ func SystemRolePermissions() map[string][]string {
 	// Format: "resource:action"
 	allPermissions := []string{}
 	for _, p := range DefaultPermissions() {
+		// chat:triage is the SAC preset's initial-triage permission: the admin already changes any status through
+		// contacts:write, so it does not receive it (an administrator can still grant it by hand).
+		if p.Resource == ResourceChat && p.Action == ActionTriage {
+			continue
+		}
 		allPermissions = append(allPermissions, p.Resource+":"+p.Action)
 	}
 
@@ -391,7 +400,7 @@ func SystemRolePermissions() map[string][]string {
 		"chatbot.keywords:read", "chatbot.keywords:write", "chatbot.keywords:delete",
 		"chatbot.ai:read", "chatbot.ai:write", "chatbot.ai:delete",
 		// Chat
-		"chat:read", "chat:write", "chat:triage", "chat.assign:write",
+		"chat:read", "chat:write", "chat.assign:write",
 		// Chat interno
 		"team_chat:read", "team_chat:write", "team_chat:manage", "team_chat:delete",
 		// CRM: o gestor usa e administra o funil, coerente com ter settings.general:write

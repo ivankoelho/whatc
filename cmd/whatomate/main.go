@@ -227,8 +227,8 @@ func runServer(args []string) {
 			lo.Fatal("Resolve-send permission backfill failed", "error", err)
 		}
 
-		// Taking a new conversation into attendance by status is its own permission (SAC triage; additive, once per organization).
-		if err := database.BackfillChatTriagePermission(db, lo); err != nil {
+		// Team preset keys and the SAC triage permission (chat:triage): additive, once per organization.
+		if err := database.BackfillTeamProfileKeysAndChatTriage(db, lo); err != nil {
 			lo.Fatal("Chat triage permission backfill failed", "error", err)
 		}
 

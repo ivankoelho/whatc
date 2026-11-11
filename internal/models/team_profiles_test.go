@@ -23,7 +23,8 @@ func TestTeamProfilesUseKnownPermissions(t *testing.T) {
 }
 
 // chat:triage (take a "new" conversation into attendance by status) is the SAC's initial-triage permission.
-// The ordinary attendant baseline and the other presets do not have it; admin (everything) and manager do.
+// Nobody else has it: not the other presets, not the agent baseline, not manager, not admin (both already change
+// any status through contacts:write). An administrator can still grant it by hand, so it stays in the catalog.
 func TestChatTriageHolders(t *testing.T) {
 	has := func(keys []string) bool {
 		for _, k := range keys {
@@ -34,15 +35,36 @@ func TestChatTriageHolders(t *testing.T) {
 		return false
 	}
 	for _, tp := range TeamProfiles() {
-		want := tp.Name == "SAC"
+		want := tp.Key == "sac"
 		if has(tp.Permissions) != want {
 			t.Errorf("profile %q: chat:triage = %v, want %v", tp.Name, has(tp.Permissions), want)
 		}
 	}
 	roles := SystemRolePermissions()
-	for role, want := range map[string]bool{"admin": true, "manager": true, "agent": false} {
-		if has(roles[role]) != want {
-			t.Errorf("system role %q: chat:triage = %v, want %v", role, has(roles[role]), want)
+	for _, role := range []string{"admin", "manager", "agent"} {
+		if has(roles[role]) {
+			t.Errorf("system role %q must not hold chat:triage", role)
 		}
+	}
+	found := false
+	for _, p := range DefaultPermissions() {
+		found = found || (p.Resource == ResourceChat && p.Action == ActionTriage)
+	}
+	if !found {
+		t.Error("chat:triage must stay in the permission catalog")
+	}
+}
+
+// The key, not the name, identifies a preset: every preset has a distinct, non-empty key.
+func TestTeamProfileKeysAreUnique(t *testing.T) {
+	seen := map[string]string{}
+	for _, tp := range TeamProfiles() {
+		if tp.Key == "" {
+			t.Errorf("profile %q has no key", tp.Name)
+		}
+		if other, dup := seen[tp.Key]; dup {
+			t.Errorf("profiles %q and %q share the key %q", other, tp.Name, tp.Key)
+		}
+		seen[tp.Key] = tp.Name
 	}
 }

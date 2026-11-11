@@ -8,52 +8,78 @@ import (
 	"gorm.io/gorm"
 )
 
-// BackfillChatTriagePermission gives chat:triage (take a "new" conversation into attendance by status) to the
-// roles that are meant to do the first triage: the system roles admin and manager and the preset "SAC".
-// SeedSystemRolesForOrg skips an organization that already has system roles, and the team presets are created
-// once and never overwritten, so a new permission never reaches an existing installation any other way. No other
-// role receives it (agent, Vendas, Logística, Jurídico, the supervisors and custom roles keep their permissions
-// exactly as they were: the supervisors already change any status through contacts:write).
+// BackfillTeamProfileKeysAndChatTriage gives the team presets of organizations that predate custom_roles.profile_key
+// their profile key and grants chat:triage (take a "new" conversation into attendance by status) to the SAC preset.
+// New organizations never need it: the seed creates the presets with their key and chat:triage already in the SAC
+// profile. Nobody else receives chat:triage (the other presets, the system roles and custom roles are untouched).
 //
-// EXACT behavior (same shape as the other backfills: the guard is the data, there is no stored marker):
-//   - Purely additive: it never revokes anything.
-//   - An organization is skipped when its admin or manager SYSTEM role already holds the permission. That is
-//     the state of a new organization (seeded with it) and of one this backfill already served.
-//   - So it is idempotent, and a second run changes nothing.
-//   - Otherwise it grants the three roles above (those that exist and are not deleted). This also covers a SAC
-//     preset that the seed recreated in the same boot (and so already carries the permission).
-//   - What an administrator does afterwards is respected only while admin or manager keep it. Removing it from the
-//     SAC role alone, or from a custom role, is never undone. If it is removed from BOTH admin and manager, the
-//     next -migrate grants it again (the data cannot tell "never granted" from "removed on purpose").
-//   - Two boots running at once cannot fail on a duplicate link (ON CONFLICT DO NOTHING).
-func BackfillChatTriagePermission(db *gorm.DB, lo logf.Logger) error {
-	var seeded int64
-	if err := db.Model(&models.Permission{}).Where("resource = ? AND action = ?", models.ResourceChat, models.ActionTriage).Count(&seeded).Error; err != nil {
-		return fmt.Errorf("failed to look up chat:triage: %w", err)
+// WHICH role is the SAC preset is decided by its key, never by its name. The only place a name is used is the
+// one-time recognition of roles created BEFORE keys existed, and there the name alone is not enough: a role is
+// recognised as a preset only if it is not a system role, is not deleted, still has no key, and has BOTH the
+// preset's canonical name AND its original seed description. So a custom role that someone named "SAC" is not a
+// preset, and a preset whose name or description an administrator changed is not recognised (it can be given
+// chat:triage by hand).
+//
+// EXACT behavior:
+//   - Per organization, in ONE transaction: the keys of the recognised presets and the chat:triage grant are
+//     written together. If anything fails, nothing is written and the next -migrate tries again.
+//   - The keys are the run-once marker (there is no other: this project keeps no migration table, its backfills
+//     are guarded by the shape of the data). An organization is considered when NONE of its roles has a key yet.
+//     After a successful run it has them, so it is never considered again: a second run changes nothing, and what
+//     an administrator does afterwards is respected (removing chat:triage from the SAC role is NOT undone).
+//     An organization created after this release is seeded with keys and is never considered either.
+//   - It does not depend on what admin or manager hold: neither receives chat:triage.
+//   - Purely additive: it never revokes anything and never changes a name, description or other permission.
+//   - Two boots at once cannot fail on a duplicate link (ON CONFLICT DO NOTHING); the unique index on
+//     (organization, profile key) keeps a key from being given to two roles.
+func BackfillTeamProfileKeysAndChatTriage(db *gorm.DB, lo logf.Logger) error {
+	var triage models.Permission
+	if err := db.Where("resource = ? AND action = ?", models.ResourceChat, models.ActionTriage).First(&triage).Error; err != nil {
+		return fmt.Errorf("the permission chat:triage is not seeded: run the permission seed before this backfill: %w", err)
 	}
-	if seeded == 0 {
-		return fmt.Errorf("the permission chat:triage is not seeded: run the permission seed before this backfill")
-	}
-	res := db.Exec(`
-		INSERT INTO role_permissions (custom_role_id, permission_id)
-		SELECT r.id, target.id
+
+	var orgIDs []string
+	if err := db.Raw(`
+		SELECT DISTINCT r.organization_id::text
 		FROM custom_roles r
-		JOIN permissions target ON target.resource = 'chat' AND target.action = 'triage'
 		WHERE r.deleted_at IS NULL
-		  AND ((r.is_system = TRUE AND r.name IN ('admin', 'manager')) OR r.name = 'SAC')
 		  AND NOT EXISTS (
-			SELECT 1 FROM custom_roles r2
-			JOIN role_permissions rp2 ON rp2.custom_role_id = r2.id
-			JOIN permissions p2 ON p2.id = rp2.permission_id
-			WHERE r2.organization_id = r.organization_id AND r2.deleted_at IS NULL
-			  AND r2.is_system = TRUE AND r2.name IN ('admin', 'manager')
-			  AND p2.resource = 'chat' AND p2.action = 'triage')
-		ON CONFLICT DO NOTHING`)
-	if res.Error != nil {
-		return fmt.Errorf("failed to backfill chat:triage: %w", res.Error)
+			SELECT 1 FROM custom_roles k
+			WHERE k.organization_id = r.organization_id AND k.deleted_at IS NULL AND k.profile_key IS NOT NULL)`).
+		Scan(&orgIDs).Error; err != nil {
+		return fmt.Errorf("failed to list organizations without profile keys: %w", err)
 	}
-	if res.RowsAffected > 0 {
-		lo.Info("Chat triage permission backfill complete", "roles_granted", res.RowsAffected)
+
+	keyed, granted := 0, 0
+	for _, orgID := range orgIDs {
+		err := db.Transaction(func(tx *gorm.DB) error {
+			for _, tp := range models.TeamProfiles() {
+				res := tx.Exec(`
+					UPDATE custom_roles SET profile_key = ?
+					WHERE organization_id = ? AND deleted_at IS NULL AND is_system = FALSE AND profile_key IS NULL
+					  AND name = ? AND description = ?`, tp.Key, orgID, tp.Name, tp.Description)
+				if res.Error != nil {
+					return fmt.Errorf("failed to key preset %s: %w", tp.Key, res.Error)
+				}
+				keyed += int(res.RowsAffected)
+			}
+			res := tx.Exec(`
+				INSERT INTO role_permissions (custom_role_id, permission_id)
+				SELECT r.id, ? FROM custom_roles r
+				WHERE r.organization_id = ? AND r.deleted_at IS NULL AND r.profile_key = 'sac'
+				ON CONFLICT DO NOTHING`, triage.ID, orgID)
+			if res.Error != nil {
+				return fmt.Errorf("failed to grant chat:triage to the SAC preset: %w", res.Error)
+			}
+			granted += int(res.RowsAffected)
+			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("organization %s: %w", orgID, err)
+		}
+	}
+	if keyed > 0 || granted > 0 {
+		lo.Info("Team profile keys and chat:triage backfill complete", "roles_keyed", keyed, "chat_triage_granted", granted)
 	}
 	return nil
 }
