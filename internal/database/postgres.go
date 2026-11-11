@@ -125,6 +125,7 @@ func GetMigrationModels() []MigrationModel {
 
 		// Conversation Notes
 		{"ConversationNote", &models.ConversationNote{}},
+		{"ConversationPin", &models.ConversationPin{}},
 
 		// Calling / IVR
 		{"CallLog", &models.CallLog{}},

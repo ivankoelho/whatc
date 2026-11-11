@@ -655,6 +655,16 @@ function onUserActive() {
   })
 }
 
+// Pin/unpin a conversation for the current user (max 3, enforced by the server).
+async function togglePin(contact: Contact) {
+  const next = !contact.is_pinned
+  try {
+    await contactsStore.setPinned(contact.id, next)
+  } catch (error: any) {
+    toast.error(error?.response?.status === 409 ? t('chat.pinLimitReached') : t('chat.pinFailed'))
+  }
+}
+
 onUnmounted(() => {
   // Leaving the chat view entirely: the route-param watcher only clears the
   // *outgoing* contact when switching between conversations, so the one still
@@ -2078,6 +2088,7 @@ async function sendMediaMessage() {
             :get-initials="getInitials"
             :get-avatar-gradient="getAvatarGradient"
             @click="handleContactClick(contact)"
+            @toggle-pin="togglePin"
           />
 
           <!-- Loading indicator for infinite scroll -->
