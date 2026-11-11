@@ -225,6 +225,8 @@ export const contactsService = {
   statusCounts: () => api.get('/contacts/counts'),
   updateStatus: (id: string, status: 'new' | 'in_progress' | 'resolved') =>
     api.put(`/contacts/${id}/status`, { contact_status: status }),
+  pin: (id: string) => api.put(`/contacts/${id}/pin`),
+  unpin: (id: string) => api.delete(`/contacts/${id}/pin`),
   get: (id: string) => api.get(`/contacts/${id}`),
   create: (data: any) => api.post('/contacts', data),
   lookup: (phone: string) => api.get('/contacts/lookup', { params: { phone } }),

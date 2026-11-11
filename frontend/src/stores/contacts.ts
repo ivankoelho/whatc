@@ -42,6 +42,9 @@ export interface Contact {
   last_inbound_at?: string
   service_window_open?: boolean
   unread_count: number
+  // The caller's own pin (server-side, per user); pinned_at orders the pins.
+  is_pinned?: boolean
+  pinned_at?: string
   assigned_user_id?: string
   assigned_user_name?: string
   whatsapp_account?: string
@@ -144,6 +147,11 @@ export const useContactsStore = defineStore('contacts', () => {
 
   const sortedContacts = computed(() => {
     return [...filteredContacts.value].sort((a, b) => {
+      // Pinned first (most recently pinned on top), then by last message.
+      if (!!a.is_pinned !== !!b.is_pinned) return a.is_pinned ? -1 : 1
+      if (a.is_pinned && b.is_pinned) {
+        return new Date(b.pinned_at ?? 0).getTime() - new Date(a.pinned_at ?? 0).getTime()
+      }
       const dateA = a.last_message_at ? new Date(a.last_message_at).getTime() : 0
       const dateB = b.last_message_at ? new Date(b.last_message_at).getTime() : 0
       return dateB - dateA
@@ -487,6 +495,20 @@ export const useContactsStore = defineStore('contacts', () => {
     }
   }
 
+  // Pin/unpin for the current user. The server enforces the limit (409).
+  // Throws on failure so the caller can show the reason.
+  async function setPinned(id: string, pinned: boolean) {
+    if (pinned) await contactsService.pin(id)
+    else await contactsService.unpin(id)
+    const apply = (c?: Contact | null) => {
+      if (!c) return
+      c.is_pinned = pinned
+      c.pinned_at = pinned ? new Date().toISOString() : undefined
+    }
+    apply(contacts.value.find(c => c.id === id))
+    if (currentContact.value?.id === id) apply(currentContact.value)
+  }
+
   async function updateContactStatus(id: string, status: ContactStatus) {
     await contactsService.updateStatus(id, status)
     // The WebSocket event does the list bookkeeping. Update the open chat
@@ -576,6 +598,7 @@ export const useContactsStore = defineStore('contacts', () => {
     newCount,
     setStatusFilter,
     fetchStatusCounts,
+    setPinned,
     updateContactStatus,
     applyStatusChange,
     replyingTo,
