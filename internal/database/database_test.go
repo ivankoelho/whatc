@@ -163,8 +163,13 @@ func TestSeedSystemRolesForOrg_AdminRoleHasAllPermissions(t *testing.T) {
 	err = db.Model(&adminRole).Association("Permissions").Find(&perms)
 	require.NoError(t, err)
 
-	totalPerms := len(models.DefaultPermissions())
-	assert.Equal(t, totalPerms, len(perms), "admin role should have all permissions")
+	// Every permission except chat:triage, the SAC preset's own permission (the admin already changes any status
+	// through contacts:write); it stays in the catalog so it can be granted by hand.
+	totalPerms := len(models.DefaultPermissions()) - 1
+	assert.Equal(t, totalPerms, len(perms), "admin role should have all permissions but chat:triage")
+	for _, p := range perms {
+		assert.False(t, p.Resource == "chat" && p.Action == "triage", "admin must not receive chat:triage")
+	}
 }
 
 // --- CreateDefaultAdmin ---

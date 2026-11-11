@@ -227,6 +227,11 @@ func runServer(args []string) {
 			lo.Fatal("Resolve-send permission backfill failed", "error", err)
 		}
 
+		// Team preset keys and the SAC triage permission (chat:triage): additive, once per organization.
+		if err := database.BackfillTeamProfileKeysAndChatTriage(db, lo); err != nil {
+			lo.Fatal("Chat triage permission backfill failed", "error", err)
+		}
+
 		// Same window: supervising cases became its own permission. Grant it to
 		// whoever could (conversations:view_all), THEN narrow the untouched preset.
 		if err := database.BackfillOccurrenceViewAll(db, lo); err != nil {
@@ -898,6 +903,8 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.PUT("/api/contacts/{id}/tags", app.UpdateContactTags)
 	g.PUT("/api/contacts/{id}/name", app.UpdateContactName)
 	g.PUT("/api/contacts/{id}/status", app.UpdateContactStatus)
+	g.PUT("/api/contacts/{id}/pin", app.PinConversation)
+	g.DELETE("/api/contacts/{id}/pin", app.UnpinConversation)
 	g.POST("/api/contacts/{id}/typing", app.NotifyTyping)
 	g.GET("/api/contacts/{id}/session-data", app.GetContactSessionData)
 
