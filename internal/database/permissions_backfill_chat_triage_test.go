@@ -260,3 +260,126 @@ func TestBackfillChatTriage_PermissionNotSeeded_IsAnErrorNotASilentSkip(t *testi
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not seeded")
 }
+
+// ---- The real boot sequence -------------------------------------------------------------------------------------
+// RunMigrationWithProgress seeds the system roles and the missing presets (SeedSystemRolesForAllOrgs, which creates
+// the missing presets WITH their key) BEFORE main.go runs the backfill. These tests run both, in that order, the
+// way a -migrate does, instead of calling the backfill function on its own.
+
+func boot(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	require.NoError(t, database.SeedSystemRolesForAllOrgs(db))
+	require.NoError(t, database.BackfillTeamProfileKeysAndChatTriage(db, testLog()))
+}
+
+func roleByKey(t *testing.T, db *gorm.DB, orgID uuid.UUID, key string) *models.CustomRole {
+	t.Helper()
+	var r models.CustomRole
+	require.NoError(t, db.Where("organization_id = ? AND profile_key = ? AND deleted_at IS NULL", orgID, key).First(&r).Error)
+	return &r
+}
+
+// An old organization that only has the SAC preset (the others were created later or deleted): the seed creates the
+// missing ones with their keys, so the organization ALREADY has keys when the backfill runs. The legacy SAC must still
+// be recognised and given chat:triage.
+func TestBoot_PartiallySeededOrganizationStillGetsItsSAC(t *testing.T) {
+	db := seededDB(t)
+	org := testutil.CreateTestOrganization(t, db)
+	sac := legacyPreset(t, db, org.ID, "sac")
+
+	boot(t, db)
+
+	assert.Equal(t, "sac", keyOf(t, db, sac.ID), "the legacy SAC is the SAC preset")
+	assert.Equal(t, []string{"SAC"}, triageHolders(t, db, org.ID))
+	assert.NotEmpty(t, roleByKey(t, db, org.ID, "vendas"), "and the presets the seed created are keyed too")
+	var n int64
+	require.NoError(t, db.Model(&models.CustomRole{}).Where("organization_id = ? AND name = ?", org.ID, "SAC").Count(&n).Error)
+	assert.Equal(t, int64(1), n, "no duplicate SAC")
+}
+
+// Same partial organization, but the SAC is not the only legacy preset: each legacy preset is keyed on its own,
+// whatever the seed created around it.
+func TestBoot_EachLegacyPresetIsKeyedEvenWhenTheSeedCreatedOthers(t *testing.T) {
+	db := seededDB(t)
+	org := testutil.CreateTestOrganization(t, db)
+	sac := legacyPreset(t, db, org.ID, "sac")
+	logistica := legacyPreset(t, db, org.ID, "logistica")
+
+	boot(t, db)
+	assert.Equal(t, "sac", keyOf(t, db, sac.ID))
+	assert.Equal(t, "logistica", keyOf(t, db, logistica.ID))
+	assert.Equal(t, []string{"SAC"}, triageHolders(t, db, org.ID), "only the SAC gets chat:triage")
+}
+
+// The administrator removes chat:triage from the SAC; a later full boot (seed + backfill) does not restore it.
+func TestBoot_ManualRemovalSurvivesLaterBoots(t *testing.T) {
+	db := seededDB(t)
+	org := testutil.CreateTestOrganization(t, db)
+	sac := legacyPreset(t, db, org.ID, "sac")
+
+	boot(t, db)
+	require.Equal(t, []string{"SAC"}, triageHolders(t, db, org.ID))
+	require.NoError(t, db.Exec(`DELETE FROM role_permissions WHERE custom_role_id = ? AND permission_id =
+		(SELECT id FROM permissions WHERE resource = 'chat' AND action = 'triage')`, sac.ID).Error)
+
+	boot(t, db)
+	boot(t, db)
+	assert.Empty(t, triageHolders(t, db, org.ID))
+	assert.Equal(t, "sac", keyOf(t, db, sac.ID))
+}
+
+// A custom role named "SAC" through the real sequence: it is not the preset, so it gets neither the key nor the
+// permission. (The seed also finds the name taken and does not create the real SAC preset: pre-existing behaviour.)
+func TestBoot_ACustomRoleNamedSACIsNotThePreset(t *testing.T) {
+	db := seededDB(t)
+	org := testutil.CreateTestOrganization(t, db)
+	custom := &models.CustomRole{BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: org.ID, Name: "SAC", Description: "feito à mão"}
+	require.NoError(t, db.Create(custom).Error)
+
+	boot(t, db)
+	assert.Empty(t, keyOf(t, db, custom.ID))
+	assert.Empty(t, triageHolders(t, db, org.ID))
+}
+
+// A legacy SAC that an administrator renamed: it cannot be recognised (documented). The seed, finding no role named
+// SAC, creates the preset again with its key and chat:triage; the renamed role is left exactly as it was.
+func TestBoot_ARenamedLegacySACIsLeftAloneAndTheSeedCreatesTheKeyedPreset(t *testing.T) {
+	db := seededDB(t)
+	org := testutil.CreateTestOrganization(t, db)
+	renamed := legacyPreset(t, db, org.ID, "sac")
+	require.NoError(t, db.Model(renamed).Update("name", "Atendimento").Error)
+
+	boot(t, db)
+	boot(t, db)
+	assert.Empty(t, keyOf(t, db, renamed.ID))
+	assert.NotContains(t, triageHolders(t, db, org.ID), "Atendimento")
+	assert.Equal(t, []string{"SAC"}, triageHolders(t, db, org.ID), "the preset the seed created")
+	assert.NotEmpty(t, roleByKey(t, db, org.ID, "sac"))
+}
+
+// A legacy SAC whose description was edited: left alone, no error, never keyed, through repeated boots.
+func TestBoot_ALegacySACWithAnEditedDescriptionIsLeftAlone(t *testing.T) {
+	db := seededDB(t)
+	org := testutil.CreateTestOrganization(t, db)
+	edited := legacyPreset(t, db, org.ID, "sac")
+	require.NoError(t, db.Model(edited).Update("description", "outra descrição").Error)
+
+	boot(t, db)
+	boot(t, db)
+	assert.Empty(t, keyOf(t, db, edited.ID))
+	assert.Empty(t, triageHolders(t, db, org.ID))
+}
+
+// An organization created after this release is seeded with keys and the SAC permission, and a boot changes nothing.
+func TestBoot_ANewOrganizationIsSeededCompleteAndStaysPut(t *testing.T) {
+	db := seededDB(t)
+	org := testutil.CreateTestOrganization(t, db)
+	require.NoError(t, database.SeedSystemRolesForOrg(db, org.ID))
+	require.Equal(t, []string{"SAC"}, triageHolders(t, db, org.ID))
+	sac := roleByKey(t, db, org.ID, "sac")
+	require.NoError(t, db.Exec(`DELETE FROM role_permissions WHERE custom_role_id = ? AND permission_id =
+		(SELECT id FROM permissions WHERE resource = 'chat' AND action = 'triage')`, sac.ID).Error) // removed on purpose
+
+	boot(t, db)
+	assert.Empty(t, triageHolders(t, db, org.ID))
+}
