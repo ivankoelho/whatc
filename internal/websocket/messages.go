@@ -21,6 +21,12 @@ const (
 	TypeContactUpdate  = "contact_update"
 	// TypeContactStatusChanged carries ContactStatusChangedPayload
 	TypeContactStatusChanged = "contact_status_changed"
+	// TypeContactCountsChanged is an id-less hint ("recount your sidebar
+	// counters"). It carries no contact data, so it may go to the whole org:
+	// the numbers themselves only come from the scoped GET /contacts/counts.
+	// Needed because a transfer can take a conversation OUT of someone's scope,
+	// and by then that user no longer passes the per-contact authorizer.
+	TypeContactCountsChanged = "contact_counts_changed"
 	// TypeAgentTyping carries AgentTypingPayload
 	TypeAgentTyping = "agent_typing"
 	TypeSetContact  = "set_contact"

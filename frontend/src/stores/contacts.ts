@@ -477,14 +477,32 @@ export const useContactsStore = defineStore('contacts', () => {
     await fetchContacts({ search })
   }
 
+  // The server owns the "New" counter (visibility scope + 24h window); local
+  // deltas are only a hint. Every fetch takes a ticket and only the latest
+  // ticket may write, so a slow older response can never overwrite a newer one.
+  let countsTicket = 0
+  let countsTimer: ReturnType<typeof setTimeout> | null = null
+
   async function fetchStatusCounts() {
+    const ticket = ++countsTicket
     try {
       const response = await contactsService.statusCounts()
+      if (ticket !== countsTicket) return
       const data = response.data.data || response.data
       newCount.value = data.new ?? 0
     } catch (error) {
       console.error('Failed to fetch status counts:', error)
     }
+  }
+
+  // Debounced resync: bursts of events (a flow of arrivals, a bulk transfer)
+  // collapse into one request.
+  function scheduleStatusCountsRefresh(delayMs = 500) {
+    if (countsTimer) clearTimeout(countsTimer)
+    countsTimer = setTimeout(() => {
+      countsTimer = null
+      void fetchStatusCounts()
+    }, delayMs)
   }
 
   async function updateContactStatus(id: string, status: ContactStatus) {
@@ -509,6 +527,8 @@ export const useContactsStore = defineStore('contacts', () => {
     } else if (payload.old_status !== 'new' && status === 'new') {
       newCount.value += 1
     }
+    // The delta above is instant feedback; the server value is the truth.
+    scheduleStatusCountsRefresh()
 
     const contact = contacts.value.find(c => c.id === payload.contact_id)
     if (contact) {
@@ -576,6 +596,7 @@ export const useContactsStore = defineStore('contacts', () => {
     newCount,
     setStatusFilter,
     fetchStatusCounts,
+    scheduleStatusCountsRefresh,
     updateContactStatus,
     applyStatusChange,
     replyingTo,
