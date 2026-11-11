@@ -52,6 +52,23 @@ type UpdateContactStatusRequest struct {
 	ContactStatus models.ContactStatus `json:"contact_status"`
 }
 
+// canSetContactStatus says whether a user may set the conversation to the given status by hand.
+//
+//   - contacts:write (edit the contact record) keeps every transition, as it always did;
+//   - chat:write (answer customers) is enough to CONCLUDE the attendance (resolved) or reopen it
+//     (in_progress). Concluding is part of attending, so an attendant must not need the right to edit
+//     the whole customer record for it: the agent role has contacts:read only on purpose (see
+//     contacts.name:write). Sending the conversation back to "new" stays with contacts:write.
+//
+// Neither case skips the conversation check that follows (canInteractWithConversation): who may act on
+// WHICH conversation is the visibility rule's job, not this function's.
+func canSetContactStatus(to models.ContactStatus, canEditContacts, canAttend bool) bool {
+	if canEditContacts {
+		return true
+	}
+	return canAttend && (to == models.ContactStatusResolved || to == models.ContactStatusInProgress)
+}
+
 // UpdateContactStatus manually sets a conversation's service status.
 func (a *App) UpdateContactStatus(r *fastglue.Request) error {
 	orgID, userID, err := a.getOrgAndUserID(r)
@@ -59,7 +76,11 @@ func (a *App) UpdateContactStatus(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
 	}
 
-	if !a.HasPermission(userID, models.ResourceContacts, models.ActionWrite, orgID) {
+	// Two permissions open this endpoint, for different things (see canSetContactStatus). With neither there
+	// is nothing to decide and nothing about the request is read.
+	canEditContacts := a.HasPermission(userID, models.ResourceContacts, models.ActionWrite, orgID)
+	canAttend := a.HasPermission(userID, models.ResourceChat, models.ActionWrite, orgID)
+	if !canEditContacts && !canAttend {
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You do not have permission to change contact status", nil, "")
 	}
 
@@ -76,6 +97,10 @@ func (a *App) UpdateContactStatus(r *fastglue.Request) error {
 	if !req.ContactStatus.IsValid() {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest,
 			"contact_status must be one of: new, in_progress, resolved", nil, "")
+	}
+
+	if !canSetContactStatus(req.ContactStatus, canEditContacts, canAttend) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You do not have permission to change contact status", nil, "")
 	}
 
 	contact, err := findByIDAndOrg[models.Contact](a.DB, r, contactID, orgID, "Contact")

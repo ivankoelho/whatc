@@ -857,6 +857,7 @@
     "conversationResolved": "Conversation resolved",
     "conversationReopened": "Conversation reopened",
     "statusChangeFailed": "Could not change the conversation status. Try again.",
+    "statusChangeForbidden": "You do not have permission to conclude or reopen this conversation.",
     "noTagsAvailable": "No tags available",
     "paused": "Paused",
     "assignedTo": "Assigned to",
