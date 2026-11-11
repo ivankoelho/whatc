@@ -52,21 +52,30 @@ type UpdateContactStatusRequest struct {
 	ContactStatus models.ContactStatus `json:"contact_status"`
 }
 
-// canSetContactStatus says whether a user may set the conversation to the given status by hand.
+// canSetContactStatus says whether a user may move the conversation from one status to another by hand.
 //
-//   - contacts:write (edit the contact record) keeps every transition, as it always did;
-//   - chat:write (answer customers) is enough to CONCLUDE the attendance (resolved) or reopen it
-//     (in_progress). Concluding is part of attending, so an attendant must not need the right to edit
-//     the whole customer record for it: the agent role has contacts:read only on purpose (see
-//     contacts.name:write). Sending the conversation back to "new" stays with contacts:write.
-//
-// Neither case skips the conversation check that follows (canInteractWithConversation): who may act on
-// WHICH conversation is the visibility rule's job, not this function's.
-func canSetContactStatus(to models.ContactStatus, canEditContacts, canAttend bool) bool {
+// contacts:write holders keep every transition. chat:write (attending) is deliberately narrower, so that
+// "conclude" does not turn into a general status editor:
+//   - conclude (-> resolved) from any status, for a conversation the user can already access;
+//   - reopen (-> in_progress) only from resolved: an attendant cannot take a conversation that is
+//     still "new" (waiting for attendance or distribution) just by clicking, without any real interaction;
+//   - never -> new.
+// WHO may act on WHICH conversation stays with canInteractWithConversation.
+func canSetContactStatus(from, to models.ContactStatus, canEditContacts, canAttend bool) bool {
 	if canEditContacts {
 		return true
 	}
-	return canAttend && (to == models.ContactStatusResolved || to == models.ContactStatusInProgress)
+	if !canAttend {
+		return false
+	}
+	switch to {
+	case models.ContactStatusResolved:
+		return true
+	case models.ContactStatusInProgress:
+		return from == models.ContactStatusResolved
+	default:
+		return false
+	}
 }
 
 // UpdateContactStatus manually sets a conversation's service status.
@@ -99,10 +108,6 @@ func (a *App) UpdateContactStatus(r *fastglue.Request) error {
 			"contact_status must be one of: new, in_progress, resolved", nil, "")
 	}
 
-	if !canSetContactStatus(req.ContactStatus, canEditContacts, canAttend) {
-		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You do not have permission to change contact status", nil, "")
-	}
-
 	contact, err := findByIDAndOrg[models.Contact](a.DB, r, contactID, orgID, "Contact")
 	if err != nil {
 		return nil
@@ -110,6 +115,12 @@ func (a *App) UpdateContactStatus(r *fastglue.Request) error {
 	if !a.canInteractWithConversation(userID, orgID, contact) {
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
 			"You do not have access to this conversation", nil, "")
+	}
+
+	// The transition rule needs the current status, so it runs once the contact is loaded and the caller
+	// is known to have access to it.
+	if !canSetContactStatus(contact.ContactStatus, req.ContactStatus, canEditContacts, canAttend) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You do not have permission to change contact status", nil, "")
 	}
 
 	// Resolving is a close: it must close the attendance and free the contact,

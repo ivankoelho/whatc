@@ -195,3 +195,58 @@ func TestConclude_RepeatedClicksHaveNoDuplicateEffects(t *testing.T) {
 	}
 	assert.Equal(t, 1, resolved, "exactly one resolved event")
 }
+
+// The narrower chat:write rule: conclude from any status, reopen only from resolved, never back to "new";
+// contacts:write holders keep every transition (including taking a "new" conversation).
+func TestConclude_ChatWriteTransitionRules(t *testing.T) {
+	t.Parallel()
+	e := newConcludeEnv(t)
+	setStatus := func(c *models.Contact, st models.ContactStatus) {
+		require.NoError(t, e.app.DB.Model(&models.Contact{}).Where("id = ?", c.ID).Update("contact_status", st).Error)
+	}
+	status := func(c *models.Contact) models.ContactStatus {
+		var x models.Contact
+		require.NoError(t, e.app.DB.First(&x, "id = ?", c.ID).Error)
+		return x.ContactStatus
+	}
+
+	t.Run("cannot take a new conversation by clicking", func(t *testing.T) {
+		c, _ := e.attendance(t, e.agent)
+		setStatus(c, models.ContactStatusNew)
+		assert.Equal(t, fasthttp.StatusForbidden, e.put(t, e.agent, c, "in_progress"))
+		assert.Equal(t, models.ContactStatusNew, status(c), "nothing changed")
+	})
+	t.Run("can conclude a conversation that is new or in progress", func(t *testing.T) {
+		for _, from := range []models.ContactStatus{models.ContactStatusNew, models.ContactStatusInProgress} {
+			c, _ := e.attendance(t, e.agent)
+			setStatus(c, from)
+			assert.Equal(t, fasthttp.StatusOK, e.put(t, e.agent, c, "resolved"), "from %s", from)
+			assert.Equal(t, models.ContactStatusResolved, status(c))
+		}
+	})
+	t.Run("can reopen only from resolved", func(t *testing.T) {
+		c, _ := e.attendance(t, e.agent)
+		setStatus(c, models.ContactStatusResolved)
+		assert.Equal(t, fasthttp.StatusOK, e.put(t, e.agent, c, "in_progress"))
+		assert.Equal(t, models.ContactStatusInProgress, status(c))
+		assert.Equal(t, fasthttp.StatusForbidden, e.put(t, e.agent, c, "in_progress"), "already in progress: not a reopen")
+	})
+	t.Run("never back to new", func(t *testing.T) {
+		c, _ := e.attendance(t, e.agent)
+		setStatus(c, models.ContactStatusResolved)
+		assert.Equal(t, fasthttp.StatusForbidden, e.put(t, e.agent, c, "new"))
+	})
+	t.Run("a contacts:write holder keeps every transition", func(t *testing.T) {
+		adminRole := testutil.CreateAdminRole(t, e.app.DB, e.org.ID)
+		admin := testutil.CreateTestUser(t, e.app.DB, e.org.ID, testutil.WithRoleID(&adminRole.ID))
+		c, _ := e.attendance(t, e.agent)
+		setStatus(c, models.ContactStatusNew)
+		assert.Equal(t, fasthttp.StatusOK, e.put(t, admin, c, "in_progress"), "new -> in_progress")
+		assert.Equal(t, fasthttp.StatusOK, e.put(t, admin, c, "new"), "reset to new")
+	})
+	t.Run("the rule never opens a conversation the user cannot access", func(t *testing.T) {
+		c, _ := e.attendance(t, e.agent)
+		setStatus(c, models.ContactStatusResolved)
+		assert.Equal(t, fasthttp.StatusForbidden, e.put(t, e.other, c, "in_progress"))
+	})
+}
