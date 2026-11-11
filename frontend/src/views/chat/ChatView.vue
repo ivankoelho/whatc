@@ -673,8 +673,15 @@ const isCurrentPinned = computed(() => !!contactsStore.currentContact?.is_pinned
 // Pin/unpin a conversation for the current user (max 3, enforced by the server).
 async function togglePin(contact: Contact) {
   const next = !contact.is_pinned
+  // Pinning moves the row to another group (it is re-created in the DOM), which
+  // would drop keyboard focus to <body>. Remember it and put it back.
+  const hadFocus = !!document.activeElement?.closest('[data-testid="pin-toggle"]')
   try {
     await contactsStore.setPinned(contact.id, next)
+    if (hadFocus) {
+      await nextTick()
+      document.querySelector<HTMLElement>(`[data-testid="pin-toggle"][data-contact-id="${contact.id}"]`)?.focus()
+    }
   } catch (error: any) {
     toast.error(error?.response?.status === 409 ? t('chat.pinLimitReached') : t('chat.pinFailed'))
   }
@@ -2151,7 +2158,7 @@ async function sendMediaMessage() {
          turn once isInfoPanelOpen hands the screen to ContactInfoPanel. -->
     <div
       v-if="!isMobile || contactsStore.currentContact"
-      class="flex-1 flex flex-col bg-[#0f0f10] light:bg-gray-50"
+      class="min-w-0 flex-1 flex flex-col bg-[#0f0f10] light:bg-gray-50"
       :class="isMobile && contactsStore.currentContact && isInfoPanelOpen && 'hidden'"
     >
       <!-- No Contact Selected -->
@@ -2172,7 +2179,7 @@ async function sendMediaMessage() {
       <template v-else>
         <!-- Chat Header -->
         <div class="h-14 flex-shrink-0 px-4 border-b border-white/[0.08] light:border-gray-200 flex items-center justify-between bg-[#0f0f10] light:bg-white">
-          <div class="flex items-center gap-2">
+          <div class="flex min-w-0 items-center gap-2">
             <Button
               v-if="isMobile"
               variant="ghost"
@@ -2183,15 +2190,15 @@ async function sendMediaMessage() {
             >
               <ArrowLeft class="h-4 w-4" />
             </Button>
-            <Avatar class="h-8 w-8 ring-2 ring-white/[0.1] light:ring-gray-200">
+            <Avatar class="h-8 w-8 shrink-0 ring-2 ring-white/[0.1] light:ring-gray-200">
               <AvatarImage :src="contactsStore.currentContact.avatar_url" />
               <AvatarFallback :class="'text-xs bg-gradient-to-br text-white ' + getAvatarGradient(contactsStore.currentContact.name || contactsStore.currentContact.phone_number)">
                 {{ getInitials(contactsStore.currentContact.name || contactsStore.currentContact.phone_number) }}
               </AvatarFallback>
             </Avatar>
-            <div>
+            <div class="min-w-0">
               <div class="flex items-center gap-1.5">
-                <p class="text-sm font-medium text-white light:text-gray-900">
+                <p class="truncate text-sm font-medium text-white light:text-gray-900">
                   {{ contactsStore.currentContact.name || contactsStore.currentContact.phone_number }}
                 </p>
                 <Badge v-if="activeTransferId" class="text-[10px] h-5 bg-orange-500/20 text-orange-400 light:bg-orange-100 light:text-orange-700">
@@ -2201,12 +2208,12 @@ async function sendMediaMessage() {
                   {{ $t('chat.marketingOptOut', 'Marketing Opt-out') }}
                 </Badge>
               </div>
-              <p class="text-[11px] text-white/50 light:text-gray-500">
+              <p class="truncate text-[11px] text-white/50 light:text-gray-500">
                 {{ contactsStore.currentContact.phone_number }}
               </p>
             </div>
           </div>
-          <div class="flex items-center gap-1">
+          <div class="flex shrink-0 items-center gap-1">
             <CallButton
               v-if="contactsStore.currentContact?.phone_number && selectedAccount && isBusinessCallingEnabled"
               :contact-id="contactsStore.currentContact.id"
@@ -2275,10 +2282,13 @@ async function sendMediaMessage() {
                 ? 'text-white/60 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100'
                 : 'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 light:text-emerald-600 light:hover:bg-emerald-50'"
               :disabled="isChangingStatus"
+              :aria-label="isConversationResolved ? $t('chat.reopenConversation') : $t('chat.resolveConversation')"
+              :title="isConversationResolved ? $t('chat.reopenConversation') : $t('chat.resolveConversation')"
               @click="toggleConversationStatus"
             >
               <component :is="isConversationResolved ? RotateCcw : CheckCircle2" class="h-4 w-4" />
-              <span>{{ isConversationResolved ? $t('chat.reopenConversation') : $t('chat.resolveConversation') }}</span>
+              <!-- Label hidden below sm: at phone width the header cannot carry it plus the pin and the other actions. The accessible name stays. -->
+              <span class="hidden sm:inline">{{ isConversationResolved ? $t('chat.reopenConversation') : $t('chat.resolveConversation') }}</span>
             </Button>
             <Tooltip>
               <TooltipTrigger as-child>

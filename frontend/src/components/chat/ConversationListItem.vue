@@ -77,7 +77,8 @@ const hasMetaLine = computed(() => tags.value.length > 0 || assignedName.value !
           <button
             type="button"
             data-testid="pin-toggle"
-            class="-my-1 flex h-6 w-6 items-center justify-center rounded text-white/45 hover:bg-white/[0.08] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70 light:text-gray-500 light:hover:bg-gray-200/70 light:hover:text-gray-900"
+            :data-contact-id="props.contact.id"
+            class="-my-1 flex h-6 w-6 [@media(pointer:coarse)]:-my-2.5 [@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:w-10 items-center justify-center rounded text-white/45 hover:bg-white/[0.08] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70 light:text-gray-500 light:hover:bg-gray-200/70 light:hover:text-gray-900"
             :class="props.contact.is_pinned ? '' : 'opacity-0 group-hover:opacity-100 focus:opacity-100 [@media(hover:none)]:hidden'"
             :aria-pressed="!!props.contact.is_pinned"
             :aria-label="(props.contact.is_pinned ? t('chat.unpinConversation') : t('chat.pinConversation')) + ': ' + displayName"

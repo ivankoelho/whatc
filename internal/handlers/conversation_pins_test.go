@@ -135,3 +135,32 @@ func TestPinConversation_RespectsVisibility(t *testing.T) {
 	// and the leftover mark can still be cleared
 	assert.Equal(t, fasthttp.StatusOK, pinCall(t, app, org.ID, agent.ID, mine[0].ID, true))
 }
+
+// Two quick clicks (or two tabs) must not both pass the limit check.
+func TestPinConversation_ConcurrentPinsRespectLimit(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	me := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+
+	const n = 8
+	statuses := make(chan int, n)
+	for i := 0; i < n; i++ {
+		ct := testutil.CreateTestContact(t, app.DB, org.ID)
+		go func() { statuses <- pinCall(t, app, org.ID, me.ID, ct.ID, false) }()
+	}
+	ok, refused := 0, 0
+	for i := 0; i < n; i++ {
+		switch <-statuses {
+		case fasthttp.StatusOK:
+			ok++
+		case fasthttp.StatusConflict:
+			refused++
+		}
+	}
+	var rows int64
+	app.DB.Model(&models.ConversationPin{}).Where("user_id = ?", me.ID).Count(&rows)
+	assert.Equal(t, int64(models.MaxPinnedConversations), rows)
+	assert.Equal(t, models.MaxPinnedConversations, ok)
+	assert.Equal(t, n-models.MaxPinnedConversations, refused)
+}
