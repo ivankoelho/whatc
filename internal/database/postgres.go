@@ -210,6 +210,14 @@ func RunMigrationWithProgress(db *gorm.DB, adminCfg *config.DefaultAdminConfig) 
 	// when they are introduced, never again, so an administrator's later choice is not overridden at a restart.
 	commercialExisted := CommercialColumnsExist(db)
 
+	// Contact status is introduced ONCE, atomically, before anything else touches the contacts table: the column and
+	// the derivation of the statuses of the conversations that already exist commit together or not at all. See
+	// IntroduceContactStatus. After that no boot ever derives statuses again.
+	if _, err := IntroduceContactStatus(silentDB); err != nil {
+		fmt.Printf("\n  \033[31m✗ Failed to introduce contact_status\033[0m\n\n")
+		return fmt.Errorf("failed to introduce contact_status: %w", err)
+	}
+
 	migrationModels := GetMigrationModels()
 	indexes := getIndexes()
 
@@ -307,12 +315,6 @@ func RunMigrationWithProgress(db *gorm.DB, adminCfg *config.DefaultAdminConfig) 
 	// Classify existing sales teams and departments by name, once, when the commercial flag is introduced
 	if err := ApplyCommercialBackfill(silentDB, commercialExisted); err != nil {
 		fmt.Println("Failed to backfill commercial departments")
-		return err
-	}
-
-	// Derive contact_status for contacts that predate the column
-	if err := BackfillContactStatus(silentDB); err != nil {
-		fmt.Printf("\n  \033[31m✗ Failed to backfill contact_status\033[0m\n\n")
 		return err
 	}
 
@@ -606,12 +608,92 @@ func BackfillCommercialDepartments(db *gorm.DB) error {
 	`).Error
 }
 
-// BackfillContactStatus derives contact_status for existing contacts.
-// Guarded by contact_status = 'new' (the column default), so it is idempotent
-// and can never overwrite a status an agent actually set.
+// IntroduceContactStatus adds contacts.contact_status to an installation that does not have it yet and derives the
+// status of the conversations that already exist, ATOMICALLY and only once.
+//
+// Why atomic. The column is created NOT NULL DEFAULT 'new', so the moment it exists every conversation says "new".
+// If the column were created by the general AutoMigrate and the derivation ran many steps later (as it used to), a
+// boot that stopped in between would leave the column in place WITHOUT the derivation, and no later boot could tell
+// (the column "already existed"). Here the column, what the derivation reads, and the derivation itself are ONE
+// transaction: if any step fails nothing is kept (the column is not left behind) and the next boot starts over.
+//
+// Why only once. 'new' is not just the column default: it is the live queue of conversations waiting for
+// attendance. Deriving again at every boot (the old behaviour) moved every waiting conversation with a recent
+// message to 'in_progress' at each restart, emptying the queue and the "Novo" counter.
+//
+// EXACT behavior:
+//   - Does nothing when the contacts table does not exist (a new database: AutoMigrate creates the table with the
+//     column and there is nothing to derive) and when contact_status already exists (every later boot).
+//   - Otherwise, in one transaction and through that transaction only: adds ONLY the contact_status column, with
+//     exactly the model's definition; adds is_read / last_inbound_at only if an old installation still lacks them
+//     (the derivation reads them); fills last_inbound_at from the messages (BackfillLastInboundAt) and derives the
+//     statuses (BackfillContactStatus). The messages table is used only if it exists.
+//   - It never runs AutoMigrate of the Contact model and does not create the CHECK constraint or the index: those
+//     stay in the normal flow, which runs afterwards.
+//   - Returns whether it introduced the column. Errors are returned as they are, never swallowed.
+//
+// Cost: ADD COLUMN with a constant default does not rewrite the table (PostgreSQL 11+), but the transaction holds
+// the table lock until it commits, so the derivation time (proportional to the number of contacts) is a window in
+// which contacts is locked. It happens once, in a -migrate boot that runs before the server accepts requests.
+func IntroduceContactStatus(db *gorm.DB) (bool, error) {
+	m := db.Migrator()
+	if !m.HasTable(&models.Contact{}) || m.HasColumn(&models.Contact{}, "contact_status") {
+		return false, nil
+	}
+	err := db.Transaction(func(tx *gorm.DB) error {
+		tm := tx.Migrator()
+		// contact_status first; the other two only if an old installation lacks them (the derivation reads them).
+		for _, col := range []struct{ field, column string }{
+			{"ContactStatus", "contact_status"},
+			{"IsRead", "is_read"},
+			{"LastInboundAt", "last_inbound_at"},
+		} {
+			if tm.HasColumn(&models.Contact{}, col.column) {
+				continue
+			}
+			if err := tm.AddColumn(&models.Contact{}, col.field); err != nil {
+				return fmt.Errorf("adding contacts.%s: %w", col.column, err)
+			}
+		}
+		hasMessages := tm.HasTable(&models.Message{})
+		if hasMessages {
+			if err := BackfillLastInboundAt(tx); err != nil {
+				return fmt.Errorf("backfilling last_inbound_at: %w", err)
+			}
+		}
+		if err := backfillContactStatusActive(tx); err != nil {
+			return fmt.Errorf("deriving contact_status (active conversations): %w", err)
+		}
+		if hasMessages {
+			if err := backfillContactStatusResolved(tx); err != nil {
+				return fmt.Errorf("deriving contact_status (finished conversations): %w", err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// BackfillContactStatus derives contact_status for contacts that predate the column.
+//
+// DO NOT call it at every boot. It acts on contact_status = 'new', and 'new' is also a legitimate live state (the
+// queue of conversations waiting for attendance), so running it again moves those conversations to 'in_progress'
+// or 'resolved'. It is only correct as part of the one-time introduction of the column, see IntroduceContactStatus
+// (which calls it inside its transaction). The earlier comment here claimed it "can never overwrite a status an
+// agent set"; that held for statuses set by agents, but not for the waiting queue.
 func BackfillContactStatus(db *gorm.DB) error {
-	// Active conversations: a recent inbound message, or still unread.
-	if err := db.Exec(`
+	if err := backfillContactStatusActive(db); err != nil {
+		return err
+	}
+	return backfillContactStatusResolved(db)
+}
+
+// backfillContactStatusActive: conversations with a recent inbound message, or still unread, are in progress.
+func backfillContactStatusActive(db *gorm.DB) error {
+	return db.Exec(`
 		UPDATE contacts
 		SET contact_status = 'in_progress'
 		WHERE contact_status = 'new'
@@ -620,11 +702,11 @@ func BackfillContactStatus(db *gorm.DB) error {
 		        (last_inbound_at IS NOT NULL AND last_inbound_at > NOW() - INTERVAL '24 hours')
 		     OR is_read = false
 		  )
-	`).Error; err != nil {
-		return err
-	}
+	`).Error
+}
 
-	// Contacts with message history but no recent activity are considered done.
+// backfillContactStatusResolved: contacts with message history but no recent activity are considered done.
+func backfillContactStatusResolved(db *gorm.DB) error {
 	return db.Exec(`
 		UPDATE contacts c
 		SET contact_status = 'resolved'
