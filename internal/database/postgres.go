@@ -608,6 +608,13 @@ func BackfillCommercialDepartments(db *gorm.DB) error {
 	`).Error
 }
 
+// contactStatusIntroductionLockKey names the PostgreSQL advisory lock that serializes IntroduceContactStatus. The
+// project's other advisory locks use pg_advisory_xact_lock(hashtextextended(<string>, 0)) on strings built from ids and
+// short prefixes ("team_rr:<team>", "presence:<org>:<user>", "occurrence_processes_seed:<org>", "<org>/<contact>", the
+// chat limits). This key is a fixed string under its own "whatomate:migrate:" namespace, which none of them can
+// produce, so it cannot collide with them. Do not reuse it for anything else.
+const contactStatusIntroductionLockKey = "whatomate:migrate:introduce_contact_status"
+
 // IntroduceContactStatus adds contacts.contact_status to an installation that does not have it yet and derives the
 // status of the conversations that already exist, ATOMICALLY and only once.
 //
@@ -632,16 +639,35 @@ func BackfillCommercialDepartments(db *gorm.DB) error {
 //     stay in the normal flow, which runs afterwards.
 //   - Returns whether it introduced the column. Errors are returned as they are, never swallowed.
 //
+// Concurrent executors. Two -migrate processes can reach this point together (an instance restarted by the
+// supervisor while another one is still migrating, a manual run during a deploy, two replicas). The check above is
+// only an optimisation that spares the transaction when there is nothing to do: both could see the column missing.
+// The authority is the check made INSIDE the transaction after taking a transaction-scoped advisory lock
+// (contactStatusIntroductionLockKey, held until commit or rollback, so it also covers a crash). The loser waits, then
+// finds the column the winner committed and returns without error and WITHOUT running any backfill. Without the
+// lock the loser's ADD COLUMN failed with 'column "contact_status" already exists' and took the boot down.
+//
 // Cost: ADD COLUMN with a constant default does not rewrite the table (PostgreSQL 11+), but the transaction holds
 // the table lock until it commits, so the derivation time (proportional to the number of contacts) is a window in
 // which contacts is locked. It happens once, in a -migrate boot that runs before the server accepts requests.
 func IntroduceContactStatus(db *gorm.DB) (bool, error) {
 	m := db.Migrator()
+	// Optimisation only: the authoritative check is the one inside the transaction, after the lock.
 	if !m.HasTable(&models.Contact{}) || m.HasColumn(&models.Contact{}, "contact_status") {
 		return false, nil
 	}
+	introduced := true
 	err := db.Transaction(func(tx *gorm.DB) error {
+		// Serialize concurrent executors BEFORE changing anything. Transaction-scoped: released at commit or rollback.
+		if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))", contactStatusIntroductionLockKey).Error; err != nil {
+			return fmt.Errorf("locking the contact_status introduction: %w", err)
+		}
 		tm := tx.Migrator()
+		// Look again now that no other executor can be in the middle of it: the winner may have just committed.
+		if tm.HasColumn(&models.Contact{}, "contact_status") {
+			introduced = false
+			return nil
+		}
 		// contact_status first; the other two only if an old installation lacks them (the derivation reads them).
 		for _, col := range []struct{ field, column string }{
 			{"ContactStatus", "contact_status"},
@@ -674,7 +700,7 @@ func IntroduceContactStatus(db *gorm.DB) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return true, nil
+	return introduced, nil
 }
 
 // BackfillContactStatus derives contact_status for contacts that predate the column.

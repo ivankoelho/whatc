@@ -2,6 +2,7 @@ package database_test
 
 import (
 	"database/sql"
+	"sync"
 	"testing"
 	"time"
 
@@ -10,7 +11,9 @@ import (
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 // These tests run the REAL migration (RunMigrationWithProgress) on scratch databases. They pin the behaviour of the
@@ -248,4 +251,108 @@ func TestContactStatusIntroduction_OtherBackfillsKeepWorking(t *testing.T) {
 	require.NoError(t, db.Raw("SELECT last_inbound_at FROM contacts WHERE id = ?", ids.nullInbound).Scan(&li).Error)
 	assert.False(t, li.IsZero(), "BackfillLastInboundAt still runs every boot")
 	assert.Equal(t, "in_progress", statusOf(t, db, ids.nullInbound), "and a boot never changes the status")
+}
+
+// independentConnections opens n separate connection pools to the same database, so each concurrent executor
+// behaves like its own -migrate process: its own connection, its own transaction, nothing shared in memory.
+func independentConnections(t *testing.T, db *gorm.DB, n int) []*gorm.DB {
+	t.Helper()
+	dsn := db.Dialector.(*postgres.Dialector).DSN
+	conns := make([]*gorm.DB, n)
+	for i := range conns {
+		c, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+		require.NoError(t, err)
+		conns[i] = c
+		t.Cleanup(func() {
+			if sqlDB, e := c.DB(); e == nil {
+				_ = sqlDB.Close()
+			}
+		})
+	}
+	return conns
+}
+
+// 9. CONCURRENT EXECUTORS (real PostgreSQL, independent connections). Several -migrate processes reaching the
+// introduction at the same time on the same legacy database: nobody gets an error, EXACTLY ONE introduces the column
+// and runs the derivation (the others return without running any backfill), the final statuses are right, and no
+// conversation is lost or altered. Before the advisory lock, the losers failed with `column "contact_status" ... already
+// exists` (14 of 60 executions in the original probe).
+//
+// "Runs no backfill" is proven by a statement-level trigger on contacts that records every UPDATE statement: one
+// complete introduction issues exactly 3 (last_inbound_at, active conversations, finished conversations), so any
+// executor that repeated a backfill would show up as extra rows.
+func TestContactStatusIntroduction_ConcurrentExecutors_ExactlyOneIntroduces(t *testing.T) {
+	const executors, trials = 5, 10
+	db, ids := legacyInstallation(t)
+	conns := independentConnections(t, db, executors)
+
+	require.NoError(t, db.Exec(`CREATE TABLE zz_update_log (id bigserial PRIMARY KEY)`).Error)
+	require.NoError(t, db.Exec(`CREATE FUNCTION zz_log_update() RETURNS trigger AS $$ BEGIN INSERT INTO zz_update_log DEFAULT VALUES; RETURN NULL; END $$ LANGUAGE plpgsql`).Error)
+	require.NoError(t, db.Exec(`CREATE TRIGGER zz_log AFTER UPDATE ON contacts FOR EACH STATEMENT EXECUTE FUNCTION zz_log_update()`).Error)
+
+	var contactsBefore, messagesBefore int64
+	require.NoError(t, db.Raw("SELECT COUNT(*) FROM contacts").Scan(&contactsBefore).Error)
+	require.NoError(t, db.Raw("SELECT COUNT(*) FROM messages").Scan(&messagesBefore).Error)
+
+	for trial := 1; trial <= trials; trial++ {
+		require.NoError(t, db.Exec("ALTER TABLE contacts DROP COLUMN IF EXISTS contact_status").Error) // back to legacy
+		require.NoError(t, db.Exec("TRUNCATE zz_update_log").Error)
+
+		type result struct {
+			introduced bool
+			err        error
+		}
+		results := make([]result, executors)
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		for i := 0; i < executors; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				<-start
+				results[i].introduced, results[i].err = database.IntroduceContactStatus(conns[i])
+			}(i)
+		}
+		close(start)
+		wg.Wait()
+
+		introduced := 0
+		for i, r := range results {
+			require.NoError(t, r.err, "trial %d, executor %d: a concurrent executor must never fail", trial, i)
+			if r.introduced {
+				introduced++
+			}
+		}
+		assert.Equal(t, 1, introduced, "trial %d: exactly one executor introduces the column", trial)
+
+		var statements int64
+		require.NoError(t, db.Raw("SELECT COUNT(*) FROM zz_update_log").Scan(&statements).Error)
+		assert.Equal(t, int64(3), statements, "trial %d: one derivation only (3 UPDATE statements); the others ran no backfill", trial)
+
+		assert.True(t, db.Migrator().HasColumn(&models.Contact{}, "contact_status"))
+		assert.Equal(t, "in_progress", statusOf(t, db, ids.recent), "trial %d", trial)
+		assert.Equal(t, "in_progress", statusOf(t, db, ids.unread), "trial %d", trial)
+		assert.Equal(t, "resolved", statusOf(t, db, ids.oldHistory), "trial %d", trial)
+		assert.Equal(t, "new", statusOf(t, db, ids.silent), "trial %d", trial)
+		assert.Equal(t, "in_progress", statusOf(t, db, ids.nullInbound), "trial %d", trial)
+
+		var contactsAfter, messagesAfter int64
+		require.NoError(t, db.Raw("SELECT COUNT(*) FROM contacts").Scan(&contactsAfter).Error)
+		require.NoError(t, db.Raw("SELECT COUNT(*) FROM messages").Scan(&messagesAfter).Error)
+		assert.Equal(t, contactsBefore, contactsAfter, "trial %d: no conversation lost", trial)
+		assert.Equal(t, messagesBefore, messagesAfter, "trial %d: no message lost", trial)
+	}
+
+	// afterwards: idempotent. A person's decision survives another round of executors.
+	require.NoError(t, db.Exec("UPDATE contacts SET contact_status = 'new' WHERE id = ?", ids.recent).Error) // a waiting conversation
+	require.NoError(t, db.Exec("TRUNCATE zz_update_log").Error)
+	for _, c := range conns {
+		introduced, err := database.IntroduceContactStatus(c)
+		require.NoError(t, err)
+		assert.False(t, introduced)
+	}
+	assert.Equal(t, "new", statusOf(t, db, ids.recent), "the waiting queue is untouched by later executors")
+	var statements int64
+	require.NoError(t, db.Raw("SELECT COUNT(*) FROM zz_update_log").Scan(&statements).Error)
+	assert.Zero(t, statements, "no backfill ran after the introduction")
 }
