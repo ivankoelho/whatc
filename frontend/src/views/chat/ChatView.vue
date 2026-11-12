@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { formatTime as formatDtTime, formatDate as formatDtDate } from '@/lib/utils'
 import { ref, watch, onMounted, onUnmounted, nextTick, computed, defineAsyncComponent } from 'vue'
+import { useResizeObserver } from '@vueuse/core'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useMediaScan } from '@/composables/useMediaScan'
@@ -179,6 +180,45 @@ const CONTACTS_MIN_WIDTH = 240
 const CONTACTS_MAX_WIDTH = 560
 const contactsWidth = ref(320)
 const isResizingContacts = ref(false)
+
+// Three areas compete for the width on desktop: the conversation list, the chat and the Contact Info
+// (plus the optional Notes panel). The Contact Info is complementary, so it is the one that yields:
+//   1. the chat column never shrinks below CHAT_MIN_WIDTH, so its header (and every action in it)
+//      stays inside the column instead of spilling over the panel next to it;
+//   2. the Contact Info shrinks down to its own minimum (ContactInfoPanel's MIN_WIDTH);
+//   3. if the row still does not fit, it becomes a side sheet inside the chat column, under the chat
+//      header (infoAsOverlay), rather than pushing the chat to zero. The Notes panel is never closed
+//      by any of this, and the sheet never covers a control of another panel.
+// CHAT_MIN_WIDTH: the chat header needs 377px for its actions (avatar, seven action buttons and its
+// padding, measured by e2e/tests/chat/chat-layout.spec.ts) plus about 100px so the contact name stays readable.
+const CHAT_MIN_WIDTH = 480
+const layoutRoot = ref<HTMLElement | null>(null)
+const chatColumn = ref<HTMLElement | null>(null)
+const infoAsOverlay = ref(false)
+let settlingInfoLayout = false
+
+async function settleInfoLayout() {
+  if (settlingInfoLayout) return
+  settlingInfoLayout = true
+  try {
+    // Measure with the Contact Info in the row (already at its minimum if the row is tight): if the row
+    // still overflows, the columns cannot all fit and the Contact Info leaves the row.
+    infoAsOverlay.value = false
+    await nextTick()
+    const el = layoutRoot.value
+    if (!isMobile.value && isInfoPanelOpen.value && el && el.scrollWidth > el.clientWidth + 1) {
+      infoAsOverlay.value = true
+    }
+  } finally {
+    settlingInfoLayout = false
+  }
+}
+watch(
+  [isMobile, isInfoPanelOpen, isNotesPanelOpen, contactsWidth, () => contactsStore.currentContact?.id],
+  settleInfoLayout,
+  { flush: 'post' },
+)
+useResizeObserver(layoutRoot, settleInfoLayout)
 
 function startContactsResize(e: MouseEvent) {
   isResizingContacts.value = true
@@ -1979,7 +2019,7 @@ async function sendMediaMessage() {
 </script>
 
 <template>
-  <div class="flex h-full bg-[#0a0a0b] light:bg-gray-50">
+  <div ref="layoutRoot" class="relative flex h-full bg-[#0a0a0b] light:bg-gray-50">
     <!-- Status rail (Bitrix's All / Tasks / CoPilot column) — desktop only;
          mobile keeps the pills inside the list header. -->
     <ConversationStatusFilter
@@ -2170,8 +2210,10 @@ async function sendMediaMessage() {
          turn once isInfoPanelOpen hands the screen to ContactInfoPanel. -->
     <div
       v-if="!isMobile || contactsStore.currentContact"
-      class="min-w-0 flex-1 flex flex-col bg-[#0f0f10] light:bg-gray-50"
+      ref="chatColumn"
+      class="relative min-w-0 flex-1 flex flex-col bg-[#0f0f10] light:bg-gray-50"
       :class="isMobile && contactsStore.currentContact && isInfoPanelOpen && 'hidden'"
+      :style="!isMobile && { minWidth: CHAT_MIN_WIDTH + 'px' }"
     >
       <!-- No Contact Selected -->
       <div
@@ -2957,16 +2999,28 @@ async function sendMediaMessage() {
 
     <!-- Contact Info Panel — Oportunidades/Ocorrências render as sections of
          this same column (spec item 4), not separate side panels. -->
-    <ContactInfoPanel
-      v-if="contactsStore.currentContact && isInfoPanelOpen"
-      :contact="contactsStore.currentContact"
-      :session-data="contactSessionData"
-      :source-transfer-id="activeTransferId ?? undefined"
-      @close="isInfoPanelOpen = false"
-      @tags-updated="(tags) => contactsStore.updateContactTags(contactsStore.currentContact!.id, tags)"
-      @name-updated="(name) => contactsStore.updateContactName(contactsStore.currentContact!.id, name)"
-      @registration-updated="(registration) => contactsStore.updateContactRegistration(contactsStore.currentContact!.id, registration)"
-    />
+    <!-- The wrapper is invisible (`contents`) while the panel is a column of the row. When the
+         columns cannot all fit (see settleInfoLayout) the panel moves INTO the chat column as a
+         side sheet under the chat header (top-14 = the header's h-14): it never covers the
+         header's actions nor the Notes panel, and it does not squeeze the chat. -->
+    <Teleport :to="chatColumn ?? 'body'" :disabled="!infoAsOverlay || !chatColumn">
+      <div
+        v-if="contactsStore.currentContact && isInfoPanelOpen"
+        data-testid="contact-info-slot"
+        :data-overlay="infoAsOverlay"
+        :class="infoAsOverlay ? 'absolute bottom-0 right-0 top-14 z-30 max-w-full shadow-2xl' : 'contents'"
+      >
+        <ContactInfoPanel
+          :contact="contactsStore.currentContact"
+          :session-data="contactSessionData"
+          :source-transfer-id="activeTransferId ?? undefined"
+          @close="isInfoPanelOpen = false"
+          @tags-updated="(tags) => contactsStore.updateContactTags(contactsStore.currentContact!.id, tags)"
+          @name-updated="(name) => contactsStore.updateContactName(contactsStore.currentContact!.id, name)"
+          @registration-updated="(registration) => contactsStore.updateContactRegistration(contactsStore.currentContact!.id, registration)"
+        />
+      </div>
+    </Teleport>
 
     <!-- Template Params Dialog -->
     <Dialog v-model:open="templateDialogOpen">
