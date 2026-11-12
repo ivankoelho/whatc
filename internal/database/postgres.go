@@ -106,6 +106,8 @@ func GetMigrationModels() []MigrationModel {
 		{"ChatbotSession", &models.ChatbotSession{}},
 		{"ChatbotSessionMessage", &models.ChatbotSessionMessage{}},
 		{"AIContext", &models.AIContext{}},
+		{"AIAgent", &models.AIAgent{}},
+		{"AIPendingReply", &models.AIPendingReply{}},
 		{"AgentTransfer", &models.AgentTransfer{}},
 
 		// User tracking

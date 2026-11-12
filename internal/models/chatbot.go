@@ -87,6 +87,14 @@ type AIConfig struct {
 	SystemPrompt   string     `gorm:"column:ai_system_prompt;type:text" json:"ai_system_prompt"`
 	IncludeHistory bool       `gorm:"column:ai_include_history;default:true" json:"ai_include_history"`
 	HistoryLimit   int        `gorm:"column:ai_history_limit;default:4" json:"ai_history_limit"`
+
+	// DefaultAgentID is the organization's default AIAgent. ChatbotSettings is one row per
+	// organization in practice, so this does NOT say where the agent may act: that is the
+	// agent's own WhatsAppAccounts list (fail-closed; see AIAgent).
+	DefaultAgentID *uuid.UUID `gorm:"column:ai_default_agent_id;type:uuid" json:"ai_default_agent_id,omitempty"`
+	// MonthlyTokenLimit caps the AI tokens the organization's agent may use per calendar month.
+	// 0 = no cap.
+	MonthlyTokenLimit int64 `gorm:"column:ai_monthly_token_limit;not null;default:0" json:"ai_monthly_token_limit"`
 }
 
 // PanelFieldConfig defines a field to display in the contact info panel

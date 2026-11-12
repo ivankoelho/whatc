@@ -498,6 +498,8 @@ func runServer(args []string) {
 	notifierCtx, notifierCancel := context.WithCancel(context.Background())
 	go app.StartOccurrenceNotifier(notifierCtx)
 	go app.StartSendIntentReconciler(notifierCtx)
+	// AI agent wait: answers customers once they paused; recovers waits left by a previous run
+	go app.StartAIWaitWorker(notifierCtx)
 
 	// Start presence reaper (sweeps every 10s; grace is 60s)
 	presenceCtx, presenceCancel := context.WithCancel(context.Background())
@@ -1197,6 +1199,14 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/chatbot/ai-contexts/{id}", app.GetAIContext)
 	g.PUT("/api/chatbot/ai-contexts/{id}", app.UpdateAIContext)
 	g.DELETE("/api/chatbot/ai-contexts/{id}", app.DeleteAIContext)
+
+	// AI Agents
+	g.GET("/api/chatbot/ai-agents", app.ListAIAgents)
+	g.POST("/api/chatbot/ai-agents", app.CreateAIAgent)
+	g.GET("/api/chatbot/ai-agents/{id}", app.GetAIAgent)
+	g.PUT("/api/chatbot/ai-agents/{id}", app.UpdateAIAgent)
+	g.DELETE("/api/chatbot/ai-agents/{id}", app.DeleteAIAgent)
+	g.GET("/api/chatbot/ai-agents/{id}/readiness", app.GetAIAgentReadiness)
 
 	// Agent Transfers
 	g.GET("/api/chatbot/transfers", app.ListAgentTransfers)
