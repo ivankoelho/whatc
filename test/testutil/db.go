@@ -139,6 +139,7 @@ func runMigrations(db *gorm.DB) error {
 		&models.Widget{},
 		// Conversation Notes
 		&models.ConversationNote{},
+		&models.ConversationPin{},
 		// Calling / IVR
 		&models.CallLog{},
 		&models.IVRFlow{},

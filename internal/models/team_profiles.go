@@ -6,6 +6,8 @@ import "strings"
 // admin/manager/agent system roles it is created once per organization when
 // missing (by name) and never overwritten, so admins can tune it afterwards.
 type TeamProfile struct {
+	// Key identifies the preset independently of its (editable) name; it is stored in CustomRole.ProfileKey.
+	Key         string
 	Name        string
 	Description string
 	Permissions []string // "resource:action"
@@ -44,11 +46,15 @@ func TeamProfiles() []TeamProfile {
 
 	return []TeamProfile{
 		{
+			Key:         "sac",
 			Name:        "SAC",
 			Description: "Atendimento ao cliente: recebe a conversa após o fluxo e a transfere para Vendas ou Logística",
-			Permissions: with("contacts:read", "tags:read", "templates:read"),
+			// chat:triage: the SAC receives the first contact and does the initial triage, so it may take a
+			// "new" conversation into attendance by status (the agent baseline may not).
+			Permissions: with("contacts:read", "tags:read", "templates:read", "chat:triage"),
 		},
 		{
+			Key:         "vendas",
 			Name:        "Vendas",
 			Description: "Vendedor da loja: atende o fluxo de vendas e abre oportunidades no CRM",
 			// Sellers work in the CRM, never in the internal protocols (those are for SAC, Jurídico, store supervisors
@@ -57,6 +63,7 @@ func TeamProfiles() []TeamProfile {
 				"occurrences:read", "occurrences:write"),
 		},
 		{
+			Key:         "logistica",
 			Name:        "Logística",
 			Description: "Prazo e entrega: busca ou cria contatos em toda a base, dispara templates e liga para o cliente",
 			// contacts:read lists the whole organization's (shared) contacts;
@@ -64,6 +71,7 @@ func TeamProfiles() []TeamProfile {
 			Permissions: with("contacts:read", "contacts:write", "tags:read", "templates:read"),
 		},
 		{
+			Key:         "juridico",
 			Name:        "Jurídico",
 			Description: "Backoffice (não é por loja): trabalha os protocolos do jurídico: abre, acompanha e registra casos, consulta documentos e histórico e participa da discussão interna. Não atende conversas de WhatsApp nem usa o CRM comercial",
 			// Backoffice profile: not tied to a store or unit. Deliberately NOT built on the agent baseline: no chat (the WhatsApp conversations of the stores), no
@@ -77,6 +85,7 @@ func TeamProfiles() []TeamProfile {
 			},
 		},
 		{
+			Key:         "supervisor_loja",
 			Name:        "Supervisor de Loja",
 			Description: "Acompanha Vendas e Logística da sua loja, intervém nas conversas e fala com o backoffice no chat interno",
 			Permissions: with(
@@ -88,6 +97,7 @@ func TeamProfiles() []TeamProfile {
 			),
 		},
 		{
+			Key:         "supervisor_sac",
 			Name:        "Supervisor de SAC",
 			Description: "Supervisiona os chamados de todas as lojas e os agentes de SAC; só lê as conversas das contas e equipes a que pertence (conversations:view_all é concessão explícita)",
 			Permissions: with(

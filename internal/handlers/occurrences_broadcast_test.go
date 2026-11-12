@@ -45,15 +45,23 @@ func newTestHubWithClient(t *testing.T, orgID uuid.UUID) (*websocket.Hub, *webso
 // its type. Fails the test if nothing arrives within 2s.
 func readBroadcast(t *testing.T, client *websocket.Client, expectedType string) websocket.WSMessage {
 	t.Helper()
-	select {
-	case data := <-client.SendChan():
-		var msg websocket.WSMessage
-		require.NoError(t, json.Unmarshal(data, &msg))
-		assert.Equal(t, expectedType, msg.Type)
-		return msg
-	case <-time.After(2 * time.Second):
-		t.Fatalf("timed out waiting for a %q broadcast", expectedType)
-		return websocket.WSMessage{}
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case data := <-client.SendChan():
+			var msg websocket.WSMessage
+			require.NoError(t, json.Unmarshal(data, &msg))
+			// Transfer events are followed by an id-less counters hint; it is
+			// not what these tests are about, so step over it.
+			if msg.Type == websocket.TypeContactCountsChanged && expectedType != msg.Type {
+				continue
+			}
+			assert.Equal(t, expectedType, msg.Type)
+			return msg
+		case <-deadline:
+			t.Fatalf("timed out waiting for a %q broadcast", expectedType)
+			return websocket.WSMessage{}
+		}
 	}
 }
 

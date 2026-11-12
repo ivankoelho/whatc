@@ -125,6 +125,7 @@ func GetMigrationModels() []MigrationModel {
 
 		// Conversation Notes
 		{"ConversationNote", &models.ConversationNote{}},
+		{"ConversationPin", &models.ConversationPin{}},
 
 		// Calling / IVR
 		{"CallLog", &models.CallLog{}},
@@ -208,6 +209,14 @@ func RunMigrationWithProgress(db *gorm.DB, adminCfg *config.DefaultAdminConfig) 
 	// Whether the "commercial" columns already existed before this boot: the name-based classification runs only
 	// when they are introduced, never again, so an administrator's later choice is not overridden at a restart.
 	commercialExisted := CommercialColumnsExist(db)
+
+	// Contact status is introduced ONCE, atomically, before anything else touches the contacts table: the column and
+	// the derivation of the statuses of the conversations that already exist commit together or not at all. See
+	// IntroduceContactStatus. After that no boot ever derives statuses again.
+	if _, err := IntroduceContactStatus(silentDB); err != nil {
+		fmt.Printf("\n  \033[31m✗ Failed to introduce contact_status\033[0m\n\n")
+		return fmt.Errorf("failed to introduce contact_status: %w", err)
+	}
 
 	migrationModels := GetMigrationModels()
 	indexes := getIndexes()
@@ -306,12 +315,6 @@ func RunMigrationWithProgress(db *gorm.DB, adminCfg *config.DefaultAdminConfig) 
 	// Classify existing sales teams and departments by name, once, when the commercial flag is introduced
 	if err := ApplyCommercialBackfill(silentDB, commercialExisted); err != nil {
 		fmt.Println("Failed to backfill commercial departments")
-		return err
-	}
-
-	// Derive contact_status for contacts that predate the column
-	if err := BackfillContactStatus(silentDB); err != nil {
-		fmt.Printf("\n  \033[31m✗ Failed to backfill contact_status\033[0m\n\n")
 		return err
 	}
 
@@ -605,12 +608,119 @@ func BackfillCommercialDepartments(db *gorm.DB) error {
 	`).Error
 }
 
-// BackfillContactStatus derives contact_status for existing contacts.
-// Guarded by contact_status = 'new' (the column default), so it is idempotent
-// and can never overwrite a status an agent actually set.
+// contactStatusIntroductionLockKey names the PostgreSQL advisory lock that serializes IntroduceContactStatus. The
+// project's other advisory locks use pg_advisory_xact_lock(hashtextextended(<string>, 0)) on strings built from ids and
+// short prefixes ("team_rr:<team>", "presence:<org>:<user>", "occurrence_processes_seed:<org>", "<org>/<contact>", the
+// chat limits). This key is a fixed string under its own "whatomate:migrate:" namespace, which does not reuse the
+// namespaces of the others, so an accidental collision is extremely unlikely. It is not impossible: the hash is 64
+// bits. A collision would only make two unrelated operations wait for each other. Do not reuse it for anything else.
+const contactStatusIntroductionLockKey = "whatomate:migrate:introduce_contact_status"
+
+// IntroduceContactStatus adds contacts.contact_status to an installation that does not have it yet and derives the
+// status of the conversations that already exist, ATOMICALLY and only once.
+//
+// Why atomic. The column is created NOT NULL DEFAULT 'new', so the moment it exists every conversation says "new".
+// If the column were created by the general AutoMigrate and the derivation ran many steps later (as it used to), a
+// boot that stopped in between would leave the column in place WITHOUT the derivation, and no later boot could tell
+// (the column "already existed"). Here the column, what the derivation reads, and the derivation itself are ONE
+// transaction: if any step fails nothing is kept (the column is not left behind) and the next boot starts over.
+//
+// Why only once. 'new' is not just the column default: it is the live queue of conversations waiting for
+// attendance. Deriving again at every boot (the old behaviour) moved every waiting conversation with a recent
+// message to 'in_progress' at each restart, emptying the queue and the "Novo" counter.
+//
+// EXACT behavior:
+//   - Does nothing when the contacts table does not exist (a new database: AutoMigrate creates the table with the
+//     column and there is nothing to derive) and when contact_status already exists (every later boot).
+//   - Otherwise, in one transaction and through that transaction only: adds ONLY the contact_status column, with
+//     exactly the model's definition; adds is_read / last_inbound_at only if an old installation still lacks them
+//     (the derivation reads them); fills last_inbound_at from the messages (BackfillLastInboundAt) and derives the
+//     statuses (BackfillContactStatus). The messages table is used only if it exists.
+//   - It never runs AutoMigrate of the Contact model and does not create the CHECK constraint or the index: those
+//     stay in the normal flow, which runs afterwards.
+//   - Returns whether it introduced the column. Errors are returned as they are, never swallowed.
+//
+// Concurrent executors. Two -migrate processes can reach this point together (an instance restarted by the
+// supervisor while another one is still migrating, a manual run during a deploy, two replicas). The check above is
+// only an optimisation that spares the transaction when there is nothing to do: both could see the column missing.
+// The authority is the check made INSIDE the transaction after taking a transaction-scoped advisory lock
+// (contactStatusIntroductionLockKey, held until commit or rollback, so it also covers a crash). The loser waits, then
+// finds the column the winner committed and returns without error and WITHOUT running any backfill. Without the
+// lock the loser's ADD COLUMN failed with 'column "contact_status" already exists' and took the boot down.
+//
+// Cost: ADD COLUMN with a constant default does not rewrite the table (PostgreSQL 11+), but the transaction holds
+// the table lock until it commits, so the derivation time (proportional to the number of contacts) is a window in
+// which contacts is locked. It happens once, in a -migrate boot that runs before the server accepts requests.
+func IntroduceContactStatus(db *gorm.DB) (bool, error) {
+	m := db.Migrator()
+	// Optimisation only: the authoritative check is the one inside the transaction, after the lock.
+	if !m.HasTable(&models.Contact{}) || m.HasColumn(&models.Contact{}, "contact_status") {
+		return false, nil
+	}
+	introduced := true
+	err := db.Transaction(func(tx *gorm.DB) error {
+		// Serialize concurrent executors BEFORE changing anything. Transaction-scoped: released at commit or rollback.
+		if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))", contactStatusIntroductionLockKey).Error; err != nil {
+			return fmt.Errorf("locking the contact_status introduction: %w", err)
+		}
+		tm := tx.Migrator()
+		// Look again now that no other executor can be in the middle of it: the winner may have just committed.
+		if tm.HasColumn(&models.Contact{}, "contact_status") {
+			introduced = false
+			return nil
+		}
+		// contact_status first; the other two only if an old installation lacks them (the derivation reads them).
+		for _, col := range []struct{ field, column string }{
+			{"ContactStatus", "contact_status"},
+			{"IsRead", "is_read"},
+			{"LastInboundAt", "last_inbound_at"},
+		} {
+			if tm.HasColumn(&models.Contact{}, col.column) {
+				continue
+			}
+			if err := tm.AddColumn(&models.Contact{}, col.field); err != nil {
+				return fmt.Errorf("adding contacts.%s: %w", col.column, err)
+			}
+		}
+		hasMessages := tm.HasTable(&models.Message{})
+		if hasMessages {
+			if err := BackfillLastInboundAt(tx); err != nil {
+				return fmt.Errorf("backfilling last_inbound_at: %w", err)
+			}
+		}
+		if err := backfillContactStatusActive(tx); err != nil {
+			return fmt.Errorf("deriving contact_status (active conversations): %w", err)
+		}
+		if hasMessages {
+			if err := backfillContactStatusResolved(tx); err != nil {
+				return fmt.Errorf("deriving contact_status (finished conversations): %w", err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return introduced, nil
+}
+
+// BackfillContactStatus derives contact_status for contacts that predate the column.
+//
+// DO NOT call it at every boot. It acts on contact_status = 'new', and 'new' is also a legitimate live state (the
+// queue of conversations waiting for attendance), so running it again moves those conversations to 'in_progress'
+// or 'resolved'. It is only correct as part of the one-time introduction of the column, see IntroduceContactStatus
+// (which calls it inside its transaction). The earlier comment here claimed it "can never overwrite a status an
+// agent set"; that held for statuses set by agents, but not for the waiting queue.
 func BackfillContactStatus(db *gorm.DB) error {
-	// Active conversations: a recent inbound message, or still unread.
-	if err := db.Exec(`
+	if err := backfillContactStatusActive(db); err != nil {
+		return err
+	}
+	return backfillContactStatusResolved(db)
+}
+
+// backfillContactStatusActive: conversations with a recent inbound message, or still unread, are in progress.
+func backfillContactStatusActive(db *gorm.DB) error {
+	return db.Exec(`
 		UPDATE contacts
 		SET contact_status = 'in_progress'
 		WHERE contact_status = 'new'
@@ -619,11 +729,11 @@ func BackfillContactStatus(db *gorm.DB) error {
 		        (last_inbound_at IS NOT NULL AND last_inbound_at > NOW() - INTERVAL '24 hours')
 		     OR is_read = false
 		  )
-	`).Error; err != nil {
-		return err
-	}
+	`).Error
+}
 
-	// Contacts with message history but no recent activity are considered done.
+// backfillContactStatusResolved: contacts with message history but no recent activity are considered done.
+func backfillContactStatusResolved(db *gorm.DB) error {
 	return db.Exec(`
 		UPDATE contacts c
 		SET contact_status = 'resolved'
@@ -953,8 +1063,10 @@ func SeedSystemRolesForOrg(db *gorm.DB, orgID uuid.UUID) error {
 }
 
 // SeedTeamProfilesForOrg creates the preset team roles the organization is
-// missing. It matches by name and never touches an existing role, so edits an
-// admin made to a profile survive every restart.
+// missing. A preset counts as present when a role carries its profile key (so a
+// renamed preset is not recreated) or, for roles created before keys existed,
+// has its name. It never touches an existing role, so edits an admin made to a
+// profile survive every restart.
 func SeedTeamProfilesForOrg(db *gorm.DB, orgID uuid.UUID) error {
 	var permissions []models.Permission
 	if err := db.Find(&permissions).Error; err != nil {
@@ -967,7 +1079,7 @@ func SeedTeamProfilesForOrg(db *gorm.DB, orgID uuid.UUID) error {
 
 	for _, tp := range models.TeamProfiles() {
 		var n int64
-		if err := db.Model(&models.CustomRole{}).Where("organization_id = ? AND name = ?", orgID, tp.Name).Count(&n).Error; err != nil {
+		if err := db.Model(&models.CustomRole{}).Where("organization_id = ? AND (name = ? OR profile_key = ?)", orgID, tp.Name, tp.Key).Count(&n).Error; err != nil {
 			return fmt.Errorf("failed to look up role %s: %w", tp.Name, err)
 		}
 		if n > 0 {
@@ -978,6 +1090,7 @@ func SeedTeamProfilesForOrg(db *gorm.DB, orgID uuid.UUID) error {
 			OrganizationID: orgID,
 			Name:           tp.Name,
 			Description:    tp.Description,
+			ProfileKey:     func() *string { k := tp.Key; return &k }(),
 		}
 		seen := map[string]bool{}
 		for _, key := range tp.Permissions {

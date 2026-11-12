@@ -19,11 +19,15 @@ func (Permission) TableName() string {
 // CustomRole represents a role with specific permissions
 type CustomRole struct {
 	BaseModel
-	OrganizationID uuid.UUID    `gorm:"type:uuid;index;not null" json:"organization_id"`
+	OrganizationID uuid.UUID    `gorm:"type:uuid;index;not null;uniqueIndex:idx_custom_roles_org_profile_key,where:profile_key IS NOT NULL AND deleted_at IS NULL" json:"organization_id"`
 	Name           string       `gorm:"size:100;not null" json:"name"`
 	Description    string       `gorm:"size:500" json:"description"`
 	IsSystem       bool         `gorm:"default:false" json:"is_system"`  // true for default admin/manager/agent
 	IsDefault      bool         `gorm:"default:false" json:"is_default"` // default role for new users in org
+	// ProfileKey identifies a team preset (see TeamProfiles) independently of the name it is shown under, which
+	// an administrator can change. NULL for system roles and for roles made by hand. Unique per organization
+	// among the roles that are not deleted.
+	ProfileKey *string `gorm:"size:50;uniqueIndex:idx_custom_roles_org_profile_key,where:profile_key IS NOT NULL AND deleted_at IS NULL" json:"profile_key,omitempty"`
 	Permissions    []Permission `gorm:"many2many:role_permissions;" json:"permissions"`
 
 	// Relations
@@ -123,6 +127,11 @@ const (
 	// ActionResolveSend lets the holder settle a customer send whose outcome the system could not
 	// establish (a message that may or may not have reached the customer), after checking the conversation.
 	ActionResolveSend = "resolve_send"
+	// ActionTriage lets the holder take a conversation that is still "new" (waiting for attendance) into
+	// attendance by changing its status by hand, within the conversations they can already access. Replying to
+	// the customer already does this for any attendant; this is only the explicit status change, which an
+	// ordinary attendant (chat:write alone) cannot do.
+	ActionTriage = "triage"
 )
 
 // DefaultPermissions returns the list of all available permissions to seed
@@ -191,6 +200,7 @@ func DefaultPermissions() []Permission {
 		// Chat
 		{Resource: ResourceChat, Action: ActionRead, Description: "View chat conversations"},
 		{Resource: ResourceChat, Action: ActionWrite, Description: "Send messages"},
+		{Resource: ResourceChat, Action: ActionTriage, Description: "Take a new conversation into attendance (change its status from new to in progress), within the conversations the user can access"},
 		{Resource: ResourceChatAssign, Action: ActionWrite, Description: "Assign conversations to agents"},
 
 		// Chat interno entre usuários (separado do atendimento WhatsApp, "chat")
@@ -363,6 +373,11 @@ func SystemRolePermissions() map[string][]string {
 	// Format: "resource:action"
 	allPermissions := []string{}
 	for _, p := range DefaultPermissions() {
+		// chat:triage is the SAC preset's initial-triage permission: the admin already changes any status through
+		// contacts:write, so it does not receive it (an administrator can still grant it by hand).
+		if p.Resource == ResourceChat && p.Action == ActionTriage {
+			continue
+		}
 		allPermissions = append(allPermissions, p.Resource+":"+p.Action)
 	}
 

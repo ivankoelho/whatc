@@ -848,6 +848,13 @@
     "filterAll": "Todos",
     "filterByStatus": "Filtrar por status",
     "agentTyping": "{name} está digitando…",
+    "pinnedSection": "Fixadas",
+    "pinnedGroupLabel": "Conversas fixadas",
+    "pinnedCounterLabel": "{n} de {max} fixadas",
+    "pinConversation": "Fixar conversa",
+    "unpinConversation": "Desafixar conversa",
+    "pinLimitReached": "Você pode fixar até 3 conversas. Desafixe uma para fixar outra.",
+    "pinFailed": "Não foi possível alterar a fixação da conversa.",
     "statusNew": "Novo",
     "statusInProgress": "Em andamento",
     "statusResolved": "Concluído",
@@ -857,6 +864,7 @@
     "conversationResolved": "Atendimento concluído",
     "conversationReopened": "Atendimento reaberto",
     "statusChangeFailed": "Não foi possível alterar o status do atendimento. Tente de novo.",
+    "statusChangeForbidden": "Você não tem permissão para concluir ou reabrir este atendimento.",
     "noTagsAvailable": "Nenhuma etiqueta disponível",
     "paused": "Pausado",
     "assignedTo": "Atribuído a",
@@ -5075,6 +5083,10 @@
       "chat_write": {
         "label": "Enviar mensagens",
         "description": "Responder clientes pelo atendimento."
+      },
+      "chat_triage": {
+        "label": "Assumir conversas novas",
+        "description": "Iniciar o atendimento de uma conversa que ainda aguarda atendimento (triagem), nas conversas a que tem acesso."
       },
       "chat_assign_write": {
         "label": "Atribuir conversas",
