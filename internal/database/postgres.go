@@ -611,8 +611,9 @@ func BackfillCommercialDepartments(db *gorm.DB) error {
 // contactStatusIntroductionLockKey names the PostgreSQL advisory lock that serializes IntroduceContactStatus. The
 // project's other advisory locks use pg_advisory_xact_lock(hashtextextended(<string>, 0)) on strings built from ids and
 // short prefixes ("team_rr:<team>", "presence:<org>:<user>", "occurrence_processes_seed:<org>", "<org>/<contact>", the
-// chat limits). This key is a fixed string under its own "whatomate:migrate:" namespace, which none of them can
-// produce, so it cannot collide with them. Do not reuse it for anything else.
+// chat limits). This key is a fixed string under its own "whatomate:migrate:" namespace, which does not reuse the
+// namespaces of the others, so an accidental collision is extremely unlikely. It is not impossible: the hash is 64
+// bits. A collision would only make two unrelated operations wait for each other. Do not reuse it for anything else.
 const contactStatusIntroductionLockKey = "whatomate:migrate:introduce_contact_status"
 
 // IntroduceContactStatus adds contacts.contact_status to an installation that does not have it yet and derives the
