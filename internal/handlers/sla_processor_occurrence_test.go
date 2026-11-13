@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"github.com/google/uuid"
 	"testing"
 	"time"
 
@@ -141,4 +142,51 @@ func TestGetSLAEnabledSettingsCached_IncludesOccurrenceOnlyOrgs(t *testing.T) {
 		}
 	}
 	assert.True(t, found, "an org with only occurrence_sla_enabled must still be loaded by the SLA processor loop")
+}
+
+// Internal tickets have no customer, so they have no first-response SLA: only the
+// resolution deadline can breach them. Service protocols keep both (see the
+// MarksResponseBreach / DoesNotBreachWhenAlreadyReplied tests above).
+func newInternalSLACase(t *testing.T, app *App, sla models.SLATracking) (*models.Organization, models.Occurrence) {
+	t.Helper()
+	org := testutil.CreateTestOrganization(t, app.DB)
+	user := testutil.CreateTestUser(t, app.DB, org.ID)
+	stage, err := app.InitialStageForTest(org.ID)
+	require.NoError(t, err)
+	occ := models.Occurrence{
+		OrganizationID: org.ID, Kind: models.OccurrenceKindInternal, Title: "Chamado interno",
+		StageID: stage.ID, OpenedByUserID: user.ID, SLA: sla,
+	}
+	require.NoError(t, app.CreateOccurrenceForTest(&occ))
+	return org, occ
+}
+
+func breachedAfterTick(t *testing.T, app *App, orgID, occID uuid.UUID) bool {
+	t.Helper()
+	NewSLAProcessor(app, time.Minute).processOccurrenceSLA(orgID, time.Now())
+	var reloaded models.Occurrence
+	require.NoError(t, app.DB.First(&reloaded, "id = ?", occID).Error)
+	return reloaded.SLA.Breached
+}
+
+func TestProcessOccurrenceSLA_InternalTicketNotBreachedBeforeResolutionDeadline(t *testing.T) {
+	app := newSLATestApp(t)
+	future := time.Now().Add(4 * time.Hour)
+	org, occ := newInternalSLACase(t, app, models.SLATracking{ResolutionDeadline: &future})
+	assert.False(t, breachedAfterTick(t, app, org.ID, occ.ID), "no first-response deadline and resolution still ahead")
+}
+
+func TestProcessOccurrenceSLA_InternalTicketIgnoresAStrayResponseDeadline(t *testing.T) {
+	app := newSLATestApp(t)
+	past, future := time.Now().Add(-2*time.Hour), time.Now().Add(4*time.Hour)
+	// A response deadline on an internal ticket is an inconsistent record: the guard must ignore it.
+	org, occ := newInternalSLACase(t, app, models.SLATracking{ResponseDeadline: &past, ResolutionDeadline: &future})
+	assert.False(t, breachedAfterTick(t, app, org.ID, occ.ID))
+}
+
+func TestProcessOccurrenceSLA_InternalTicketBreachedWhenResolutionExpires(t *testing.T) {
+	app := newSLATestApp(t)
+	past := time.Now().Add(-1 * time.Hour)
+	org, occ := newInternalSLACase(t, app, models.SLATracking{ResolutionDeadline: &past})
+	assert.True(t, breachedAfterTick(t, app, org.ID, occ.ID))
 }

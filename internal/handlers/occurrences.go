@@ -864,7 +864,9 @@ func (a *App) UpdateOccurrence(r *fastglue.Request) error {
 			now := time.Now()
 			rd := now.Add(time.Duration(responseMinutes) * time.Minute)
 			xd := now.Add(time.Duration(resolutionMinutes) * time.Minute)
-			updates["sla_response_deadline"] = rd
+			if !occ.IsInternal() { // internal tickets have no first-response deadline
+				updates["sla_response_deadline"] = rd
+			}
 			updates["sla_resolution_deadline"] = xd
 		}
 	}
