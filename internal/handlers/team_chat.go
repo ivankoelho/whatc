@@ -39,6 +39,8 @@ type ChatChannelResponse struct {
 	DMUserID      *uuid.UUID             `json:"dm_user_id,omitempty"`
 	// OccurrenceID is set for the discussion of a case (kind "occurrence"): the UI links back to it.
 	OccurrenceID *uuid.UUID `json:"occurrence_id,omitempty"`
+	// OccurrenceKind is the case's kind ("service" or "internal"), so the chat can tell the two apart.
+	OccurrenceKind string `json:"occurrence_kind,omitempty"`
 	UnreadCount   int64                  `json:"unread_count"`
 	LastMessageAt *time.Time             `json:"last_message_at,omitempty"`
 	CreatedAt     time.Time              `json:"created_at"`

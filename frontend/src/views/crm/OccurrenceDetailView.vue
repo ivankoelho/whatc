@@ -591,7 +591,7 @@ onUnmounted(() => {
 
         <!-- Colleagues only (kept mounted so it keeps receiving messages while the other tab is open) -->
         <div v-show="convTab === 'internal' || isInternal" id="case-internal" class="scroll-mt-4">
-          <OccurrenceChatPanel :occurrence-id="occurrence.id" />
+          <OccurrenceChatPanel :occurrence-id="occurrence.id" :internal="isInternal" />
         </div>
           </div>
         </section>

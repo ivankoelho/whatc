@@ -1130,6 +1130,7 @@ export interface TeamChatChannel {
   dm_user_id?: string
   // The case a discussion belongs to (kind "occurrence"): the chat links back to it.
   occurrence_id?: string
+  occurrence_kind?: 'service' | 'internal'
   unread_count: number
   last_message_at?: string
   created_at: string

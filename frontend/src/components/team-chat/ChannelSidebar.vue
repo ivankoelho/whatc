@@ -195,6 +195,11 @@ function badge(n: number): string {
                   </span>
                 </span>
                 <span
+                  v-if="c.kind === 'occurrence' && c.occurrence_kind === 'internal'"
+                  class="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+                  :data-testid="`internal-badge-${c.id}`"
+                >{{ t('teamChat.internalBadge') }}</span>
+                <span
                   v-if="c.unread_count > 0"
                   class="min-w-5 rounded-full bg-primary px-1.5 text-center text-[11px] font-semibold leading-5 text-primary-foreground"
                   :aria-label="t('teamChat.unreadCount', { n: c.unread_count })"
