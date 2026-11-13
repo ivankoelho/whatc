@@ -561,6 +561,7 @@
     "today": "Hoje",
     "yesterday": "Ontem",
     "sectionOccurrences": "Chamados",
+    "internalBadge": "Interno",
     "sectionOccurrenceHits": "Chamados encontrados",
     "searchPlaceholder": "Buscar conversas e chamados",
     "searching": "Buscando…",
@@ -3041,6 +3042,7 @@
     "showAll": "Mostrar todos ({n})",
     "internalOnly": "Só colegas",
     "internalChatHint": "Converse sobre este chamado com SAC, Logística e supervisores. Nada escrito aqui é enviado ao cliente.",
+    "internalChatHintInternal": "Converse sobre este chamado com as pessoas envolvidas. Nada escrito aqui sai do sistema.",
     "internalChatFailed": "Não foi possível abrir a discussão",
     "internalChatEmpty": "Nenhuma mensagem ainda. Comece a discussão.",
     "internalChatReadOnly": "Você pode ler esta discussão, mas não escrever nela.",
@@ -3110,8 +3112,9 @@
     "claim": "Assumir",
     "claimed": "Você agora é o responsável por esta ocorrência",
     "claimFailed": "Não foi possível assumir esta ocorrência",
-    "support": {
-      "title": "Acompanhamento e apoio",
+        "support": {
+      "title": "Pessoas no chamado",
+      "requester": "Solicitante",
       "none": "Ninguém acompanha ou apoia esta ocorrência ainda.",
       "roleSupport": "Pessoa de apoio",
       "roleFollower": "Acompanhando",
@@ -3126,8 +3129,9 @@
       "note": "Apoio não dá acesso ao WhatsApp do cliente, a anexos restritos nem a outros protocolos.",
       "loadFailed": "Não foi possível carregar as opções de apoio"
     },
-    "transfer": {
-      "title": "Responsabilidade e encaminhamento",
+        "transfer": {
+      "title": "Atendimento",
+      "deadline": "Prazo",
       "currentTeam": "Departamento atual",
       "currentOwner": "Responsável atual",
       "noTeam": "Com o solicitante",
@@ -3189,6 +3193,8 @@
       "formTitle": "Novo chamado interno",
       "type": "Tipo",
       "typeRequest": "Solicitação (preciso de algo)",
+      "typeIncidentShort": "Incidente",
+      "typeRequestShort": "Solicitação",
       "typeIncident": "Incidente (algo parou ou quebrou)",
       "requesterDepartment": "Meu departamento",
       "optional": "Opcional",

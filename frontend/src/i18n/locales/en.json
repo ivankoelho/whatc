@@ -561,6 +561,7 @@
     "today": "Today",
     "yesterday": "Yesterday",
     "sectionOccurrences": "Cases",
+    "internalBadge": "Internal",
     "sectionOccurrenceHits": "Cases found",
     "searchPlaceholder": "Search chats and cases",
     "searching": "Searching…",
@@ -3052,6 +3053,7 @@
     "showAll": "Show all ({n})",
     "internalOnly": "Colleagues only",
     "internalChatHint": "Talk about this case with SAC, Logistics and supervisors. Nothing written here is sent to the customer.",
+    "internalChatHintInternal": "Talk about this ticket with the people involved. Nothing written here leaves the system.",
     "internalChatFailed": "Could not open the discussion",
     "internalChatEmpty": "No messages yet. Start the discussion.",
     "internalChatReadOnly": "You can read this discussion but not write in it.",
@@ -3121,8 +3123,9 @@
     "claim": "Claim",
     "claimed": "You are now responsible for this occurrence",
     "claimFailed": "Could not claim this occurrence",
-    "support": {
-      "title": "Following and support",
+        "support": {
+      "title": "People on this ticket",
+      "requester": "Requester",
       "none": "Nobody is following or supporting this case yet.",
       "roleSupport": "Support person",
       "roleFollower": "Following",
@@ -3137,8 +3140,9 @@
       "note": "Support does not grant access to the customer WhatsApp, restricted attachments or other cases.",
       "loadFailed": "Could not load the support options"
     },
-    "transfer": {
-      "title": "Responsibility and forwarding",
+        "transfer": {
+      "title": "Handling",
+      "deadline": "Due",
       "currentTeam": "Current department",
       "currentOwner": "Current owner",
       "noTeam": "With the requester",
@@ -3200,6 +3204,8 @@
       "formTitle": "New internal ticket",
       "type": "Type",
       "typeRequest": "Request (I need something)",
+      "typeIncidentShort": "Incident",
+      "typeRequestShort": "Request",
       "typeIncident": "Incident (something stopped or broke)",
       "requesterDepartment": "My department",
       "optional": "Optional",

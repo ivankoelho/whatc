@@ -591,7 +591,7 @@ onUnmounted(() => {
 
         <!-- Colleagues only (kept mounted so it keeps receiving messages while the other tab is open) -->
         <div v-show="convTab === 'internal' || isInternal" id="case-internal" class="scroll-mt-4">
-          <OccurrenceChatPanel :occurrence-id="occurrence.id" />
+          <OccurrenceChatPanel :occurrence-id="occurrence.id" :internal="isInternal" />
         </div>
           </div>
         </section>
@@ -600,45 +600,30 @@ onUnmounted(() => {
         <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <section class="rounded-lg border bg-card p-4" data-testid="case-request">
             <h2 class="mb-3 text-sm font-semibold">{{ $t('occurrences.secRequest') }}</h2>
-            <dl class="grid grid-cols-2 gap-x-6 gap-y-3 text-sm md:grid-cols-4">
+            <!-- Internal ticket: who asked, what, and compact tags. The team already says where it went, so the
+                 target department is only shown when no team was picked. -->
+            <div v-if="isInternal" class="space-y-3 text-sm" data-testid="internal-request">
+              <p class="text-muted-foreground" data-testid="internal-requester">
+                <span class="font-medium text-foreground">{{ occurrence.opened_by_name || '—' }}</span>
+                <template v-if="occurrence.requester_department_name"> · {{ occurrence.requester_department_name }}</template>
+                · {{ $t('occurrences.openedAtLabel') }} {{ formatDateTime(occurrence.opened_at) }}
+              </p>
+              <p v-if="occurrence.description" class="whitespace-pre-wrap leading-relaxed [overflow-wrap:anywhere]">{{ occurrence.description }}</p>
+              <div class="flex flex-wrap gap-1.5" data-testid="internal-tags">
+                <Badge v-if="occurrence.ticket_type" variant="secondary">{{ $t(occurrence.ticket_type === 'incident' ? 'occurrences.internal.typeIncidentShort' : 'occurrences.internal.typeRequestShort') }}</Badge>
+                <Badge v-if="occurrence.impact" variant="outline">{{ $t('occurrences.internal.impact') }}: {{ $t('occurrences.internal.level.' + occurrence.impact) }}</Badge>
+                <Badge v-if="occurrence.urgency" variant="outline">{{ $t('occurrences.internal.urgency') }}: {{ $t('occurrences.internal.level.' + occurrence.urgency) }}</Badge>
+                <Badge v-if="occurrence.category_name" variant="outline">{{ occurrence.category_name }}</Badge>
+                <Badge v-if="occurrence.affected_item" variant="outline" class="max-w-full [overflow-wrap:anywhere]">{{ $t('occurrences.internal.affectedItem') }}: {{ occurrence.affected_item }}</Badge>
+                <Badge v-if="occurrence.due_date" variant="outline">{{ $t('occurrences.internal.dueDate') }}: {{ formatCivilDate(occurrence.due_date) }}</Badge>
+                <Badge v-if="!occurrence.team_id && occurrence.department_name" variant="outline">{{ $t('occurrences.internal.targetDepartment') }}: {{ occurrence.department_name }}</Badge>
+              </div>
+            </div>
+            <dl v-else class="grid grid-cols-2 gap-x-6 gap-y-3 text-sm md:grid-cols-4">
               <div v-if="!isInternal">
                 <dt class="text-xs text-muted-foreground">{{ $t('occurrences.contactLabel') }}</dt>
                 <dd>{{ occurrence.contact_name }}</dd>
               </div>
-              <template v-if="isInternal">
-                <div data-testid="internal-requester">
-                  <dt class="text-xs text-muted-foreground">{{ $t('occurrences.internal.requester') }}</dt>
-                  <dd>{{ occurrence.opened_by_name || '—' }}</dd>
-                </div>
-                <div v-if="occurrence.requester_department_name">
-                  <dt class="text-xs text-muted-foreground">{{ $t('occurrences.internal.requesterDepartment') }}</dt>
-                  <dd>{{ occurrence.requester_department_name }}</dd>
-                </div>
-                <div v-if="occurrence.department_name">
-                  <dt class="text-xs text-muted-foreground">{{ $t('occurrences.internal.targetDepartment') }}</dt>
-                  <dd>{{ occurrence.department_name }}</dd>
-                </div>
-                <div v-if="occurrence.ticket_type">
-                  <dt class="text-xs text-muted-foreground">{{ $t('occurrences.internal.type') }}</dt>
-                  <dd>{{ $t(occurrence.ticket_type === 'incident' ? 'occurrences.internal.typeIncident' : 'occurrences.internal.typeRequest') }}</dd>
-                </div>
-                <div v-if="occurrence.impact">
-                  <dt class="text-xs text-muted-foreground">{{ $t('occurrences.internal.impact') }}</dt>
-                  <dd>{{ $t('occurrences.internal.level.' + occurrence.impact) }}</dd>
-                </div>
-                <div v-if="occurrence.urgency">
-                  <dt class="text-xs text-muted-foreground">{{ $t('occurrences.internal.urgency') }}</dt>
-                  <dd>{{ $t('occurrences.internal.level.' + occurrence.urgency) }}</dd>
-                </div>
-                <div v-if="occurrence.affected_item">
-                  <dt class="text-xs text-muted-foreground">{{ $t('occurrences.internal.affectedItem') }}</dt>
-                  <dd class="[overflow-wrap:anywhere]">{{ occurrence.affected_item }}</dd>
-                </div>
-                <div v-if="occurrence.due_date">
-                  <dt class="text-xs text-muted-foreground">{{ $t('occurrences.internal.dueDate') }}</dt>
-                  <dd>{{ formatCivilDate(occurrence.due_date) }}</dd>
-                </div>
-              </template>
               <div v-if="occurrence.category_name">
                 <dt class="text-xs text-muted-foreground">{{ $t('occurrences.categoryLabel') }}</dt>
                 <dd>{{ occurrence.category_name }}</dd>
@@ -664,7 +649,7 @@ onUnmounted(() => {
                 <dd>{{ formatDateTime(occurrence.updated_at) }}</dd>
               </div>
             </dl>
-            <div v-if="occurrence.description" class="mt-4 border-t pt-3">
+            <div v-if="occurrence.description && !isInternal" class="mt-4 border-t pt-3">
               <p class="whitespace-pre-wrap text-sm leading-relaxed [overflow-wrap:anywhere]">{{ occurrence.description }}</p>
             </div>
 
@@ -697,12 +682,13 @@ onUnmounted(() => {
             <div id="case-transfer" class="mt-4 scroll-mt-4 border-t pt-3">
               <OccurrenceTransferCard
                 :occurrence-id="occurrence.id" :team-name="occurrence.team_name" :assigned-name="occurrence.assigned_user_name"
-                :closed="occurrence.general_state === 'resolved'" @changed="onTransferred"
+                :closed="occurrence.general_state === 'resolved'" :deadline="occurrence.sla_resolution_deadline" :deadline-breached="occurrence.sla_breached"
+                :can-claim="canWrite && !occurrence.assigned_user_id && (occurrence.can?.claim ?? true)" @claim="claimOccurrence" @changed="onTransferred"
               />
             </div>
 
             <div id="case-people" class="mt-4 scroll-mt-4 border-t pt-3">
-              <OccurrenceParticipantsCard embedded :occurrence-id="occurrence.id" :can-write="canWrite && (occurrence.can?.add_participant ?? true)" />
+              <OccurrenceParticipantsCard embedded :requester-id="isInternal ? occurrence.opened_by_user_id : undefined" :occurrence-id="occurrence.id" :can-write="canWrite && (occurrence.can?.add_participant ?? true)" />
             </div>
           </section>
 
