@@ -56,7 +56,7 @@ func (a *App) customerAccountOf(orgID uuid.UUID, occ *models.Occurrence) *models
 // customer's chat may send the protocol or reply about it. Seeing every case
 // (occurrences:view_all) and holding chat:write is not a tie.
 func (a *App) canMessageCustomerFromCase(orgID, userID uuid.UUID, occ *models.Occurrence, acc occurrenceAccess) bool {
-	if !a.HasPermission(userID, models.ResourceChat, models.ActionWrite, orgID) || !workTheCase(acc) {
+	if occ.IsInternal() || !a.HasPermission(userID, models.ResourceChat, models.ActionWrite, orgID) || !workTheCase(acc) {
 		return false
 	}
 	if a.canUseCaseChannel(orgID, userID, occ, acc, a.customerAccountOf(orgID, occ), true) {

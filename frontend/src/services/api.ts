@@ -1614,10 +1614,35 @@ export interface OccurrenceStage {
   allowed_from?: string[] | null
 }
 
+export interface InternalTicketInput {
+  title: string
+  description: string
+  ticket_type: 'incident' | 'request'
+  impact?: string
+  urgency?: string
+  team_id?: string
+  department_id?: string
+  category_id?: string
+  requester_department_id?: string
+  assigned_user_id?: string
+  due_date?: string
+  affected_item?: string
+  observer_user_ids?: string[]
+}
+
 export interface Occurrence {
   id: string
   protocol_number: string
-  contact_id: string
+  contact_id?: string
+  kind?: 'service' | 'internal'
+  ticket_type?: 'incident' | 'request'
+  impact?: string
+  urgency?: string
+  requester_department_id?: string
+  requester_department_name?: string
+  due_date?: string
+  affected_item?: string
+  opened_by_name?: string
   contact_name: string
   contact_phone?: string
   title: string
@@ -1826,6 +1851,7 @@ export const occurrencesService = {
     api.delete<ApiEnvelope<{ removed: boolean }>>(`/occurrences/${id}/participants/${userId}`),
   forwardTargets: () =>
     api.get<ApiEnvelope<{ targets: { id: string; name: string; unit_id?: string; unit_name?: string }[] }>>('/occurrences/forward-targets'),
+  createInternal: (data: InternalTicketInput) => api.post<ApiEnvelope<Occurrence>>('/occurrences/internal', data),
   summary: (params?: Record<string, string>) =>
     api.get<ApiEnvelope<{ counts: Record<string, number>; total: number }>>('/occurrences/summary', { params }),
   // The ONLY way to send a public message from an occurrence: also stamps the first-response SLA.

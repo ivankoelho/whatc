@@ -164,18 +164,23 @@ func (a *App) loadOccurrenceWithAccess(r *fastglue.Request, orgID, userID uuid.U
 	if err != nil {
 		return nil, occurrenceAccess{}, errEnvelopeSent
 	}
-	var contact models.Contact
-	if err := a.DB.Where("id = ? AND organization_id = ?", occ.ContactID, orgID).
-		First(&contact).Error; err != nil {
-		_ = r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
-		return nil, occurrenceAccess{}, errEnvelopeSent
+	// An internal ticket has no customer, hence no contact to load.
+	var contact *models.Contact
+	if occ.ContactID != nil {
+		var c models.Contact
+		if err := a.DB.Where("id = ? AND organization_id = ?", *occ.ContactID, orgID).
+			First(&c).Error; err != nil {
+			_ = r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
+			return nil, occurrenceAccess{}, errEnvelopeSent
+		}
+		contact = &c
 	}
 	acc := a.authorizeOccurrence(userID, orgID, occ)
 	if (needInteract && !acc.interact) || (!needInteract && !acc.view) {
 		_ = r.SendErrorEnvelope(fasthttp.StatusForbidden, "You do not have access to this occurrence", nil, "")
 		return nil, occurrenceAccess{}, errEnvelopeSent
 	}
-	occ.Contact = &contact
+	occ.Contact = contact
 	return occ, acc, nil
 }
 

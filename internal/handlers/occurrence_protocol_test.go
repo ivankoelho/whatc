@@ -35,7 +35,7 @@ func TestOccurrenceProtocol_UniqueUnderConcurrency(t *testing.T) {
 			defer wg.Done()
 			occ := models.Occurrence{
 				OrganizationID: org.ID,
-				ContactID:      contact.ID,
+				ContactID:      &contact.ID,
 				Title:          fmt.Sprintf("Caso %d", idx),
 				StageID:        stage.ID,
 				OpenedByUserID: user.ID,

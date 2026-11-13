@@ -80,7 +80,7 @@ func TestOccurrences_ListHidesInvisibleContacts(t *testing.T) {
 	require.NoError(t, err)
 
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Privada",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Privada",
 		StageID: stage.ID, OpenedByUserID: owner.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))
@@ -113,7 +113,7 @@ func TestOccurrences_AssigneeSeesOwnEvenWhenContactInvisible(t *testing.T) {
 	require.NoError(t, err)
 
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Atribuída a mim",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Atribuída a mim",
 		StageID: stage.ID, OpenedByUserID: owner.ID, AssignedUserID: &assignee.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))
@@ -239,7 +239,7 @@ func TestOccurrences_ListEnvelopeShape(t *testing.T) {
 	stage, err := app.InitialStageForTest(org.ID)
 	require.NoError(t, err)
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Teste",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Teste",
 		StageID: stage.ID, OpenedByUserID: user.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))
@@ -277,7 +277,7 @@ func TestOccurrences_ClosedSinceIncludesBoundary(t *testing.T) {
 	cut := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
 
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Na borda",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Na borda",
 		StageID: stage.ID, OpenedByUserID: user.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))
@@ -315,7 +315,7 @@ func TestOccurrences_ClosedSinceExcludesOlder(t *testing.T) {
 	cut := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
 
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Velha",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Velha",
 		StageID: stage.ID, OpenedByUserID: user.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))
@@ -349,7 +349,7 @@ func TestOccurrences_ClosedSinceExcludesOpen(t *testing.T) {
 	require.NoError(t, err)
 
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Aberta",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Aberta",
 		StageID: stage.ID, OpenedByUserID: user.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))
@@ -418,7 +418,7 @@ func TestOccurrences_ClosedSinceCombinesWithStageFilter(t *testing.T) {
 		{other, cut.Add(time.Hour), "Dentro da janela, etapa errada"},
 	} {
 		occ := models.Occurrence{
-			OrganizationID: org.ID, ContactID: contact.ID, Title: s.title,
+			OrganizationID: org.ID, ContactID: &contact.ID, Title: s.title,
 			StageID: s.stage.ID, OpenedByUserID: user.ID,
 		}
 		require.NoError(t, app.CreateOccurrenceForTest(&occ))

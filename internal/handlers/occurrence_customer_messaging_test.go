@@ -64,7 +64,7 @@ func newMsgWorld(t *testing.T) *msgWorld {
 	// A case the Juridico owns, on the same contact (so the window is open).
 	stage, err := app.InitialStageForTest(org.ID)
 	require.NoError(t, err)
-	jurOcc := models.Occurrence{OrganizationID: org.ID, ContactID: contact.ID, Title: "Caso do juridico",
+	jurOcc := models.Occurrence{OrganizationID: org.ID, ContactID: &contact.ID, Title: "Caso do juridico",
 		StageID: stage.ID, OpenedByUserID: w.jur.ID, AssignedUserID: &w.jur.ID}
 	require.NoError(t, app.CreateOccurrenceForTest(&jurOcc))
 	w.occJur = &jurOcc

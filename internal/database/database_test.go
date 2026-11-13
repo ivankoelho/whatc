@@ -341,7 +341,7 @@ func TestBackfillOccurrenceSourceForManualCases(t *testing.T) {
 	// own DB default on AutoMigrate: no source_transfer_id, yet source =
 	// 'whatsapp'.
 	manual := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, ProtocolNumber: "MANUAL-1",
+		OrganizationID: org.ID, ContactID: &contact.ID, ProtocolNumber: "MANUAL-1",
 		Title: "Aberto manualmente", StageID: stage.ID, OpenedByUserID: uuid.New(),
 	}
 	require.NoError(t, db.Create(&manual).Error)
@@ -350,7 +350,7 @@ func TestBackfillOccurrenceSourceForManualCases(t *testing.T) {
 	// A genuinely transfer-sourced row must be left untouched.
 	transferID := uuid.New()
 	fromTransfer := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, ProtocolNumber: "TRANSFER-1",
+		OrganizationID: org.ID, ContactID: &contact.ID, ProtocolNumber: "TRANSFER-1",
 		Title: "Aberto por transferência", StageID: stage.ID, OpenedByUserID: uuid.New(),
 		SourceTransferID: &transferID,
 	}
@@ -382,7 +382,7 @@ func TestBackfillOccurrenceSourceForManualCases_Idempotent(t *testing.T) {
 	require.NoError(t, db.Create(&stage).Error)
 
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, ProtocolNumber: "MANUAL-2",
+		OrganizationID: org.ID, ContactID: &contact.ID, ProtocolNumber: "MANUAL-2",
 		Title: "Aberto manualmente", StageID: stage.ID, OpenedByUserID: uuid.New(),
 	}
 	require.NoError(t, db.Create(&occ).Error)

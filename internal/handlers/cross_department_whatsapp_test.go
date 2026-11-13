@@ -68,7 +68,7 @@ func TestHomologation_WhatsAppSimulation(t *testing.T) {
 			t.Run("resposta externa só por quem pode", func(t *testing.T) {
 				// the customer answers on the logistics number: the 24h window opens
 				require.NoError(t, w.app.DB.Create(&models.Message{BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: w.org.ID,
-					WhatsAppAccount: w.account.Name, ContactID: occ.ContactID, Direction: models.DirectionIncoming, MessageType: models.MessageTypeText,
+					WhatsAppAccount: w.account.Name, ContactID: *occ.ContactID, Direction: models.DirectionIncoming, MessageType: models.MessageTypeText,
 					Content: "pode ligar?", Status: models.MessageStatusDelivered}).Error)
 				sent := w.meta.count()
 				send := func(u *models.User) int {

@@ -58,8 +58,21 @@ var occurrenceSaleChannels = map[string]bool{
 type OccurrenceResponse struct {
 	ID               uuid.UUID  `json:"id"`
 	ProtocolNumber   string     `json:"protocol_number"`
-	ContactID        uuid.UUID  `json:"contact_id"`
+	ContactID        *uuid.UUID `json:"contact_id,omitempty"`
 	ContactName      string     `json:"contact_name"`
+
+	// Internal-ticket fields; empty on service cases. Requester is whoever
+	// opened the case (OpenedByUserID).
+	Kind                    string     `json:"kind"`
+	TicketType              string     `json:"ticket_type,omitempty"`
+	Impact                  string     `json:"impact,omitempty"`
+	Urgency                 string     `json:"urgency,omitempty"`
+	RequesterDepartmentID   *uuid.UUID `json:"requester_department_id,omitempty"`
+	RequesterDepartmentName string     `json:"requester_department_name,omitempty"`
+	DueDate                 *time.Time `json:"due_date,omitempty"`
+	AffectedItem            string     `json:"affected_item,omitempty"`
+	OpenedByUserID          uuid.UUID  `json:"opened_by_user_id"`
+	OpenedByName            string     `json:"opened_by_name,omitempty"`
 	ContactPhone     string     `json:"contact_phone,omitempty"`
 	Title            string     `json:"title"`
 	Description      string     `json:"description"`
@@ -114,6 +127,14 @@ func occurrenceToResponse(o models.Occurrence) OccurrenceResponse {
 		ID:                    o.ID,
 		ProtocolNumber:        o.ProtocolNumber,
 		ContactID:             o.ContactID,
+		Kind:                  o.Kind,
+		TicketType:            o.TicketType,
+		Impact:                o.Impact,
+		Urgency:               o.Urgency,
+		RequesterDepartmentID: o.RequesterDepartmentID,
+		DueDate:               o.DueDate,
+		AffectedItem:          o.AffectedItem,
+		OpenedByUserID:        o.OpenedByUserID,
 		Title:                 o.Title,
 		Description:           o.Description,
 		StageID:               o.StageID,
@@ -394,7 +415,8 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 
 	occ := models.Occurrence{
 		OrganizationID:     orgID,
-		ContactID:          contactID,
+		ContactID:          &contactID,
+		Kind:               models.OccurrenceKindService,
 		Title:              req.Title,
 		Description:        req.Description,
 		StageID:            stage.ID,
@@ -641,6 +663,12 @@ func (a *App) ListOccurrences(r *fastglue.Request) error {
 	if whatHappenedID := string(r.RequestCtx.QueryArgs().Peek("what_happened_id")); whatHappenedID != "" {
 		query = query.Where("occurrences.what_happened_id = ?", whatHappenedID)
 	}
+	if kind := string(r.RequestCtx.QueryArgs().Peek("kind")); kind != "" {
+		if kind != models.OccurrenceKindService && kind != models.OccurrenceKindInternal {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid kind", nil, "")
+		}
+		query = query.Where("occurrences.kind = ?", kind)
+	}
 	if protocol := string(r.RequestCtx.QueryArgs().Peek("protocol")); protocol != "" {
 		query = query.Where("occurrences.protocol_number ILIKE ?", "%"+protocol+"%")
 	}
@@ -679,6 +707,11 @@ func (a *App) ListOccurrences(r *fastglue.Request) error {
 	for i, o := range occurrences {
 		result[i] = occurrenceToResponse(o)
 	}
+	ptrs := make([]*OccurrenceResponse, len(result))
+	for i := range result {
+		ptrs[i] = &result[i]
+	}
+	a.fillRequesterNames(orgID, ptrs...)
 
 	return r.SendEnvelope(map[string]any{
 		"occurrences": result,
@@ -779,6 +812,7 @@ func (a *App) GetOccurrence(r *fastglue.Request) error {
 	}
 	a.DB.Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").Preload("WhatHappened").Preload("Process").First(occ, occ.ID)
 	resp := occurrenceToResponse(*occ)
+	a.fillRequesterNames(orgID, &resp)
 	resp.Can = viewerCapabilities(acc, occ, userID)
 	// Talking to the customer, or going to the chat, is the chat's right and not the case's: without chat:write there
 	// is no reply, and without access to the conversation there is no "open conversation". The endpoints enforce the same.
@@ -787,7 +821,7 @@ func (a *App) GetOccurrence(r *fastglue.Request) error {
 	canMessage := a.canMessageCustomerFromCase(orgID, userID, occ, acc)
 	resp.Can["reply"] = canMessage
 	resp.Can["send_protocol"] = canMessage
-	resp.Can["open_conversation"] = a.HasPermission(userID, models.ResourceChat, models.ActionRead, orgID) && a.CanViewConversationByID(userID, orgID, occ.ContactID)
+	resp.Can["open_conversation"] = a.HasPermission(userID, models.ResourceChat, models.ActionRead, orgID) && occ.ContactID != nil && a.CanViewConversationByID(userID, orgID, *occ.ContactID)
 	if occ.TeamID != nil {
 		a.DB.Model(&models.Team{}).Where("id = ? AND organization_id = ?", *occ.TeamID, orgID).Select("name").Scan(&resp.TeamName)
 	}
@@ -830,7 +864,9 @@ func (a *App) UpdateOccurrence(r *fastglue.Request) error {
 			now := time.Now()
 			rd := now.Add(time.Duration(responseMinutes) * time.Minute)
 			xd := now.Add(time.Duration(resolutionMinutes) * time.Minute)
-			updates["sla_response_deadline"] = rd
+			if !occ.IsInternal() { // internal tickets have no first-response deadline
+				updates["sla_response_deadline"] = rd
+			}
 			updates["sla_resolution_deadline"] = xd
 		}
 	}

@@ -215,7 +215,7 @@ func occurrenceForUsage(t *testing.T, f *usageSendFixture) (*models.User, models
 		"assigned_user_id": user.ID, "last_inbound_at": time.Now()}).Error)
 	stage, err := f.app.InitialStageForTest(f.org.ID)
 	require.NoError(t, err)
-	occ := models.Occurrence{OrganizationID: f.org.ID, ContactID: f.contact.ID, Title: "T", StageID: stage.ID, OpenedByUserID: user.ID}
+	occ := models.Occurrence{OrganizationID: f.org.ID, ContactID: &f.contact.ID, Title: "T", StageID: stage.ID, OpenedByUserID: user.ID}
 	require.NoError(t, f.app.CreateOccurrenceForTest(&occ))
 	return user, occ
 }
