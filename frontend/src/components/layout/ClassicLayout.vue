@@ -22,6 +22,7 @@ import { useBranding } from '@/composables/useBranding'
 import OrganizationSwitcher from './OrganizationSwitcher.vue'
 import UserMenu from './UserMenu.vue'
 import ActiveCallPanel from '@/components/calling/ActiveCallPanel.vue'
+import MobileTabBar from './MobileTabBar.vue'
 import { ScrollToTop } from '@/components/shared'
 import { navigationSections, type NavSection, type NavItem } from './navigation'
 
@@ -106,6 +107,11 @@ const navSections = computed(() => {
 })
 
 
+// Phone shell: bottom tab bar = the first 4 permitted modules; the rest lives in the drawer ("More").
+// An open conversation is its own screen, so the bar (and top bar) step aside.
+const mobileTabs = computed(() => navSections.value.flatMap(s => s.items).slice(0, 4))
+const isImmersive = computed(() => route.name === 'chat-conversation' && !!route.params.contactId)
+
 const toggleSidebar = () => {
   isCollapsed.value = !isCollapsed.value
 }
@@ -117,12 +123,12 @@ const handleLogout = async () => {
 </script>
 
 <template>
-  <div class="flex h-screen bg-[#0a0a0b] light:bg-gray-50">
+  <div class="flex h-screen max-md:h-[100dvh] bg-[#0a0a0b] light:bg-gray-50">
     <!-- Skip link for accessibility -->
     <a href="#main-content" class="skip-link">{{ $t('nav.skipToMain') }}</a>
 
     <!-- Mobile header -->
-    <header class="fixed top-0 left-0 right-0 z-50 flex h-12 items-center justify-between border-b border-white/[0.08] light:border-gray-200 bg-[#0a0a0b]/95 light:bg-white/95 backdrop-blur-sm px-3 md:hidden">
+    <header class="fixed top-0 left-0 right-0 z-50 flex h-12 items-center justify-between border-b border-white/[0.08] light:border-gray-200 bg-[#0a0a0b]/95 light:bg-white/95 backdrop-blur-sm px-3 md:hidden pt-[env(safe-area-inset-top)]" :class="isImmersive && 'hidden'">
       <RouterLink to="/" class="flex items-center gap-2">
         <img :src="logoUrl || '/logo-atacadao.png'" alt="" class="h-7 w-7 rounded-lg object-cover shadow-lg shadow-black/20">
         <span class="font-semibold text-sm text-white light:text-gray-900">{{ systemName || 'WhatsApp ATC' }}</span>
@@ -143,7 +149,7 @@ const handleLogout = async () => {
     <!-- Mobile menu overlay -->
     <div
       v-if="isMobileMenuOpen"
-      class="fixed inset-0 z-40 bg-black/60 light:bg-black/30 backdrop-blur-sm md:hidden"
+      class="fixed inset-0 z-[55] bg-black/60 light:bg-black/30 backdrop-blur-sm md:hidden"
       @click="isMobileMenuOpen = false"
     />
 
@@ -151,7 +157,7 @@ const handleLogout = async () => {
     <aside
       :class="[
         'flex flex-col border-r border-white/[0.08] light:border-gray-200 bg-[#0a0a0b] light:bg-white transition-all duration-300',
-        'fixed inset-y-0 left-0 z-40 md:relative',
+        'fixed inset-y-0 left-0 z-40 max-md:z-[60] md:relative',
         'transform md:transform-none',
         isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
         isCollapsed ? 'w-64 md:w-16' : 'w-64'
@@ -289,7 +295,11 @@ const handleLogout = async () => {
     </aside>
 
     <!-- Main content -->
-    <main id="main-content" class="relative flex-1 overflow-hidden pt-12 md:pt-0 bg-[#0a0a0b] light:bg-gray-50" role="main">
+    <main
+      id="main-content"
+      :class="['relative flex-1 min-w-0 overflow-hidden md:pt-0 bg-[#0a0a0b] light:bg-gray-50', isImmersive ? 'pt-0' : 'pt-12 max-md:pb-[calc(3.5rem+env(safe-area-inset-bottom))]']"
+      role="main"
+    >
       <RouterView v-slot="{ Component, route: viewRoute }">
         <Transition name="page">
           <component :is="Component" :key="viewRoute.meta.stableKey ? String(viewRoute.name) : viewRoute.path" />
@@ -298,5 +308,7 @@ const handleLogout = async () => {
       <ActiveCallPanel />
       <ScrollToTop />
     </main>
+
+    <MobileTabBar v-if="!isImmersive" :items="mobileTabs" :more-open="isMobileMenuOpen" @more="isMobileMenuOpen = !isMobileMenuOpen" />
   </div>
 </template>

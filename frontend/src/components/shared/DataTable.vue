@@ -146,7 +146,7 @@ function getRowKey(item: T, index: number): string {
 </script>
 
 <template>
-  <div :class="maxHeight ? 'overflow-auto' : ''" :style="maxHeight ? { maxHeight } : {}">
+  <div :class="['dt-mobile', maxHeight ? 'overflow-auto' : '']" :style="maxHeight ? { maxHeight } : {}">
   <Table>
     <TableHeader>
       <TableRow>
@@ -220,6 +220,7 @@ function getRowKey(item: T, index: number): string {
         <TableCell
           v-for="col in columns"
           :key="col.key"
+          :data-label="col.key === 'actions' ? undefined : col.label"
           :class="[
             col.align === 'right' && 'text-right',
             col.align === 'center' && 'text-center',

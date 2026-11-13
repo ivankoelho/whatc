@@ -387,7 +387,7 @@ function formatTimeRemaining(deadline: string | undefined): string {
 
     <!-- Content -->
     <ScrollArea class="flex-1">
-      <div class="p-6 space-y-6">
+      <div class="p-6 max-md:p-3 space-y-6">
         <!-- Loading skeleton -->
         <div v-if="isLoading" class="space-y-4">
           <Skeleton class="h-12 w-full bg-white/[0.08] light:bg-gray-200 rounded-xl" />
@@ -406,7 +406,7 @@ function formatTimeRemaining(deadline: string | undefined): string {
         <!-- Agent View (no tabs, just their transfers) -->
         <div v-else-if="!isAdminOrManager">
           <div class="rounded-xl border border-white/[0.08] bg-white/[0.02] light:bg-white light:border-gray-200">
-            <div class="p-6">
+            <div class="p-6 max-md:p-3">
               <h3 class="text-lg font-semibold text-white light:text-gray-900">{{ $t('agentTransfers.myTransfers') }}</h3>
               <p class="text-sm text-white/50 light:text-gray-500">{{ $t('agentTransfers.contactsTransferred') }}</p>
             </div>

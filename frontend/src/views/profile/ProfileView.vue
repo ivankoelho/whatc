@@ -71,7 +71,7 @@ async function changePassword() {
 
     <!-- Content -->
     <ScrollArea class="flex-1">
-      <div class="p-6 space-y-6 max-w-2xl mx-auto">
+      <div class="p-6 max-md:p-3 space-y-6 max-w-2xl mx-auto">
         <!-- User Info -->
         <Card>
           <CardHeader>

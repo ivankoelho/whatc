@@ -375,7 +375,7 @@ void _displayStats.value // Suppress unused warning
 
     <!-- Content -->
     <ScrollArea class="flex-1">
-      <div class="p-6 space-y-6">
+      <div class="p-6 max-md:p-3 space-y-6">
         <!-- Error State -->
         <ErrorState
           v-if="error && !isLoading"

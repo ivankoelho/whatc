@@ -371,6 +371,33 @@ const GRID_MARGIN: [number, number] = [16, 16]
 const isDragMode = ref(false)
 const gridLayout = ref<Array<{ i: string; x: number; y: number; w: number; h: number }>>([])
 
+// Phones: 2-column grid derived from the saved layout (never persisted, no drag/resize)
+const mq = window.matchMedia('(max-width: 767px)')
+const isMobile = ref(mq.matches)
+mq.addEventListener('change', e => { isMobile.value = e.matches })
+const displayLayout = computed(() => {
+  if (!isMobile.value) return gridLayout.value
+  const sorted = [...gridLayout.value].sort((a, b) => a.y - b.y || a.x - b.x)
+  const out: typeof gridLayout.value = []
+  let y = 0
+  let half: { y: number; h: number } | null = null // a half-width item waiting for a partner
+  for (const it of sorted) {
+    if (it.w >= 6) {
+      if (half) { y = half.y + half.h; half = null }
+      out.push({ ...it, x: 0, y, w: 2 })
+      y += it.h
+    } else if (half) {
+      out.push({ ...it, x: 1, y: half.y, w: 1 })
+      y = half.y + Math.max(half.h, it.h)
+      half = null
+    } else {
+      out.push({ ...it, x: 0, y, w: 1 })
+      half = { y, h: it.h }
+    }
+  }
+  return out
+})
+
 const isChartWidget = (widget: DashboardWidget) => widget.display_type === 'chart'
 const isTableWidget = (widget: DashboardWidget) => widget.display_type === 'table'
 const isShortcutsWidget = (widget: DashboardWidget) => widget.display_type === 'shortcuts'
@@ -467,6 +494,7 @@ const persistLayout = async () => {
 }
 
 const onLayoutUpdate = (newLayout: Array<{ i: string; x: number; y: number; w: number; h: number }>) => {
+  if (isMobile.value) return
   gridLayout.value = newLayout
   if (!isDragMode.value) return
   if (layoutSaveTimer) clearTimeout(layoutSaveTimer)
@@ -728,24 +756,24 @@ onMounted(() => {
   <div class="flex flex-col h-full bg-[#0a0a0b] light:bg-gray-50">
     <!-- Header -->
     <header class="border-b border-white/[0.08] light:border-gray-200 bg-[#0a0a0b]/95 light:bg-white/95 backdrop-blur">
-      <div class="flex h-16 items-center px-6">
+      <div class="flex h-16 items-center px-6 max-md:h-auto max-md:min-h-14 max-md:flex-wrap max-md:gap-y-2 max-md:px-4 max-md:py-2">
         <div class="h-8 w-8 rounded-lg bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center mr-3 shadow-lg shadow-emerald-500/20">
           <LayoutDashboard class="h-4 w-4 text-white" />
         </div>
-        <div class="flex-1">
+        <div class="flex-1 min-w-0">
           <h1 class="text-xl font-semibold text-white light:text-gray-900">{{ $t('dashboard.title') }}</h1>
           <p class="text-sm text-white/50 light:text-gray-500">{{ $t('dashboard.subtitle') }}</p>
         </div>
 
         <!-- Time Range Filter -->
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-2 max-md:w-full max-md:overflow-x-auto max-md:pb-1">
           <Button v-if="canCreateWidget" variant="outline" size="sm" @click="openAddWidgetDialog" class="bg-white/[0.04] border-white/[0.1] text-white/70 hover:bg-white/[0.08] hover:text-white light:bg-white light:border-gray-200 light:text-gray-700">
             <Plus class="h-4 w-4 mr-2" />
             {{ $t('dashboard.addWidget') }}
           </Button>
 
           <Button
-            v-if="canEditWidget && widgets.length > 1"
+            v-if="canEditWidget && widgets.length > 1 && !isMobile"
             variant="outline"
             size="sm"
             @click="isDragMode = !isDragMode"
@@ -772,7 +800,7 @@ onMounted(() => {
 
     <!-- Content -->
     <ScrollArea class="flex-1">
-      <div class="p-6 space-y-6">
+      <div class="p-6 max-md:p-3 space-y-6">
         <!-- Loading Skeleton -->
         <div v-if="isLoading" class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <div v-for="i in 4" :key="i" class="rounded-xl border border-white/[0.08] bg-white/[0.02] p-6 light:bg-white light:border-gray-200">
@@ -790,8 +818,8 @@ onMounted(() => {
         <!-- Widget Grid Layout -->
         <GridLayout
           v-if="!isLoading && gridLayout.length > 0"
-          :layout="gridLayout"
-          :col-num="GRID_COLS"
+          :layout="displayLayout"
+          :col-num="isMobile ? 2 : GRID_COLS"
           :row-height="GRID_ROW_HEIGHT"
           :margin="GRID_MARGIN"
           :is-draggable="isDragMode"
@@ -801,21 +829,21 @@ onMounted(() => {
           @layout-updated="onLayoutUpdate"
         >
           <GridItem
-            v-for="item in gridLayout"
+            v-for="item in displayLayout"
             :key="item.i"
             :i="item.i"
             :x="item.x"
             :y="item.y"
             :w="item.w"
             :h="item.h"
-            :min-w="2"
+            :min-w="isMobile ? 1 : 2"
             :min-h="2"
             drag-allow-from=".widget-drag-handle"
           >
             <!-- Number widget card -->
             <div
               v-if="getWidgetById(item.i) && isNumberWidget(getWidgetById(item.i)!)"
-              class="group relative h-full card-depth rounded-xl border border-white/[0.08] bg-white/[0.04] p-6 light:bg-white light:border-gray-200 hover:bg-white/[0.06] light:hover:bg-gray-50 transition-colors overflow-hidden"
+              class="group relative h-full card-depth rounded-xl border border-white/[0.08] bg-white/[0.04] p-6 max-md:p-3 light:bg-white light:border-gray-200 hover:bg-white/[0.06] light:hover:bg-gray-50 transition-colors overflow-hidden"
             >
               <!-- Gradient accent bar -->
               <div :class="['absolute top-0 inset-x-0 h-0.5', getWidgetColor(getWidgetById(item.i)!.color).gradient]" />
@@ -826,14 +854,14 @@ onMounted(() => {
               </div>
 
               <div class="flex flex-row items-start justify-between space-y-0 pb-2">
-                <div class="flex-1">
+                <div class="flex-1 min-w-0">
                   <span class="text-sm font-medium text-white/50 light:text-gray-500">
                     {{ getWidgetById(item.i)!.name }}
                   </span>
                 </div>
                 <div class="flex items-center gap-2">
                   <!-- Actions - hidden in drag mode -->
-                  <div v-if="!isDragMode && (canEditWidget || canDeleteWidget)" class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div v-if="!isDragMode && (canEditWidget || canDeleteWidget)" class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity max-md:hidden">
                     <Button
                       v-if="canEditWidget"
                       variant="ghost"
@@ -892,7 +920,7 @@ onMounted(() => {
             <!-- Chart widget card -->
             <div
               v-else-if="getWidgetById(item.i) && isChartWidget(getWidgetById(item.i)!)"
-              class="group relative h-full flex flex-col card-depth rounded-xl border border-white/[0.08] bg-white/[0.04] p-6 light:bg-white light:border-gray-200 hover:bg-white/[0.06] light:hover:bg-gray-50 transition-colors overflow-hidden"
+              class="group relative h-full flex flex-col card-depth rounded-xl border border-white/[0.08] bg-white/[0.04] p-6 max-md:p-3 light:bg-white light:border-gray-200 hover:bg-white/[0.06] light:hover:bg-gray-50 transition-colors overflow-hidden"
             >
               <!-- Drag handle indicator -->
               <div v-if="isDragMode" class="widget-drag-handle absolute top-2 left-2 text-white/20 light:text-gray-300 cursor-grab active:cursor-grabbing z-10">
@@ -905,7 +933,7 @@ onMounted(() => {
                   <p v-if="getWidgetById(item.i)!.description" class="text-xs text-white/30 light:text-gray-400 mt-0.5">{{ getWidgetById(item.i)!.description }}</p>
                 </div>
                 <div class="flex items-center gap-2">
-                  <div v-if="!isDragMode && (canEditWidget || canDeleteWidget)" class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div v-if="!isDragMode && (canEditWidget || canDeleteWidget)" class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity max-md:hidden">
                     <Button
                       v-if="canEditWidget"
                       variant="ghost"
@@ -960,13 +988,13 @@ onMounted(() => {
                 <GripVertical class="h-4 w-4" />
               </div>
 
-              <div class="p-6 pb-3 flex flex-row items-center justify-between">
+              <div class="p-6 max-md:p-3 pb-3 flex flex-row items-center justify-between">
                 <div>
                   <span class="text-sm font-medium text-white/50 light:text-gray-500">{{ getWidgetById(item.i)!.name }}</span>
                   <p v-if="getWidgetById(item.i)!.description" class="text-xs text-white/30 light:text-gray-400 mt-0.5">{{ getWidgetById(item.i)!.description }}</p>
                 </div>
                 <div class="flex items-center gap-2">
-                  <div v-if="!isDragMode && (canEditWidget || canDeleteWidget)" class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div v-if="!isDragMode && (canEditWidget || canDeleteWidget)" class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity max-md:hidden">
                     <Button v-if="canEditWidget" variant="ghost" size="icon" class="h-6 w-6 text-white/20 hover:text-white hover:bg-white/[0.1] light:text-gray-300 light:hover:text-gray-700 light:hover:bg-gray-100" @click.stop="openEditWidgetDialog(getWidgetById(item.i)!)" :title="$t('dashboard.editWidgetTooltip')">
                       <Pencil class="h-3 w-3" />
                     </Button>
@@ -1068,13 +1096,13 @@ onMounted(() => {
                 <GripVertical class="h-4 w-4" />
               </div>
 
-              <div class="p-6 pb-3 flex flex-row items-center justify-between">
+              <div class="p-6 max-md:p-3 pb-3 flex flex-row items-center justify-between">
                 <div>
                   <span class="text-sm font-medium text-white/50 light:text-gray-500">{{ getWidgetById(item.i)!.name }}</span>
                   <p v-if="getWidgetById(item.i)!.description" class="text-xs text-white/30 light:text-gray-400 mt-0.5">{{ getWidgetById(item.i)!.description }}</p>
                 </div>
                 <div class="flex items-center gap-2">
-                  <div v-if="!isDragMode && (canEditWidget || canDeleteWidget)" class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div v-if="!isDragMode && (canEditWidget || canDeleteWidget)" class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity max-md:hidden">
                     <Button v-if="canEditWidget" variant="ghost" size="icon" class="h-6 w-6 text-white/20 hover:text-white hover:bg-white/[0.1] light:text-gray-300 light:hover:text-gray-700 light:hover:bg-gray-100" @click.stop="openEditWidgetDialog(getWidgetById(item.i)!)" :title="$t('dashboard.editWidgetTooltip')">
                       <Pencil class="h-3 w-3" />
                     </Button>

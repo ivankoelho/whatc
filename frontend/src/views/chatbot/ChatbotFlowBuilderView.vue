@@ -721,26 +721,26 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="flex flex-col h-screen bg-muted/30">
+  <div class="flex flex-col h-screen max-md:h-[100dvh] bg-muted/30">
     <!-- Header -->
-    <header class="border-b bg-background px-4 py-3 flex-shrink-0">
-      <div class="flex items-center gap-4">
+    <header class="border-b bg-background px-4 py-3 flex-shrink-0 max-md:px-3 max-md:py-2">
+      <div class="flex items-center gap-4 max-md:flex-wrap max-md:gap-2">
         <Button variant="ghost" size="icon" @click="handleCancel">
           <ArrowLeft class="h-5 w-5" />
         </Button>
 
-        <div class="flex-1 flex items-center gap-6">
+        <div class="flex-1 flex items-center gap-6 max-md:basis-full max-md:order-last max-md:flex-col max-md:items-stretch max-md:gap-2">
           <div class="flex items-center gap-2">
             <Label class="text-sm text-muted-foreground whitespace-nowrap">{{ $t('flowBuilder.name') }}</Label>
-            <Input v-model="name" :placeholder="$t('flowBuilder.namePlaceholder')" class="w-48 font-medium" />
+            <Input v-model="name" :placeholder="$t('flowBuilder.namePlaceholder')" class="w-48 font-medium max-md:w-full" />
           </div>
           <div class="flex items-center gap-2">
             <Label class="text-sm text-muted-foreground whitespace-nowrap">{{ $t('flowBuilder.description') }}</Label>
-            <Input v-model="description" :placeholder="$t('flowBuilder.optional')" class="w-64" />
+            <Input v-model="description" :placeholder="$t('flowBuilder.optional')" class="w-64 max-md:w-full" />
           </div>
         </div>
 
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-3 max-md:ml-auto max-md:gap-2 max-md:min-w-0 max-md:flex-1 max-md:flex-wrap max-md:justify-end">
           <div class="flex items-center gap-2">
             <Switch :checked="enabled" @update:checked="enabled = $event" />
             <span class="text-sm">{{ enabled ? $t('flowBuilder.enabled') : $t('flowBuilder.disabled') }}</span>
@@ -832,7 +832,7 @@ onMounted(async () => {
       <Card
         v-else
         data-testid="flow-builder-panel"
-        class="min-w-0 border-y-0 border-r-0 rounded-none shrink-0 flex flex-col relative"
+        class="min-w-0 border-y-0 border-r-0 rounded-none shrink-0 flex flex-col relative max-md:!w-full max-md:fixed max-md:inset-x-0 max-md:bottom-14 max-md:z-30 max-md:h-[40dvh] max-md:border-t max-md:border-x-0 max-md:rounded-t-2xl max-md:shadow-2xl"
         :style="{ width: panelWidth + 'px' }"
       >
         <div

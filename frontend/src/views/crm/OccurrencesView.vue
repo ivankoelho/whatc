@@ -163,7 +163,7 @@ onMounted(async () => {
 
     <!-- List: the table keeps its card. -->
     <ScrollArea v-else orientation="vertical" class="flex-1 h-full">
-      <div class="p-6">
+      <div class="p-6 max-md:p-3">
         <Card>
           <CardContent class="pt-6">
             <div id="occurrences-list">
