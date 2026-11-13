@@ -75,7 +75,23 @@ func (OccurrenceStage) TableName() string { return "occurrence_stages" }
 type Occurrence struct {
 	BaseModel
 	OrganizationID uuid.UUID `gorm:"type:uuid;index;not null;uniqueIndex:idx_occ_org_protocol" json:"organization_id"`
-	ContactID      uuid.UUID `gorm:"type:uuid;index;not null" json:"contact_id"`
+	// ContactID is nil for an internal ticket (Kind = internal): it has a
+	// requester inside the company, not a customer.
+	ContactID *uuid.UUID `gorm:"type:uuid;index" json:"contact_id,omitempty"`
+
+	// Kind separates customer cases ("service", the original protocol) from
+	// tickets between departments ("internal"). Existing rows are all service.
+	Kind string `gorm:"size:12;not null;default:'service';index" json:"kind"`
+
+	// Internal-ticket fields (ITIL-style, as in GLPI/ServiceNow). All optional
+	// and empty on service cases. Priority is derived from Impact x Urgency by
+	// the server when both are sent (see internalPriority).
+	TicketType            string     `gorm:"size:12" json:"ticket_type,omitempty"` // incident | request
+	Impact                string     `gorm:"size:10" json:"impact,omitempty"`      // low | medium | high
+	Urgency               string     `gorm:"size:10" json:"urgency,omitempty"`     // low | medium | high
+	RequesterDepartmentID *uuid.UUID `gorm:"type:uuid;index" json:"requester_department_id,omitempty"`
+	DueDate               *time.Time `json:"due_date,omitempty"`                      // date the requester needs it by
+	AffectedItem          string     `gorm:"size:255" json:"affected_item,omitempty"` // asset, system or location
 
 	// Total unique index, deliberately NOT partial on soft delete: a deleted
 	// protocol must never be reissued, because the customer still has the
@@ -157,17 +173,35 @@ type Occurrence struct {
 	FirstResponseBy *User `gorm:"foreignKey:FirstResponseByID" json:"first_response_by,omitempty"`
 
 	// Relations
-	Contact      *Contact                `gorm:"foreignKey:ContactID" json:"contact,omitempty"`
-	Stage        *OccurrenceStage        `gorm:"foreignKey:StageID" json:"stage,omitempty"`
-	AssignedUser *User                   `gorm:"foreignKey:AssignedUserID" json:"assigned_user,omitempty"`
-	Unit         *Unit                   `gorm:"foreignKey:UnitID" json:"unit,omitempty"`
-	Department   *Department             `gorm:"foreignKey:DepartmentID" json:"department,omitempty"`
-	Category     *OccurrenceCategory     `gorm:"foreignKey:CategoryID" json:"category,omitempty"`
-	WhatHappened *OccurrenceWhatHappened `gorm:"foreignKey:WhatHappenedID" json:"what_happened,omitempty"`
-	Process      *OccurrenceProcess      `gorm:"foreignKey:ProcessID" json:"process,omitempty"`
+	Contact      *Contact         `gorm:"foreignKey:ContactID" json:"contact,omitempty"`
+	Stage        *OccurrenceStage `gorm:"foreignKey:StageID" json:"stage,omitempty"`
+	AssignedUser *User            `gorm:"foreignKey:AssignedUserID" json:"assigned_user,omitempty"`
+	Unit         *Unit            `gorm:"foreignKey:UnitID" json:"unit,omitempty"`
+	Department   *Department      `gorm:"foreignKey:DepartmentID" json:"department,omitempty"`
+
+	Category            *OccurrenceCategory     `gorm:"foreignKey:CategoryID" json:"category,omitempty"`
+	WhatHappened        *OccurrenceWhatHappened `gorm:"foreignKey:WhatHappenedID" json:"what_happened,omitempty"`
+	Process             *OccurrenceProcess      `gorm:"foreignKey:ProcessID" json:"process,omitempty"`
 }
 
 func (Occurrence) TableName() string { return "occurrences" }
+
+// Occurrence kinds.
+const (
+	OccurrenceKindService  = "service"
+	OccurrenceKindInternal = "internal"
+)
+
+// IsInternal reports whether the case is an internal ticket (no customer).
+func (o Occurrence) IsInternal() bool { return o.Kind == OccurrenceKindInternal }
+
+// CustomerID is the contact's id, or uuid.Nil for an internal ticket.
+func (o Occurrence) CustomerID() uuid.UUID {
+	if o.ContactID == nil {
+		return uuid.Nil
+	}
+	return *o.ContactID
+}
 
 // OccurrenceEvent is one entry on an occurrence's timeline. Manual notes and
 // automatic events share this table on purpose: two tables drift, and a
@@ -424,15 +458,15 @@ func (OccurrenceFile) TableName() string { return "occurrence_files" }
 // case came from its requester (opened with a team), and a nil ToTeamID means it went back to the requester.
 type OccurrenceTransfer struct {
 	BaseModel
-	OrganizationID uuid.UUID `gorm:"type:uuid;index;not null" json:"organization_id"`
-	OccurrenceID   uuid.UUID `gorm:"type:uuid;index;not null" json:"occurrence_id"`
-	Kind           string    `gorm:"size:10;not null" json:"kind"` // forward | return
+	OrganizationID uuid.UUID  `gorm:"type:uuid;index;not null" json:"organization_id"`
+	OccurrenceID   uuid.UUID  `gorm:"type:uuid;index;not null" json:"occurrence_id"`
+	Kind           string     `gorm:"size:10;not null" json:"kind"` // forward | return
 	FromTeamID     *uuid.UUID `gorm:"type:uuid" json:"from_team_id,omitempty"`
 	ToTeamID       *uuid.UUID `gorm:"type:uuid" json:"to_team_id,omitempty"`
 	FromUserID     *uuid.UUID `gorm:"type:uuid" json:"from_user_id,omitempty"` // who held the case before
 	ToUserID       *uuid.UUID `gorm:"type:uuid" json:"to_user_id,omitempty"`   // who holds it after (may be nobody yet)
-	ByUserID       uuid.UUID `gorm:"type:uuid;not null" json:"by_user_id"`
-	Reason         string    `gorm:"type:text" json:"reason"`
+	ByUserID       uuid.UUID  `gorm:"type:uuid;not null" json:"by_user_id"`
+	Reason         string     `gorm:"type:text" json:"reason"`
 }
 
 func (OccurrenceTransfer) TableName() string { return "occurrence_transfers" }

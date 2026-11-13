@@ -25,7 +25,7 @@ func TestProcessOccurrenceSLA_MarksResponseBreach(t *testing.T) {
 
 	past := time.Now().Add(-1 * time.Hour)
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Sem resposta",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Sem resposta",
 		StageID: stage.ID, OpenedByUserID: user.ID,
 		SLA: models.SLATracking{ResponseDeadline: &past},
 	}
@@ -51,7 +51,7 @@ func TestProcessOccurrenceSLA_DoesNotBreachWhenAlreadyReplied(t *testing.T) {
 	past := time.Now().Add(-1 * time.Hour)
 	replied := time.Now().Add(-30 * time.Minute)
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Já respondido",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Já respondido",
 		StageID: stage.ID, OpenedByUserID: user.ID,
 		SLA: models.SLATracking{ResponseDeadline: &past, FirstResponseAt: &replied},
 	}
@@ -75,7 +75,7 @@ func TestProcessOccurrenceSLA_MarksResolutionBreach(t *testing.T) {
 
 	past := time.Now().Add(-1 * time.Hour)
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Sem resolução",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Sem resolução",
 		StageID: stage.ID, OpenedByUserID: user.ID,
 		SLA: models.SLATracking{ResolutionDeadline: &past},
 	}
@@ -101,7 +101,7 @@ func TestProcessOccurrenceSLA_DoesNotRewriteAlreadyBreached(t *testing.T) {
 	past := time.Now().Add(-1 * time.Hour)
 	firstBreach := time.Now().Add(-45 * time.Minute)
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Já quebrado",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Já quebrado",
 		StageID: stage.ID, OpenedByUserID: user.ID,
 		SLA: models.SLATracking{ResponseDeadline: &past, Breached: true, BreachedAt: &firstBreach},
 	}

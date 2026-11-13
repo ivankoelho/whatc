@@ -54,7 +54,7 @@ func TestOccurrences_CloseAndReopen(t *testing.T) {
 		First(&closing).Error)
 
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Fecha e reabre",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Fecha e reabre",
 		StageID: initial.ID, OpenedByUserID: user.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))
@@ -104,7 +104,7 @@ func TestOccurrences_SameStageIsNoOp(t *testing.T) {
 		First(&closing).Error)
 
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Reenvio da mesma etapa",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Reenvio da mesma etapa",
 		StageID: initial.ID, OpenedByUserID: user.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))
@@ -174,7 +174,7 @@ func TestOccurrences_EveryEndpointIsAuthorized(t *testing.T) {
 	require.NoError(t, err)
 
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Privada",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Privada",
 		StageID: stage.ID, OpenedByUserID: owner.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))
@@ -224,7 +224,7 @@ func TestOccurrences_NoteAppearsOnTimeline(t *testing.T) {
 	require.NoError(t, err)
 
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Com nota",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Com nota",
 		StageID: stage.ID, OpenedByUserID: user.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))
@@ -251,7 +251,7 @@ func TestOccurrences_UpdateAssigneeAbsentVsEmpty(t *testing.T) {
 	require.NoError(t, err)
 
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Original",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Original",
 		StageID: stage.ID, OpenedByUserID: user.ID, AssignedUserID: &assignee.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))
@@ -291,7 +291,7 @@ func TestOccurrences_UpdateDescriptionAbsentVsEmpty(t *testing.T) {
 	require.NoError(t, err)
 
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Original",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Original",
 		Description: "Descrição original", StageID: stage.ID, OpenedByUserID: user.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))
@@ -341,7 +341,7 @@ func setupOccurrenceForDelete(t *testing.T, app *handlers.App) (org *models.Orga
 	require.NoError(t, err)
 
 	occ = models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Para excluir",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Para excluir",
 		StageID: stage.ID, OpenedByUserID: owner.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))

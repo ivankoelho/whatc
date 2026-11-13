@@ -31,7 +31,7 @@ func TestOccurrenceSendProtocol_RejectedOutsideServiceWindow(t *testing.T) {
 	stage, err := app.InitialStageForTest(org.ID)
 	require.NoError(t, err)
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Fora da janela",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Fora da janela",
 		StageID: stage.ID, OpenedByUserID: user.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))
@@ -63,7 +63,7 @@ func TestOccurrenceSendProtocol_RejectedWhenNeverInbound(t *testing.T) {
 	stage, err := app.InitialStageForTest(org.ID)
 	require.NoError(t, err)
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Sem inbound",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Sem inbound",
 		StageID: stage.ID, OpenedByUserID: user.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))
@@ -94,7 +94,7 @@ func TestOccurrenceSendProtocol_DeniedForInvisibleContact(t *testing.T) {
 	stage, err := app.InitialStageForTest(org.ID)
 	require.NoError(t, err)
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Privada",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Privada",
 		StageID: stage.ID, OpenedByUserID: owner.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))
@@ -127,7 +127,7 @@ func TestOccurrenceSendProtocol_SendsWithinWindow(t *testing.T) {
 	stage, err := app.InitialStageForTest(org.ID)
 	require.NoError(t, err)
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Dentro da janela",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Dentro da janela",
 		StageID: stage.ID, OpenedByUserID: user.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))
@@ -177,7 +177,7 @@ func sendFixture(t *testing.T, insideWindow bool) (*handlers.App, *mockWhatsAppS
 	stage, err := app.InitialStageForTest(org.ID)
 	require.NoError(t, err)
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Mensagem custom",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Mensagem custom",
 		StageID: stage.ID, OpenedByUserID: user.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))

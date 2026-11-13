@@ -26,7 +26,7 @@ func TestReplyToOccurrence_RejectedOutsideServiceWindow(t *testing.T) {
 	stage, err := app.InitialStageForTest(org.ID)
 	require.NoError(t, err)
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Fora da janela",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Fora da janela",
 		StageID: stage.ID, OpenedByUserID: user.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))
@@ -64,7 +64,7 @@ func TestReplyToOccurrence_SetsFirstResponseOnlyOnce(t *testing.T) {
 	stage, err := app.InitialStageForTest(org.ID)
 	require.NoError(t, err)
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Peça quebrada",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Peça quebrada",
 		StageID: stage.ID, OpenedByUserID: user.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))
@@ -126,7 +126,7 @@ func TestCreateOccurrenceEvent_NoteNeverSetsFirstResponse(t *testing.T) {
 	stage, err := app.InitialStageForTest(org.ID)
 	require.NoError(t, err)
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Caso comum",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Caso comum",
 		StageID: stage.ID, OpenedByUserID: user.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))
@@ -159,7 +159,7 @@ func replyScenario(t *testing.T, app *handlers.App) (org *models.Organization, a
 
 	stage, err := app.InitialStageForTest(org.ID)
 	require.NoError(t, err)
-	occ = models.Occurrence{OrganizationID: org.ID, ContactID: contact.ID, Title: "Troca", StageID: stage.ID, OpenedByUserID: agent.ID}
+	occ = models.Occurrence{OrganizationID: org.ID, ContactID: &contact.ID, Title: "Troca", StageID: stage.ID, OpenedByUserID: agent.ID}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))
 	return
 }

@@ -97,6 +97,8 @@ const shownEvents = computed(() => {
 
 const occurrenceId = computed(() => route.params.id as string)
 const occurrence = ref<Occurrence | null>(null)
+// An internal ticket has no customer: no WhatsApp, no sale data, only the colleagues' chat.
+const isInternal = computed(() => occurrence.value?.kind === 'internal')
 const isLoading = ref(true)
 const isNotFound = ref(false)
 const isSendingProtocol = ref(false)
@@ -424,7 +426,7 @@ onUnmounted(() => {
             <Download class="h-4 w-4 mr-2" aria-hidden="true" />
             {{ $t('occurrences.export.button') }}
           </Button>
-          <Button v-if="occurrence.can?.open_conversation ?? false" size="sm" variant="outline" as-child>
+          <Button v-if="!isInternal && (occurrence.can?.open_conversation ?? false)" size="sm" variant="outline" as-child>
             <RouterLink :to="`/chat/${occurrence.contact_id}`">
               <MessageCircle class="h-4 w-4 mr-2 text-emerald-500" aria-hidden="true" />
               {{ $t('chat.openConversation') }}
@@ -528,6 +530,7 @@ onUnmounted(() => {
         <section id="case-conversation" class="scroll-mt-4 rounded-xl border-2 border-primary/25 bg-card shadow-md" data-testid="case-conversation">
           <div class="flex border-b" role="tablist" :aria-label="$t('occurrences.convTitle')">
             <button
+              v-if="!isInternal"
               type="button" role="tab" :aria-selected="convTab === 'customer'" data-testid="conv-tab-customer"
               class="flex items-center gap-2 border-b-2 px-5 py-3.5 text-base transition-colors"
               :class="convTab === 'customer' ? 'border-emerald-500 font-medium text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'"
@@ -541,7 +544,7 @@ onUnmounted(() => {
             ><MessagesSquare class="h-4 w-4 text-sky-600" aria-hidden="true" />{{ $t('occurrences.internalChat') }}</button>
           </div>
           <div class="p-5 max-sm:p-2 [&_[data-testid=occurrence-chat]]:min-h-[26rem] max-sm:[&_[data-testid=occurrence-chat]]:min-h-[34rem] [&_[data-testid=case-whatsapp]]:border-0 [&_[data-testid=case-whatsapp]]:shadow-none [&_[data-testid=occurrence-chat]]:border-0 [&_[data-testid=occurrence-chat]]:shadow-none">
-        <div v-show="convTab === 'customer'" id="case-customer" class="scroll-mt-4 space-y-4">
+        <div v-if="!isInternal" v-show="convTab === 'customer'" id="case-customer" class="scroll-mt-4 space-y-4">
           <OccurrenceWhatsAppCard :occurrence-id="occurrence.id" @configured="waConfigured = $event" />
           <OccurrenceCommunicationCard :occurrence-id="occurrence.id" />
         <!-- Legacy reply (from the contact's own account): only when the case has no channel account -->
@@ -587,7 +590,7 @@ onUnmounted(() => {
         </div>
 
         <!-- Colleagues only (kept mounted so it keeps receiving messages while the other tab is open) -->
-        <div v-show="convTab === 'internal'" id="case-internal" class="scroll-mt-4">
+        <div v-show="convTab === 'internal' || isInternal" id="case-internal" class="scroll-mt-4">
           <OccurrenceChatPanel :occurrence-id="occurrence.id" />
         </div>
           </div>
@@ -598,10 +601,44 @@ onUnmounted(() => {
           <section class="rounded-lg border bg-card p-4" data-testid="case-request">
             <h2 class="mb-3 text-sm font-semibold">{{ $t('occurrences.secRequest') }}</h2>
             <dl class="grid grid-cols-2 gap-x-6 gap-y-3 text-sm md:grid-cols-4">
-              <div>
+              <div v-if="!isInternal">
                 <dt class="text-xs text-muted-foreground">{{ $t('occurrences.contactLabel') }}</dt>
                 <dd>{{ occurrence.contact_name }}</dd>
               </div>
+              <template v-if="isInternal">
+                <div data-testid="internal-requester">
+                  <dt class="text-xs text-muted-foreground">{{ $t('occurrences.internal.requester') }}</dt>
+                  <dd>{{ occurrence.opened_by_name || '—' }}</dd>
+                </div>
+                <div v-if="occurrence.requester_department_name">
+                  <dt class="text-xs text-muted-foreground">{{ $t('occurrences.internal.requesterDepartment') }}</dt>
+                  <dd>{{ occurrence.requester_department_name }}</dd>
+                </div>
+                <div v-if="occurrence.department_name">
+                  <dt class="text-xs text-muted-foreground">{{ $t('occurrences.internal.targetDepartment') }}</dt>
+                  <dd>{{ occurrence.department_name }}</dd>
+                </div>
+                <div v-if="occurrence.ticket_type">
+                  <dt class="text-xs text-muted-foreground">{{ $t('occurrences.internal.type') }}</dt>
+                  <dd>{{ $t(occurrence.ticket_type === 'incident' ? 'occurrences.internal.typeIncident' : 'occurrences.internal.typeRequest') }}</dd>
+                </div>
+                <div v-if="occurrence.impact">
+                  <dt class="text-xs text-muted-foreground">{{ $t('occurrences.internal.impact') }}</dt>
+                  <dd>{{ $t('occurrences.internal.level.' + occurrence.impact) }}</dd>
+                </div>
+                <div v-if="occurrence.urgency">
+                  <dt class="text-xs text-muted-foreground">{{ $t('occurrences.internal.urgency') }}</dt>
+                  <dd>{{ $t('occurrences.internal.level.' + occurrence.urgency) }}</dd>
+                </div>
+                <div v-if="occurrence.affected_item">
+                  <dt class="text-xs text-muted-foreground">{{ $t('occurrences.internal.affectedItem') }}</dt>
+                  <dd class="[overflow-wrap:anywhere]">{{ occurrence.affected_item }}</dd>
+                </div>
+                <div v-if="occurrence.due_date">
+                  <dt class="text-xs text-muted-foreground">{{ $t('occurrences.internal.dueDate') }}</dt>
+                  <dd>{{ formatCivilDate(occurrence.due_date) }}</dd>
+                </div>
+              </template>
               <div v-if="occurrence.category_name">
                 <dt class="text-xs text-muted-foreground">{{ $t('occurrences.categoryLabel') }}</dt>
                 <dd>{{ occurrence.category_name }}</dd>
@@ -631,7 +668,7 @@ onUnmounted(() => {
               <p class="whitespace-pre-wrap text-sm leading-relaxed [overflow-wrap:anywhere]">{{ occurrence.description }}</p>
             </div>
 
-            <div class="mt-4 border-t pt-3" data-testid="case-order">
+            <div v-if="!isInternal" class="mt-4 border-t pt-3" data-testid="case-order">
               <h3 class="mb-2 text-sm font-semibold">{{ $t('occurrences.secOrder') }}</h3>
               <template v-if="occurrence.order_ref || occurrence.invoice_number || occurrence.product_description">
                 <dl class="space-y-2 text-sm">

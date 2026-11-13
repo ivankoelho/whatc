@@ -198,7 +198,7 @@ func TestUpdateOccurrence_RejectsUnitFromAnotherOrg(t *testing.T) {
 	stage, err := app.InitialStageForTest(org.ID)
 	require.NoError(t, err)
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Caso",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Caso",
 		StageID: stage.ID, OpenedByUserID: user.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))

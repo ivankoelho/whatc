@@ -57,7 +57,7 @@ func TestCaseWhatsApp_ConversationIsForThoseWhoWorkTheCase(t *testing.T) {
 func (w *chatWorld) contactOf(t *testing.T) uuid.UUID {
 	var occ models.Occurrence
 	require.NoError(t, w.app.DB.First(&occ, w.occID).Error)
-	return occ.ContactID
+	return *occ.ContactID
 }
 
 func TestCaseWhatsApp_ReplyNeedsTheWindowAndGoesOutOnTheLogisticsAccount(t *testing.T) {
