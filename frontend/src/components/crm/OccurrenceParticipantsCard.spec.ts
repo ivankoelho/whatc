@@ -64,4 +64,19 @@ describe('OccurrenceParticipantsCard (acompanhamento e apoio)', () => {
     expect(svc.supportDepartments).not.toHaveBeenCalled()
     expect(w.find('[data-testid="support-department"]').exists()).toBe(false)
   })
+
+  it('shows the requester as such, without a remove button, and never offers them as support', async () => {
+    svc.listParticipants.mockReturnValue(ok({ participants: [row('u1', 'Bia', true, { role: 'follower' }), row('u9', 'Rita', true, { role: 'follower' })] }))
+    svc.supportUsers.mockReturnValue(ok({ users: [{ id: 'u9', full_name: 'Rita' }, { id: 'u3', full_name: 'Davi' }] }))
+    const w = mount(OccurrenceParticipantsCard, { props: { occurrenceId: 'o1', canWrite: true, requesterId: 'u9' }, global: { plugins: [i18n] } })
+    await flushPromises()
+    const rita = w.find('[data-testid="participant-u9"]')
+    expect(rita.find('[data-testid="participant-requester-badge"]').text()).toBe('Requester')
+    expect(rita.find('button').exists()).toBe(false)
+    expect(w.find('[data-testid="participant-u1"] button').exists()).toBe(true) // others keep their remove action
+    await w.find('[data-testid="support-department"]').setValue('d1')
+    await flushPromises()
+    expect(w.find('[data-testid="support-user-u9"]').exists()).toBe(false)
+    expect(w.find('[data-testid="support-user-u3"]').exists()).toBe(true)
+  })
 })

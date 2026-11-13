@@ -3110,8 +3110,9 @@
     "claim": "Assumir",
     "claimed": "Você agora é o responsável por esta ocorrência",
     "claimFailed": "Não foi possível assumir esta ocorrência",
-    "support": {
-      "title": "Acompanhamento e apoio",
+        "support": {
+      "title": "Pessoas no chamado",
+      "requester": "Solicitante",
       "none": "Ninguém acompanha ou apoia esta ocorrência ainda.",
       "roleSupport": "Pessoa de apoio",
       "roleFollower": "Acompanhando",
@@ -3126,8 +3127,9 @@
       "note": "Apoio não dá acesso ao WhatsApp do cliente, a anexos restritos nem a outros protocolos.",
       "loadFailed": "Não foi possível carregar as opções de apoio"
     },
-    "transfer": {
-      "title": "Responsabilidade e encaminhamento",
+        "transfer": {
+      "title": "Atendimento",
+      "deadline": "Prazo",
       "currentTeam": "Departamento atual",
       "currentOwner": "Responsável atual",
       "noTeam": "Com o solicitante",
@@ -3189,6 +3191,8 @@
       "formTitle": "Novo chamado interno",
       "type": "Tipo",
       "typeRequest": "Solicitação (preciso de algo)",
+      "typeIncidentShort": "Incidente",
+      "typeRequestShort": "Solicitação",
       "typeIncident": "Incidente (algo parou ou quebrou)",
       "requesterDepartment": "Meu departamento",
       "optional": "Opcional",

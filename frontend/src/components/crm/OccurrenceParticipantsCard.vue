@@ -11,7 +11,8 @@ import { Users, X } from 'lucide-vue-next'
 
 // "Acompanhamento e apoio": pick a support department, then only its ACTIVE members (the server filters by
 // what the caller may pick from); the list keeps the history of who added/removed whom and when.
-const props = defineProps<{ occurrenceId: string; canWrite: boolean; embedded?: boolean }>()
+// requesterId: on an internal ticket the requester is shown as such, cannot be removed and is never offered again.
+const props = defineProps<{ occurrenceId: string; canWrite: boolean; embedded?: boolean; requesterId?: string }>()
 
 const { t } = useI18n()
 const participants = ref<OccurrenceParticipant[]>([])
@@ -24,7 +25,8 @@ const isBusy = ref(false)
 const activeList = computed(() => participants.value.filter(p => p.active))
 const history = computed(() => participants.value.filter(p => !p.active))
 // people already linked are not offered twice
-const candidates = computed(() => people.value.filter(u => !activeList.value.some(p => p.user_id === u.id)))
+const candidates = computed(() => people.value.filter(u => u.id !== props.requesterId && !activeList.value.some(p => p.user_id === u.id)))
+const isRequester = (userId: string) => !!props.requesterId && userId === props.requesterId
 
 const fmt = (iso?: string) => formatDateTime(iso)
 const roleLabel = (r: string) => (r === 'support' ? t('occurrences.support.roleSupport') : t('occurrences.support.roleFollower'))
@@ -108,14 +110,17 @@ watch(() => props.occurrenceId, () => { load(); loadDepartments() }, { immediate
         <div class="min-w-0 flex-1 space-y-1">
           <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span class="font-medium [overflow-wrap:anywhere]">{{ p.user_name }}</span>
-            <Badge :variant="p.role === 'support' ? 'default' : 'secondary'" class="text-xs">{{ roleLabel(p.role) }}</Badge>
-            <Badge v-for="c in p.capabilities" :key="c" variant="outline" class="text-xs">{{ $t('occurrences.cap.' + c) }}</Badge>
+            <Badge v-if="isRequester(p.user_id)" class="text-xs" data-testid="participant-requester-badge">{{ $t('occurrences.support.requester') }}</Badge>
+            <template v-else>
+              <Badge :variant="p.role === 'support' ? 'default' : 'secondary'" class="text-xs">{{ roleLabel(p.role) }}</Badge>
+              <Badge v-for="c in p.capabilities" :key="c" variant="outline" class="text-xs">{{ $t('occurrences.cap.' + c) }}</Badge>
+            </template>
           </div>
           <p class="text-xs leading-relaxed text-muted-foreground">
             <span v-if="p.department_name">{{ p.department_name }} · </span>{{ $t('occurrences.support.addedBy', { name: p.added_by || '—' }) }} · {{ fmt(p.added_at) }}
           </p>
         </div>
-        <Button v-if="canWrite" variant="ghost" size="icon" class="-mr-1 h-8 w-8 shrink-0" :disabled="isBusy" :aria-label="$t('occurrences.participantsRemove')" @click="remove(p.user_id)">
+        <Button v-if="canWrite && !isRequester(p.user_id)" variant="ghost" size="icon" class="-mr-1 h-8 w-8 shrink-0" :disabled="isBusy" :aria-label="$t('occurrences.participantsRemove')" @click="remove(p.user_id)">
           <X class="h-4 w-4" />
         </Button>
       </li>

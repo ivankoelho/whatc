@@ -13,8 +13,9 @@ import { ArrowRightLeft, Send, Undo2 } from 'lucide-vue-next'
 
 // Forward and Return: the main responsibility moves between departments (teams), with a reason, and the case keeps
 // its protocol, files, discussion and history. Supporting and following are separate (the card above).
-const props = defineProps<{ occurrenceId: string; teamName?: string; assignedName?: string; closed?: boolean }>()
-const emit = defineEmits<{ changed: [] }>()
+// canClaim: nobody owns the case and the viewer may take it, so "Assumir" sits right where the gap is shown.
+const props = defineProps<{ occurrenceId: string; teamName?: string; assignedName?: string; closed?: boolean; canClaim?: boolean; deadline?: string; deadlineBreached?: boolean }>()
+const emit = defineEmits<{ changed: []; claim: [] }>()
 const { t } = useI18n()
 
 const transfers = ref<OccurrenceTransfer[]>([])
@@ -109,7 +110,7 @@ const moves = computed(() => transfers.value.filter(x => x.reason !== 'Abertura 
       {{ $t('occurrences.transfer.title') }}
     </h3>
 
-    <dl class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+    <dl class="grid grid-cols-1 gap-3 sm:grid-cols-3">
       <div>
         <dt class="text-xs text-muted-foreground">{{ $t('occurrences.transfer.currentTeam') }}</dt>
         <dd class="font-medium [overflow-wrap:anywhere]" data-testid="current-team">{{ teamName || $t('occurrences.transfer.noTeam') }}</dd>
@@ -117,14 +118,19 @@ const moves = computed(() => transfers.value.filter(x => x.reason !== 'Abertura 
       <div>
         <dt class="text-xs text-muted-foreground">{{ $t('occurrences.transfer.currentOwner') }}</dt>
         <dd class="font-medium [overflow-wrap:anywhere]" data-testid="current-owner">{{ assignedName || $t('occurrences.transfer.unassigned') }}</dd>
+        <Button v-if="canClaim && !assignedName" size="sm" class="mt-2" data-testid="transfer-claim" @click="emit('claim')">{{ $t('occurrences.claim') }}</Button>
+      </div>
+      <div v-if="deadline">
+        <dt class="text-xs text-muted-foreground">{{ $t('occurrences.transfer.deadline') }}</dt>
+        <dd :class="deadlineBreached ? 'font-medium text-destructive' : 'font-medium'" data-testid="current-deadline">{{ formatDateTime(deadline) }}</dd>
       </div>
     </dl>
 
     <div v-if="canForward || canReturn" class="flex flex-wrap gap-2">
-      <Button v-if="canForward" size="sm" :disabled="busy" data-testid="transfer-forward" @click="openForward">
+      <Button v-if="canForward" size="sm" variant="ghost" :disabled="busy" data-testid="transfer-forward" @click="openForward">
         <Send class="mr-1.5 h-4 w-4" aria-hidden="true" />{{ $t('occurrences.transfer.forward') }}
       </Button>
-      <Button v-if="canReturn" size="sm" variant="outline" :disabled="busy" data-testid="transfer-return" @click="returnOpen = true">
+      <Button v-if="canReturn" size="sm" variant="ghost" :disabled="busy" data-testid="transfer-return" @click="returnOpen = true">
         <Undo2 class="mr-1.5 h-4 w-4" aria-hidden="true" />{{ $t('occurrences.transfer.return') }}
       </Button>
     </div>

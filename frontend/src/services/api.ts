@@ -1643,6 +1643,7 @@ export interface Occurrence {
   due_date?: string
   affected_item?: string
   opened_by_name?: string
+  opened_by_user_id?: string
   contact_name: string
   contact_phone?: string
   title: string

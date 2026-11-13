@@ -101,3 +101,30 @@ func TestInternalTicket_CreateRoutesAndStaysInScope(t *testing.T) {
 	require.NoError(t, w.app.SendOccurrenceProtocol(req))
 	assert.NotEqual(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req), "an internal ticket cannot message a customer")
 }
+
+func TestInternalTicket_RequesterCannotBeRemoved(t *testing.T) {
+	w := newIsoWorld(t)
+	req := testutil.NewJSONRequest(t, map[string]any{
+		"title": "t", "description": "d", "team_id": w.teamPorto.ID.String(),
+	})
+	testutil.SetAuthContext(req, w.org.ID, w.sac.ID)
+	require.NoError(t, w.app.CreateInternalTicket(req))
+	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+	var occ models.Occurrence
+	require.NoError(t, w.app.DB.Where("organization_id = ? AND kind = ?", w.org.ID, models.OccurrenceKindInternal).First(&occ).Error)
+
+	remove := func(userID, target uuid.UUID) int {
+		r := testutil.NewJSONRequest(t, map[string]any{})
+		testutil.SetAuthContext(r, w.org.ID, userID)
+		testutil.SetPathParam(r, "id", occ.ID.String())
+		testutil.SetPathParam(r, "userId", target.String())
+		require.NoError(t, w.app.RemoveOccurrenceParticipant(r))
+		return testutil.GetResponseStatusCode(r)
+	}
+	// Neither the requester nor a team member can take the requester off the case.
+	assert.Equal(t, fasthttp.StatusConflict, remove(w.sac.ID, w.sac.ID))
+	assert.Equal(t, fasthttp.StatusConflict, remove(w.logPorto.ID, w.sac.ID))
+	var n int64
+	w.app.DB.Model(&models.OccurrenceParticipant{}).Where("occurrence_id = ? AND user_id = ?", occ.ID, w.sac.ID).Count(&n)
+	assert.EqualValues(t, 1, n, "requester still on the case")
+}
