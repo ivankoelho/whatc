@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"time"
 	"testing"
 
 	"github.com/google/uuid"
@@ -100,4 +101,39 @@ func TestInternalTicket_CreateRoutesAndStaysInScope(t *testing.T) {
 	testutil.SetPathParam(req, "id", occ.ID.String())
 	require.NoError(t, w.app.SendOccurrenceProtocol(req))
 	assert.NotEqual(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req), "an internal ticket cannot message a customer")
+}
+
+// An internal ticket has a resolution deadline and no first-response deadline: that
+// one measures the first public reply to a customer, which it cannot have.
+func TestInternalTicket_SLAHasNoFirstResponseDeadline(t *testing.T) {
+	w := newIsoWorld(t)
+	team := w.teamPorto.ID.String()
+
+	req := testutil.NewJSONRequest(t, map[string]any{
+		"title": "t", "description": "d", "team_id": team, "impact": "low", "urgency": "low",
+	})
+	testutil.SetAuthContext(req, w.org.ID, w.sac.ID)
+	require.NoError(t, w.app.CreateInternalTicket(req))
+	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var occ models.Occurrence
+	require.NoError(t, w.app.DB.Where("organization_id = ? AND kind = ?", w.org.ID, models.OccurrenceKindInternal).First(&occ).Error)
+	assert.Nil(t, occ.SLA.ResponseDeadline, "no first-response deadline")
+	require.NotNil(t, occ.SLA.ResolutionDeadline)
+	lowResolution := *occ.SLA.ResolutionDeadline
+	assert.WithinDuration(t, time.Now().Add(24*time.Hour), lowResolution, 10*time.Second) // default low policy
+
+	// Raising the priority recalculates the resolution deadline but never creates the response one.
+	upd := testutil.NewJSONRequest(t, map[string]any{"title": occ.Title, "priority": "urgent"})
+	testutil.SetAuthContext(upd, w.org.ID, w.logPorto.ID)
+	testutil.SetPathParam(upd, "id", occ.ID.String())
+	require.NoError(t, w.app.UpdateOccurrence(upd))
+	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(upd))
+
+	require.NoError(t, w.app.DB.First(&occ, "id = ?", occ.ID).Error)
+	assert.Equal(t, models.OccurrencePriorityUrgent, occ.Priority)
+	assert.Nil(t, occ.SLA.ResponseDeadline, "a priority change must not create a first-response deadline")
+	require.NotNil(t, occ.SLA.ResolutionDeadline)
+	assert.True(t, occ.SLA.ResolutionDeadline.Before(lowResolution), "urgent resolves sooner than low")
+	assert.WithinDuration(t, time.Now().Add(4*time.Hour), *occ.SLA.ResolutionDeadline, 10*time.Second)
 }

@@ -234,12 +234,14 @@ func (a *App) CreateInternalTicket(r *fastglue.Request) error {
 		RequesterDepartmentID: reqDeptID,
 		AssignedUserID:        assignee,
 	}
-	if responseMin, resolutionMin, err := a.resolveOccurrenceSLAMinutes(orgID, priority, nil); err != nil {
+	// Resolution deadline only. A first-response deadline measures the first public
+	// reply to a customer, which an internal ticket does not have, so it would always
+	// be marked breached. The first-attention metric is left to the functional spec.
+	if _, resolutionMin, err := a.resolveOccurrenceSLAMinutes(orgID, priority, nil); err != nil {
 		a.Log.Error("Failed to resolve SLA policy", "error", err, "organization_id", orgID)
 	} else {
-		now := time.Now()
-		rd, xd := now.Add(time.Duration(responseMin)*time.Minute), now.Add(time.Duration(resolutionMin)*time.Minute)
-		occ.SLA = models.SLATracking{ResponseDeadline: &rd, ResolutionDeadline: &xd}
+		xd := time.Now().Add(time.Duration(resolutionMin) * time.Minute)
+		occ.SLA = models.SLATracking{ResolutionDeadline: &xd}
 	}
 
 	var hooks []func(tx *gorm.DB, o *models.Occurrence) error
