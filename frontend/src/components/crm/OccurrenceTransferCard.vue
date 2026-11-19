@@ -13,9 +13,13 @@ import { ArrowRightLeft, Send, Undo2 } from 'lucide-vue-next'
 
 // Forward and Return: the main responsibility moves between departments (teams), with a reason, and the case keeps
 // its protocol, files, discussion and history. Supporting and following are separate (the card above).
-const props = defineProps<{ occurrenceId: string; teamName?: string; assignedName?: string; closed?: boolean }>()
-const emit = defineEmits<{ changed: [] }>()
-const { t } = useI18n()
+// canClaim: nobody owns the case and the viewer may take it, so "Assumir" sits right where the gap is shown.
+const props = defineProps<{ occurrenceId: string; teamName?: string; assignedName?: string; closed?: boolean; canClaim?: boolean; deadline?: string; deadlineBreached?: boolean; internal?: boolean }>()
+const emit = defineEmits<{ changed: []; claim: [] }>()
+const { t, te } = useI18n()
+// An internal ticket speaks of "chamado" and "equipe": a key may have an "Internal" variant.
+const tr = (key: string, params?: Record<string, unknown>) =>
+  props.internal && te(key + 'Internal') ? t(key + 'Internal', params ?? {}) : t(key, params ?? {})
 
 const transfers = ref<OccurrenceTransfer[]>([])
 const canForward = ref(false)
@@ -70,12 +74,12 @@ async function doForward() {
   busy.value = true
   try {
     await occurrencesService.forward(props.occurrenceId, { team_id: teamId.value, assigned_user_id: personId.value || undefined, reason: reason.value.trim() })
-    toast.success(t('occurrences.transfer.forwarded'))
+    toast.success(tr('occurrences.transfer.forwarded'))
     forwardOpen.value = false
     emit('changed')
     await load()
   } catch (e: any) {
-    toast.error(e?.response?.status === 409 ? t('occurrences.transfer.conflict') : getErrorMessage(e, t('occurrences.transfer.failed')))
+    toast.error(e?.response?.status === 409 ? tr('occurrences.transfer.conflict') : getErrorMessage(e, tr('occurrences.transfer.failed')))
     await load()
   } finally { busy.value = false }
 }
@@ -88,13 +92,13 @@ async function doReturn() {
   busy.value = true
   try {
     await occurrencesService.returnCase(props.occurrenceId, returnReason.value.trim())
-    toast.success(t('occurrences.transfer.returned'))
+    toast.success(tr('occurrences.transfer.returned'))
     returnOpen.value = false
     returnReason.value = ''
     emit('changed')
     await load()
   } catch (e: any) {
-    toast.error(e?.response?.status === 409 ? t('occurrences.transfer.conflict') : getErrorMessage(e, t('occurrences.transfer.failed')))
+    toast.error(e?.response?.status === 409 ? tr('occurrences.transfer.conflict') : getErrorMessage(e, tr('occurrences.transfer.failed')))
     await load()
   } finally { busy.value = false }
 }
@@ -106,34 +110,39 @@ const moves = computed(() => transfers.value.filter(x => x.reason !== 'Abertura 
   <section class="space-y-3 text-sm" data-testid="occurrence-transfer">
     <h3 class="flex items-center gap-2 text-sm font-medium">
       <ArrowRightLeft class="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-      {{ $t('occurrences.transfer.title') }}
+      {{ tr('occurrences.transfer.title') }}
     </h3>
 
-    <dl class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+    <dl class="grid grid-cols-1 gap-3 sm:grid-cols-3">
       <div>
-        <dt class="text-xs text-muted-foreground">{{ $t('occurrences.transfer.currentTeam') }}</dt>
-        <dd class="font-medium [overflow-wrap:anywhere]" data-testid="current-team">{{ teamName || $t('occurrences.transfer.noTeam') }}</dd>
+        <dt class="text-xs text-muted-foreground">{{ tr('occurrences.transfer.currentTeam') }}</dt>
+        <dd class="font-medium [overflow-wrap:anywhere]" data-testid="current-team">{{ teamName || tr('occurrences.transfer.noTeam') }}</dd>
       </div>
       <div>
-        <dt class="text-xs text-muted-foreground">{{ $t('occurrences.transfer.currentOwner') }}</dt>
-        <dd class="font-medium [overflow-wrap:anywhere]" data-testid="current-owner">{{ assignedName || $t('occurrences.transfer.unassigned') }}</dd>
+        <dt class="text-xs text-muted-foreground">{{ tr('occurrences.transfer.currentOwner') }}</dt>
+        <dd class="font-medium [overflow-wrap:anywhere]" data-testid="current-owner">{{ assignedName || tr('occurrences.transfer.unassigned') }}</dd>
+        <Button v-if="canClaim && !assignedName" size="sm" class="mt-2" data-testid="transfer-claim" @click="emit('claim')">{{ $t('occurrences.claim') }}</Button>
+      </div>
+      <div v-if="deadline">
+        <dt class="text-xs text-muted-foreground">{{ tr('occurrences.transfer.deadline') }}</dt>
+        <dd :class="deadlineBreached ? 'font-medium text-destructive' : 'font-medium'" data-testid="current-deadline">{{ formatDateTime(deadline) }}</dd>
       </div>
     </dl>
 
     <div v-if="canForward || canReturn" class="flex flex-wrap gap-2">
-      <Button v-if="canForward" size="sm" :disabled="busy" data-testid="transfer-forward" @click="openForward">
-        <Send class="mr-1.5 h-4 w-4" aria-hidden="true" />{{ $t('occurrences.transfer.forward') }}
+      <Button v-if="canForward" size="sm" variant="ghost" :disabled="busy" data-testid="transfer-forward" @click="openForward">
+        <Send class="mr-1.5 h-4 w-4" aria-hidden="true" />{{ tr('occurrences.transfer.forward') }}
       </Button>
-      <Button v-if="canReturn" size="sm" variant="outline" :disabled="busy" data-testid="transfer-return" @click="returnOpen = true">
-        <Undo2 class="mr-1.5 h-4 w-4" aria-hidden="true" />{{ $t('occurrences.transfer.return') }}
+      <Button v-if="canReturn" size="sm" variant="ghost" :disabled="busy" data-testid="transfer-return" @click="returnOpen = true">
+        <Undo2 class="mr-1.5 h-4 w-4" aria-hidden="true" />{{ tr('occurrences.transfer.return') }}
       </Button>
     </div>
 
     <ol v-if="moves.length" class="space-y-2 border-l pl-3" data-testid="transfer-history">
       <li v-for="m in moves" :key="m.id" class="text-xs">
         <p class="font-medium">
-          {{ m.kind === 'return' ? $t('occurrences.transfer.movedBack') : $t('occurrences.transfer.movedOn') }}
-          <span v-if="m.from_team || m.to_team"> · {{ m.from_team || $t('occurrences.transfer.requester') }} → {{ m.to_team || $t('occurrences.transfer.requester') }}</span>
+          {{ m.kind === 'return' ? tr('occurrences.transfer.movedBack') : tr('occurrences.transfer.movedOn') }}
+          <span v-if="m.from_team || m.to_team"> · {{ m.from_team || tr('occurrences.transfer.requester') }} → {{ m.to_team || tr('occurrences.transfer.requester') }}</span>
           <span v-if="m.to_user"> ({{ m.to_user }})</span>
         </p>
         <p class="text-muted-foreground">{{ m.by }} · {{ formatDateTime(m.created_at) }}</p>
@@ -144,33 +153,33 @@ const moves = computed(() => transfers.value.filter(x => x.reason !== 'Abertura 
     <Dialog v-model:open="forwardOpen">
       <DialogContent class="max-w-md">
         <DialogHeader>
-          <DialogTitle>{{ $t('occurrences.transfer.forwardTitle') }}</DialogTitle>
-          <DialogDescription>{{ $t('occurrences.transfer.forwardDesc') }}</DialogDescription>
+          <DialogTitle>{{ tr('occurrences.transfer.forwardTitle') }}</DialogTitle>
+          <DialogDescription>{{ tr('occurrences.transfer.forwardDesc') }}</DialogDescription>
         </DialogHeader>
         <div class="space-y-3">
           <div class="space-y-1.5">
-            <Label for="fwd-team">{{ $t('occurrences.transfer.destination') }}</Label>
+            <Label for="fwd-team">{{ tr('occurrences.transfer.destination') }}</Label>
             <select id="fwd-team" v-model="teamId" class="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="forward-team">
-              <option value="">{{ $t('occurrences.transfer.pickTeam') }}</option>
+              <option value="">{{ tr('occurrences.transfer.pickTeam') }}</option>
               <option v-for="x in targets" :key="x.id" :value="x.id">{{ x.name }}<template v-if="x.unit_name"> — {{ x.unit_name }}</template></option>
             </select>
           </div>
           <div v-if="teamId" class="space-y-1.5">
-            <Label for="fwd-person">{{ $t('occurrences.transfer.person') }}</Label>
+            <Label for="fwd-person">{{ tr('occurrences.transfer.person') }}</Label>
             <select id="fwd-person" v-model="personId" class="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="forward-person">
-              <option value="">{{ $t('occurrences.transfer.anyone') }}</option>
+              <option value="">{{ tr('occurrences.transfer.anyone') }}</option>
               <option v-for="p in members" :key="p.id" :value="p.id">{{ p.full_name }}</option>
             </select>
           </div>
           <div class="space-y-1.5">
-            <Label for="fwd-reason">{{ $t('occurrences.transfer.reason') }} <span class="text-destructive">*</span></Label>
+            <Label for="fwd-reason">{{ tr('occurrences.transfer.reason') }} <span class="text-destructive">*</span></Label>
             <Textarea id="fwd-reason" v-model="reason" :rows="3" :maxlength="500" data-testid="forward-reason" />
           </div>
-          <p class="text-xs text-muted-foreground">{{ $t('occurrences.transfer.keeps') }}</p>
+          <p class="text-xs text-muted-foreground">{{ tr('occurrences.transfer.keeps') }}</p>
         </div>
         <DialogFooter>
           <Button variant="outline" @click="forwardOpen = false">{{ $t('common.cancel') }}</Button>
-          <Button :disabled="!teamId || !reasonOk || busy" data-testid="forward-confirm" @click="doForward">{{ $t('occurrences.transfer.forward') }}</Button>
+          <Button :disabled="!teamId || !reasonOk || busy" data-testid="forward-confirm" @click="doForward">{{ tr('occurrences.transfer.forward') }}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -178,16 +187,16 @@ const moves = computed(() => transfers.value.filter(x => x.reason !== 'Abertura 
     <Dialog v-model:open="returnOpen">
       <DialogContent class="max-w-md">
         <DialogHeader>
-          <DialogTitle>{{ $t('occurrences.transfer.returnTitle') }}</DialogTitle>
-          <DialogDescription>{{ $t('occurrences.transfer.returnDesc', { to: returnTo || $t('occurrences.transfer.requester') }) }}</DialogDescription>
+          <DialogTitle>{{ tr('occurrences.transfer.returnTitle') }}</DialogTitle>
+          <DialogDescription>{{ tr('occurrences.transfer.returnDesc', { to: returnTo || tr('occurrences.transfer.requester') }) }}</DialogDescription>
         </DialogHeader>
         <div class="space-y-1.5">
-          <Label for="ret-reason">{{ $t('occurrences.transfer.reason') }} <span class="text-destructive">*</span></Label>
+          <Label for="ret-reason">{{ tr('occurrences.transfer.reason') }} <span class="text-destructive">*</span></Label>
           <Textarea id="ret-reason" v-model="returnReason" :rows="3" :maxlength="500" data-testid="return-reason" />
         </div>
         <DialogFooter>
           <Button variant="outline" @click="returnOpen = false">{{ $t('common.cancel') }}</Button>
-          <Button :disabled="returnReason.trim().length < 3 || busy" data-testid="return-confirm" @click="doReturn">{{ $t('occurrences.transfer.return') }}</Button>
+          <Button :disabled="returnReason.trim().length < 3 || busy" data-testid="return-confirm" @click="doReturn">{{ tr('occurrences.transfer.return') }}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

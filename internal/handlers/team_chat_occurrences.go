@@ -59,10 +59,12 @@ func (a *App) chatOccurrenceChannels(orgID, userID uuid.UUID, involvedOnly bool,
 func (a *App) chatOccurrenceInfo(channels []models.ChatChannel) map[uuid.UUID]struct {
 	ID    uuid.UUID
 	Label string
+	Kind  string
 } {
 	out := map[uuid.UUID]struct {
 		ID    uuid.UUID
 		Label string
+		Kind  string
 	}{}
 	var ids []uuid.UUID
 	for _, c := range channels {
@@ -74,7 +76,7 @@ func (a *App) chatOccurrenceInfo(channels []models.ChatChannel) map[uuid.UUID]st
 		return out
 	}
 	var occs []models.Occurrence
-	a.DB.Select("id", "protocol_number", "title").Where("id IN ?", ids).Find(&occs)
+	a.DB.Select("id", "protocol_number", "title", "kind").Where("id IN ?", ids).Find(&occs)
 	byID := map[uuid.UUID]models.Occurrence{}
 	for _, o := range occs {
 		byID[o.ID] = o
@@ -91,7 +93,8 @@ func (a *App) chatOccurrenceInfo(channels []models.ChatChannel) map[uuid.UUID]st
 		out[c.ID] = struct {
 			ID    uuid.UUID
 			Label string
-		}{ID: o.ID, Label: label}
+			Kind  string
+		}{ID: o.ID, Label: label, Kind: o.Kind}
 	}
 	return out
 }
@@ -130,6 +133,7 @@ func (a *App) chatOccurrenceResponses(userID uuid.UUID, channels []models.ChatCh
 		}
 		if oid := info[c.ID].ID; oid != uuid.Nil {
 			resp.OccurrenceID = &oid
+			resp.OccurrenceKind = info[c.ID].Kind
 		}
 		if t, ok := last[c.ID]; ok {
 			t := t

@@ -25,6 +25,24 @@ describe('OccurrenceTransferCard', () => {
     svc.returnCase.mockReturnValue(ok({}))
   })
 
+  it('speaks of the ticket and the team for an internal ticket, and keeps the service wording otherwise', async () => {
+    const internal = mount(OccurrenceTransferCard, { props: { occurrenceId: 'o1', teamName: 'Suporte TI', internal: true }, global: { plugins: [i18n] }, attachTo: document.body })
+    await flushPromises()
+    expect(internal.text()).toContain('Current team')
+    expect(internal.text()).toContain('Forwarded')
+    await internal.find('[data-testid="transfer-forward"]').trigger('click')
+    await flushPromises()
+    expect(document.body.textContent).toContain('Forward ticket')
+    expect(document.body.textContent).not.toContain('WhatsApp')
+    internal.unmount()
+    document.body.innerHTML = ''
+
+    const service = mountCard()
+    await flushPromises()
+    expect(service.text()).toContain('Current department')
+    expect(service.text()).not.toContain('Current team')
+  })
+
   it('shows department, owner and the movements; offers both actions only when allowed', async () => {
     const w = mountCard()
     await flushPromises()
