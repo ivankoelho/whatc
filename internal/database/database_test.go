@@ -430,3 +430,41 @@ func TestEnsureBrandingSettingsRow_IsIdempotent(t *testing.T) {
 	assert.Equal(t, "branding/login-background.jpg", row.LoginBackgroundPath,
 		"re-running the seed must not overwrite an existing configuration")
 }
+
+// An existing database (created before internal tickets) has occurrences.contact_id NOT NULL, and GORM's
+// AutoMigrate leaves that alone: the explicit statement in the index list is what lets an internal ticket,
+// which has no customer, be stored.
+func TestCreateIndexes_ReleasesTheNotNullOfOccurrencesContactID(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	cleanAll(t, db)
+
+	nullable := func() string {
+		var v string
+		require.NoError(t, db.Raw(`SELECT is_nullable FROM information_schema.columns
+			WHERE table_name = 'occurrences' AND column_name = 'contact_id'`).Scan(&v).Error)
+		return v
+	}
+
+	// The schema an older version left behind (the table is empty after cleanAll, so the constraint applies).
+	require.NoError(t, db.Exec(`ALTER TABLE occurrences ALTER COLUMN contact_id SET NOT NULL`).Error)
+	require.Equal(t, "NO", nullable())
+
+	require.NoError(t, database.CreateIndexes(db))
+	assert.Equal(t, "YES", nullable(), "contact_id must accept NULL after the migration")
+
+	// Idempotent: a second run on an already nullable column changes nothing and does not fail.
+	require.NoError(t, database.CreateIndexes(db))
+	assert.Equal(t, "YES", nullable())
+
+	// And an internal ticket (no contact) can really be stored.
+	org := testutil.CreateTestOrganization(t, db)
+	user := testutil.CreateTestUser(t, db, org.ID)
+	stage := models.OccurrenceStage{OrganizationID: org.ID, Name: "Aberto-" + uuid.NewString()[:6], IsInitial: true}
+	require.NoError(t, db.Create(&stage).Error)
+	occ := models.Occurrence{
+		OrganizationID: org.ID, Kind: models.OccurrenceKindInternal, ProtocolNumber: "9999-000001",
+		Title: "Sem cliente", StageID: stage.ID, OpenedByUserID: user.ID,
+	}
+	require.NoError(t, db.Create(&occ).Error)
+	assert.Nil(t, occ.ContactID)
+}
