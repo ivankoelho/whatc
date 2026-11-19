@@ -1,9 +1,28 @@
 <script setup lang="ts">
+import { nextTick, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { VueFlow, MarkerType } from '@vue-flow/core'
 import type { Node, Edge, NodeMouseEvent, Connection, EdgeMouseEvent } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
+
+const { t, locale } = useI18n()
+const rootEl = ref<HTMLElement | null>(null)
+// @vue-flow/controls renders four icon-only buttons with no accessible name and no slot to add one: label them after render.
+function labelControls() {
+  const labels: Record<string, string> = {
+    '.vue-flow__controls-zoomin': t('flowBuilder.canvasZoomIn'),
+    '.vue-flow__controls-zoomout': t('flowBuilder.canvasZoomOut'),
+    '.vue-flow__controls-fitview': t('flowBuilder.canvasFitView'),
+    '.vue-flow__controls-interactive': t('flowBuilder.canvasToggleInteractive')
+  }
+  for (const [selector, label] of Object.entries(labels)) {
+    rootEl.value?.querySelectorAll(selector).forEach(el => el.setAttribute('aria-label', label))
+  }
+}
+onMounted(() => nextTick(labelControls))
+watch(locale, () => nextTick(labelControls))
 
 withDefaults(
   defineProps<{
@@ -35,7 +54,7 @@ defineEmits<{
 </script>
 
 <template>
-  <div class="flow-canvas h-full relative">
+  <div ref="rootEl" class="flow-canvas h-full relative">
     <VueFlow
       :nodes="nodes"
       :edges="edges"

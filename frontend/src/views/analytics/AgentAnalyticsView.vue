@@ -326,7 +326,7 @@ void _displayStats.value // Suppress unused warning
         <div v-if="canFilterAgents" class="flex items-center gap-2 mr-4">
           <Popover v-model:open="agentComboboxOpen">
             <PopoverTrigger as-child>
-              <Button variant="outline" role="combobox" :aria-expanded="agentComboboxOpen" class="w-[200px] justify-between">
+              <Button variant="outline" role="combobox" :aria-expanded="agentComboboxOpen" :aria-label="$t('agentAnalytics.agentFilter')" class="w-[200px] justify-between">
                 <span class="truncate">{{ selectedAgentName }}</span>
                 <ChevronsUpDown class="ml-2 h-4 w-4 shrink-0 opacity-50" />
               </Button>

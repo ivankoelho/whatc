@@ -3944,6 +3944,7 @@
     }
   },
   "agentAnalytics": {
+    "agentFilter": "Agente",
     "live": {
       "title": "Ao vivo",
       "scopeAll": "Toda a organização",
@@ -4088,6 +4089,10 @@
     "errorLoadingInsights": "Falha ao carregar os insights da Meta. Tente novamente."
   },
   "flowBuilder": {
+    "canvasZoomIn": "Aproximar",
+    "canvasZoomOut": "Afastar",
+    "canvasFitView": "Ajustar à tela",
+    "canvasToggleInteractive": "Bloquear ou desbloquear o canvas",
     "steps": "Etapas",
     "add": "Adicionar",
     "flowSettings": "Configurações do fluxo",
@@ -4402,6 +4407,8 @@
       "menuBadge": "menu"
     },
     "properties": {
+      "playAudio": "Reproduzir áudio",
+      "pauseAudio": "Pausar áudio",
       "label": "Rótulo",
       "audio": "Áudio",
       "upload": "Enviar",

@@ -725,7 +725,7 @@ onMounted(async () => {
     <!-- Header -->
     <header class="border-b bg-background px-4 py-3 flex-shrink-0 max-md:px-3 max-md:py-2">
       <div class="flex items-center gap-4 max-md:flex-wrap max-md:gap-2">
-        <Button variant="ghost" size="icon" @click="handleCancel">
+        <Button variant="ghost" size="icon" :aria-label="$t('common.back')" @click="handleCancel">
           <ArrowLeft class="h-5 w-5" />
         </Button>
 
@@ -742,7 +742,7 @@ onMounted(async () => {
 
         <div class="flex items-center gap-3 max-md:ml-auto max-md:gap-2 max-md:min-w-0 max-md:flex-1 max-md:flex-wrap max-md:justify-end">
           <div class="flex items-center gap-2">
-            <Switch :checked="enabled" @update:checked="enabled = $event" />
+            <Switch :checked="enabled" :aria-label="enabled ? $t('flowBuilder.enabled') : $t('flowBuilder.disabled')" @update:checked="enabled = $event" />
             <span class="text-sm">{{ enabled ? $t('flowBuilder.enabled') : $t('flowBuilder.disabled') }}</span>
           </div>
 
@@ -844,7 +844,7 @@ onMounted(async () => {
           :aria-valuemin="PANEL_MIN_WIDTH"
           :aria-valuemax="PANEL_MAX_WIDTH"
           :class="[
-            'absolute left-0 top-0 z-10 h-full w-1.5 -ml-0.5 cursor-col-resize transition-colors',
+            'absolute left-0 top-0 z-10 h-full w-1.5 -ml-0.5 cursor-col-resize transition-colors max-md:hidden',
             'hover:bg-primary/40 focus-visible:bg-primary/40 focus-visible:outline-none',
             panelDragging && 'bg-primary/60',
           ]"

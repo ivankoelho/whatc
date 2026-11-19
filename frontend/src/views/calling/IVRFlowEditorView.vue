@@ -404,15 +404,15 @@ onMounted(() => {
       </Button>
       <Input v-model="flowName" :placeholder="$t('flows.flowName')" class="h-8 text-sm max-w-[250px] max-md:max-w-none max-md:basis-[calc(100%-3rem)] max-md:min-w-0" />
       <div class="flex items-center gap-2 ml-4">
-        <Switch v-model:checked="isActive" />
+        <Switch v-model:checked="isActive" :aria-label="$t('common.active')" />
         <Label class="text-xs whitespace-nowrap">{{ $t('common.active') }}</Label>
       </div>
       <div class="flex items-center gap-2 ml-2">
-        <Switch v-model:checked="isCallStart" :disabled="!isActive" />
+        <Switch v-model:checked="isCallStart" :disabled="!isActive" :aria-label="$t('calling.incomingCallStart')" />
         <Label class="text-xs whitespace-nowrap">{{ $t('calling.incomingCallStart') }}</Label>
       </div>
       <div class="flex items-center gap-2 ml-2">
-        <Switch v-model:checked="isOutgoingEnd" :disabled="!isActive" />
+        <Switch v-model:checked="isOutgoingEnd" :disabled="!isActive" :aria-label="$t('calling.outgoingEnd')" />
         <Label class="text-xs whitespace-nowrap">{{ $t('calling.outgoingEnd') }}</Label>
       </div>
       <div class="flex-1" />
