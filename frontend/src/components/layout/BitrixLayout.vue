@@ -8,6 +8,7 @@ import { useAuthStore } from '@/stores/auth'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Menu, X } from 'lucide-vue-next'
+import { useMobileDrawerA11y } from '@/composables/useMobileDrawerA11y'
 import { wsService } from '@/services/websocket'
 import { authService } from '@/services/api'
 import { useBranding } from '@/composables/useBranding'
@@ -29,6 +30,9 @@ const { logoUrl, systemName, loadBranding } = useBranding()
 const { background: wallpaper } = useWallpaper()
 const isCollapsed = ref(true)
 const isMobileMenuOpen = ref(false)
+const asideEl = ref<HTMLElement | null>(null)
+// Phone drawer: focus moves in on open, Escape closes, focus returns to the opener; `drawerLocked` makes the page behind it inert.
+const { locked: drawerLocked } = useMobileDrawerA11y(isMobileMenuOpen, asideEl)
 
 // Refresh user data and connect WebSocket on mount
 onMounted(() => {
@@ -143,7 +147,7 @@ const handleLogout = async () => {
 <template>
   <div class="on-wallpaper relative flex h-screen max-md:h-[100dvh] overflow-hidden" :style="{ background: wallpaper, '--wallpaper': wallpaper }">
     <!-- Skip link for accessibility -->
-    <a href="#main-content" class="skip-link">{{ $t('nav.skipToMain') }}</a>
+    <a href="#main-content" class="skip-link" :inert="drawerLocked || undefined">{{ $t('nav.skipToMain') }}</a>
 
     <!-- Mobile menu overlay -->
     <div
@@ -154,10 +158,12 @@ const handleLogout = async () => {
 
     <!-- Sidebar: glass over the wallpaper, white text in both colour modes -->
     <aside
+      ref="asideEl"
       :class="[
-        'shell-glass flex shrink-0 flex-col text-white transition-[width,transform] duration-300',
+        'shell-glass flex shrink-0 flex-col text-white transition-[width,transform] max-md:transition-[transform,visibility] duration-300',
         'fixed inset-y-0 left-0 z-40 max-md:z-[60] bg-black/45 backdrop-blur-xl md:relative md:bg-black/15 md:backdrop-blur-md',
-        isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
+        // Closed phone drawer is off-canvas: `invisible` (applied after the slide-out ends) also removes it from the tab order and the accessibility tree.
+        isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0 max-md:invisible',
         isCollapsed ? 'w-[272px] md:w-[70px]' : 'w-[272px]'
       ]"
       role="navigation"
@@ -265,7 +271,7 @@ const handleLogout = async () => {
       </div>
     </aside>
 
-    <div class="flex min-w-0 flex-1 flex-col">
+    <div class="flex min-w-0 flex-1 flex-col" :inert="drawerLocked || undefined">
       <!-- Top bar: module tabs on the left, workspace tools on the right -->
       <header :class="['shell-glass flex h-14 shrink-0 items-center gap-2 px-2 text-white md:px-3', isImmersive && 'max-md:hidden']">
         <button
@@ -322,6 +328,6 @@ const handleLogout = async () => {
       </main>
     </div>
 
-    <MobileTabBar v-if="!isImmersive" glass :items="mobileTabs" :more-open="isMobileMenuOpen" @more="isMobileMenuOpen = !isMobileMenuOpen" />
+    <MobileTabBar v-if="!isImmersive" glass :inert="drawerLocked || undefined" :items="mobileTabs" :more-open="isMobileMenuOpen" @more="isMobileMenuOpen = !isMobileMenuOpen" />
   </div>
 </template>

@@ -8,6 +8,7 @@ import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { Button } from '@/components/ui/button'
+import { useMobileDrawerA11y } from '@/composables/useMobileDrawerA11y'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
@@ -34,6 +35,9 @@ const authStore = useAuthStore()
 const { logoUrl, systemName, loadBranding } = useBranding()
 const isCollapsed = ref(true)
 const isMobileMenuOpen = ref(false)
+const asideEl = ref<HTMLElement | null>(null)
+// Phone drawer: focus moves in on open, Escape closes, focus returns to the opener; `drawerLocked` makes the page behind it inert.
+const { locked: drawerLocked } = useMobileDrawerA11y(isMobileMenuOpen, asideEl)
 
 // Refresh user data and connect WebSocket on mount
 onMounted(() => {
@@ -125,10 +129,10 @@ const handleLogout = async () => {
 <template>
   <div class="flex h-screen max-md:h-[100dvh] bg-[#0a0a0b] light:bg-gray-50">
     <!-- Skip link for accessibility -->
-    <a href="#main-content" class="skip-link">{{ $t('nav.skipToMain') }}</a>
+    <a href="#main-content" class="skip-link" :inert="drawerLocked || undefined">{{ $t('nav.skipToMain') }}</a>
 
     <!-- Mobile header -->
-    <header class="fixed top-0 left-0 right-0 z-50 flex h-12 items-center justify-between border-b border-white/[0.08] light:border-gray-200 bg-[#0a0a0b]/95 light:bg-white/95 backdrop-blur-sm px-3 md:hidden pt-[env(safe-area-inset-top)]" :class="isImmersive && 'hidden'">
+    <header :inert="drawerLocked || undefined" class="fixed top-0 left-0 right-0 z-50 flex h-12 items-center justify-between border-b border-white/[0.08] light:border-gray-200 bg-[#0a0a0b]/95 light:bg-white/95 backdrop-blur-sm px-3 md:hidden pt-[env(safe-area-inset-top)]" :class="isImmersive && 'hidden'">
       <RouterLink to="/" class="flex items-center gap-2">
         <img :src="logoUrl || '/logo-atacadao.png'" alt="" class="h-7 w-7 rounded-lg object-cover shadow-lg shadow-black/20">
         <span class="font-semibold text-sm text-white light:text-gray-900">{{ systemName || 'WhatsApp ATC' }}</span>
@@ -155,11 +159,13 @@ const handleLogout = async () => {
 
     <!-- Sidebar -->
     <aside
+      ref="asideEl"
       :class="[
         'flex flex-col border-r border-white/[0.08] light:border-gray-200 bg-[#0a0a0b] light:bg-white transition-all duration-300',
         'fixed inset-y-0 left-0 z-40 max-md:z-[60] md:relative',
         'transform md:transform-none',
-        isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
+        // Closed phone drawer is off-canvas: `invisible` (applied after the slide-out ends) also removes it from the tab order and the accessibility tree.
+        isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0 max-md:invisible',
         isCollapsed ? 'w-64 md:w-16' : 'w-64'
       ]"
       role="navigation"
@@ -297,6 +303,7 @@ const handleLogout = async () => {
     <!-- Main content -->
     <main
       id="main-content"
+      :inert="drawerLocked || undefined"
       :class="['relative flex-1 min-w-0 overflow-hidden md:pt-0 bg-[#0a0a0b] light:bg-gray-50', isImmersive ? 'pt-0' : 'pt-12 max-md:pb-[calc(3.5rem+env(safe-area-inset-bottom))]']"
       role="main"
     >
@@ -309,6 +316,6 @@ const handleLogout = async () => {
       <ScrollToTop />
     </main>
 
-    <MobileTabBar v-if="!isImmersive" :items="mobileTabs" :more-open="isMobileMenuOpen" @more="isMobileMenuOpen = !isMobileMenuOpen" />
+    <MobileTabBar v-if="!isImmersive" :inert="drawerLocked || undefined" :items="mobileTabs" :more-open="isMobileMenuOpen" @more="isMobileMenuOpen = !isMobileMenuOpen" />
   </div>
 </template>
