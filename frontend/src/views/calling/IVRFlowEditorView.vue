@@ -396,7 +396,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="h-screen max-md:h-[100dvh] flex flex-col">
+  <div class="h-screen max-md:h-full flex flex-col">
     <!-- Toolbar -->
     <div class="flex items-center gap-3 px-4 py-2 border-b bg-background shrink-0 max-md:flex-wrap max-md:gap-2 max-md:px-3 max-md:[&>div:not(.flex-1)]:ml-0">
       <Button variant="ghost" size="icon" class="h-8 w-8" :aria-label="t('calling.backToFlows')" @click="router.push({ name: 'ivr-flows' })">
@@ -439,9 +439,9 @@ onMounted(() => {
     </div>
 
     <!-- Main content -->
-    <div class="flex-1 flex overflow-hidden">
+    <div class="flex-1 flex overflow-hidden max-md:flex-col">
       <!-- Canvas -->
-      <div class="flex-1 relative">
+      <div class="flex-1 relative max-md:min-h-[9rem]">
         <div v-if="loading" class="absolute inset-0 flex items-center justify-center bg-background/80 z-10">
           <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
         </div>
@@ -473,7 +473,7 @@ onMounted(() => {
       </div>
 
       <!-- Right Panel -->
-      <div :class="['w-[420px] min-w-0 border-l bg-background shrink-0 flex flex-col overflow-hidden max-md:fixed max-md:inset-x-0 max-md:bottom-14 max-md:z-30 max-md:h-[40dvh] max-md:!w-full max-md:border-t max-md:rounded-t-2xl max-md:shadow-2xl', !selectedIVRNode && 'max-md:hidden']">
+      <div :class="['w-[420px] min-w-0 border-l bg-background shrink-0 flex flex-col overflow-hidden max-md:h-[40dvh] max-md:shrink max-md:!w-full max-md:border-l-0 max-md:border-t', !selectedIVRNode && 'max-md:hidden']">
         <!-- Node Properties (when a node is selected) -->
         <div v-if="selectedIVRNode" class="flex-1 overflow-y-auto">
           <IVRNodeProperties
