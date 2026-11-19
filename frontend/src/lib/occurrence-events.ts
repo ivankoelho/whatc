@@ -49,3 +49,14 @@ export const historyFilterTypes = [
   'opened', 'forwarded', 'assignment', 'stage_change', 'closed', 'reopened', 'note', 'reply',
   'customer_notification', 'participant_added', 'participant_removed', 'file_added', 'file_removed', 'protocol_sent',
 ] as const
+
+// An internal ticket says "chamado"/"equipe" where a service protocol says "ocorrência"/"departamento".
+const internalEventLabels: Record<string, string> = {
+  opened: 'occurrences.eventOpenedInternal',
+  closed: 'occurrences.eventClosedInternal',
+  returned: 'occurrences.eventReturnedInternal',
+}
+
+export function eventLabelKey(type: string, internal = false): string {
+  return (internal && internalEventLabels[type]) || eventLabels[type] || 'occurrences.eventUnknown'
+}

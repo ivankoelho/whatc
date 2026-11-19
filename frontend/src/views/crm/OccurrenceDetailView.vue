@@ -8,7 +8,7 @@ import { IconButton, DeleteConfirmDialog } from '@/components/shared'
 import OccurrenceAttachmentsCard from '@/components/crm/OccurrenceAttachmentsCard.vue'
 import OccurrenceHistoryDialog from '@/components/crm/OccurrenceHistoryDialog.vue'
 import OccurrenceExportDialog from '@/components/crm/OccurrenceExportDialog.vue'
-import { eventIcons, eventLabels } from '@/lib/occurrence-events'
+import { eventIcons, eventLabelKey } from '@/lib/occurrence-events'
 import OccurrenceParticipantsCard from '@/components/crm/OccurrenceParticipantsCard.vue'
 import OccurrenceTransferCard from '@/components/crm/OccurrenceTransferCard.vue'
 import OccurrenceCommunicationCard from '@/components/crm/OccurrenceCommunicationCard.vue'
@@ -184,7 +184,7 @@ async function claimOccurrence() {
   isClaiming.value = true
   try {
     await occurrencesService.claim(occurrence.value.id)
-    toast.success(t('occurrences.claimed'))
+    toast.success(t(isInternal.value ? 'occurrences.claimedInternal' : 'occurrences.claimed'))
   } catch (e) {
     toast.error(getErrorMessage(e, t('occurrences.claimFailed')))
   } finally {
@@ -682,13 +682,13 @@ onUnmounted(() => {
             <div id="case-transfer" class="mt-4 scroll-mt-4 border-t pt-3">
               <OccurrenceTransferCard
                 :occurrence-id="occurrence.id" :team-name="occurrence.team_name" :assigned-name="occurrence.assigned_user_name"
-                :closed="occurrence.general_state === 'resolved'" :deadline="occurrence.sla_resolution_deadline" :deadline-breached="occurrence.sla_breached"
+                :closed="occurrence.general_state === 'resolved'" :internal="isInternal" :deadline="occurrence.sla_resolution_deadline" :deadline-breached="occurrence.sla_breached"
                 :can-claim="canWrite && !occurrence.assigned_user_id && (occurrence.can?.claim ?? true)" @claim="claimOccurrence" @changed="onTransferred"
               />
             </div>
 
             <div id="case-people" class="mt-4 scroll-mt-4 border-t pt-3">
-              <OccurrenceParticipantsCard embedded :requester-id="isInternal ? occurrence.opened_by_user_id : undefined" :occurrence-id="occurrence.id" :can-write="canWrite && (occurrence.can?.add_participant ?? true)" />
+              <OccurrenceParticipantsCard embedded :internal="isInternal" :requester-id="isInternal ? occurrence.opened_by_user_id : undefined" :occurrence-id="occurrence.id" :can-write="canWrite && (occurrence.can?.add_participant ?? true)" />
             </div>
           </section>
 
@@ -705,7 +705,7 @@ onUnmounted(() => {
                 <component :is="eventIcons[event.type] || StickyNote" class="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                 <div class="min-w-0">
                   <p class="flex flex-wrap items-baseline gap-x-2">
-                    <span class="font-medium">{{ $t(eventLabels[event.type] || 'occurrences.eventUnknown') }}</span>
+                    <span class="font-medium">{{ $t(eventLabelKey(event.type, isInternal)) }}</span>
                     <span v-if="event.created_by_name" class="text-xs text-muted-foreground">{{ event.created_by_name }}</span>
                     <span class="text-xs text-muted-foreground">{{ formatDateTime(event.created_at) }}</span>
                   </p>
@@ -729,7 +729,7 @@ onUnmounted(() => {
     <OccurrenceExportDialog v-if="occurrence && exportOpen" v-model:open="exportOpen" :occurrence-id="occurrence.id" />
     <OccurrenceHistoryDialog
       v-if="occurrence && historyOpen" v-model:open="historyOpen"
-      :occurrence-id="occurrence.id" :protocol="occurrence.protocol_number" :title="occurrence.title"
+      :occurrence-id="occurrence.id" :protocol="occurrence.protocol_number" :title="occurrence.title" :internal="isInternal"
     />
     <DeleteConfirmDialog
       v-model:open="isDeleteDialogOpen"

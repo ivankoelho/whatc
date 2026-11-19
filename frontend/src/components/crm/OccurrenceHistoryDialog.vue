@@ -6,13 +6,13 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { occurrencesService, type OccurrenceEvent } from '@/services/api'
-import { eventIcons, eventLabels, historyFilterTypes } from '@/lib/occurrence-events'
+import { eventIcons, eventLabels, eventLabelKey, historyFilterTypes } from '@/lib/occurrence-events'
 import { formatDateTime } from '@/lib/utils'
 
 // The whole history of a case in a large window: newest first, loaded a page at a time while scrolling,
 // filterable by type and searchable. The server decides what each person may see (messages to the
 // customer are withheld from people who cannot read that conversation, and say so).
-const props = defineProps<{ open: boolean; occurrenceId: string; protocol: string; title: string }>()
+const props = defineProps<{ open: boolean; occurrenceId: string; protocol: string; title: string; internal?: boolean }>()
 const emit = defineEmits<{ 'update:open': [value: boolean] }>()
 const { t } = useI18n()
 
@@ -118,7 +118,7 @@ const empty = computed(() => !loading.value && !failed.value && events.value.len
             <component :is="eventIcons[e.type] || StickyNote" class="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
             <div class="min-w-0 flex-1">
               <p class="flex flex-wrap items-baseline gap-x-2">
-                <span class="font-medium">{{ t(eventLabels[e.type] || 'occurrences.eventUnknown') }}</span>
+                <span class="font-medium">{{ t(eventLabelKey(e.type, internal)) }}</span>
                 <span v-if="e.created_by_name" class="text-xs text-muted-foreground">{{ e.created_by_name }}</span>
                 <span class="text-xs text-muted-foreground">{{ formatDateTime(e.created_at) }}</span>
               </p>

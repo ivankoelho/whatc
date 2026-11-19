@@ -12,7 +12,7 @@ import { Users, X } from 'lucide-vue-next'
 // "Acompanhamento e apoio": pick a support department, then only its ACTIVE members (the server filters by
 // what the caller may pick from); the list keeps the history of who added/removed whom and when.
 // requesterId: on an internal ticket the requester is shown as such, cannot be removed and is never offered again.
-const props = defineProps<{ occurrenceId: string; canWrite: boolean; embedded?: boolean; requesterId?: string }>()
+const props = defineProps<{ occurrenceId: string; canWrite: boolean; embedded?: boolean; requesterId?: string; internal?: boolean }>()
 
 const { t } = useI18n()
 const participants = ref<OccurrenceParticipant[]>([])
@@ -145,7 +145,7 @@ watch(() => props.occurrenceId, () => { load(); loadDepartments() }, { immediate
         </fieldset>
         <Button size="sm" :disabled="selected.length === 0 || isBusy" data-testid="participant-add" @click="add">{{ $t('occurrences.support.add') }}</Button>
       </template>
-      <p class="text-xs leading-relaxed text-muted-foreground">{{ $t('occurrences.support.note') }}</p>
+      <p class="text-xs leading-relaxed text-muted-foreground">{{ $t(internal ? 'occurrences.support.noteInternal' : 'occurrences.support.note') }}</p>
     </div>
 
     <details v-if="history.length > 0" class="text-xs" data-testid="participant-history">
