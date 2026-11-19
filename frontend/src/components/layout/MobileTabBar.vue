@@ -31,7 +31,7 @@ defineEmits<{ more: [] }>()
       :to="item.path"
       :class="[
         'flex h-14 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition active:scale-95',
-        item.active ? 'text-emerald-400' : glass ? 'text-white/65' : 'text-white/50 light:text-gray-500'
+        item.active ? (glass ? 'text-emerald-400' : 'text-emerald-400 light:text-emerald-700') : glass ? 'text-white/65' : 'text-white/50 light:text-gray-500'
       ]"
       :aria-current="item.active ? 'page' : undefined"
     >
@@ -42,7 +42,7 @@ defineEmits<{ more: [] }>()
       type="button"
       :class="[
         'flex h-14 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition active:scale-95',
-        moreOpen ? 'text-emerald-400' : glass ? 'text-white/65' : 'text-white/50 light:text-gray-500'
+        moreOpen ? (glass ? 'text-emerald-400' : 'text-emerald-400 light:text-emerald-700') : glass ? 'text-white/65' : 'text-white/50 light:text-gray-500'
       ]"
       :aria-expanded="moreOpen"
       @click="$emit('more')"
