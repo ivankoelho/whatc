@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -51,6 +52,10 @@ type chatNodeCtx struct {
 type nodeOutcome struct {
 	outcome string
 	yield   bool
+	// halt stops the run right here, persisting nothing and sending nothing more. Used when a human
+	// took over the conversation while the node was working: the attendance already ended the
+	// chatbot session in the database, and saving this stale in-memory copy would reopen it.
+	halt bool
 }
 
 // runChatGraph executes the v2 graph for a session against a single inbound
@@ -141,6 +146,9 @@ func (a *App) runChatGraph(
 		if err != nil {
 			_ = a.persistChatSession(session)
 			return err
+		}
+		if res.halt {
+			return nil
 		}
 
 		appendChatPath(session, node, res.outcome)
@@ -723,10 +731,32 @@ func (a *App) execChatAIResponse(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome,
 		userMessage = processTemplate(tmpl, ctx.session.SessionData)
 	}
 
-	answer, err := a.generateAIResponse(settings, ctx.session, userMessage, aiFeatureChatbotNode)
+	reply, err := a.generateAIReply(settings, ctx.session, userMessage, aiFeatureChatbotNode)
 	if err != nil {
 		a.Log.Error("ai_response node generateAIResponse failed",
 			"node", node.ID, "session", ctx.session.ID, "error", err)
+		if reply.ByAgent {
+			// same policy as the direct reply: the cap hands over at once, other failures on the second in a row
+			if errors.Is(err, ErrAICapReached) || a.noteAIFailure(ctx.session) >= aiFailuresBeforeHandoff {
+				reason := aiHandoffFailure
+				if errors.Is(err, ErrAICapReached) {
+					reason = aiHandoffCap
+				}
+				if a.handoffFromAI(ctx.account, ctx.contact, ctx.session, settings, reason) {
+					return nodeOutcome{halt: true}, nil
+				}
+			}
+		}
+		return nodeOutcome{outcome: "default"}, nil
+	}
+	if reply.ByAgent {
+		a.clearAIFailures(ctx.session)
+	}
+	answer := reply.Text
+	if answer == "" && reply.Handoff != "" { // the agent only asks for a human
+		if a.handoffFromAI(ctx.account, ctx.contact, ctx.session, settings, reply.Handoff) {
+			return nodeOutcome{halt: true}, nil
+		}
 		return nodeOutcome{outcome: "default"}, nil
 	}
 	if answer == "" {
@@ -735,10 +765,27 @@ func (a *App) execChatAIResponse(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome,
 		return nodeOutcome{outcome: "default"}, nil
 	}
 
-	if err := a.sendAndSaveTextMessage(a.nodeCtx(ctx, node, usage.ActorAI, "chatbot_flow_node"), ctx.account, ctx.contact, answer); err != nil {
+	sent, err := a.sendAIReply(a.nodeCtx(ctx, node, usage.ActorAI, "chatbot_flow_node"), reply.ByAgent,
+		ctx.account.OrganizationID, ctx.contact.ID,
+		func(c context.Context) error {
+			return a.sendAndSaveAgentText(c, ctx.account, ctx.contact, answer, reply.Sender)
+		})
+	if err != nil {
 		return nodeOutcome{}, fmt.Errorf("send ai response: %w", err)
 	}
+	if !sent {
+		// A human took over while the reply was being written (or the guard could not be had): the
+		// reply is dropped AND the flow stops here, so no later node speaks over the human and the
+		// session the attendance ended is not saved back as active.
+		a.Log.Info("ai_response node: AI reply not sent, stopping the flow", "node", node.ID, "session", ctx.session.ID)
+		return nodeOutcome{halt: true}, nil
+	}
 	a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, answer, node.ID)
+	if reply.Handoff != "" { // the agent said its last words; now hand over
+		if a.handoffFromAI(ctx.account, ctx.contact, ctx.session, settings, reply.Handoff) {
+			return nodeOutcome{halt: true}, nil
+		}
+	}
 	return nodeOutcome{outcome: "default"}, nil
 }
 

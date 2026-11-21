@@ -37,6 +37,8 @@ type ChatbotSettingsResponse struct {
 	AIModel                      string            `json:"ai_model"`
 	AIMaxTokens                  int               `json:"ai_max_tokens"`
 	AISystemPrompt               string            `json:"ai_system_prompt"`
+	AIDefaultAgentID             *uuid.UUID        `json:"ai_default_agent_id"`
+	AIMonthlyTokenLimit          int64             `json:"ai_monthly_token_limit"`
 	// AIAPIKeyConfigured says whether a key is stored. The key itself is never
 	// returned, not even masked: the UI only needs to know there is one.
 	AIAPIKeyConfigured bool `json:"ai_api_key_configured"`
@@ -200,12 +202,14 @@ func (a *App) GetChatbotSettings(r *fastglue.Request) error {
 		AwayReassignAfterMins:        settings.AgentAssignment.AwayReassignAfterMins,
 		OfflineReleaseAfterMins:      settings.AgentAssignment.OfflineReleaseAfterMins,
 		// AI
-		AIEnabled:          settings.AI.Enabled,
-		AIProvider:         settings.AI.Provider,
-		AIModel:            settings.AI.Model,
-		AIMaxTokens:        settings.AI.MaxTokens,
-		AISystemPrompt:     settings.AI.SystemPrompt,
-		AIAPIKeyConfigured: settings.AI.APIKey != "",
+		AIEnabled:           settings.AI.Enabled,
+		AIProvider:          settings.AI.Provider,
+		AIModel:             settings.AI.Model,
+		AIMaxTokens:         settings.AI.MaxTokens,
+		AISystemPrompt:      settings.AI.SystemPrompt,
+		AIAPIKeyConfigured:  settings.AI.APIKey != "",
+		AIDefaultAgentID:    settings.AI.DefaultAgentID,
+		AIMonthlyTokenLimit: settings.AI.MonthlyTokenLimit,
 		// Knowledge
 		KnowledgeEnabled:      settings.KnowledgeEnabled,
 		KnowledgeRAGAvailable: a.Config != nil && a.Config.Knowledge.RAGEnabled,
@@ -300,11 +304,13 @@ func chatbotSLASnapshot(s *models.ChatbotSettings) map[string]any {
 // change the activity log should surface.
 func chatbotAISnapshot(s *models.ChatbotSettings) map[string]any {
 	return map[string]any{
-		"ai_enabled":       s.AI.Enabled,
-		"ai_provider":      s.AI.Provider,
-		"ai_model":         s.AI.Model,
-		"ai_max_tokens":    s.AI.MaxTokens,
-		"ai_system_prompt": s.AI.SystemPrompt,
+		"ai_enabled":             s.AI.Enabled,
+		"ai_provider":            s.AI.Provider,
+		"ai_model":               s.AI.Model,
+		"ai_max_tokens":          s.AI.MaxTokens,
+		"ai_system_prompt":       s.AI.SystemPrompt,
+		"ai_default_agent_id":    s.AI.DefaultAgentID,
+		"ai_monthly_token_limit": s.AI.MonthlyTokenLimit,
 	}
 }
 
@@ -339,6 +345,9 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		AIModel                      *string            `json:"ai_model"`
 		AIMaxTokens                  *int               `json:"ai_max_tokens"`
 		AISystemPrompt               *string            `json:"ai_system_prompt"`
+		// AIDefaultAgentID is the organization's default AIAgent; "" clears it.
+		AIDefaultAgentID    *string `json:"ai_default_agent_id"`
+		AIMonthlyTokenLimit *int64  `json:"ai_monthly_token_limit"`
 		// KnowledgeEnabled turns Knowledge on for this organization's AI replies (needs
 		// settings.chatbot:write; it also takes the global knowledge.rag_enabled to have effect).
 		KnowledgeEnabled *bool `json:"knowledge_enabled"`
@@ -436,7 +445,8 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		req.ClientReminderMessage != nil || req.ClientAutoCloseMinutes != nil ||
 		req.ClientAutoCloseMessage != nil || req.CloseInactiveAttendances != nil
 	aiTouched := req.AIEnabled != nil || req.AIProvider != nil || req.AIAPIKey != nil ||
-		req.AIModel != nil || req.AIMaxTokens != nil || req.AISystemPrompt != nil
+		req.AIModel != nil || req.AIMaxTokens != nil || req.AISystemPrompt != nil ||
+		req.AIDefaultAgentID != nil || req.AIMonthlyTokenLimit != nil
 
 	// The AI provider, model and above all the API key are credentials-level
 	// configuration: changing them needs settings.chatbot:write. (The rest of
@@ -447,6 +457,20 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		}
 		if req.AIProvider != nil && *req.AIProvider != "" && !isSupportedAIProvider(string(*req.AIProvider)) {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Unsupported AI provider", nil, "")
+		}
+		if req.AIMonthlyTokenLimit != nil && *req.AIMonthlyTokenLimit < 0 {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "ai_monthly_token_limit cannot be negative", nil, "")
+		}
+		if req.AIDefaultAgentID != nil && *req.AIDefaultAgentID != "" {
+			agentID, perr := uuid.Parse(*req.AIDefaultAgentID)
+			if perr != nil {
+				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid ai_default_agent_id", nil, "")
+			}
+			var n int64
+			a.DB.Model(&models.AIAgent{}).Where("id = ? AND organization_id = ?", agentID, orgID).Count(&n)
+			if n == 0 {
+				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "AI agent not found in this organization", nil, "")
+			}
 		}
 	}
 
@@ -562,6 +586,17 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 	}
 	if req.AISystemPrompt != nil {
 		settings.AI.SystemPrompt = *req.AISystemPrompt
+	}
+	if req.AIDefaultAgentID != nil {
+		if *req.AIDefaultAgentID == "" {
+			settings.AI.DefaultAgentID = nil
+		} else {
+			id := uuid.MustParse(*req.AIDefaultAgentID) // validated above
+			settings.AI.DefaultAgentID = &id
+		}
+	}
+	if req.AIMonthlyTokenLimit != nil {
+		settings.AI.MonthlyTokenLimit = *req.AIMonthlyTokenLimit
 	}
 
 	// SLA Settings

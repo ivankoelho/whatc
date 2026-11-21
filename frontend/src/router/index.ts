@@ -178,6 +178,12 @@ const router = createRouter({
           meta: { permission: 'chatbot.ai' }
         },
         {
+          path: 'chatbot/agents',
+          name: 'chatbot-agents',
+          component: () => import('@/views/chatbot/AIAgentsView.vue'),
+          meta: { permission: 'chatbot.ai' }
+        },
+        {
           path: 'chatbot/transfers',
           name: 'chatbot-transfers',
           component: () => import('@/views/chatbot/AgentTransfersView.vue'),
@@ -496,7 +502,8 @@ const navigationOrder = [
     { path: '/chatbot', permission: 'settings.chatbot' },
     { path: '/chatbot/keywords', permission: 'chatbot.keywords' },
     { path: '/chatbot/flows', permission: 'flows.chatbot' },
-    { path: '/chatbot/ai', permission: 'chatbot.ai' }
+    { path: '/chatbot/ai', permission: 'chatbot.ai' },
+    { path: '/chatbot/agents', permission: 'chatbot.ai' }
   ]},
   { path: '/chatbot/transfers', permission: 'transfers' },
   { path: '/analytics/agents', permission: 'analytics.agents' },
