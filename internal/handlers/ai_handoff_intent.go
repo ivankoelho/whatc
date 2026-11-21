@@ -141,6 +141,7 @@ func (a *App) runHandoffRecovery(in *models.AIHandoffIntent) {
 		a.finishHandoffIntent(in.ID, "gone", true)
 		return
 	}
+	a.decryptAccountSecrets(&account) // loaded straight from the database: the token is still the stored cipher
 	var contact models.Contact
 	if err := a.DB.Where("id = ? AND organization_id = ?", in.ContactID, in.OrganizationID).First(&contact).Error; err != nil {
 		a.finishHandoffIntent(in.ID, "gone", true)

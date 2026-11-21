@@ -358,6 +358,7 @@ func (a *App) runAIPendingReply(row *models.AIPendingReply, typing *aiTypingStat
 	if err := a.DB.Where("organization_id = ? AND name = ?", row.OrganizationID, row.WhatsAppAccount).First(&account).Error; err != nil {
 		return aiOutcomeGone
 	}
+	a.decryptAccountSecrets(&account) // loaded straight from the database: the token is still the stored cipher
 	var contact models.Contact
 	if err := a.DB.Where("id = ? AND organization_id = ?", row.ContactID, row.OrganizationID).First(&contact).Error; err != nil {
 		return aiOutcomeGone

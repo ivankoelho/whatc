@@ -3,6 +3,7 @@ package handlers
 import (
 	"testing"
 
+	"github.com/shridarpatil/whatomate/internal/crypto"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -83,4 +84,46 @@ func TestHandoffFromAI_ExtractionRequestsRoomForReasoningModels(t *testing.T) {
 	}
 	assert.EqualValues(t, aiQualificationMaxTokens, got)
 	assert.GreaterOrEqual(t, got, float64(2000))
+}
+
+// The access token is stored encrypted. Every code path that loads the account straight from the database to
+// send must decrypt it first: the answer sent after the wait used to go out with the cipher ("enc:...") as the
+// bearer token and Meta answered 190 (real homologation, wait of 8 s).
+func TestAIWait_AnswerAfterTheWaitSendsThePlainAccessToken(t *testing.T) {
+	w := newWaitWiring(t, "Qual ambiente seria?")
+	const plain = "EAAX-plain-token-for-the-test"
+	enc, err := crypto.Encrypt(plain, w.app.Config.App.EncryptionKey)
+	require.NoError(t, err)
+	require.NoError(t, w.app.DB.Model(&models.WhatsAppAccount{}).Where("id = ?", w.f.account.ID).Update("access_token", enc).Error)
+	w.app.InvalidateWhatsAppAccountCache(w.f.account.PhoneID)
+
+	w.inbound(t, "5511988880077", "quero porcelanato")
+	require.Equal(t, 1, w.app.drainAIWait(later()))
+
+	require.NotEmpty(t, w.textSends(), "the answer was sent")
+	for _, h := range w.wa.authHeaders() {
+		assert.Equal(t, "Bearer "+plain, h, "never the stored cipher")
+	}
+}
+
+// Same rule for the handoff recovery: it loads the account from the database and tells the customer that a
+// person is coming, so it must send with the plain token.
+func TestHandoffRecovery_SendsThePlainAccessToken(t *testing.T) {
+	w := newDurableWiring(t)
+	const plain = "EAAX-plain-token-for-the-recovery"
+	enc, err := crypto.Encrypt(plain, w.app.Config.App.EncryptionKey)
+	require.NoError(t, err)
+	require.NoError(t, w.app.DB.Model(&models.WhatsAppAccount{}).Where("id = ?", w.f.account.ID).Update("access_token", enc).Error)
+	w.app.InvalidateWhatsAppAccountCache(w.f.account.PhoneID)
+	contact, session := w.handoffSession(t, "quero porcelanato", "para a sala, uns 40 m²")
+	w.ai.replies = []string{qualHappy}
+	_, err = w.app.recordHandoffIntent(w.f.account, contact, session, aiHandoffMarker)
+	require.NoError(t, err)
+
+	require.Equal(t, 1, w.app.recoverAIHandoffs(afterLease()))
+
+	require.NotEmpty(t, w.textSends(), "the customer was told")
+	for _, h := range w.wa.authHeaders() {
+		assert.Equal(t, "Bearer "+plain, h, "never the stored cipher")
+	}
 }

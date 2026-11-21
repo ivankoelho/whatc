@@ -33,12 +33,19 @@ import (
 type waCounter struct {
 	mu     sync.Mutex
 	bodies []string
+	auths  []string // the Authorization header of every call: it must carry the plain token, never the stored cipher
 }
 
 func (w *waCounter) count() int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return len(w.bodies)
+}
+
+func (w *waCounter) authHeaders() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]string(nil), w.auths...)
 }
 
 func (w *waCounter) all() []string {
@@ -66,6 +73,7 @@ func newWiring(t *testing.T, replies ...string) *wiring {
 		body, _ := io.ReadAll(r.Body)
 		wa.mu.Lock()
 		wa.bodies = append(wa.bodies, string(body))
+		wa.auths = append(wa.auths, r.Header.Get("Authorization"))
 		wa.mu.Unlock()
 		_ = json.NewEncoder(w).Encode(map[string]any{"messages": []map[string]string{{"id": "wamid.mock_" + uuid.NewString()[:8]}}})
 	}))
