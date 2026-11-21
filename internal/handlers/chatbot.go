@@ -37,10 +37,13 @@ type ChatbotSettingsResponse struct {
 	AIModel                      string            `json:"ai_model"`
 	AIMaxTokens                  int               `json:"ai_max_tokens"`
 	AISystemPrompt               string            `json:"ai_system_prompt"`
-	AIDefaultAgentID             *uuid.UUID        `json:"ai_default_agent_id"`
-	AIMonthlyTokenLimit          int64             `json:"ai_monthly_token_limit"`
-	AIUnlimitedAck               bool              `json:"ai_unlimited_ack"`
-	AIAgentOnly                  bool              `json:"ai_agent_only"`
+	// The four agent-administration fields below are returned only to whoever may read the agents
+	// (chatbot.ai:read): the limit, the acceptance of running without one, the isolation switch and the default
+	// agent are the administrator's, not every user's. Absent (not false/0) for everyone else.
+	AIDefaultAgentID    *uuid.UUID `json:"ai_default_agent_id,omitempty"`
+	AIMonthlyTokenLimit *int64     `json:"ai_monthly_token_limit,omitempty"`
+	AIUnlimitedAck      *bool      `json:"ai_unlimited_ack,omitempty"`
+	AIAgentOnly         *bool      `json:"ai_agent_only,omitempty"`
 	// AIAPIKeyConfigured says whether a key is stored. The key itself is never
 	// returned, not even masked: the UI only needs to know there is one.
 	AIAPIKeyConfigured bool `json:"ai_api_key_configured"`
@@ -210,10 +213,6 @@ func (a *App) GetChatbotSettings(r *fastglue.Request) error {
 		AIMaxTokens:         settings.AI.MaxTokens,
 		AISystemPrompt:      settings.AI.SystemPrompt,
 		AIAPIKeyConfigured:  settings.AI.APIKey != "",
-		AIDefaultAgentID:    settings.AI.DefaultAgentID,
-		AIMonthlyTokenLimit: settings.AI.MonthlyTokenLimit,
-		AIUnlimitedAck:      settings.AI.UnlimitedAck,
-		AIAgentOnly:         settings.AI.AgentOnly,
 		// Knowledge
 		KnowledgeEnabled:      settings.KnowledgeEnabled,
 		KnowledgeRAGAvailable: a.Config != nil && a.Config.Knowledge.RAGEnabled,
@@ -235,6 +234,12 @@ func (a *App) GetChatbotSettings(r *fastglue.Request) error {
 		ClientAutoCloseMinutes:   settings.ClientInactivity.AutoCloseMinutes,
 		ClientAutoCloseMessage:   settings.ClientInactivity.AutoCloseMessage,
 		CloseInactiveAttendances: settings.ClientInactivity.CloseInactiveAttendances,
+	}
+	if a.canReadAgentAdmin(r, orgID) {
+		settingsResp.AIDefaultAgentID = settings.AI.DefaultAgentID
+		settingsResp.AIMonthlyTokenLimit = &settings.AI.MonthlyTokenLimit
+		settingsResp.AIUnlimitedAck = &settings.AI.UnlimitedAck
+		settingsResp.AIAgentOnly = &settings.AI.AgentOnly
 	}
 
 	return r.SendEnvelope(map[string]any{
@@ -1673,4 +1678,14 @@ func (a *App) getChatbotStats(orgID uuid.UUID) ChatbotStatsResponse {
 		Count(&stats.AIContextsCount)
 
 	return stats
+}
+
+// canReadAgentAdmin says whether the caller may see the agent-administration fields of the chatbot settings:
+// the same permission that opens the agents screen and its endpoints (chatbot.ai:read).
+func (a *App) canReadAgentAdmin(r *fastglue.Request, orgID uuid.UUID) bool {
+	_, userID, err := a.getOrgAndUserID(r)
+	if err != nil {
+		return false
+	}
+	return a.HasPermission(userID, models.ResourceChatbotAI, models.ActionRead, orgID)
 }
