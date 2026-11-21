@@ -170,6 +170,7 @@ func agentReplyFixture(t *testing.T, replies ...string) (*App, aiAgentFixture, *
 	f.settings.AI.Model = "gpt-test"
 	f.settings.AI.APIKey = enc
 	f.settings.AI.MaxTokens = 200
+	f.settings.AI.UnlimitedAck = true // these tests are about the prompt, not the cap (see ai_cap_runtime_test.go)
 	f.settings.AI.SystemPrompt = "LEGACY PROMPT"
 	require.NoError(t, app.DB.Model(f.agent).Updates(map[string]any{
 		"objective": "Qualificar compras de pisos", "company_info": "Atacadão dos Pisos, loja Centro",
