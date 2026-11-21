@@ -2865,6 +2865,16 @@
     "changedByAnother": "Someone else already took or changed this transfer. The list was refreshed."
   },
   "occurrences": {
+    "alerts": {
+      "title": "Protocols",
+      "empty": "No protocol notifications",
+      "dismiss": "Dismiss",
+      "dismissAll": "Dismiss all",
+      "uncategorized": "Uncategorized",
+      "kind_assigned": "New protocol assigned to you",
+      "kind_transferred": "Protocol transferred to you",
+      "kind_team": "Protocol on your team"
+    },
     "title": "Protocols",
     "subtitle": "Support cases and protocols",
     "searchPlaceholder": "Search by protocol...",

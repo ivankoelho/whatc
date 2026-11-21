@@ -389,8 +389,15 @@ func (a *App) ReassignOccurrence(r *fastglue.Request) error {
 	}
 	a.DB.Create(&models.OccurrenceEvent{OrganizationID: orgID, OccurrenceID: occ.ID,
 		Type: models.OccurrenceEventAssignment, Metadata: meta, CreatedByID: &userID})
+	moved := !sameOptUUID(occ.AssignedUserID, &target) // handing it to its current owner is no news
+	if moved {
+		a.clearOccurrenceAlerts(occ.ID)
+	}
 	a.DB.Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").Preload("WhatHappened").Preload("Process").First(occ, occ.ID)
 	resp := occurrenceToResponse(*occ)
 	a.broadcastOccurrence(orgID, occ.ID, websocket.WSMessage{Type: websocket.TypeOccurrenceChanged, Payload: resp})
+	if moved {
+		a.alertOccurrence(occ, &target, userID, "transferred") // after occurrence_changed, see UpdateOccurrence
+	}
 	return r.SendEnvelope(resp)
 }

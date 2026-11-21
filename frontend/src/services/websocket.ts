@@ -75,6 +75,7 @@ const WS_TYPE_CAMPAIGN_STATS_UPDATE = 'campaign_stats_update'
 
 // Permission types
 const WS_TYPE_PERMISSIONS_UPDATED = 'permissions_updated'
+const WS_TYPE_OCCURRENCE_ALERT = 'occurrence_alert'
 
 // Call types
 const WS_TYPE_CALL_INCOMING = 'call_incoming'
@@ -325,6 +326,9 @@ class WebSocketService {
           break
         case WS_TYPE_CAMPAIGN_STATS_UPDATE:
           this.handleCampaignStatsUpdate(message.payload)
+          break
+        case WS_TYPE_OCCURRENCE_ALERT:
+          window.dispatchEvent(new CustomEvent('occurrence-alert'))
           break
         case WS_TYPE_PERMISSIONS_UPDATED:
           this.handlePermissionsUpdated()

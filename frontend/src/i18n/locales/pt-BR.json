@@ -2854,6 +2854,16 @@
     "changedByAnother": "Outra pessoa já assumiu ou alterou este atendimento. A lista foi atualizada."
   },
   "occurrences": {
+    "alerts": {
+      "title": "Protocolos",
+      "empty": "Nenhuma notificação de protocolo",
+      "dismiss": "Dispensar",
+      "dismissAll": "Dispensar todas",
+      "uncategorized": "Não categorizado",
+      "kind_assigned": "Novo protocolo atribuído a você",
+      "kind_transferred": "Protocolo transferido para você",
+      "kind_team": "Protocolo na sua equipe"
+    },
     "title": "Protocolos",
     "subtitle": "Casos de atendimento e protocolos",
     "searchPlaceholder": "Buscar por protocolo...",

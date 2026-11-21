@@ -108,6 +108,7 @@ func runMigrations(db *gorm.DB) error {
 		&models.CustomAction{},
 		&models.UserAvailabilityLog{},
 		&models.UserSessionEvent{},
+		&models.OccurrenceAlert{},
 		&models.AgentPresenceLog{},
 		&models.AgentTransferAssignment{},
 		// WhatsApp models

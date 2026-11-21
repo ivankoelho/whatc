@@ -21,6 +21,8 @@ import { authService } from '@/services/api'
 import { useBranding } from '@/composables/useBranding'
 import OrganizationSwitcher from './OrganizationSwitcher.vue'
 import UserMenu from './UserMenu.vue'
+import HeaderTools from './HeaderTools.vue'
+import HeaderClock from './HeaderClock.vue'
 import ActiveCallPanel from '@/components/calling/ActiveCallPanel.vue'
 import { ScrollToTop } from '@/components/shared'
 import { navigationSections, type NavSection, type NavItem } from './navigation'
@@ -127,6 +129,10 @@ const handleLogout = async () => {
         <img :src="logoUrl || '/logo-atacadao.png'" alt="" class="h-7 w-7 rounded-lg object-cover shadow-lg shadow-black/20">
         <span class="font-semibold text-sm text-white light:text-gray-900">{{ systemName || 'WhatsApp ATC' }}</span>
       </RouterLink>
+      <div class="ml-auto mr-2 flex items-center gap-1">
+        <HeaderClock />
+        <HeaderTools />
+      </div>
       <Button
         variant="ghost"
         size="icon"
