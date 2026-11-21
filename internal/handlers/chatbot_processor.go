@@ -282,6 +282,15 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	// need to advance the flow — chatbotInput feeds the media URL as the input
 	// so it lands in store_as (notes rendering "Foto: {{referencia_por_foto}}"
 	// then carry a clickable link). Text and interactive replies are unaffected.
+	// A voice note carries no text: when an agent is in charge of this number it is transcribed and handled like
+	// a typed message (or the customer is asked to write when that is not possible).
+	if msg.Type == "audio" && strings.TrimSpace(messageText) == "" {
+		text, stop := a.transcribeIncomingAudio(account, contact, settings, msg.ID, mediaInfo)
+		if stop {
+			return
+		}
+		messageText = text
+	}
 	effectiveInput, actionable := chatbotInput(messageText, buttonID, mediaInfo)
 	if !actionable {
 		a.Log.Debug("Skipping message with no actionable content for chatbot", "type", msg.Type)
