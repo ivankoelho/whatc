@@ -51,7 +51,7 @@ func (e occEnv) add(t *testing.T, org, contact uuid.UUID, protocol, title string
 		require.NoError(t, e.db.Create(&stage).Error)
 	}
 	o := models.Occurrence{
-		OrganizationID: org, ContactID: contact, ProtocolNumber: protocol, Title: title,
+		OrganizationID: org, ContactID: &contact, ProtocolNumber: protocol, Title: title,
 		Description: "SENTINEL-INTERNAL-DESCRIPTION", StageID: stage.ID, OpenedByUserID: e.opener.ID, OpenedAt: opened, ClosedAt: closed,
 	}
 	require.NoError(t, e.db.Create(&o).Error)

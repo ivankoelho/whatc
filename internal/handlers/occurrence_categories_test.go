@@ -129,7 +129,7 @@ func TestOccurrenceCategories_DeleteRejectedWhenOccurrenceUsesIt(t *testing.T) {
 	stage, err := app.InitialStageForTest(org.ID)
 	require.NoError(t, err)
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Sem tinta",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Sem tinta",
 		StageID: stage.ID, OpenedByUserID: user.ID, CategoryID: &category.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))

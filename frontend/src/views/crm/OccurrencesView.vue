@@ -15,11 +15,13 @@ import { slaStatus } from '@/lib/occurrence-sla'
 import { getErrorMessage } from '@/lib/api-utils'
 import { toast } from 'vue-sonner'
 import { useSearchPagination } from '@/composables/useSearchPagination'
-import { ClipboardList, List, LayoutGrid, ListTodo, FilePlus2 } from 'lucide-vue-next'
+import { ClipboardList, List, LayoutGrid, ListTodo, FilePlus2, Headphones, Building2, ArrowLeft } from 'lucide-vue-next'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useOccurrenceViewMode } from '@/composables/useOccurrenceViewMode'
 import OccurrenceBoard from '@/components/crm/OccurrenceBoard.vue'
 import OpenProtocolForm from '@/components/crm/OpenProtocolForm.vue'
+import OpenInternalTicketForm from '@/components/crm/OpenInternalTicketForm.vue'
+import { Button } from '@/components/ui/button'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -27,6 +29,9 @@ const store = useOccurrencesStore()
 const { mode } = useOccurrenceViewMode()
 
 const activeTab = ref<'list' | 'open'>('list')
+// What the "open" tab is showing: the type chooser (null) or one of the two forms.
+const openKind = ref<'service' | 'internal' | null>(null)
+const kindFilter = ref('all')
 const stageFilter = ref('all')
 const error = ref(false)
 
@@ -55,6 +60,7 @@ async function fetchOccurrences() {
     await store.fetchOccurrences({
       protocol: searchQuery.value || undefined,
       stage_id: stageFilter.value !== 'all' ? stageFilter.value : undefined,
+      kind: kindFilter.value !== 'all' ? kindFilter.value : undefined,
       page: String(currentPage.value),
       limit: String(pageSize),
     } as Record<string, string>)
@@ -79,7 +85,13 @@ watch(mode, newMode => {
 // registered there wouldn't otherwise show up until a manual refresh.
 watch(activeTab, newTab => {
   if (newTab === 'list') fetchOccurrences()
+  if (newTab === 'open') openKind.value = null
 })
+
+function onKindFilterChange() {
+  currentPage.value = 1
+  fetchOccurrences()
+}
 
 function onStageFilterChange() {
   currentPage.value = 1
@@ -113,6 +125,14 @@ onMounted(async () => {
         <template v-if="activeTab === 'list'" #actions>
           <div class="flex flex-wrap items-center gap-2">
             <SearchInput v-model="searchQuery" :placeholder="$t('occurrences.searchPlaceholder')" class="w-64" />
+            <Select v-if="mode === 'list'" v-model="kindFilter" @update:model-value="onKindFilterChange">
+              <SelectTrigger id="occurrences-kind-filter" class="w-44"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{{ $t('occurrences.internal.filterAll') }}</SelectItem>
+                <SelectItem value="service">{{ $t('occurrences.internal.serviceName') }}</SelectItem>
+                <SelectItem value="internal">{{ $t('occurrences.internal.internalName') }}</SelectItem>
+              </SelectContent>
+            </Select>
             <Select v-if="mode === 'list'" v-model="stageFilter" @update:model-value="onStageFilterChange">
               <SelectTrigger id="occurrences-stage-filter" class="w-48">
                 <SelectValue :placeholder="$t('occurrences.filterByStage')" />
@@ -141,7 +161,31 @@ onMounted(async () => {
       <TabsContent value="open" class="flex-1 min-h-0">
         <ScrollArea orientation="vertical" class="flex-1 h-full">
           <div class="p-6">
-            <OpenProtocolForm />
+            <div v-if="openKind === null" class="max-w-3xl space-y-4">
+              <div>
+                <h2 class="text-lg font-semibold">{{ $t('occurrences.internal.chooseTitle') }}</h2>
+                <p class="text-sm text-muted-foreground">{{ $t('occurrences.internal.chooseHint') }}</p>
+              </div>
+              <div class="grid gap-4 sm:grid-cols-2">
+                <button type="button" data-testid="open-kind-service" class="text-left rounded-lg border p-5 hover:border-primary hover:bg-accent/40 transition-colors" @click="openKind = 'service'">
+                  <Headphones class="h-6 w-6 mb-3 text-violet-500" aria-hidden="true" />
+                  <div class="font-medium">{{ $t('occurrences.internal.serviceName') }}</div>
+                  <p class="text-sm text-muted-foreground mt-1">{{ $t('occurrences.internal.serviceDesc') }}</p>
+                </button>
+                <button type="button" data-testid="open-kind-internal" class="text-left rounded-lg border p-5 hover:border-primary hover:bg-accent/40 transition-colors" @click="openKind = 'internal'">
+                  <Building2 class="h-6 w-6 mb-3 text-emerald-500" aria-hidden="true" />
+                  <div class="font-medium">{{ $t('occurrences.internal.internalName') }}</div>
+                  <p class="text-sm text-muted-foreground mt-1">{{ $t('occurrences.internal.internalDesc') }}</p>
+                </button>
+              </div>
+            </div>
+            <template v-else>
+              <Button variant="ghost" size="sm" class="mb-3" @click="openKind = null">
+                <ArrowLeft class="h-4 w-4 mr-1.5" />{{ $t('occurrences.internal.back') }}
+              </Button>
+              <OpenProtocolForm v-if="openKind === 'service'" />
+              <OpenInternalTicketForm v-else @cancel="openKind = null" />
+            </template>
           </div>
         </ScrollArea>
       </TabsContent>
@@ -184,6 +228,7 @@ onMounted(async () => {
                 <template #cell-protocol_number="{ item: occ }">
                   <div class="cursor-pointer font-mono text-sm" @click="goToDetail(occ)">
                     {{ occ.protocol_number }}
+                    <Badge v-if="occ.kind === 'internal'" variant="secondary" class="ml-2 align-middle">{{ $t('occurrences.internal.badge') }}</Badge>
                   </div>
                 </template>
                 <template #cell-title="{ item: occ }">
@@ -193,7 +238,7 @@ onMounted(async () => {
                 </template>
                 <template #cell-contact_name="{ item: occ }">
                   <div class="cursor-pointer" @click="goToDetail(occ)">
-                    {{ occ.contact_name }}
+                    {{ occ.kind === 'internal' ? (occ.opened_by_name || '—') : occ.contact_name }}
                   </div>
                 </template>
                 <template #cell-contact_phone="{ item: occ }">

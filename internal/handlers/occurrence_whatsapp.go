@@ -33,6 +33,10 @@ const serviceWindow = 24 * time.Hour
 // case: the one its communication used, else the one the automation names today.
 // nil when none is configured; nothing falls back to another account.
 func (a *App) caseChannelAccount(orgID uuid.UUID, occ *models.Occurrence) *models.WhatsAppAccount {
+	// An internal ticket has no customer, so no customer channel.
+	if occ.IsInternal() {
+		return nil
+	}
 	name := ""
 	var n models.OccurrenceNotification
 	if a.DB.Where("organization_id = ? AND occurrence_id = ? AND whats_app_account <> ''", orgID, occ.ID).Order("created_at DESC").First(&n).Error == nil {
@@ -145,7 +149,7 @@ func (a *App) GetOccurrenceWhatsApp(r *fastglue.Request) error {
 		}
 	}
 	out["messages"] = msgs
-	out["window_open"] = a.serviceWindowOpen(orgID, occ.ContactID, account.Name)
+	out["window_open"] = a.serviceWindowOpen(orgID, occ.CustomerID(), account.Name)
 	canWrite := a.HasPermission(userID, models.ResourceOccurrences, models.ActionWrite, orgID)
 	out["can_reply"] = canWrite
 	out["templates"] = a.caseTemplates(orgID, account.Name)

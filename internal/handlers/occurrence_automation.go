@@ -94,6 +94,9 @@ func resolveAutomation(tx *gorm.DB, orgID uuid.UUID, unitID, teamID *uuid.UUID, 
 // rule (template approved, parameters, opt-out) is checked again by the worker,
 // because the world may change between now and then.
 func (a *App) newForwardNotification(tx *gorm.DB, occ *models.Occurrence, contact *models.Contact) error {
+	if occ.IsInternal() {
+		return nil // nobody outside the company to tell
+	}
 	n := models.OccurrenceNotification{
 		OrganizationID: occ.OrganizationID, OccurrenceID: occ.ID, Kind: notificationKindCreated,
 		IdempotencyKey: "occ:" + occ.ID.String() + ":" + notificationKindCreated,

@@ -28,7 +28,11 @@ const PRIORITY_TONE = {
   urgent: 'bg-red-500/15 text-red-700 dark:text-red-300',
 } as const
 
-const contactName = computed(() => props.occurrence.contact_name || props.occurrence.contact_phone || '—')
+const isInternal = computed(() => props.occurrence.kind === 'internal')
+// An internal ticket shows who asked for it; there is no customer or chat to open.
+const contactName = computed(() => isInternal.value
+  ? (props.occurrence.opened_by_name || '—')
+  : (props.occurrence.contact_name || props.occurrence.contact_phone || '—'))
 const assignee = computed(() => props.occurrence.assigned_user_name || '')
 const sla = computed(() => slaStatus(props.occurrence))
 const openedAt = computed(() => {
@@ -59,7 +63,11 @@ const openedAt = computed(() => {
         <p class="truncate text-sm font-semibold text-foreground">{{ contactName }}</p>
         <!-- WhatsApp line opens the contact's conversation. .stop keeps the
              click from also opening the occurrence (the card's own click). -->
+        <span v-if="isInternal" class="mt-0.5 block truncate text-xs text-muted-foreground">
+          {{ t('occurrences.internal.badge') }}<template v-if="occurrence.department_name"> · {{ occurrence.department_name }}</template>
+        </span>
         <RouterLink
+          v-else
           :to="`/chat/${occurrence.contact_id}`"
           :title="t('chat.openConversation')"
           :aria-label="`${t('chat.openConversation')}: ${contactName}`"

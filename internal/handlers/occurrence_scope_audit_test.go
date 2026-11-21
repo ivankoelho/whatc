@@ -29,7 +29,7 @@ func (w *isoWorld) legacy(t *testing.T, mutate func(*models.Occurrence)) models.
 	contact := testutil.CreateTestContact(t, w.app.DB, w.org.ID)
 	stage, err := w.app.InitialStageForTest(w.org.ID)
 	require.NoError(t, err)
-	o := models.Occurrence{OrganizationID: w.org.ID, ContactID: contact.ID, Title: "Antigo",
+	o := models.Occurrence{OrganizationID: w.org.ID, ContactID: &contact.ID, Title: "Antigo",
 		StageID: stage.ID, OpenedByUserID: w.sac.ID}
 	mutate(&o)
 	require.NoError(t, w.app.CreateOccurrenceForTest(&o))
@@ -61,7 +61,7 @@ func TestScopeAudit_OnlyOrgWideSupervisorsAndOnlyReliableSuggestions(t *testing.
 	uniquePair := w.legacy(t, func(o *models.Occurrence) { o.UnitID, o.DepartmentID = &w.unitPorto.ID, &dept.ID }) // single team
 	ambiguous := w.legacy(t, func(o *models.Occurrence) { o.UnitID, o.DepartmentID = &w.unitOutra.ID, &dept.ID })  // two teams
 	bare := w.legacy(t, func(o *models.Occurrence) { o.AssignedUserID = &w.logPorto.ID })                          // nothing known
-	tr := models.AgentTransfer{OrganizationID: w.org.ID, ContactID: w.occ.ContactID, WhatsAppAccount: "x", PhoneNumber: "5511900000000", TeamID: &w.teamPorto.ID}
+	tr := models.AgentTransfer{OrganizationID: w.org.ID, ContactID: *w.occ.ContactID, WhatsAppAccount: "x", PhoneNumber: "5511900000000", TeamID: &w.teamPorto.ID}
 	require.NoError(t, w.app.DB.Create(&tr).Error)
 	viaTransfer := w.legacy(t, func(o *models.Occurrence) { o.SourceTransferID = &tr.ID })
 

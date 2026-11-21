@@ -41,7 +41,7 @@ func (w *retWorld) protocolOf(t *testing.T, occ uuid.UUID) (string, uuid.UUID) {
 	t.Helper()
 	var o models.Occurrence
 	require.NoError(t, w.app.DB.First(&o, "id = ?", occ).Error)
-	return o.ProtocolNumber, o.ContactID
+	return o.ProtocolNumber, *o.ContactID
 }
 
 func TestRetention_Holds_PlaceRevokeHistoryAndIsolation(t *testing.T) {

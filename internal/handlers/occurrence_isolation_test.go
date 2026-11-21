@@ -71,7 +71,7 @@ func newIsoWorld(t *testing.T) *isoWorld {
 	stage, err := app.InitialStageForTest(org.ID)
 	require.NoError(t, err)
 	w.occ = models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Atraso na entrega",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Atraso na entrega",
 		StageID: stage.ID, OpenedByUserID: w.sac.ID, TeamID: &w.teamPorto.ID, UnitID: &w.unitPorto.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&w.occ))
@@ -152,7 +152,7 @@ func TestOccurrenceIsolation_LegacyCaseWithoutScopeIsRestricted(t *testing.T) {
 	contact := testutil.CreateTestContact(t, w.app.DB, w.org.ID)
 	stage, err := w.app.InitialStageForTest(w.org.ID)
 	require.NoError(t, err)
-	legacy := models.Occurrence{OrganizationID: w.org.ID, ContactID: contact.ID, Title: "Antigo",
+	legacy := models.Occurrence{OrganizationID: w.org.ID, ContactID: &contact.ID, Title: "Antigo",
 		StageID: stage.ID, OpenedByUserID: w.sac.ID}
 	require.NoError(t, w.app.CreateOccurrenceForTest(&legacy))
 
