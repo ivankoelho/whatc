@@ -158,7 +158,7 @@ describe('AIAgentsView', () => {
     svc.getAIAgentReadiness.mockResolvedValue({ data: { data: { issues: [], token_cap: { defined: true, limit: 250000, used: 1200, remaining: 248800 } } } })
     const w = mountView()
     await flushPromises()
-    const usage = w.find('[data-testid="token-usage"]').text().replace(/[.,   ]/g, '') // thousands separators follow the machine's locale
+    const usage = w.find('[data-testid="token-usage"]').text().replace(/\D/g, '') // digits only: thousands separators follow the machine locale
     expect(usage).toContain('1200')
     expect(usage).toContain('250000')
     expect(usage).toContain('248800')
