@@ -74,3 +74,33 @@ usa 200.000 como exemplo de teste, não como recomendação).
 - **Lista de hosts de download da Meta** (`facebook.com`, `fbsbx.com`, `fbcdn.net`, `whatsapp.net`,
   `whatsapp.com`): se a Meta passar a servir mídia de outro domínio, o download falha fechado (erro claro) até a
   lista ser atualizada; confirmar na homologação real com mídia de verdade.
+
+## O que a CI Linux comprova (e que não deu para provar localmente)
+
+`.github/workflows/test.yml` já roda `go test -race -p 1 -timeout 45m` em todos os pacotes (exceto `/test/`) contra
+PostgreSQL 16 e Redis 7, e `e2e-tests.yml` roda o Playwright com PostgreSQL 15, Redis 7 e ClamAV. Portanto, ao abrir
+o PR para `main` (a CI só roda em PR para `main`), os itens abaixo são exercitados sem configuração extra:
+
+| Item | Onde roda | Observação |
+|---|---|---|
+| `-race` em todo o código novo (handoff, recuperação, teto, SEC-1) | `test.yml` | a máquina de desenvolvimento não tem `gcc` |
+| testes de symlink (`TestServeLoginBackground_RejectsSymlink`, `TestApp_ServeMedia_RejectsSymlink`) | `test.yml` | falham no Windows por falta de privilégio, não por defeito |
+| queda real do processo (`TestHandoffRealKill_*`) | `test.yml` | o binário de teste reexecuta a si mesmo (`os.Args[0]`); o auxiliar usa `TEST_DB_KEEP=1` para não apagar a fixture do pai |
+| E2E Playwright | `e2e-tests.yml` | precisa de PostgreSQL, Redis, ClamAV e o binário compilado; não foi executado localmente |
+
+Para repetir localmente em Linux/WSL (PostgreSQL e Redis exclusivos, nunca os compartilhados):
+
+```bash
+TEST_DATABASE_URL='postgres://postgres:<senha>@127.0.0.1:<porta>/<banco_exclusivo>?sslmode=disable' \
+TEST_REDIS_URL='redis://127.0.0.1:<porta>/<n>' \
+go test -race -p 1 -timeout 45m ./internal/handlers ./pkg/whatsapp ./internal/models ./internal/database
+```
+
+## Validação no navegador (simulada)
+
+Feita contra uma organização vazia, com um binário descartável (via `go build -overlay`, fora do repositório) que
+aponta o WhatsApp e a IA para servidores simulados locais; nenhuma conta, mensagem, chave ou cliente reais. Cobriu a
+tela de agentes (salvar, recarregar, editar, valores inválidos, teto, aceite sem limite, isolamento por número,
+permissões, outra organização, celular) e o agente atendendo clientes simulados pelo webhook (saudação assinada,
+resposta com preço bloqueada e refeita, dados da empresa, qualificação, oportunidade no CRM, transferência à equipe
+da unidade, atendente humano assumindo e o agente calando, teto atingido, número sem agente isolado).

@@ -229,7 +229,8 @@ const issueLabel = (i: Issue) => `${i.account}: ${t('aiAgents.issues.' + i.probl
       </template>
     </PageHeader>
 
-    <ScrollArea class="flex-1">
+    <!-- the viewport's inner wrapper has min-width: fit-content: it grows to the longest unbroken line and the cards overflow a phone -->
+    <ScrollArea class="flex-1 [&>div>div]:!min-w-0">
       <div class="p-6 space-y-6">
         <ErrorState v-if="loadError" :title="$t('common.loadErrorTitle')" :description="loadError" :retry-label="$t('common.retry')" @retry="load" />
 
