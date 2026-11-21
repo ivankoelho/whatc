@@ -45,6 +45,10 @@ const loadError = ref<string | null>(null)
 // organization-wide settings that belong to agents: the default agent and the monthly cap
 const defaultAgentId = ref<string>(NONE)
 const monthlyLimit = ref<number>(0)
+const unlimitedAck = ref(false)
+const agentOnly = ref(false)
+interface TokenCap { defined: boolean; limit: number; used: number; remaining: number | null }
+const tokenCap = ref<TokenCap | null>(null)
 const isSavingSettings = ref(false)
 
 // create / edit dialog
@@ -68,7 +72,9 @@ async function loadIssues(list: AIAgent[]) {
   const out: Record<string, Issue[]> = {}
   await Promise.all(list.filter(a => a.whatsapp_accounts?.length).map(async a => {
     try {
-      out[a.id] = unwrap(await chatbotService.getAIAgentReadiness(a.id)).issues ?? []
+      const r = unwrap(await chatbotService.getAIAgentReadiness(a.id))
+      out[a.id] = r.issues ?? []
+      if (r.token_cap) tokenCap.value = r.token_cap
     } catch {
       out[a.id] = []
     }
@@ -89,6 +95,8 @@ async function load() {
     const s = unwrap(settings).settings ?? {}
     defaultAgentId.value = s.ai_default_agent_id || NONE
     monthlyLimit.value = s.ai_monthly_token_limit ?? 0
+    unlimitedAck.value = !!s.ai_unlimited_ack
+    agentOnly.value = !!s.ai_agent_only
     accounts.value = unwrap(accs).accounts ?? []
     await loadIssues(agents.value)
   } catch (err) {
@@ -109,8 +117,11 @@ async function saveSettings() {
     await chatbotService.updateSettings({
       ai_default_agent_id: defaultAgentId.value === NONE ? '' : defaultAgentId.value,
       ai_monthly_token_limit: Math.max(0, Math.floor(Number(monthlyLimit.value) || 0)),
+      ai_unlimited_ack: unlimitedAck.value,
+      ai_agent_only: agentOnly.value,
     })
     toast.success(t('aiAgents.settingsSaved'))
+    await loadIssues(agents.value)
   } catch (err) {
     toast.error(getErrorMessage(err, t('aiAgents.settingsFailed')))
   } finally {
@@ -240,6 +251,24 @@ const issueLabel = (i: Issue) => `${i.account}: ${t('aiAgents.issues.' + i.probl
                   <p class="text-xs text-muted-foreground">{{ $t('aiAgents.monthlyLimitHelp') }}</p>
                 </div>
               </div>
+              <div v-if="!(monthlyLimit > 0)" class="flex items-start gap-3 rounded-md border border-amber-500/40 p-3" data-testid="unlimited-ack-row">
+                <Switch :checked="unlimitedAck" data-testid="unlimited-ack" @update:checked="(v: boolean) => (unlimitedAck = v)" />
+                <div class="space-y-1">
+                  <Label>{{ $t('aiAgents.unlimitedAck') }}</Label>
+                  <p class="text-xs text-muted-foreground">{{ $t('aiAgents.unlimitedAckHelp') }}</p>
+                </div>
+              </div>
+              <div class="flex items-start gap-3">
+                <Switch :checked="agentOnly" data-testid="agent-only" @update:checked="(v: boolean) => (agentOnly = v)" />
+                <div class="space-y-1">
+                  <Label>{{ $t('aiAgents.agentOnly') }}</Label>
+                  <p class="text-xs text-muted-foreground">{{ $t('aiAgents.agentOnlyHelp') }}</p>
+                </div>
+              </div>
+              <p v-if="tokenCap" class="text-sm" data-testid="token-usage">
+                <template v-if="tokenCap.limit > 0">{{ $t('aiAgents.usageWithLimit', { used: tokenCap.used.toLocaleString(), limit: tokenCap.limit.toLocaleString(), remaining: (tokenCap.remaining ?? 0).toLocaleString() }) }}</template>
+                <template v-else>{{ $t('aiAgents.usageNoLimit', { used: tokenCap.used.toLocaleString() }) }}</template>
+              </p>
               <Button size="sm" :disabled="isSavingSettings" data-testid="save-settings" @click="saveSettings">{{ $t('common.save') }}</Button>
             </CardContent>
           </Card>

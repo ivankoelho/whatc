@@ -132,7 +132,36 @@ describe('AIAgentsView', () => {
     await w.find('[data-testid="monthly-limit"]').setValue('1500.7')
     await w.find('[data-testid="save-settings"]').trigger('click')
     await flushPromises()
-    expect(svc.updateSettings).toHaveBeenCalledWith({ ai_default_agent_id: 'ag-1', ai_monthly_token_limit: 1500 })
+    expect(svc.updateSettings).toHaveBeenCalledWith({
+      ai_default_agent_id: 'ag-1', ai_monthly_token_limit: 1500, ai_unlimited_ack: false, ai_agent_only: false,
+    })
+  })
+
+  it('asks for an explicit acceptance only when there is no limit, and sends both new flags', async () => {
+    svc.updateSettings.mockResolvedValue({ data: { data: {} } })
+    const w = mountView()
+    await flushPromises()
+    expect(w.find('[data-testid="unlimited-ack-row"]').exists()).toBe(false) // a limit exists: nothing to accept
+
+    await w.find('[data-testid="monthly-limit"]').setValue('0')
+    expect(w.find('[data-testid="unlimited-ack-row"]').exists()).toBe(true)
+    await w.find('[data-testid="unlimited-ack"]').setValue(true)
+    await w.find('[data-testid="agent-only"]').setValue(true)
+    await w.find('[data-testid="save-settings"]').trigger('click')
+    await flushPromises()
+    expect(svc.updateSettings).toHaveBeenCalledWith({
+      ai_default_agent_id: 'ag-1', ai_monthly_token_limit: 0, ai_unlimited_ack: true, ai_agent_only: true,
+    })
+  })
+
+  it('shows the month consumption next to the limit', async () => {
+    svc.getAIAgentReadiness.mockResolvedValue({ data: { data: { issues: [], token_cap: { defined: true, limit: 250000, used: 1200, remaining: 248800 } } } })
+    const w = mountView()
+    await flushPromises()
+    const usage = w.find('[data-testid="token-usage"]').text().replace(/[.,   ]/g, '') // thousands separators follow the machine's locale
+    expect(usage).toContain('1200')
+    expect(usage).toContain('250000')
+    expect(usage).toContain('248800')
   })
 
   it('has the screen strings in both languages', () => {
