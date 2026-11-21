@@ -159,6 +159,25 @@ func (UserOrganization) TableName() string {
 	return "user_organizations"
 }
 
+// UserSessionEvent records one step of a login session: "login", "refresh"
+// (the session proved alive, which extends its expiry) or "logout". SessionID
+// is stable across refresh-token rotation, so two devices are two sessions.
+// Reason is set on logout ("manual"). A session that never logs out ends by
+// expiry, which the report derives. Connection drops are not here: they live in
+// AgentPresenceLog.
+type UserSessionEvent struct {
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
+	UserID         uuid.UUID `gorm:"type:uuid;index;not null" json:"user_id"`
+	OrganizationID uuid.UUID `gorm:"type:uuid;index;not null" json:"organization_id"`
+	Event          string    `gorm:"size:10;not null" json:"event"`
+	SessionID      string    `gorm:"size:64;index" json:"session_id"`
+	Reason         string    `gorm:"size:20" json:"reason,omitempty"`
+	UserAgent      string    `gorm:"size:255" json:"user_agent,omitempty"`
+	CreatedAt      time.Time `gorm:"index;not null" json:"created_at"`
+}
+
+func (UserSessionEvent) TableName() string { return "user_session_events" }
+
 // UserAvailabilityLog tracks user availability changes for break time calculation
 type UserAvailabilityLog struct {
 	ID             uuid.UUID  `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`

@@ -99,6 +99,7 @@ func (a *App) Login(r *fastglue.Request) error {
 	}
 
 	a.setAuthCookies(r, accessToken, refreshToken)
+	a.startSession(r, user.ID, user.OrganizationID, refreshToken)
 
 	return r.SendEnvelope(CookieAuthResponse{
 		ExpiresIn: a.Config.JWT.AccessExpiryMins * 60,
@@ -185,6 +186,7 @@ func (a *App) Register(r *fastglue.Request) error {
 		}
 
 		a.setAuthCookies(r, accessToken, refreshToken)
+		a.startSession(r, existingUser.ID, existingUser.OrganizationID, refreshToken)
 
 		return r.SendEnvelope(CookieAuthResponse{
 			ExpiresIn: a.Config.JWT.AccessExpiryMins * 60,
@@ -256,6 +258,7 @@ func (a *App) Register(r *fastglue.Request) error {
 	}
 
 	a.setAuthCookies(r, accessToken, refreshToken)
+	a.startSession(r, user.ID, user.OrganizationID, refreshToken)
 
 	return r.SendEnvelope(CookieAuthResponse{
 		ExpiresIn: a.Config.JWT.AccessExpiryMins * 60,
@@ -344,6 +347,7 @@ func (a *App) RefreshToken(r *fastglue.Request) error {
 	}
 
 	a.setAuthCookies(r, accessToken, newRefreshToken)
+	a.continueSession(r, user.ID, user.OrganizationID, claims.ID, newRefreshToken)
 
 	return r.SendEnvelope(CookieAuthResponse{
 		ExpiresIn: a.Config.JWT.AccessExpiryMins * 60,
@@ -523,10 +527,12 @@ func (a *App) Logout(r *fastglue.Request) error {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
 				a.Redis.Del(ctx, refreshTokenKey(claims.ID))
+				a.endSession(r, claims.UserID, claims.OrganizationID, claims.ID)
 			}
 		}
 	}
 
+	a.endSessionFromCookies(r)
 	a.clearAuthCookies(r)
 
 	return r.SendEnvelope(map[string]string{"status": "logged_out"})

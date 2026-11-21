@@ -135,6 +135,8 @@ Em `internal/models/models.go`, na struct `Contact`, logo após `IsRead`:
 
 - [ ] **Step 5: Escrever o backfill**
 
+> **Errata (2026-11-12): o plano abaixo está superado.** O comentário e a chamada abaixo (backfill a cada boot, "nunca sobrescreve um status que um atendente definiu") estavam errados: `new` também é a fila viva de conversas aguardando atendimento, e rodar a derivação em todo `-migrate` movia essas conversas para `in_progress`/`resolved` a cada reinício, esvaziando a fila e o contador "Novo". O código atual usa `database.IntroduceContactStatus` (`internal/database/postgres.go`): adiciona a coluna e deriva os status **uma única vez e de forma atômica** (uma transação), e nenhum boot posterior deriva de novo. Não reaplique este trecho.
+
 Em `internal/database/postgres.go`, ao lado de `BackfillLastInboundAt`:
 
 ```go

@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { formatTime as formatDtTime, formatDate as formatDtDate } from '@/lib/utils'
 import { ref, watch, onMounted, onUnmounted, nextTick, computed, defineAsyncComponent } from 'vue'
+import { useResizeObserver } from '@vueuse/core'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useMediaScan } from '@/composables/useMediaScan'
 import { useContactsStore, type Contact, type Message } from '@/stores/contacts'
 import { useAuthStore } from '@/stores/auth'
+import { canChangeConversationStatus, statusChangeErrorKey } from '@/utils/conversationStatus'
 import { useUsersStore } from '@/stores/users'
 import { useTransfersStore } from '@/stores/transfers'
 import { useTeamsStore } from '@/stores/teams'
@@ -82,6 +84,7 @@ import {
   X,
   SmilePlus,
   MapPin,
+  Pin,
   ExternalLink,
   Loader2,
   ShieldAlert,
@@ -177,6 +180,45 @@ const CONTACTS_MIN_WIDTH = 240
 const CONTACTS_MAX_WIDTH = 560
 const contactsWidth = ref(320)
 const isResizingContacts = ref(false)
+
+// Three areas compete for the width on desktop: the conversation list, the chat and the Contact Info
+// (plus the optional Notes panel). The Contact Info is complementary, so it is the one that yields:
+//   1. the chat column never shrinks below CHAT_MIN_WIDTH, so its header (and every action in it)
+//      stays inside the column instead of spilling over the panel next to it;
+//   2. the Contact Info shrinks down to its own minimum (ContactInfoPanel's MIN_WIDTH);
+//   3. if the row still does not fit, it becomes a side sheet inside the chat column, under the chat
+//      header (infoAsOverlay), rather than pushing the chat to zero. The Notes panel is never closed
+//      by any of this, and the sheet never covers a control of another panel.
+// CHAT_MIN_WIDTH: the chat header needs 377px for its actions (avatar, seven action buttons and its
+// padding, measured by e2e/tests/chat/chat-layout.spec.ts) plus about 100px so the contact name stays readable.
+const CHAT_MIN_WIDTH = 480
+const layoutRoot = ref<HTMLElement | null>(null)
+const chatColumn = ref<HTMLElement | null>(null)
+const infoAsOverlay = ref(false)
+let settlingInfoLayout = false
+
+async function settleInfoLayout() {
+  if (settlingInfoLayout) return
+  settlingInfoLayout = true
+  try {
+    // Measure with the Contact Info in the row (already at its minimum if the row is tight): if the row
+    // still overflows, the columns cannot all fit and the Contact Info leaves the row.
+    infoAsOverlay.value = false
+    await nextTick()
+    const el = layoutRoot.value
+    if (!isMobile.value && isInfoPanelOpen.value && el && el.scrollWidth > el.clientWidth + 1) {
+      infoAsOverlay.value = true
+    }
+  } finally {
+    settlingInfoLayout = false
+  }
+}
+watch(
+  [isMobile, isInfoPanelOpen, isNotesPanelOpen, contactsWidth, () => contactsStore.currentContact?.id],
+  settleInfoLayout,
+  { flush: 'post' },
+)
+useResizeObserver(layoutRoot, settleInfoLayout)
 
 function startContactsResize(e: MouseEvent) {
   isResizingContacts.value = true
@@ -284,6 +326,8 @@ const isChangingStatus = ref(false)
 const isConversationResolved = computed(
   () => contactsStore.currentContact?.contact_status === 'resolved'
 )
+// Concluding is part of attending: chat:write is enough (see canSetContactStatus in the backend)
+const canChangeStatus = computed(() => canChangeConversationStatus((r, a) => authStore.hasPermission(r, a)))
 
 async function toggleConversationStatus() {
   const contact = contactsStore.currentContact
@@ -296,8 +340,8 @@ async function toggleConversationStatus() {
     toast.success(next === 'resolved'
       ? t('chat.conversationResolved')
       : t('chat.conversationReopened'))
-  } catch {
-    toast.error(t('chat.statusChangeFailed'))
+  } catch (e) {
+    toast.error(t(statusChangeErrorKey(e)))
   } finally {
     isChangingStatus.value = false
   }
@@ -624,8 +668,11 @@ onMounted(async () => {
     tagsStore.fetchTags().catch(() => {})
   }
 
-  // Seed the "New" pill counter; WebSocket events keep it current from here
-  contactsStore.fetchStatusCounts()
+  // Seed the "New" pill counter; WebSocket events trigger resyncs from here.
+  // The 24h window ages conversations out without any event, so also re-read
+  // it periodically and when the tab becomes visible again.
+  contactsStore.activateStatusCounts()
+  document.addEventListener('visibilitychange', onCountsVisible)
 
   if (contactId.value) {
     await selectContact(contactId.value)
@@ -655,7 +702,44 @@ function onUserActive() {
   })
 }
 
+function onCountsVisible() {
+  if (document.visibilityState === 'visible') contactsStore.scheduleStatusCountsRefresh()
+}
+
+// Pinned conversations are grouped at the top unless a search is active.
+// Status/tag filters keep the grouping, applied to the filtered result.
+const MAX_PINNED = 3 // mirrors the backend limit (the server is the enforcer)
+const isSearching = computed(() => contactsStore.searchQuery.trim() !== '')
+const pinnedGroup = computed(() =>
+  isSearching.value ? [] : contactsStore.sortedContacts.filter(c => c.is_pinned))
+const restGroup = computed(() =>
+  isSearching.value ? contactsStore.sortedContacts : contactsStore.sortedContacts.filter(c => !c.is_pinned))
+// n/3 is only truthful when the list is not narrowed: under a filter the
+// group shows just the pins that match, so the counter would undercount.
+const pinnedCounterVisible = computed(() =>
+  contactsStore.statusFilter === 'all' && contactsStore.selectedTags.length === 0)
+const isCurrentPinned = computed(() => !!contactsStore.currentContact?.is_pinned)
+
+// Pin/unpin a conversation for the current user (max 3, enforced by the server).
+async function togglePin(contact: Contact) {
+  const next = !contact.is_pinned
+  // Pinning moves the row to another group (it is re-created in the DOM), which
+  // would drop keyboard focus to <body>. Remember it and put it back.
+  const hadFocus = !!document.activeElement?.closest('[data-testid="pin-toggle"]')
+  try {
+    await contactsStore.setPinned(contact.id, next)
+    if (hadFocus) {
+      await nextTick()
+      document.querySelector<HTMLElement>(`[data-testid="pin-toggle"][data-contact-id="${contact.id}"]`)?.focus()
+    }
+  } catch (error: any) {
+    toast.error(error?.response?.status === 409 ? t('chat.pinLimitReached') : t('chat.pinFailed'))
+  }
+}
+
 onUnmounted(() => {
+  contactsStore.deactivateStatusCounts()
+  document.removeEventListener('visibilitychange', onCountsVisible)
   // Leaving the chat view entirely: the route-param watcher only clears the
   // *outgoing* contact when switching between conversations, so the one still
   // open here would keep a live typing entry. The 3s TTL covers it in
@@ -1935,7 +2019,7 @@ async function sendMediaMessage() {
 </script>
 
 <template>
-  <div class="flex h-full bg-[#0a0a0b] light:bg-gray-50">
+  <div ref="layoutRoot" class="relative flex h-full bg-[#0a0a0b] light:bg-gray-50">
     <!-- Status rail (Bitrix's All / Tasks / CoPilot column) — desktop only;
          mobile keeps the pills inside the list header. -->
     <ConversationStatusFilter
@@ -2069,8 +2153,35 @@ async function sendMediaMessage() {
       <!-- Contacts -->
       <ScrollArea :ref="(el: any) => contactsScroll.scrollAreaRef.value = el" orientation="vertical" class="flex-1">
         <div class="py-1 w-full">
+          <!-- Pinned group: header, the pinned rows, a hairline, then the rest.
+               No group while searching (a search is one flat result list; the
+               pin mark on the row still says which ones are pinned). -->
+          <div v-if="pinnedGroup.length" role="group" :aria-label="$t('chat.pinnedGroupLabel')">
+            <div class="flex items-center gap-1.5 px-3 pb-1 pt-1.5 text-[11px] tracking-wide text-white/50 light:text-gray-500">
+              <Pin class="h-3 w-3" aria-hidden="true" />
+              <span class="font-medium">{{ $t('chat.pinnedSection') }}</span>
+              <span
+                v-if="pinnedCounterVisible"
+                data-testid="pinned-counter"
+                class="ml-auto text-white/40 light:text-gray-500"
+                :aria-label="$t('chat.pinnedCounterLabel', { n: pinnedGroup.length, max: MAX_PINNED })"
+              >{{ pinnedGroup.length }}/{{ MAX_PINNED }}</span>
+            </div>
+            <ConversationListItem
+              v-for="contact in pinnedGroup"
+              :key="contact.id"
+              :contact="contact"
+              :active="contactsStore.currentContact?.id === contact.id"
+              :format-time="formatContactTime"
+              :get-initials="getInitials"
+              :get-avatar-gradient="getAvatarGradient"
+              @click="handleContactClick(contact)"
+              @toggle-pin="togglePin"
+            />
+            <div v-if="restGroup.length" data-testid="pinned-divider" class="mx-3 my-1 border-t border-white/[0.12] light:border-gray-300" role="separator" />
+          </div>
           <ConversationListItem
-            v-for="contact in contactsStore.sortedContacts"
+            v-for="contact in restGroup"
             :key="contact.id"
             :contact="contact"
             :active="contactsStore.currentContact?.id === contact.id"
@@ -2078,6 +2189,7 @@ async function sendMediaMessage() {
             :get-initials="getInitials"
             :get-avatar-gradient="getAvatarGradient"
             @click="handleContactClick(contact)"
+            @toggle-pin="togglePin"
           />
 
           <!-- Loading indicator for infinite scroll -->
@@ -2098,8 +2210,10 @@ async function sendMediaMessage() {
          turn once isInfoPanelOpen hands the screen to ContactInfoPanel. -->
     <div
       v-if="!isMobile || contactsStore.currentContact"
-      class="flex-1 flex flex-col bg-[#0f0f10] light:bg-gray-50"
+      ref="chatColumn"
+      class="relative min-w-0 flex-1 flex flex-col bg-[#0f0f10] light:bg-gray-50"
       :class="isMobile && contactsStore.currentContact && isInfoPanelOpen && 'hidden'"
+      :style="!isMobile && { minWidth: CHAT_MIN_WIDTH + 'px' }"
     >
       <!-- No Contact Selected -->
       <div
@@ -2119,7 +2233,7 @@ async function sendMediaMessage() {
       <template v-else>
         <!-- Chat Header -->
         <div class="h-14 flex-shrink-0 px-4 border-b border-white/[0.08] light:border-gray-200 flex items-center justify-between bg-[#0f0f10] light:bg-white">
-          <div class="flex items-center gap-2">
+          <div class="flex min-w-0 items-center gap-2">
             <Button
               v-if="isMobile"
               variant="ghost"
@@ -2130,15 +2244,15 @@ async function sendMediaMessage() {
             >
               <ArrowLeft class="h-4 w-4" />
             </Button>
-            <Avatar class="h-8 w-8 ring-2 ring-white/[0.1] light:ring-gray-200">
+            <Avatar class="h-8 w-8 shrink-0 ring-2 ring-white/[0.1] light:ring-gray-200">
               <AvatarImage :src="contactsStore.currentContact.avatar_url" />
               <AvatarFallback :class="'text-xs bg-gradient-to-br text-white ' + getAvatarGradient(contactsStore.currentContact.name || contactsStore.currentContact.phone_number)">
                 {{ getInitials(contactsStore.currentContact.name || contactsStore.currentContact.phone_number) }}
               </AvatarFallback>
             </Avatar>
-            <div>
+            <div class="min-w-0">
               <div class="flex items-center gap-1.5">
-                <p class="text-sm font-medium text-white light:text-gray-900">
+                <p class="truncate text-sm font-medium text-white light:text-gray-900">
                   {{ contactsStore.currentContact.name || contactsStore.currentContact.phone_number }}
                 </p>
                 <Badge v-if="activeTransferId" class="text-[10px] h-5 bg-orange-500/20 text-orange-400 light:bg-orange-100 light:text-orange-700">
@@ -2148,12 +2262,12 @@ async function sendMediaMessage() {
                   {{ $t('chat.marketingOptOut', 'Marketing Opt-out') }}
                 </Badge>
               </div>
-              <p class="text-[11px] text-white/50 light:text-gray-500">
+              <p class="truncate text-[11px] text-white/50 light:text-gray-500">
                 {{ contactsStore.currentContact.phone_number }}
               </p>
             </div>
           </div>
-          <div class="flex items-center gap-1">
+          <div class="flex shrink-0 items-center gap-1">
             <CallButton
               v-if="contactsStore.currentContact?.phone_number && selectedAccount && isBusinessCallingEnabled"
               :contact-id="contactsStore.currentContact.id"
@@ -2193,9 +2307,29 @@ async function sendMediaMessage() {
               </TooltipTrigger>
               <TooltipContent>{{ action.name }}</TooltipContent>
             </Tooltip>
+            <!-- Pin for the open conversation: the touch alternative to the list's
+                 hover action. 44px target on coarse pointers. -->
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  data-testid="header-pin-toggle"
+                  class="h-8 w-8 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11 text-white/50 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100"
+                  :class="isCurrentPinned && 'text-white light:text-gray-900'"
+                  :aria-pressed="isCurrentPinned"
+                  :aria-label="isCurrentPinned ? $t('chat.unpinConversation') : $t('chat.pinConversation')"
+                  @click="contactsStore.currentContact && togglePin(contactsStore.currentContact)"
+                >
+                  <Pin class="h-4 w-4" :class="isCurrentPinned && 'fill-current'" aria-hidden="true" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{{ isCurrentPinned ? $t('chat.unpinConversation') : $t('chat.pinConversation') }}</TooltipContent>
+            </Tooltip>
             <!-- Labelled, not icon-only: resolving a conversation is a
                  consequential action and deserves a visible name. -->
             <Button
+              v-if="canChangeStatus"
               variant="ghost"
               size="sm"
               class="h-8 gap-1.5 px-2 text-xs font-medium"
@@ -2203,10 +2337,13 @@ async function sendMediaMessage() {
                 ? 'text-white/60 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100'
                 : 'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 light:text-emerald-600 light:hover:bg-emerald-50'"
               :disabled="isChangingStatus"
+              :aria-label="isConversationResolved ? $t('chat.reopenConversation') : $t('chat.resolveConversation')"
+              :title="isConversationResolved ? $t('chat.reopenConversation') : $t('chat.resolveConversation')"
               @click="toggleConversationStatus"
             >
               <component :is="isConversationResolved ? RotateCcw : CheckCircle2" class="h-4 w-4" />
-              <span>{{ isConversationResolved ? $t('chat.reopenConversation') : $t('chat.resolveConversation') }}</span>
+              <!-- Label hidden below sm: at phone width the header cannot carry it plus the pin and the other actions. The accessible name stays. -->
+              <span class="hidden sm:inline">{{ isConversationResolved ? $t('chat.reopenConversation') : $t('chat.resolveConversation') }}</span>
             </Button>
             <Tooltip>
               <TooltipTrigger as-child>
@@ -2862,16 +2999,28 @@ async function sendMediaMessage() {
 
     <!-- Contact Info Panel — Oportunidades/Ocorrências render as sections of
          this same column (spec item 4), not separate side panels. -->
-    <ContactInfoPanel
-      v-if="contactsStore.currentContact && isInfoPanelOpen"
-      :contact="contactsStore.currentContact"
-      :session-data="contactSessionData"
-      :source-transfer-id="activeTransferId ?? undefined"
-      @close="isInfoPanelOpen = false"
-      @tags-updated="(tags) => contactsStore.updateContactTags(contactsStore.currentContact!.id, tags)"
-      @name-updated="(name) => contactsStore.updateContactName(contactsStore.currentContact!.id, name)"
-      @registration-updated="(registration) => contactsStore.updateContactRegistration(contactsStore.currentContact!.id, registration)"
-    />
+    <!-- The wrapper is invisible (`contents`) while the panel is a column of the row. When the
+         columns cannot all fit (see settleInfoLayout) the panel moves INTO the chat column as a
+         side sheet under the chat header (top-14 = the header's h-14): it never covers the
+         header's actions nor the Notes panel, and it does not squeeze the chat. -->
+    <Teleport :to="chatColumn ?? 'body'" :disabled="!infoAsOverlay || !chatColumn">
+      <div
+        v-if="contactsStore.currentContact && isInfoPanelOpen"
+        data-testid="contact-info-slot"
+        :data-overlay="infoAsOverlay"
+        :class="infoAsOverlay ? 'absolute bottom-0 right-0 top-14 z-30 max-w-full shadow-2xl' : 'contents'"
+      >
+        <ContactInfoPanel
+          :contact="contactsStore.currentContact"
+          :session-data="contactSessionData"
+          :source-transfer-id="activeTransferId ?? undefined"
+          @close="isInfoPanelOpen = false"
+          @tags-updated="(tags) => contactsStore.updateContactTags(contactsStore.currentContact!.id, tags)"
+          @name-updated="(name) => contactsStore.updateContactName(contactsStore.currentContact!.id, name)"
+          @registration-updated="(registration) => contactsStore.updateContactRegistration(contactsStore.currentContact!.id, registration)"
+        />
+      </div>
+    </Teleport>
 
     <!-- Template Params Dialog -->
     <Dialog v-model:open="templateDialogOpen">

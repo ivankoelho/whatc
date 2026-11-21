@@ -368,7 +368,7 @@ async function updateContactTags(tags: string[]) {
   <div
     class="flex flex-col bg-muted/60 h-full relative"
     :class="isMobile && 'w-full'"
-    :style="!isMobile && { width: `${panelWidth}px` }"
+    :style="!isMobile && { width: `${panelWidth}px`, minWidth: `${MIN_WIDTH}px` }"
   >
     <!-- Resize Handle — desktop only, the mobile pane is always full-width -->
     <div

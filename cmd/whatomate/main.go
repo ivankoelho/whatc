@@ -227,6 +227,11 @@ func runServer(args []string) {
 			lo.Fatal("Resolve-send permission backfill failed", "error", err)
 		}
 
+		// Team preset keys and the SAC triage permission (chat:triage): additive, once per organization.
+		if err := database.BackfillTeamProfileKeysAndChatTriage(db, lo); err != nil {
+			lo.Fatal("Chat triage permission backfill failed", "error", err)
+		}
+
 		// Same window: supervising cases became its own permission. Grant it to
 		// whoever could (conversations:view_all), THEN narrow the untouched preset.
 		if err := database.BackfillOccurrenceViewAll(db, lo); err != nil {
@@ -898,6 +903,8 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.PUT("/api/contacts/{id}/tags", app.UpdateContactTags)
 	g.PUT("/api/contacts/{id}/name", app.UpdateContactName)
 	g.PUT("/api/contacts/{id}/status", app.UpdateContactStatus)
+	g.PUT("/api/contacts/{id}/pin", app.PinConversation)
+	g.DELETE("/api/contacts/{id}/pin", app.UnpinConversation)
 	g.POST("/api/contacts/{id}/typing", app.NotifyTyping)
 	g.GET("/api/contacts/{id}/session-data", app.GetContactSessionData)
 
@@ -996,6 +1003,10 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/occurrences/scope-audit/apply", app.ApplyOccurrenceScopeSuggestions)
 	g.PUT("/api/occurrences/{id}/scope", app.SetOccurrenceScope)
 	g.POST("/api/occurrences/{id}/reassign", app.ReassignOccurrence)
+	g.GET("/api/occurrence-alerts", app.ListOccurrenceAlerts)
+	g.PUT("/api/occurrence-alerts/seen", app.MarkOccurrenceAlertsSeen)
+	g.PUT("/api/occurrence-alerts/dismiss-all", app.DismissAllOccurrenceAlerts)
+	g.PUT("/api/occurrence-alerts/{id}/dismiss", app.DismissOccurrenceAlert)
 	g.GET("/api/occurrences/{id}/notifications", app.ListOccurrenceNotifications)
 	g.POST("/api/occurrences/{id}/notifications/{nid}/resolve", app.ResolveOccurrenceNotification)
 	g.GET("/api/occurrences/{id}/chat", app.GetOccurrenceChat)
@@ -1235,6 +1246,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/analytics/agents/{id}", app.GetAgentDetails)
 	g.GET("/api/analytics/agents/comparison", app.GetAgentComparison)
 	g.GET("/api/analytics/agents/live", app.GetLiveAgents)
+	g.GET("/api/analytics/agents/attendance", app.GetAgentAttendance)
 
 	// Meta WhatsApp Analytics
 	// WhatsApp consumption (whatsapp_usage:read|write)

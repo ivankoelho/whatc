@@ -848,6 +848,13 @@
     "filterAll": "All",
     "filterByStatus": "Filter by status",
     "agentTyping": "{name} is typing…",
+    "pinnedSection": "Pinned",
+    "pinnedGroupLabel": "Pinned conversations",
+    "pinnedCounterLabel": "{n} of {max} pinned",
+    "pinConversation": "Pin conversation",
+    "unpinConversation": "Unpin conversation",
+    "pinLimitReached": "You can pin up to 3 conversations. Unpin one to pin another.",
+    "pinFailed": "Could not change the conversation pin.",
     "statusNew": "New",
     "statusInProgress": "In progress",
     "statusResolved": "Resolved",
@@ -857,6 +864,7 @@
     "conversationResolved": "Conversation resolved",
     "conversationReopened": "Conversation reopened",
     "statusChangeFailed": "Could not change the conversation status. Try again.",
+    "statusChangeForbidden": "You do not have permission to conclude or reopen this conversation.",
     "noTagsAvailable": "No tags available",
     "paused": "Paused",
     "assignedTo": "Assigned to",
@@ -2857,6 +2865,16 @@
     "changedByAnother": "Someone else already took or changed this transfer. The list was refreshed."
   },
   "occurrences": {
+    "alerts": {
+      "title": "Protocols",
+      "empty": "No protocol notifications",
+      "dismiss": "Dismiss",
+      "dismissAll": "Dismiss all",
+      "uncategorized": "Uncategorized",
+      "kind_assigned": "New protocol assigned to you",
+      "kind_transferred": "Protocol transferred to you",
+      "kind_team": "Protocol on your team"
+    },
     "title": "Protocols",
     "subtitle": "Support cases and protocols",
     "searchPlaceholder": "Search by protocol...",
@@ -3946,6 +3964,38 @@
     }
   },
   "agentAnalytics": {
+    "attendance": {
+      "title": "Attendance",
+      "description": "Logins, away time and logouts per agent in the period",
+      "agent": "Agent",
+      "firstLogin": "First login",
+      "logins": "Logins",
+      "connected": "Connected",
+      "away": "Away",
+      "lastLogout": "Last logout",
+      "noLogin": "No login record",
+      "noLoginHint": "{n} agent(s) with no login record in the period",
+      "onlyNoLogin": "Only with no login record",
+      "team": "Team",
+      "allTeams": "All teams",
+      "unit": "Unit",
+      "allUnits": "All units",
+      "role": "Role",
+      "allRoles": "All roles",
+      "sessions": "Sessions",
+      "awayPeriods": "Away periods",
+      "noReturn": "no return recorded",
+      "connectedNow": "Connected now",
+      "activeN": "{n} valid session(s)",
+      "ended_manual": "ended by the agent",
+      "ended_expired": "session expired",
+      "ended_active": "active",
+      "mobile": "mobile",
+      "desktop": "desktop",
+      "disconnections": "{n} disconnection(s) in the period",
+      "empty": "No agents found",
+      "loadFailed": "Could not load the report"
+    },
     "live": {
       "title": "Live",
       "scopeAll": "Whole organization",
@@ -5086,6 +5136,10 @@
       "chat_write": {
         "label": "Send messages",
         "description": "Reply to customers in the chat."
+      },
+      "chat_triage": {
+        "label": "Take over new conversations",
+        "description": "Start attending a conversation that is still waiting for attendance (triage), within the conversations they can access."
       },
       "chat_assign_write": {
         "label": "Assign conversations",

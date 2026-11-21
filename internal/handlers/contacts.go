@@ -45,14 +45,17 @@ type ContactResponse struct {
 	LastMessageAt      *time.Time           `json:"last_message_at"`
 	LastMessagePreview string               `json:"last_message_preview"`
 	UnreadCount        int                  `json:"unread_count"`
-	AssignedUserID     *uuid.UUID           `json:"assigned_user_id,omitempty"`
-	AssignedUserName   string               `json:"assigned_user_name,omitempty"`
-	WhatsAppAccount    string               `json:"whatsapp_account,omitempty"`
-	LastInboundAt      *time.Time           `json:"last_inbound_at,omitempty"`
-	ServiceWindowOpen  bool                 `json:"service_window_open"`
-	MarketingOptOut    bool                 `json:"marketing_opt_out"`
-	CreatedAt          time.Time            `json:"created_at"`
-	UpdatedAt          time.Time            `json:"updated_at"`
+	// IsPinned is the caller's own pin (see ConversationPin); false elsewhere.
+	IsPinned          bool       `json:"is_pinned"`
+	PinnedAt          *time.Time `json:"pinned_at,omitempty"`
+	AssignedUserID    *uuid.UUID `json:"assigned_user_id,omitempty"`
+	AssignedUserName  string     `json:"assigned_user_name,omitempty"`
+	WhatsAppAccount   string     `json:"whatsapp_account,omitempty"`
+	LastInboundAt     *time.Time `json:"last_inbound_at,omitempty"`
+	ServiceWindowOpen bool       `json:"service_window_open"`
+	MarketingOptOut   bool       `json:"marketing_opt_out"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
 // MessageResponse represents a message for the frontend
@@ -180,8 +183,12 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 		}
 	}
 
-	// Order by last message time (most recent first)
-	query = query.Order("last_message_at DESC NULLS LAST, created_at DESC")
+	// The caller's own pins first (most recently pinned on top), then by last
+	// message time (most recent first). Pins are per user, so this ordering is
+	// computed against the caller only.
+	query = query.
+		Order(fmt.Sprintf("(SELECT pinned_at FROM conversation_pins cp WHERE cp.user_id = '%s' AND cp.contact_id = contacts.id) DESC NULLS LAST", userID.String())).
+		Order("last_message_at DESC NULLS LAST, created_at DESC")
 
 	var total int64
 	query.Model(&models.Contact{}).Count(&total)
@@ -197,6 +204,20 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 	// Resolve assigned-agent names in a single query (avoid N+1) so the chat
 	// list can show "Atribuído a: X" per row.
 	assignedNames := a.assignedUserNames(orgID, contacts)
+
+	// The caller's pins among this page (one query, no N+1).
+	pinned := map[uuid.UUID]time.Time{}
+	if len(contacts) > 0 {
+		ids := make([]uuid.UUID, len(contacts))
+		for i, c := range contacts {
+			ids[i] = c.ID
+		}
+		var pins []models.ConversationPin
+		a.DB.Where("user_id = ? AND contact_id IN ?", userID, ids).Find(&pins)
+		for _, p := range pins {
+			pinned[p.ContactID] = p.PinnedAt
+		}
+	}
 
 	// Convert to response format
 	response := make([]ContactResponse, len(contacts))
@@ -245,6 +266,8 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 			LastMessageAt:      c.LastMessageAt,
 			LastMessagePreview: c.LastMessagePreview,
 			UnreadCount:        int(unreadCount),
+			IsPinned:           !pinned[c.ID].IsZero(),
+			PinnedAt:           pinnedAtPtr(pinned[c.ID]),
 			AssignedUserID:     c.AssignedUserID,
 			WhatsAppAccount:    c.WhatsAppAccount,
 			LastInboundAt:      c.LastInboundAt,
