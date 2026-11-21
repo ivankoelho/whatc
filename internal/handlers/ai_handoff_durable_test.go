@@ -310,3 +310,29 @@ func TestDurableHandoff_IntentCannotBeRecorded_FarewellIsNotSentHandoffIsMadeFir
 	}
 	assert.Equal(t, 1, countWaitMessages(sent), "the customer is told only after the attendance exists")
 }
+
+// Recovery claims across organizations (one worker serves all), but every handoff it finishes stays inside its
+// own organization: its own account, its own unit team, its own contact.
+func TestDurableHandoff_RecoveryKeepsEachHandoffInsideItsOrganization(t *testing.T) {
+	w1 := newDurableWiring(t)
+	w2 := newWiring(t, durableFarewell, qualHappy) // another organization, same database; intents of both stay
+	crashAt(t, "after_farewell")
+	w1.inboundSurvivingCrash(t, "5511900005001", durableCustomer)
+	w2.inboundSurvivingCrash(t, "5511900005002", durableCustomer)
+	aiHandoffFault = nil
+	c1, c2 := w1.contactFor(t, "5511900005001"), w2.contactFor(t, "5511900005002")
+
+	require.Equal(t, 2, w1.app.recoverAIHandoffs(afterLease()), "one worker recovers both organizations")
+
+	for _, tc := range []struct {
+		w *wiring
+		c *models.Contact
+	}{{w1, c1}, {w2, c2}} {
+		tr := tc.w.aiTransfers(t, tc.c.ID)
+		require.Len(t, tr, 1)
+		assert.Equal(t, tc.w.f.org.ID, tr[0].OrganizationID, "the attendance belongs to the contact's organization")
+		assert.Equal(t, tc.w.f.account.Name, tr[0].WhatsAppAccount)
+		require.NotNil(t, tr[0].TeamID)
+		assert.Equal(t, tc.w.f.team.ID, *tr[0].TeamID, "routed to ITS unit team, never the other organization's")
+	}
+}
