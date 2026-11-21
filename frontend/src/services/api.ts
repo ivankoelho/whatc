@@ -531,6 +531,11 @@ export const agentAnalyticsService = {
   getLive: () => api.get('/analytics/agents/live')
 }
 
+export const agentAttendanceService = {
+  get: (params?: Record<string, string>) => api.get('/analytics/agents/attendance', { params })
+}
+
+
 // Meta WhatsApp Analytics Types
 export type MetaAnalyticsType =
   | 'analytics'

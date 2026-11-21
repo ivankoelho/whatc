@@ -110,6 +110,7 @@ func GetMigrationModels() []MigrationModel {
 
 		// User tracking
 		{"UserAvailabilityLog", &models.UserAvailabilityLog{}},
+		{"UserSessionEvent", &models.UserSessionEvent{}},
 		{"AgentPresenceLog", &models.AgentPresenceLog{}},
 		{"AgentTransferAssignment", &models.AgentTransferAssignment{}},
 
