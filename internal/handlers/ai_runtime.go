@@ -79,7 +79,7 @@ func (a *App) completeAI(ctx context.Context, settings *models.ChatbotSettings, 
 		if limit := settings.AI.MonthlyTokenLimit; limit > 0 {
 			res, err := a.reserveAITokens(meta.OrgID, limit, estimateAITokens(req), time.Now())
 			if err != nil {
-				a.recordAIUsage(meta, provider, req.Model, nil, 0, err)
+				a.recordAIUsageOrLog(meta, provider, req.Model, err)
 				return nil, err
 			}
 			meta.reservation = res
@@ -89,7 +89,7 @@ func (a *App) completeAI(ctx context.Context, settings *models.ChatbotSettings, 
 
 	apiKey, err := a.resolveAIAPIKey(settings)
 	if err != nil {
-		a.recordAIUsage(meta, provider, req.Model, nil, 0, err)
+		a.recordAIUsageOrLog(meta, provider, req.Model, err)
 		return nil, err
 	}
 	p, err := a.newAIProvider(provider, apiKey)
@@ -170,6 +170,14 @@ func (a *App) completeWithTools(ctx context.Context, p ai.Provider, provider str
 // recordAIUsage persists one AIUsageLog row. A failure to log is logged and
 // swallowed: observability must never break a customer's reply. It reports the failure to the
 // caller too, and to the call's token reservation, which then stays counted as consumption.
+// recordAIUsageOrLog records a call that failed before it reached the provider. The caller is already
+// returning the real error, so a failure to write the usage row is logged, never swallowed silently.
+func (a *App) recordAIUsageOrLog(meta aiCallMeta, provider, model string, callErr error) {
+	if err := a.recordAIUsage(meta, provider, model, nil, 0, callErr); err != nil {
+		a.Log.Error("Failed to record the AI usage of a failed call", "error", err, "feature", meta.Feature, "org_id", meta.OrgID)
+	}
+}
+
 func (a *App) recordAIUsage(meta aiCallMeta, provider, model string, resp *ai.Response, took time.Duration, callErr error) error {
 	entry := models.AIUsageLog{
 		OrganizationID:  meta.OrgID,
