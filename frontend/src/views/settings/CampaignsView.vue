@@ -261,7 +261,7 @@ function getProgressPercentage(campaign: Campaign): number {
 
     <!-- Campaigns List -->
     <ScrollArea class="flex-1">
-      <div class="p-6">
+      <div class="p-6 max-md:p-3">
         <div>
           <Card>
             <CardHeader>
@@ -272,7 +272,7 @@ function getProgressPercentage(campaign: Campaign): number {
                 </div>
                 <div class="flex items-center gap-2 flex-wrap">
                   <Select v-model="filterStatus">
-                    <SelectTrigger class="w-[140px]">
+                    <SelectTrigger class="w-[140px]" :aria-label="$t('campaigns.status')">
                       <SelectValue :placeholder="$t('campaigns.allStatuses')" />
                     </SelectTrigger>
                     <SelectContent>

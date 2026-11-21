@@ -25,7 +25,7 @@ defineProps<{
   <header class="border-b border-white/[0.08] light:border-gray-200 bg-[#0a0a0b]/95 light:bg-white/95 backdrop-blur">
     <div class="flex min-h-16 flex-wrap items-center gap-y-2 px-4 py-2 sm:px-6 sm:py-0">
       <RouterLink v-if="backLink" :to="backLink">
-        <Button variant="ghost" size="icon" class="mr-3">
+        <Button variant="ghost" size="icon" class="mr-3" :aria-label="$t('common.back')">
           <ArrowLeft class="h-5 w-5" />
         </Button>
       </RouterLink>

@@ -112,7 +112,7 @@ function selectTemplate(tpl: any) {
 <template>
   <Popover v-model:open="isOpen">
     <PopoverTrigger as-child>
-      <Button type="button" variant="ghost" size="icon">
+      <Button type="button" variant="ghost" size="icon" :aria-label="$t('chat.template')">
         <LayoutTemplate class="h-5 w-5" />
       </Button>
     </PopoverTrigger>

@@ -181,7 +181,7 @@ async function confirmDelete() {
     />
 
     <ScrollArea v-else orientation="vertical" class="flex-1">
-      <div class="p-6">
+      <div class="p-6 max-md:p-3">
         <div class="max-w-4xl mx-auto">
           <Card>
             <CardHeader>

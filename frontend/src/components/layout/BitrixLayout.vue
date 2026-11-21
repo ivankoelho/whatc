@@ -8,6 +8,7 @@ import { useAuthStore } from '@/stores/auth'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Menu, X } from 'lucide-vue-next'
+import { useMobileDrawerA11y } from '@/composables/useMobileDrawerA11y'
 import { wsService } from '@/services/websocket'
 import { authService } from '@/services/api'
 import { useBranding } from '@/composables/useBranding'
@@ -18,6 +19,7 @@ import WallpaperPicker from './WallpaperPicker.vue'
 import HeaderTools from './HeaderTools.vue'
 import HeaderClock from './HeaderClock.vue'
 import ActiveCallPanel from '@/components/calling/ActiveCallPanel.vue'
+import MobileTabBar from './MobileTabBar.vue'
 import { ScrollToTop } from '@/components/shared'
 import { navigationSections, type NavSection, type NavItem } from './navigation'
 
@@ -30,6 +32,9 @@ const { logoUrl, systemName, loadBranding } = useBranding()
 const { background: wallpaper } = useWallpaper()
 const isCollapsed = ref(true)
 const isMobileMenuOpen = ref(false)
+const asideEl = ref<HTMLElement | null>(null)
+// Phone drawer: focus moves in on open, Escape closes, focus returns to the opener; `drawerLocked` makes the page behind it inert.
+const { locked: drawerLocked } = useMobileDrawerA11y(isMobileMenuOpen, asideEl)
 
 // Refresh user data and connect WebSocket on mount
 onMounted(() => {
@@ -102,6 +107,11 @@ const navSections = computed(() => {
     .filter(section => section.items.length > 0)
 })
 
+// Phone shell: bottom tab bar = the first 4 permitted modules; the rest lives in the drawer ("More").
+// An open conversation is its own screen, so the bar (and top bar) step aside.
+const mobileTabs = computed(() => navSections.value.flatMap(s => s.items).slice(0, 4))
+const isImmersive = computed(() => route.name === 'chat-conversation' && !!route.params.contactId)
+
 // Bitrix-style top tabs: the active module's sub-pages live only here, so the
 // sidebar stays a flat list of modules. Groups (Settings) become clusters
 // split by a divider instead of labelled headers.
@@ -137,23 +147,25 @@ const handleLogout = async () => {
 </script>
 
 <template>
-  <div class="on-wallpaper relative flex h-screen overflow-hidden" :style="{ background: wallpaper, '--wallpaper': wallpaper }">
+  <div class="on-wallpaper relative flex h-screen max-md:h-[100dvh] overflow-hidden" :style="{ background: wallpaper, '--wallpaper': wallpaper }">
     <!-- Skip link for accessibility -->
-    <a href="#main-content" class="skip-link">{{ $t('nav.skipToMain') }}</a>
+    <a href="#main-content" class="skip-link" :inert="drawerLocked || undefined">{{ $t('nav.skipToMain') }}</a>
 
     <!-- Mobile menu overlay -->
     <div
       v-if="isMobileMenuOpen"
-      class="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm md:hidden"
+      class="fixed inset-0 z-[55] bg-black/50 backdrop-blur-sm md:hidden"
       @click="isMobileMenuOpen = false"
     />
 
     <!-- Sidebar: glass over the wallpaper, white text in both colour modes -->
     <aside
+      ref="asideEl"
       :class="[
-        'shell-glass flex shrink-0 flex-col text-white transition-[width,transform] duration-300',
-        'fixed inset-y-0 left-0 z-40 bg-black/45 backdrop-blur-xl md:relative md:bg-black/15 md:backdrop-blur-md',
-        isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
+        'shell-glass flex shrink-0 flex-col text-white transition-[width,transform] max-md:transition-[transform,visibility] duration-300',
+        'fixed inset-y-0 left-0 z-40 max-md:z-[60] bg-black/45 backdrop-blur-xl md:relative md:bg-black/15 md:backdrop-blur-md',
+        // Closed phone drawer is off-canvas: `invisible` (applied after the slide-out ends) also removes it from the tab order and the accessibility tree.
+        isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0 max-md:invisible',
         isCollapsed ? 'w-[272px] md:w-[70px]' : 'w-[272px]'
       ]"
       role="navigation"
@@ -261,9 +273,9 @@ const handleLogout = async () => {
       </div>
     </aside>
 
-    <div class="flex min-w-0 flex-1 flex-col">
+    <div class="flex min-w-0 flex-1 flex-col" :inert="drawerLocked || undefined">
       <!-- Top bar: module tabs on the left, workspace tools on the right -->
-      <header class="shell-glass flex h-14 shrink-0 items-center gap-2 px-2 text-white md:px-3">
+      <header :class="['shell-glass flex h-14 shrink-0 items-center gap-2 px-2 text-white md:px-3', isImmersive && 'max-md:hidden']">
         <button
           type="button"
           class="shell-chip h-9 w-9 justify-center md:hidden"
@@ -310,7 +322,7 @@ const handleLogout = async () => {
       <!-- Main content: a rounded sheet floating over the wallpaper -->
       <main
         id="main-content"
-        class="relative mx-1.5 mb-1.5 flex-1 overflow-hidden rounded-2xl bg-background shadow-[0_8px_40px_-12px_rgba(0,0,0,0.45)] md:mb-2 md:ml-0 md:mr-2"
+        :class="['relative mx-1.5 mb-1.5 flex-1 overflow-hidden rounded-2xl bg-background shadow-[0_8px_40px_-12px_rgba(0,0,0,0.45)] md:mb-2 md:ml-0 md:mr-2', isImmersive ? 'max-md:mx-0 max-md:mb-0 max-md:rounded-none' : 'max-md:mb-[calc(3.5rem+env(safe-area-inset-bottom)+0.375rem)]']"
         role="main"
       >
         <RouterView v-slot="{ Component, route: viewRoute }">
@@ -322,5 +334,7 @@ const handleLogout = async () => {
         <ScrollToTop />
       </main>
     </div>
+
+    <MobileTabBar v-if="!isImmersive" glass :inert="drawerLocked || undefined" :items="mobileTabs" :more-open="isMobileMenuOpen" @more="isMobileMenuOpen = !isMobileMenuOpen" />
   </div>
 </template>

@@ -313,7 +313,7 @@ function getHeaderIcon(type: string) {
     </PageHeader>
 
     <ScrollArea class="flex-1">
-      <div class="p-6">
+      <div class="p-6 max-md:p-3">
         <div>
           <ErrorState
             v-if="error && !isLoading"
@@ -331,9 +331,9 @@ function getHeaderIcon(type: string) {
                 </div>
                 <div class="flex items-center gap-4 flex-wrap">
                   <div class="flex items-center gap-2">
-                    <Label class="text-sm text-muted-foreground">{{ $t('templates.account') }}:</Label>
+                    <Label for="templates-account" class="text-sm text-muted-foreground">{{ $t('templates.account') }}:</Label>
                     <Select v-model="selectedAccount" @update:model-value="onAccountChange">
-                      <SelectTrigger class="w-[180px]">
+                      <SelectTrigger id="templates-account" class="w-[180px]">
                         <SelectValue :placeholder="$t('templates.allAccounts')" />
                       </SelectTrigger>
                       <SelectContent>

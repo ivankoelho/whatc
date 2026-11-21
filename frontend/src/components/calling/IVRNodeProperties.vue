@@ -265,7 +265,7 @@ const nodeTypeLabels = computed<Record<string, string>>(() => ({
   <div class="space-y-4 p-4">
     <div class="flex items-center justify-between">
       <h3 class="font-semibold text-sm capitalize">{{ nodeTypeLabels[node.type] || node.type.replace('_', ' ') }}</h3>
-      <Button variant="ghost" size="icon" class="h-7 w-7" @click="emit('delete')">
+      <Button variant="ghost" size="icon" class="h-7 w-7" :aria-label="t('common.delete')" @click="emit('delete')">
         <Trash2 class="h-3.5 w-3.5 text-destructive" />
       </Button>
     </div>
@@ -273,7 +273,7 @@ const nodeTypeLabels = computed<Record<string, string>>(() => ({
     <!-- Label -->
     <div class="space-y-1.5">
       <Label class="text-xs">{{ t('calling.properties.label') }}</Label>
-      <Input :model-value="node.label" @update:model-value="updateLabel" class="h-8 text-sm" />
+      <Input :model-value="node.label" :aria-label="t('calling.properties.label')" @update:model-value="updateLabel" class="h-8 text-sm" />
     </div>
 
     <!-- Audio Section (greeting, menu, gather, hangup) -->
@@ -291,12 +291,12 @@ const nodeTypeLabels = computed<Record<string, string>>(() => ({
         <TabsContent value="audio" class="mt-2">
           <div class="flex items-center gap-2">
             <div v-if="config.audio_file" class="flex items-center gap-1 flex-1 min-w-0 px-2 py-1 border rounded-md bg-muted/50">
-              <Button variant="ghost" size="icon" class="h-5 w-5 shrink-0" @click="togglePlayback">
+              <Button variant="ghost" size="icon" class="h-5 w-5 shrink-0 [@media(pointer:coarse)]:h-7 [@media(pointer:coarse)]:w-7" :aria-label="isPlaying ? t('calling.properties.pauseAudio') : t('calling.properties.playAudio')" @click="togglePlayback">
                 <Pause v-if="isPlaying" class="h-3 w-3" />
                 <Play v-else class="h-3 w-3" />
               </Button>
               <span class="text-xs truncate">{{ config.audio_file }}</span>
-              <Button variant="ghost" size="icon" class="h-5 w-5 shrink-0 ml-auto" @click="removeAudio">
+              <Button variant="ghost" size="icon" class="h-5 w-5 shrink-0 ml-auto [@media(pointer:coarse)]:h-7 [@media(pointer:coarse)]:w-7" :aria-label="t('common.remove')" @click="removeAudio">
                 <X class="h-3 w-3 text-destructive" />
               </Button>
             </div>
@@ -322,7 +322,7 @@ const nodeTypeLabels = computed<Record<string, string>>(() => ({
 
     <!-- Greeting: interruptible -->
     <div v-if="node.type === 'greeting'" class="flex items-center gap-2">
-      <Switch :checked="!!config.interruptible" @update:checked="(v: boolean) => updateConfig('interruptible', v)" />
+      <Switch :checked="!!config.interruptible" :aria-label="t('calling.properties.interruptibleDtmf')" @update:checked="(v: boolean) => updateConfig('interruptible', v)" />
       <Label class="text-xs">{{ t('calling.properties.interruptibleDtmf') }}</Label>
     </div>
 
@@ -522,7 +522,7 @@ const nodeTypeLabels = computed<Record<string, string>>(() => ({
         <Label class="text-xs">{{ t('calling.properties.schedule') }}</Label>
         <div v-for="(entry, idx) in schedule" :key="idx" class="flex items-center gap-1.5 text-xs">
           <span class="w-12 capitalize">{{ entry.day.slice(0, 3) }}</span>
-          <Switch :checked="entry.enabled" @update:checked="(v: boolean) => updateScheduleEntry(Number(idx), 'enabled', v)" />
+          <Switch :checked="entry.enabled" :aria-label="entry.day" @update:checked="(v: boolean) => updateScheduleEntry(Number(idx), 'enabled', v)" />
           <Input
             v-if="entry.enabled"
             type="time"

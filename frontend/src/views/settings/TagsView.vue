@@ -142,7 +142,7 @@ function getColorLabel(color: string): string {
     />
 
     <ScrollArea v-else class="flex-1">
-      <div class="p-6">
+      <div class="p-6 max-md:p-3">
         <div class="max-w-6xl mx-auto">
           <Card>
             <CardHeader>
@@ -219,9 +219,9 @@ function getColorLabel(color: string): string {
           <p class="text-xs text-muted-foreground">{{ $t('tags.maxCharacters') }}</p>
         </div>
         <div class="space-y-2">
-          <Label>{{ $t('tags.color') }}</Label>
+          <Label for="tag-color">{{ $t('tags.color') }}</Label>
           <Select v-model="formData.color" :default-value="formData.color">
-            <SelectTrigger>
+            <SelectTrigger id="tag-color">
               <SelectValue :placeholder="$t('tags.selectColor')" />
             </SelectTrigger>
             <SelectContent>

@@ -327,7 +327,7 @@ void _displayStats.value // Suppress unused warning
         <div v-if="canFilterAgents" class="flex items-center gap-2 mr-4">
           <Popover v-model:open="agentComboboxOpen">
             <PopoverTrigger as-child>
-              <Button variant="outline" role="combobox" :aria-expanded="agentComboboxOpen" class="w-[200px] justify-between">
+              <Button variant="outline" role="combobox" :aria-expanded="agentComboboxOpen" :aria-label="$t('agentAnalytics.agentFilter')" class="w-[200px] justify-between">
                 <span class="truncate">{{ selectedAgentName }}</span>
                 <ChevronsUpDown class="ml-2 h-4 w-4 shrink-0 opacity-50" />
               </Button>
@@ -376,7 +376,7 @@ void _displayStats.value // Suppress unused warning
 
     <!-- Content -->
     <ScrollArea class="flex-1">
-      <div class="p-6 space-y-6">
+      <div class="p-6 max-md:p-3 space-y-6">
         <!-- Error State -->
         <ErrorState
           v-if="error && !isLoading"
