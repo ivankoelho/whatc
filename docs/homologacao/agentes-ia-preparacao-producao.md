@@ -62,6 +62,29 @@ Opções para o valor e a política (a escolher):
 Quanto ao valor em tokens: depende do preço do provedor escolhido e do volume do piloto (o roteiro de homologação
 usa 200.000 como exemplo de teste, não como recomendação).
 
+### Teto aplicado pelo runtime (fechamento das ressalvas)
+
+Antes, a exigência de teto ou aceite valia só na API e na tela: uma organização com agente já ativo e sem teto
+continuava chamando o provedor. Agora `completeAI` (toda chamada de agente, qualquer que seja a forma de ativação):
+
+| Estado salvo | Comportamento |
+|---|---|
+| limite > 0 | reserva sob trava consultiva por organização; ao atingir, `ErrAICapReached` |
+| limite ausente/0/negativo **e** sem aceite | `ErrAICapNotConfigured` (embrulha `ErrAICapReached`): o provedor não é chamado, auditoria `cap_not_configured`, cliente vai para pessoas com a nota "limite mensal não configurado" |
+| sem limite **e** `ai_unlimited_ack = true` | roda sem limite (aceite persistido) |
+| limite > 0 e aceite | o limite vale; o aceite não o afrouxa |
+| chamada que não é de agente | inalterada |
+
+Testes: `ai_cap_runtime_test.go` (inclui duas instâncias com conexões distintas e 24 chamadas simultâneas: passam
+exatamente as que cabem).
+
+### Leitura de `GET /chatbot/settings`
+
+`ai_default_agent_id`, `ai_monthly_token_limit`, `ai_unlimited_ack` e `ai_agent_only` só são devolvidos a quem tem
+`chatbot.ai:read` (`canReadAgentAdmin`); a escrita continua em `settings.chatbot:write`. Os demais campos
+(inclusive `ai_system_prompt`, provedor e modelo) seguem como antes: restringi-los é decisão à parte.
+Teste: `chatbot_settings_agent_read_test.go`.
+
 ## Itens que continuam abertos
 
 - **Homologação real** (WhatsApp e IA reais, roteiro de 10 critérios): depende dos insumos listados em
