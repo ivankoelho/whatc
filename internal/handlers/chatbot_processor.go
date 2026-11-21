@@ -250,6 +250,13 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 		a.createTransferToQueue(account, contact, models.TransferSourceChatbotDisabled)
 		return
 	}
+	// Agent-only mode: the chatbot runs only where an AI agent is authorized. Any other number keeps the
+	// behavior it has with the chatbot off, so a pilot never changes the rest of the organization.
+	if settings.AI.AgentOnly && a.resolveAIAgent(settings, account) == nil {
+		a.Log.Debug("Chatbot is agent-only and this number has no authorized agent, creating transfer for agent queue", "account", account.Name)
+		a.createTransferToQueue(account, contact, models.TransferSourceChatbotDisabled)
+		return
+	}
 	a.Log.Info("Chatbot settings loaded", "settings_id", settings.ID, "is_enabled", settings.IsEnabled, "ai_enabled", settings.AI.Enabled, "ai_provider", settings.AI.Provider, "default_response", settings.DefaultResponse)
 
 	// Check business hours if enabled

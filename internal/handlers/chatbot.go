@@ -39,6 +39,8 @@ type ChatbotSettingsResponse struct {
 	AISystemPrompt               string            `json:"ai_system_prompt"`
 	AIDefaultAgentID             *uuid.UUID        `json:"ai_default_agent_id"`
 	AIMonthlyTokenLimit          int64             `json:"ai_monthly_token_limit"`
+	AIUnlimitedAck               bool              `json:"ai_unlimited_ack"`
+	AIAgentOnly                  bool              `json:"ai_agent_only"`
 	// AIAPIKeyConfigured says whether a key is stored. The key itself is never
 	// returned, not even masked: the UI only needs to know there is one.
 	AIAPIKeyConfigured bool `json:"ai_api_key_configured"`
@@ -210,6 +212,8 @@ func (a *App) GetChatbotSettings(r *fastglue.Request) error {
 		AIAPIKeyConfigured:  settings.AI.APIKey != "",
 		AIDefaultAgentID:    settings.AI.DefaultAgentID,
 		AIMonthlyTokenLimit: settings.AI.MonthlyTokenLimit,
+		AIUnlimitedAck:      settings.AI.UnlimitedAck,
+		AIAgentOnly:         settings.AI.AgentOnly,
 		// Knowledge
 		KnowledgeEnabled:      settings.KnowledgeEnabled,
 		KnowledgeRAGAvailable: a.Config != nil && a.Config.Knowledge.RAGEnabled,
@@ -311,6 +315,8 @@ func chatbotAISnapshot(s *models.ChatbotSettings) map[string]any {
 		"ai_system_prompt":       s.AI.SystemPrompt,
 		"ai_default_agent_id":    s.AI.DefaultAgentID,
 		"ai_monthly_token_limit": s.AI.MonthlyTokenLimit,
+		"ai_unlimited_ack":       s.AI.UnlimitedAck,
+		"ai_agent_only":          s.AI.AgentOnly,
 	}
 }
 
@@ -348,6 +354,8 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		// AIDefaultAgentID is the organization's default AIAgent; "" clears it.
 		AIDefaultAgentID    *string `json:"ai_default_agent_id"`
 		AIMonthlyTokenLimit *int64  `json:"ai_monthly_token_limit"`
+		AIUnlimitedAck      *bool   `json:"ai_unlimited_ack"`
+		AIAgentOnly         *bool   `json:"ai_agent_only"`
 		// KnowledgeEnabled turns Knowledge on for this organization's AI replies (needs
 		// settings.chatbot:write; it also takes the global knowledge.rag_enabled to have effect).
 		KnowledgeEnabled *bool `json:"knowledge_enabled"`
@@ -446,7 +454,7 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		req.ClientAutoCloseMessage != nil || req.CloseInactiveAttendances != nil
 	aiTouched := req.AIEnabled != nil || req.AIProvider != nil || req.AIAPIKey != nil ||
 		req.AIModel != nil || req.AIMaxTokens != nil || req.AISystemPrompt != nil ||
-		req.AIDefaultAgentID != nil || req.AIMonthlyTokenLimit != nil
+		req.AIDefaultAgentID != nil || req.AIMonthlyTokenLimit != nil || req.AIUnlimitedAck != nil || req.AIAgentOnly != nil
 
 	// The AI provider, model and above all the API key are credentials-level
 	// configuration: changing them needs settings.chatbot:write. (The rest of
@@ -597,6 +605,19 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 	}
 	if req.AIMonthlyTokenLimit != nil {
 		settings.AI.MonthlyTokenLimit = *req.AIMonthlyTokenLimit
+	}
+	if req.AIUnlimitedAck != nil {
+		settings.AI.UnlimitedAck = *req.AIUnlimitedAck
+	}
+	if req.AIAgentOnly != nil {
+		settings.AI.AgentOnly = *req.AIAgentOnly
+	}
+	// An agent may not become (or stay) active with no monthly cap unless the administrator said so
+	// explicitly. Only requests that touch the agent or the cap are held to this, so unrelated AI
+	// settings of an organization already running are never blocked.
+	if settings.AI.DefaultAgentID != nil && !aiCapDefined(&settings.AI) &&
+		(req.AIDefaultAgentID != nil || req.AIMonthlyTokenLimit != nil || req.AIUnlimitedAck != nil) {
+		return r.SendErrorEnvelope(fasthttp.StatusUnprocessableEntity, errAICapRequired, nil, "")
 	}
 
 	// SLA Settings
