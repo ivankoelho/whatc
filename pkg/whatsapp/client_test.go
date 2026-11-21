@@ -314,6 +314,7 @@ func TestClient_DownloadMedia(t *testing.T) {
 
 			log := testutil.NopLogger()
 			client := whatsapp.NewWithTimeout(log, 5*time.Second)
+			client.TrustHost(server.Listener.Addr().String()) // a local server stands in for Meta's CDN
 
 			ctx := testutil.TestContext(t)
 
