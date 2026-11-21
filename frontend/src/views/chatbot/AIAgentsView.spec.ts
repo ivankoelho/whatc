@@ -89,6 +89,18 @@ describe('AIAgentsView', () => {
     }))
   })
 
+  it('starts a new agent with an 8 second wait, not at once', async () => {
+    svc.createAIAgent.mockResolvedValue({ data: { data: {} } })
+    const w = mountView()
+    await flushPromises()
+    await w.find('[data-testid="new-agent"]').trigger('click')
+    await w.find('[data-testid="field-name"]').setValue('Agente')
+    await w.find('[data-testid="submit"]').trigger('click')
+    await flushPromises()
+    expect(svc.createAIAgent).toHaveBeenCalledWith(expect.objectContaining({ wait_seconds: 8 }))
+    w.unmount()
+  })
+
   it('keeps the wait inside 0..60 whole seconds', async () => {
     svc.createAIAgent.mockResolvedValue({ data: { data: {} } })
     for (const [typed, sent] of [['500', 60], ['-4', 0], ['7.9', 7]] as const) {

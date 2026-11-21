@@ -56,9 +56,12 @@ const isSavingSettings = ref(false)
 const dialogOpen = ref(false)
 const editing = ref<AIAgent | null>(null)
 const isSubmitting = ref(false)
+// A new agent waits a few seconds after the customer's last message, so someone who is still typing (or writes in
+// several short messages) gets one answer instead of one per message. 0 answers at once and stays available.
+const DEFAULT_WAIT_SECONDS = 8
 const emptyForm = () => ({
   name: '', display_name: '', objective: '', instructions: '', company_info: '', tone: '', handoff_rules: '',
-  is_enabled: false, whatsapp_accounts: [] as string[], wait_seconds: 0,
+  is_enabled: false, whatsapp_accounts: [] as string[], wait_seconds: DEFAULT_WAIT_SECONDS,
 })
 const form = ref(emptyForm())
 
