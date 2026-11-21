@@ -76,6 +76,11 @@ func (a *App) completeAI(ctx context.Context, settings *models.ChatbotSettings, 
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, aiCallDeadline)
 		defer cancel()
+		//
+		// The runtime enforces the decision itself, whatever the API or the screen allowed before: an agent
+		// call with no limit AND no explicit acceptance of none does not reach the provider (fail closed). This
+		// also covers an organization whose agent was activated before this rule existed, or by a path that
+		// never went through the settings screen.
 		if limit := settings.AI.MonthlyTokenLimit; limit > 0 {
 			res, err := a.reserveAITokens(meta.OrgID, limit, estimateAITokens(req), time.Now())
 			if err != nil {
@@ -84,6 +89,9 @@ func (a *App) completeAI(ctx context.Context, settings *models.ChatbotSettings, 
 			}
 			meta.reservation = res
 			defer res.Settle() // runs after every usage row below has been written
+		} else if !settings.AI.UnlimitedAck {
+			_ = a.recordAIUsage(meta, provider, req.Model, nil, 0, ErrAICapNotConfigured)
+			return nil, ErrAICapNotConfigured
 		}
 	}
 
@@ -204,6 +212,8 @@ func (a *App) recordAIUsage(meta aiCallMeta, provider, model string, resp *ai.Re
 			entry.ErrorKind, entry.HTTPStatus, entry.ErrorMessage = string(aerr.Kind), aerr.Status, truncate(aerr.Message, 500)
 		case errors.Is(callErr, ErrAIKeyUnavailable):
 			entry.ErrorKind, entry.ErrorMessage = "credentials", "AI API key is not available"
+		case errors.Is(callErr, ErrAICapNotConfigured):
+			entry.ErrorKind, entry.ErrorMessage = "cap_not_configured", "no monthly AI token limit is set and none was explicitly accepted"
 		case errors.Is(callErr, ErrAICapReached):
 			entry.ErrorKind, entry.ErrorMessage = "cap_reached", "monthly AI token limit reached"
 		default:

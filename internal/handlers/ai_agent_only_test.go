@@ -100,11 +100,14 @@ func TestAgentOnly_AnotherOrganizationNeverUsesThisOnesAgent(t *testing.T) {
 	assert.Nil(t, w.app.resolveAIAgent(w.f.settings, otherOrg.account), "a number of another organization is not ours")
 }
 
-// AgentOnly defaults to false: an organization that never touched it behaves exactly as before.
+// AgentOnly and UnlimitedAck default to false: an organization that never touched them behaves as before
+// (the fixture of the other tests accepts no-limit explicitly, so this reads a row created with the defaults).
 func TestAgentOnly_DefaultsOff(t *testing.T) {
 	w := newWiring(t, "x")
+	org := testutil.CreateTestOrganization(t, w.app.DB)
+	require.NoError(t, w.app.DB.Create(&models.ChatbotSettings{BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: org.ID}).Error)
 	var s models.ChatbotSettings
-	require.NoError(t, w.app.DB.Where("organization_id = ?", w.f.org.ID).First(&s).Error)
+	require.NoError(t, w.app.DB.Where("organization_id = ?", org.ID).First(&s).Error)
 	assert.False(t, s.AI.AgentOnly)
 	assert.False(t, s.AI.UnlimitedAck)
 }

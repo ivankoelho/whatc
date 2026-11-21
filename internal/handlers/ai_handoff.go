@@ -15,6 +15,8 @@ import (
 const (
 	aiHandoffCap     = "cap"        // the organization's monthly token cap was reached
 	aiHandoffFailure = "ai_failure" // the AI provider failed twice in a row on this conversation
+	// aiHandoffCapMissing: the agent has neither a monthly limit nor the explicit acceptance of none (fail closed).
+	aiHandoffCapMissing = "cap_not_configured"
 )
 
 // What the customer is told when the agent hands over. Fixed texts, sent only when the attendance
@@ -102,6 +104,8 @@ func aiHandoffReasonLabel(reason string) string {
 		return "resposta do agente bloqueada pela proteção comercial (preço, estoque ou prazo)"
 	case aiHandoffCap:
 		return "limite mensal de uso de IA atingido"
+	case aiHandoffCapMissing:
+		return "limite mensal de uso de IA não configurado (e sem aceite explícito de uso sem limite)"
 	case aiHandoffFailure:
 		return "falhas seguidas do provedor de IA"
 	}

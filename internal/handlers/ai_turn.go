@@ -60,7 +60,11 @@ func (a *App) answerWithAI(account *models.WhatsAppAccount, contact *models.Cont
 				// The agent's own failures: the monthly cap hands over at once; any other failure
 				// hands over on the second one in a row. No waiting message for a single failure.
 				if errors.Is(err, ErrAICapReached) {
-					a.handoffFromAI(account, contact, session, settings, aiHandoffCap)
+					reason := aiHandoffCap
+					if errors.Is(err, ErrAICapNotConfigured) {
+						reason = aiHandoffCapMissing
+					}
+					a.handoffFromAI(account, contact, session, settings, reason)
 					return aiOutcomeHandoff
 				}
 				if a.noteAIFailure(session) >= aiFailuresBeforeHandoff {

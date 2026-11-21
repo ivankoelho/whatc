@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"fmt"
 	"hash/fnv"
 	"sync"
 	"sync/atomic"
@@ -48,6 +49,11 @@ const (
 
 // ErrAICapReached means the organization's monthly AI token cap would be exceeded by this call.
 var ErrAICapReached = errors.New("monthly AI token limit reached")
+
+// ErrAICapNotConfigured is returned, before any provider call, when an agent call finds neither a monthly limit
+// nor the administrator's explicit acceptance of running without one. It wraps ErrAICapReached on purpose: every
+// caller that already hands the customer to people when the cap is reached does the same here (fail closed).
+var ErrAICapNotConfigured = fmt.Errorf("%w: no monthly limit is set and none was explicitly accepted", ErrAICapReached)
 
 // aiCapZone is the calendar the monthly cap follows.
 var aiCapZone = func() *time.Location {

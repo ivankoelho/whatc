@@ -91,6 +91,7 @@ func newWiring(t *testing.T, replies ...string) *wiring {
 	f.settings.AI = models.AIConfig{
 		Enabled: true, Provider: models.AIProvider("openai"), Model: "gpt-test", APIKey: enc, MaxTokens: 200,
 		DefaultAgentID: &f.agent.ID,
+		UnlimitedAck:   true, // the agent cannot run without a limit unless that was explicitly accepted
 	}
 	require.NoError(t, db.Create(f.settings).Error)
 	require.NoError(t, db.Model(f.agent).Updates(map[string]any{

@@ -739,7 +739,9 @@ func (a *App) execChatAIResponse(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome,
 			// same policy as the direct reply: the cap hands over at once, other failures on the second in a row
 			if errors.Is(err, ErrAICapReached) || a.noteAIFailure(ctx.session) >= aiFailuresBeforeHandoff {
 				reason := aiHandoffFailure
-				if errors.Is(err, ErrAICapReached) {
+				if errors.Is(err, ErrAICapNotConfigured) {
+					reason = aiHandoffCapMissing
+				} else if errors.Is(err, ErrAICapReached) {
 					reason = aiHandoffCap
 				}
 				if a.handoffFromAI(ctx.account, ctx.contact, ctx.session, settings, reason) {
