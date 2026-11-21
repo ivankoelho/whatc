@@ -651,6 +651,10 @@ func (a *App) buildInteractiveData(req OutgoingMessageRequest) models.JSONB {
 	}
 }
 
+// MessageSendUnknownText is what an attendant sees on a message whose delivery could not be confirmed. It
+// deliberately says nothing about the provider or the network: only what to do.
+const MessageSendUnknownText = "Não foi possível confirmar o envio: a mensagem pode ter chegado ao cliente. Confira a conversa antes de reenviar."
+
 // finalizeMessageSend updates message status and triggers post-send actions
 func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageRequest, opts MessageSendOptions, wamid string, err error) {
 	if opts.OnResult != nil {
@@ -671,6 +675,13 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 			err = errors.New(templateutil.RedactValues(err.Error(), secrets))
 		}
 		errMsg := whatsapp.PublicErrorText(err) // what is stored and broadcast: never a raw provider body
+		if !whatsapp.NotSent(err) {
+			// Nothing proves Meta refused it (timeout, dropped connection, 5xx...): it may have reached the
+			// customer. Say so in plain words instead of showing a failure with transport internals, and keep
+			// the technical cause in the log only. The message is never resent automatically.
+			a.Log.Warn("Send outcome unknown: the message may have reached the customer", "error", err, "message_id", msg.ID)
+			errMsg = MessageSendUnknownText
+		}
 
 		a.DB.Model(&models.Message{}).Where("id = ?", msg.ID).Updates(map[string]any{
 			"status":        models.MessageStatusFailed,
