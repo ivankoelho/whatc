@@ -422,7 +422,7 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 		// A case forwarded to a team the creator is not part of is born
 		// unassigned: the receiving team claims it. Everything else keeps
 		// defaulting to the creator.
-		if !(explicitTeam && !a.userInTeam(userID, *teamID)) {
+		if !explicitTeam || a.userInTeam(userID, *teamID) {
 			occ.AssignedUserID = &userID
 		}
 	} else {
@@ -597,6 +597,9 @@ func (a *App) CreateOccurrence(r *fastglue.Request) error {
 		Type:    websocket.TypeOccurrenceChanged,
 		Payload: resp,
 	})
+	// After the occurrence_changed broadcast: clients that already handle that
+	// message must keep seeing it first.
+	a.alertOccurrence(&occ, occ.AssignedUserID, userID, "assigned")
 
 	return r.SendEnvelope(resp)
 }
@@ -948,6 +951,7 @@ func (a *App) UpdateOccurrence(r *fastglue.Request) error {
 			"Failed to update occurrence", nil, "")
 	}
 
+	var alertTo *uuid.UUID
 	if assigneeChanged {
 		a.DB.Create(&models.OccurrenceEvent{
 			OrganizationID: orgID,
@@ -955,6 +959,8 @@ func (a *App) UpdateOccurrence(r *fastglue.Request) error {
 			Type:           models.OccurrenceEventAssignment,
 			CreatedByID:    &userID,
 		})
+		a.clearOccurrenceAlerts(occ.ID)
+		alertTo, _ = updates["assigned_user_id"].(*uuid.UUID)
 	}
 
 	a.DB.Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").Preload("WhatHappened").Preload("Process").First(occ, occ.ID)
@@ -964,6 +970,11 @@ func (a *App) UpdateOccurrence(r *fastglue.Request) error {
 		Type:    websocket.TypeOccurrenceChanged,
 		Payload: resp,
 	})
+	// occurrence_alert only after occurrence_changed: a client reacting to the
+	// alert by refetching must find the case already in its new state.
+	if alertTo != nil {
+		a.alertOccurrence(occ, alertTo, userID, "transferred")
+	}
 
 	return r.SendEnvelope(resp)
 }

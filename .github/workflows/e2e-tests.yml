@@ -39,6 +39,14 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
+      # The upload gate is fail-closed: without a scanner every upload (CSV import, media) is
+      # refused. No health check on purpose: the signature download takes minutes and the build
+      # steps below take longer; "Wait for ClamAV" blocks right before the tests need it.
+      clamav:
+        image: clamav/clamav:1.4
+        ports:
+          - 3310:3310
+
     steps:
       - uses: actions/checkout@v4
 
@@ -100,6 +108,9 @@ jobs:
           [storage]
           type = "local"
           local_path = "./uploads"
+
+          [antimalware]
+          address = "127.0.0.1:3310"
           EOF
 
       # Build frontend FIRST so it can be embedded in the backend
@@ -137,6 +148,19 @@ jobs:
 
       - name: Install Playwright browsers
         run: cd frontend && npx playwright install chromium --with-deps
+
+      - name: Wait for ClamAV
+        run: |
+          for i in $(seq 1 90); do
+            # clamd answers PING with PONG (null-terminated command, "z" prefix)
+            if [ "$(printf 'zPING\0' | timeout 3 nc 127.0.0.1 3310 | tr -d '\0')" = "PONG" ]; then
+              echo "ClamAV ready after $((i * 10))s"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::ClamAV did not become ready in 15 min"
+          exit 1
 
       - name: Run E2E tests
         run: cd frontend && npm run test:e2e

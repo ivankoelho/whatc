@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { UserCheck } from 'lucide-vue-next'
+import { Pin, UserCheck } from 'lucide-vue-next'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import type { Contact } from '@/stores/contacts'
@@ -13,6 +13,8 @@ const props = defineProps<{
   getInitials: (value: string) => string
   getAvatarGradient: (value: string) => string
 }>()
+
+const emit = defineEmits<{ (e: 'toggle-pin', contact: Contact): void }>()
 
 const { t } = useI18n()
 
@@ -47,10 +49,9 @@ const hasMetaLine = computed(() => tags.value.length > 0 || assignedName.value !
   <div
     data-testid="conversation-item"
     :class="[
-      'relative flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-white/[0.04] light:hover:bg-gray-50 transition-colors',
+      'group relative flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-white/[0.04] light:hover:bg-gray-50 transition-colors',
       props.active && 'bg-white/[0.08] light:bg-gray-100'
     ]"
-    :title="statusTitle"
   >
     <!-- 2px edge bar signals the service status at a glance. -->
     <span class="absolute left-0 top-0 bottom-0 w-0.5" :class="statusBarClass" :aria-label="statusTitle" />
@@ -68,8 +69,26 @@ const hasMetaLine = computed(() => tags.value.length > 0 || assignedName.value !
         >
           {{ displayName }}
         </p>
-        <span class="flex-shrink-0 text-[11px] text-white/40 light:text-gray-500">
-          {{ props.formatTime(props.contact.last_message_at) }}
+        <span class="flex flex-shrink-0 items-center gap-0.5">
+          <!-- Pin: a quiet mark on pinned rows (still the way to unpin); on the
+               others it appears on hover or keyboard focus. Touch screens have
+               no hover, so there it is hidden and the conversation header
+               carries the action. 24px target, pulled into the row's height. -->
+          <button
+            type="button"
+            data-testid="pin-toggle"
+            :data-contact-id="props.contact.id"
+            class="-my-1 flex h-6 w-6 [@media(pointer:coarse)]:-my-2.5 [@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:w-10 items-center justify-center rounded text-white/45 hover:bg-white/[0.08] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70 light:text-gray-500 light:hover:bg-gray-200/70 light:hover:text-gray-900"
+            :class="props.contact.is_pinned ? '' : 'opacity-0 group-hover:opacity-100 focus:opacity-100 [@media(hover:none)]:hidden'"
+            :aria-pressed="!!props.contact.is_pinned"
+            :aria-label="(props.contact.is_pinned ? t('chat.unpinConversation') : t('chat.pinConversation')) + ': ' + displayName"
+            @click.stop="emit('toggle-pin', props.contact)"
+          >
+            <Pin class="h-3.5 w-3.5" :class="props.contact.is_pinned && 'fill-current'" aria-hidden="true" />
+          </button>
+          <span class="text-[11px] text-white/40 light:text-gray-500">
+            {{ props.formatTime(props.contact.last_message_at) }}
+          </span>
         </span>
       </div>
       <div class="flex items-center justify-between gap-2">

@@ -1455,6 +1455,8 @@ func (a *App) broadcastTransferCreated(transfer *models.AgentTransfer, contact *
 		return
 	}
 
+	defer a.broadcastCountsChanged(transfer.OrganizationID)
+
 	contactName, phoneNumber := a.MaskContactFields(transfer.OrganizationID, contact.ProfileName, transfer.PhoneNumber)
 
 	payload := map[string]any{
@@ -1483,10 +1485,24 @@ func (a *App) broadcastTransferCreated(transfer *models.AgentTransfer, contact *
 	})
 }
 
+// broadcastCountsChanged tells every client of the org to re-read its own
+// scoped counters. No contact id or number travels in it.
+func (a *App) broadcastCountsChanged(orgID uuid.UUID) {
+	if a.WSHub == nil {
+		return
+	}
+	a.WSHub.BroadcastToOrg(orgID, websocket.WSMessage{
+		Type:    websocket.TypeContactCountsChanged,
+		Payload: map[string]any{},
+	})
+}
+
 func (a *App) broadcastTransferResumed(transfer *models.AgentTransfer) {
 	if a.WSHub == nil {
 		return
 	}
+
+	defer a.broadcastCountsChanged(transfer.OrganizationID)
 
 	payload := map[string]any{
 		"id":         transfer.ID.String(),
@@ -1511,6 +1527,8 @@ func (a *App) broadcastTransferAssigned(transfer *models.AgentTransfer) {
 	if a.WSHub == nil {
 		return
 	}
+
+	defer a.broadcastCountsChanged(transfer.OrganizationID)
 
 	payload := map[string]any{
 		"id":         transfer.ID.String(),

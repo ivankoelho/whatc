@@ -1097,6 +1097,14 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 			"You do not have access to this conversation", nil, "")
 	}
 
+	// Creating a contact is contacts:write, whichever door it comes through.
+	// Profiles without it (e.g. sellers) may only message contacts that exist.
+	// Checked before anything is created or sent.
+	if isNewContact && !a.HasPermission(userID, models.ResourceContacts, models.ActionWrite, orgID) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"You do not have permission to start a conversation with a new contact", nil, "")
+	}
+
 	// Determine which WhatsApp account to use (explicit > template > contact > default)
 	accountName := req.AccountName
 	if accountName == "" {

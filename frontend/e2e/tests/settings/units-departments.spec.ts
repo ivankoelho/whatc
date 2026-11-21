@@ -55,7 +55,7 @@ test.describe('Departments tab: create, edit, deactivate, delete', () => {
 
     await row(name).getByRole('button', { name: 'Edit department' }).click()
     await page.getByTestId('department-name').fill(renamed)
-    await page.getByRole('dialog').getByRole('switch').click() // active -> inactive
+    await page.getByRole('dialog').getByRole('switch').first().click() // active -> inactive (the commercial switch comes second)
     await page.getByRole('dialog').getByRole('button', { name: /Save|Update/ }).click()
     await expect(row(renamed)).toBeVisible()
     await expect(row(renamed)).toContainText('No')

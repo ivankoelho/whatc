@@ -107,6 +107,8 @@ func runMigrations(db *gorm.DB) error {
 		&models.Webhook{},
 		&models.CustomAction{},
 		&models.UserAvailabilityLog{},
+		&models.UserSessionEvent{},
+		&models.OccurrenceAlert{},
 		&models.AgentPresenceLog{},
 		&models.AgentTransferAssignment{},
 		// WhatsApp models
@@ -141,6 +143,7 @@ func runMigrations(db *gorm.DB) error {
 		&models.Widget{},
 		// Conversation Notes
 		&models.ConversationNote{},
+		&models.ConversationPin{},
 		// Calling / IVR
 		&models.CallLog{},
 		&models.IVRFlow{},

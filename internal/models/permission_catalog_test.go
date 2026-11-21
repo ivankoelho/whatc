@@ -32,9 +32,15 @@ func TestPermissionCatalogGroupsEveryKey(t *testing.T) {
 	for _, k := range SystemRolePermissions()["admin"] {
 		admin[k] = true
 	}
+	// The one deliberate exception: chat:triage is the SAC preset's permission (the admin already changes any
+	// status through contacts:write). It stays in the catalog so an administrator can grant it by hand.
+	notForAdmin := map[string]bool{"chat:triage": true}
 	for key := range seen {
-		if !admin[key] {
+		if !admin[key] && !notForAdmin[key] {
 			t.Errorf("admin role does not receive catalog key %s", key)
+		}
+		if admin[key] && notForAdmin[key] {
+			t.Errorf("admin role must not receive %s", key)
 		}
 	}
 

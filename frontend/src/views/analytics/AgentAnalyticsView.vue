@@ -11,6 +11,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useUsersStore } from '@/stores/users'
 import { PageHeader, ErrorState, DateRangePicker } from '@/components/shared'
 import AgentsLivePanel from '@/components/analytics/AgentsLivePanel.vue'
+import AgentAttendancePanel from '@/components/analytics/AgentAttendancePanel.vue'
 import {
   Command,
   CommandEmpty,
@@ -386,6 +387,7 @@ void _displayStats.value // Suppress unused warning
         />
 
         <AgentsLivePanel v-if="canSeeLive && !error" />
+        <AgentAttendancePanel v-if="canSeeLive && !error" :from="dateRange.from" :to="dateRange.to" />
 
         <!-- Stats Cards -->
         <div v-if="!error" class="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
