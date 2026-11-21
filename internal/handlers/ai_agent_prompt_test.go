@@ -13,6 +13,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/config"
 	"github.com/shridarpatil/whatomate/internal/crypto"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/test/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -254,4 +255,47 @@ func TestGenerateAIReply_ConfiguredPriceIsAllowed(t *testing.T) {
 	reply, err := app.generateAIReply(f.settings, session, "tem frete grátis?", aiFeatureChatbotReply)
 	require.NoError(t, err)
 	assert.Equal(t, "O frete grátis vale acima de R$ 500,00.", reply.Text)
+}
+
+// An agent keeps the last 20 messages even when the organization-wide history setting is the generic 4: with 4
+// it forgot what the customer had answered two turns back and asked the same questions again (homologation).
+func TestGenerateAIReply_AgentSeesAtLeastTwentyMessagesOfHistory(t *testing.T) {
+	app, f, session, tr := agentReplyFixture(t, "ok", "ok")
+	f.settings.AI.IncludeHistory, f.settings.AI.HistoryLimit = true, 4
+	session.ContactID = testutil.CreateTestContact(t, app.DB, f.org.ID).ID
+	require.NoError(t, app.DB.Create(session).Error)
+	for i := 0; i < 30; i++ {
+		dir := models.DirectionIncoming
+		if i%2 == 1 {
+			dir = models.DirectionOutgoing
+		}
+		require.NoError(t, app.DB.Create(&models.ChatbotSessionMessage{
+			SessionID: session.ID, Direction: dir, Message: "m" + uuid.NewString()[:4],
+		}).Error)
+	}
+
+	_, err := app.generateAIReply(f.settings, session, "oi", aiFeatureChatbotReply)
+	require.NoError(t, err)
+
+	msgs, _ := tr.bodies[0]["messages"].([]any)
+	var turns int
+	for _, m := range msgs {
+		if role, _ := m.(map[string]any)["role"].(string); role == "user" || role == "assistant" {
+			turns++
+		}
+	}
+	assert.Equal(t, aiAgentMinHistory+1, turns, "the 20 earlier messages plus the new one")
+
+	// the organization-wide AI (no agent) keeps its own, smaller setting
+	f.settings.AI.DefaultAgentID = nil
+	_, err = app.generateAIReply(f.settings, session, "oi", aiFeatureChatbotReply)
+	require.NoError(t, err)
+	msgs, _ = tr.bodies[1]["messages"].([]any)
+	turns = 0
+	for _, m := range msgs {
+		if role, _ := m.(map[string]any)["role"].(string); role == "user" || role == "assistant" {
+			turns++
+		}
+	}
+	assert.Equal(t, 4+1, turns, "no agent: the configured limit of 4 still applies")
 }

@@ -35,6 +35,10 @@ type aiAgentRequest struct {
 // Bounds of the agent's wait before answering (seconds). 0 means "answer at once".
 const aiAgentWaitMax = 60
 
+// aiAgentMinHistory is the least number of earlier messages an agent sees. The organization-wide default (4)
+// made it forget answers from two turns back and repeat its questions.
+const aiAgentMinHistory = 20
+
 // validate checks lengths and, for the number list, that every name is a WhatsApp account of
 // the organization (an agent must never be pointed at another organization's number).
 func (a *App) validateAIAgentRequest(orgID uuid.UUID, req *aiAgentRequest) string {

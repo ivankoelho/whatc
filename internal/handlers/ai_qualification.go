@@ -174,6 +174,10 @@ func (a *App) qualificationTranscript(session *models.ChatbotSession) (transcrip
 	return b.String(), customer
 }
 
+// aiQualificationMaxTokens leaves room for models that reason before they answer: with 600 the reasoning used the
+// whole budget, the answer came back empty and the opportunity was created with no data (homologation, gpt-oss).
+const aiQualificationMaxTokens = 2000
+
 // extractQualification asks the model for the structured data (one extra AI call, counted against
 // the monthly cap) and validates every field against the customer's own messages. A failed call
 // or an unusable answer is reported as ExtractionFailed, never as an error that stops the handoff.
@@ -189,7 +193,7 @@ func (a *App) extractQualification(ctx context.Context, settings *models.Chatbot
 		Model:       settings.AI.Model,
 		System:      aiQualificationSystem,
 		Messages:    []ai.Message{{Role: ai.RoleUser, Content: transcript}},
-		MaxTokens:   600,
+		MaxTokens:   aiQualificationMaxTokens,
 		Temperature: 0,
 	})
 	if err != nil {

@@ -921,8 +921,15 @@ func (a *App) generateAIReplyWith(settings *models.ChatbotSettings, session *mod
 	}
 
 	var messages []ai.Message
-	if settings.AI.IncludeHistory && session != nil {
-		for _, msg := range a.getSessionHistoryBefore(session.ID, settings.AI.HistoryLimit, opts.historyBefore) {
+	// An agent that qualifies a customer must remember what was already answered: with the generic default
+	// of 4 messages it forgot the previous two turns and asked again. Agents always see at least
+	// aiAgentMinHistory messages, whatever the organization-wide setting says.
+	historyLimit := settings.AI.HistoryLimit
+	if agent != nil && historyLimit < aiAgentMinHistory {
+		historyLimit = aiAgentMinHistory
+	}
+	if (settings.AI.IncludeHistory || agent != nil) && session != nil {
+		for _, msg := range a.getSessionHistoryBefore(session.ID, historyLimit, opts.historyBefore) {
 			role := ai.RoleUser
 			if msg.Direction == models.DirectionOutgoing {
 				role = ai.RoleAssistant

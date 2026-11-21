@@ -31,8 +31,11 @@ const (
 // aiHandoffErrorMessage is sent only when the attendance could not be created at all.
 const aiHandoffErrorMessage = "Tive um problema para te encaminhar agora. Pode me mandar uma nova mensagem em instantes?"
 
-func handoffMessageFor(reason string) string {
-	if reason == aiHandoffMarker {
+// handoffMessageFor picks the waiting message. "I already passed him what we talked about" is only said when
+// something was qualified (or had been, earlier in this conversation): when the extraction failed the
+// attendant gets the conversation but no summary, and the customer is not told otherwise.
+func handoffMessageFor(reason string, q *Qualification) string {
+	if reason == aiHandoffMarker && (q == nil || !q.ExtractionFailed) {
 		return aiHandoffWaitMessage
 	}
 	return aiHandoffShortMessage
@@ -158,6 +161,22 @@ func (a *App) openOpportunityID(contact *models.Contact) (uuid.UUID, bool) {
 	return opp.ID, err == nil
 }
 
+// fillBareOpportunity completes an open opportunity that an earlier handoff created with no data (its
+// extraction failed). A retrigger never rewrites an opportunity, because a person may have edited it; this is
+// the one exception, and it applies only while the text is still exactly the bare one the failed extraction
+// wrote, so nothing a person typed is ever overwritten.
+func (a *App) fillBareOpportunity(id uuid.UUID, q *Qualification) {
+	var opp models.SalesOpportunity
+	if err := a.DB.First(&opp, "id = ?", id).Error; err != nil || opp.Interest != formatInterest(nil) {
+		return
+	}
+	opp.Interest = formatInterest(q)
+	applyQualification(q)(&opp)
+	if err := a.DB.Model(&opp).Select("interest", "estimated_quantity", "unit_of_measure").Updates(&opp).Error; err != nil {
+		a.Log.Error("AI handoff: could not complete the opportunity with the new qualification", "error", err, "opportunity_id", id)
+	}
+}
+
 // handoffFromAI is the one place where an AI agent hands a conversation to people. In order:
 // qualify (one extra AI call, only when the agent decided the customer is ready), register the
 // opportunity in the CRM, create the attendance in the team of the number's unit, and only then
@@ -214,7 +233,7 @@ func (a *App) handoffFromAIOutcome(account *models.WhatsAppAccount, contact *mod
 			wanted = reason == aiHandoffMarker
 		}
 		if wanted {
-			_, existed := a.openOpportunityID(contact)
+			existingID, existed := a.openOpportunityID(contact)
 			opp, err := a.createOrRetriggerSalesOpportunity(contact, nil, models.SalesOpportunityEventSourceSystem,
 				formatInterest(q), nil, nil, applyQualification(q),
 				// the contact's own account owner may belong to ANOTHER unit: an opportunity the
@@ -225,6 +244,8 @@ func (a *App) handoffFromAIOutcome(account *models.WhatsAppAccount, contact *mod
 				a.Log.Error("AI handoff: could not register the opportunity", "error", err, "contact_id", contact.ID)
 			case !existed:
 				createdOpp = opp.ID
+			case !q.ExtractionFailed:
+				a.fillBareOpportunity(existingID, q)
 			}
 		}
 	}
@@ -275,7 +296,7 @@ func (a *App) handoffFromAIOutcome(account *models.WhatsAppAccount, contact *mod
 		if told { // the out-of-hours message is moot now; a later handoff may say it again
 			a.setSessionValue(session, aiSessionHandedOff, false)
 		}
-		if err := a.sendAndSaveAgentText(aiCtx("ai_handoff"), account, contact, handoffMessageFor(reason), sender); err != nil {
+		if err := a.sendAndSaveAgentText(aiCtx("ai_handoff"), account, contact, handoffMessageFor(reason, q), sender); err != nil {
 			a.Log.Error("AI handoff: could not send the waiting message", "error", err, "contact_id", contact.ID)
 		}
 		return aiHandoffTransferred
