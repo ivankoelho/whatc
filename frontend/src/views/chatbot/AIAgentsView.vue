@@ -43,6 +43,7 @@ const isLoading = ref(true)
 const loadError = ref<string | null>(null)
 
 // organization-wide settings that belong to agents: the default agent and the monthly cap
+const savedDefaultId = ref<string>(NONE) // what the server has: the 'default' badge shows this, never an unsaved choice
 const defaultAgentId = ref<string>(NONE)
 const monthlyLimit = ref<number>(0)
 const unlimitedAck = ref(false)
@@ -94,6 +95,7 @@ async function load() {
     agents.value = unwrap(list).agents ?? []
     const s = unwrap(settings).settings ?? {}
     defaultAgentId.value = s.ai_default_agent_id || NONE
+    savedDefaultId.value = defaultAgentId.value
     monthlyLimit.value = s.ai_monthly_token_limit ?? 0
     unlimitedAck.value = !!s.ai_unlimited_ack
     agentOnly.value = !!s.ai_agent_only
@@ -120,10 +122,14 @@ async function saveSettings() {
       ai_unlimited_ack: unlimitedAck.value,
       ai_agent_only: agentOnly.value,
     })
+    savedDefaultId.value = defaultAgentId.value
     toast.success(t('aiAgents.settingsSaved'))
     await loadIssues(agents.value)
   } catch (err) {
-    toast.error(getErrorMessage(err, t('aiAgents.settingsFailed')))
+    // 422: the server refused to activate the agent with no cap decision; say it in the interface's language
+    toast.error((err as { response?: { status?: number } })?.response?.status === 422
+      ? t('aiAgents.capRequired')
+      : getErrorMessage(err, t('aiAgents.settingsFailed')))
   } finally {
     isSavingSettings.value = false
   }
@@ -285,7 +291,7 @@ const issueLabel = (i: Issue) => `${i.account}: ${t('aiAgents.issues.' + i.probl
                   <div class="min-w-0 space-y-1">
                     <div class="flex items-center gap-2 flex-wrap">
                       <span class="font-medium">{{ agent.name }}</span>
-                      <Badge v-if="agent.id === defaultAgentId" class="text-xs">{{ $t('aiAgents.defaultBadge') }}</Badge>
+                      <Badge v-if="agent.id === savedDefaultId" class="text-xs">{{ $t('aiAgents.defaultBadge') }}</Badge>
                       <Badge v-for="acc in agent.whatsapp_accounts" :key="acc" variant="secondary" class="text-xs">{{ acc }}</Badge>
                       <span v-if="!agent.whatsapp_accounts?.length" class="text-xs text-muted-foreground">{{ $t('aiAgents.noAccounts') }}</span>
                     </div>

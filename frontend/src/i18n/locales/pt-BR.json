@@ -3523,6 +3523,7 @@
     "monthlyLimit": "Limite mensal de tokens",
     "monthlyLimitHelp": "0 = sem limite. Ao atingir o limite, o agente passa o cliente para um atendente.",
     "unlimitedAck": "Aceito usar o agente sem limite mensal",
+    "capRequired": "Defina um limite mensal de tokens, ou aceite conscientemente usar o agente sem limite, antes de ativá-lo.",
     "unlimitedAckHelp": "Sem limite e sem este aceite, o agente não pode ser ativado. Defina um limite acima ou aceite conscientemente o consumo ilimitado.",
     "agentOnly": "Chatbot somente nos números com agente",
     "agentOnlyHelp": "Quando ligado, os números sem agente autorizado continuam como se o chatbot estivesse desligado (vão para a fila de atendentes). Recomendado durante o piloto.",

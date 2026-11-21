@@ -3534,6 +3534,7 @@
     "monthlyLimit": "Monthly token limit",
     "monthlyLimitHelp": "0 = no limit. When the limit is reached the agent hands the customer to an attendant.",
     "unlimitedAck": "I accept running the agent with no monthly limit",
+    "capRequired": "Set a monthly token limit, or consciously accept running the agent without one, before activating it.",
     "unlimitedAckHelp": "With no limit and no acceptance, the agent cannot be activated. Set a limit above or consciously accept unlimited consumption.",
     "agentOnly": "Chatbot only on numbers with an agent",
     "agentOnlyHelp": "When on, numbers with no authorized agent keep behaving as if the chatbot were off (they go to the attendant queue). Recommended during the pilot.",

@@ -154,6 +154,22 @@ describe('AIAgentsView', () => {
     })
   })
 
+  it('a refused save (422) is explained in the interface language and the default badge does not move', async () => {
+    svc.getSettings.mockResolvedValue({ data: { data: { settings: { ai_default_agent_id: '', ai_monthly_token_limit: 0 } } } })
+    svc.updateSettings.mockRejectedValue({ response: { status: 422, data: { message: 'Set a monthly AI token limit, or explicitly accept...' } } })
+    const w = mountView()
+    await flushPromises()
+    expect(w.find('[data-testid="agent-row-ag-1"]').text()).not.toContain(en.aiAgents.defaultBadge)
+
+    // choosing the agent locally and failing to save must not label it as the default
+    ;(w.vm as any).$.setupState.defaultAgentId = 'ag-1'
+    await w.find('[data-testid="save-settings"]').trigger('click')
+    await flushPromises()
+    const { toast } = await import('vue-sonner')
+    expect(toast.error).toHaveBeenCalledWith(en.aiAgents.capRequired)
+    expect(w.find('[data-testid="agent-row-ag-1"]').text()).not.toContain(en.aiAgents.defaultBadge)
+  })
+
   it('shows the month consumption next to the limit', async () => {
     svc.getAIAgentReadiness.mockResolvedValue({ data: { data: { issues: [], token_cap: { defined: true, limit: 250000, used: 1200, remaining: 248800 } } } })
     const w = mountView()
