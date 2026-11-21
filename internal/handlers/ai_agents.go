@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
@@ -200,6 +201,9 @@ func (a *App) UpdateAIAgent(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, msg, nil, "")
 	}
 	applyAIAgentRequest(agent, &req)
+	if agent.IsEnabled && !old.IsEnabled && a.aiCapMissingFor(orgID, agent.ID) {
+		return r.SendErrorEnvelope(fasthttp.StatusUnprocessableEntity, errAICapRequired, nil, "")
+	}
 	agent.UpdatedByID = &userID
 	if err := a.DB.Save(agent).Error; err != nil {
 		a.Log.Error("Failed to update AI agent", "error", err)
@@ -305,7 +309,10 @@ func (a *App) GetAIAgentReadiness(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
-	return r.SendEnvelope(map[string]any{"issues": a.aiAgentAccountIssues(agent)})
+	return r.SendEnvelope(map[string]any{
+		"issues":    a.aiAgentAccountIssues(agent),
+		"token_cap": a.aiTokenCapStatus(orgID, time.Now()),
+	})
 }
 
 // resolveAIAgent returns the agent that may answer on account, or nil. It is FAIL-CLOSED: any

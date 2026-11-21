@@ -155,3 +155,48 @@ func (a *App) reserveAITokens(orgID uuid.UUID, limit, tokens int64, now time.Tim
 	}
 	return res, nil
 }
+
+// errAICapRequired is the answer to an attempt to activate the agent with no monthly cap and no explicit
+// acceptance of running without one.
+const errAICapRequired = "Set a monthly AI token limit, or explicitly accept running the agent without one, before activating it"
+
+// aiCapDefined says whether the organization decided about the monthly cap: a limit, or the explicit
+// acceptance of none. It never decides the VALUE of a limit: that is a commercial choice.
+func aiCapDefined(c *models.AIConfig) bool { return c.MonthlyTokenLimit > 0 || c.UnlimitedAck }
+
+// aiCapMissingFor reports whether activating agentID would leave the organization with no cap decision:
+// the agent is the organization's default and neither a limit nor the explicit acceptance exists.
+func (a *App) aiCapMissingFor(orgID, agentID uuid.UUID) bool {
+	var s models.ChatbotSettings
+	if err := a.DB.Where("organization_id = ? AND whats_app_account = ''", orgID).First(&s).Error; err != nil {
+		return false // no settings row: the agent cannot act anyway (resolveAIAgent needs a default agent)
+	}
+	return s.AI.DefaultAgentID != nil && *s.AI.DefaultAgentID == agentID && !aiCapDefined(&s.AI)
+}
+
+// aiTokenCapStatus is the consumption picture shown to the administrator: whether a cap was decided, the
+// limit, what this calendar month (America/Sao_Paulo) has used, reservations in flight included, and
+// what is left. Remaining is nil when there is no limit.
+func (a *App) aiTokenCapStatus(orgID uuid.UUID, now time.Time) map[string]any {
+	out := map[string]any{"defined": false, "limit": int64(0), "unlimited_ack": false, "used": int64(0), "remaining": nil}
+	var s models.ChatbotSettings
+	if err := a.DB.Where("organization_id = ? AND whats_app_account = ''", orgID).First(&s).Error; err != nil {
+		return out
+	}
+	used, err := aiTokensUsed(a.DB, orgID, now)
+	if err != nil {
+		a.Log.Error("Failed to read the AI token consumption", "error", err, "org_id", orgID)
+	}
+	out["defined"] = aiCapDefined(&s.AI)
+	out["limit"] = s.AI.MonthlyTokenLimit
+	out["unlimited_ack"] = s.AI.UnlimitedAck
+	out["used"] = used
+	if s.AI.MonthlyTokenLimit > 0 {
+		rem := s.AI.MonthlyTokenLimit - used
+		if rem < 0 {
+			rem = 0
+		}
+		out["remaining"] = rem
+	}
+	return out
+}
