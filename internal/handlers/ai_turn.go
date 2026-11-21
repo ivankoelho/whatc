@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
 )
 
@@ -78,6 +79,20 @@ func (a *App) answerWithAI(account *models.WhatsAppAccount, contact *models.Cont
 				return aiOutcomeHandoff
 			}
 			a.Log.Info("AI response generated successfully", "response_length", len(aiResponse))
+			// The farewell promises a person. Write that promise down BEFORE the text leaves (P1-01): if the
+			// process dies after the customer read it, recovery finishes the handoff. If it cannot be written
+			// the farewell is not sent at all: the handoff is made first and the customer told afterwards.
+			intentID := uuid.Nil
+			if reply.Handoff != "" {
+				id, ierr := a.recordHandoffIntent(account, contact, session, reply.Handoff)
+				if ierr != nil {
+					a.Log.Error("AI handoff intent could not be recorded; handing over before saying anything", "error", ierr, "contact_id", contact.ID)
+					a.handoffFromAI(account, contact, session, settings, reply.Handoff)
+					return aiOutcomeHandoff
+				}
+				intentID = id
+			}
+			aiHandoffFaultPoint("before_farewell") // test seam: a crash after the promise was recorded, before it was made
 			track := &aiSendTrack{app: a, fence: turn.fence}
 			sent, sendErr := a.sendAIReply(aiCtx("chatbot_reply"), reply.ByAgent, account.OrganizationID, contact.ID,
 				func(ctx context.Context) error {
@@ -88,6 +103,7 @@ func (a *App) answerWithAI(account *models.WhatsAppAccount, contact *models.Cont
 					return a.sendAndSaveAgentText(ctx, account, contact, aiResponse, reply.Sender)
 				})
 			if failure := track.failure(); failure == aiOutcomeLostLease {
+				a.finishHandoffIntent(intentID, "cancelled", false) // nothing was sent, so nothing was promised
 				return failure // another worker owns this reply now: it is theirs to send
 			} else if failure != "" || sendErr != nil {
 				// The answer did not (provably) reach the customer: it is not recorded as an answer in the
@@ -98,7 +114,7 @@ func (a *App) answerWithAI(account *models.WhatsAppAccount, contact *models.Cont
 				}
 				a.Log.Error("Failed to send AI response", "error", sendErr, "outcome", failure, "contact", contact.PhoneNumber)
 				if reply.Handoff != "" {
-					a.handoffFromAI(account, contact, session, settings, reply.Handoff)
+					a.finishHandoffIntent(intentID, a.handoffFromAIOutcome(account, contact, session, settings, reply.Handoff), false)
 				}
 				return failure
 			} else if !sent {
@@ -106,11 +122,13 @@ func (a *App) answerWithAI(account *models.WhatsAppAccount, contact *models.Cont
 				// guard could not be had in time): say nothing, and do not fall through to the
 				// default response either. The reason is in the AIUsageLog row of the discard.
 				a.Log.Info("AI reply not sent", "contact", contact.PhoneNumber)
+				a.finishHandoffIntent(intentID, "not_needed", false) // a human has the conversation; nothing was promised
 				return aiOutcomeNotSent
 			}
 			a.logSessionMessage(session.ID, models.DirectionOutgoing, aiResponse, "ai_response")
 			if reply.Handoff != "" { // the agent said its last words; now hand over
-				a.handoffFromAI(account, contact, session, settings, reply.Handoff)
+				aiHandoffFaultPoint("after_farewell") // test seam: the P1-01 crash point
+				a.finishHandoffIntent(intentID, a.handoffFromAIOutcome(account, contact, session, settings, reply.Handoff), false)
 				return aiOutcomeHandoff
 			}
 			return aiOutcomeReplied

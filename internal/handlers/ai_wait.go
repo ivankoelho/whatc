@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -275,11 +276,20 @@ func (a *App) StartAIWaitWorker(ctx context.Context) {
 	slots := make(chan struct{}, aiWaitWorkers)
 	var wg sync.WaitGroup
 	defer wg.Wait()
+	var recovering atomic.Bool // handoff recovery may take minutes (it can call the model): never block the poll loop
 	t := time.NewTicker(aiWaitPollEvery)
 	defer t.Stop()
 	for {
 		now := time.Now()
 		a.reclaimStaleAIReplies(now)
+		if recovering.CompareAndSwap(false, true) {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer recovering.Store(false)
+				a.recoverAIHandoffs(time.Now()) // promises the agent made whose run died (P1-01)
+			}()
+		}
 		rows, err := a.claimDueAIReplies(now, cap(slots)-len(slots))
 		if err != nil {
 			a.Log.Error("Failed to claim AI replies", "error", err)

@@ -165,10 +165,28 @@ func (a *App) openOpportunityID(contact *models.Contact) (uuid.UUID, bool) {
 // opportunity never stops the transfer, and a failed transfer to the unit's team falls back to the
 // general queue, marked, so the customer is always attended.
 func (a *App) handoffFromAI(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, reason string) bool {
+	switch a.handoffFromAIOutcome(account, contact, session, settings, reason) {
+	case aiHandoffTransferred, aiHandoffAlreadyActive, aiHandoffHumanActive:
+		return true
+	}
+	return false
+}
+
+// How a handoff ended (what an AIHandoffIntent records as its Outcome).
+const (
+	aiHandoffTransferred    = "transferred"     // the attendance was created now
+	aiHandoffAlreadyActive  = "already_active"  // an attendance already existed: nothing sent, nothing duplicated
+	aiHandoffHumanActive    = "human_active"    // a person owned the conversation: ended quietly
+	aiHandoffOutsideHours   = "outside_hours"   // out of hours: the customer got the out-of-hours message
+	aiHandoffFailedNotified = "failed_notified" // no queue took it; the customer was told to write again
+)
+
+// handoffFromAIOutcome is handoffFromAI reporting how it ended.
+func (a *App) handoffFromAIOutcome(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, reason string) string {
 	ctx := context.Background()
 	orgID := account.OrganizationID
 	if a.humanTookOver(orgID, contact.ID) {
-		return true
+		return aiHandoffHumanActive
 	}
 	// what the agent says during the handoff is signed like everything else it says
 	sender := newAISender(a.agentForSession(settings, session))
@@ -207,8 +225,9 @@ func (a *App) handoffFromAI(account *models.WhatsAppAccount, contact *models.Con
 		}
 	}
 
-	if a.humanTookOver(orgID, contact.ID) { // someone took over during the extraction
-		return true
+	aiHandoffFaultPoint("after_qualification") // test seam: a crash between the CRM work and the transfer
+	if a.humanTookOver(orgID, contact.ID) {    // someone took over during the extraction
+		return aiHandoffHumanActive
 	}
 
 	notes := transferNotes(reason, q)
@@ -239,8 +258,9 @@ func (a *App) handoffFromAI(account *models.WhatsAppAccount, contact *models.Con
 				a.Log.Error("AI handoff: could not tell the customer about the failure", "error", serr, "contact_id", contact.ID)
 			}
 		}
-		return false
+		return aiHandoffFailedNotified
 	}
+	aiHandoffFaultPoint("after_transfer") // test seam: a crash after the attendance exists, before the waiting message
 
 	switch res.Outcome {
 	case TransferCreated:
@@ -254,9 +274,9 @@ func (a *App) handoffFromAI(account *models.WhatsAppAccount, contact *models.Con
 		if err := a.sendAndSaveAgentText(aiCtx("ai_handoff"), account, contact, handoffMessageFor(reason), sender); err != nil {
 			a.Log.Error("AI handoff: could not send the waiting message", "error", err, "contact_id", contact.ID)
 		}
-		return true
+		return aiHandoffTransferred
 	case TransferAlreadyActive:
-		return true
+		return aiHandoffAlreadyActive
 	case TransferOutsideHours:
 		if !told {
 			a.setSessionValue(session, aiSessionHandedOff, true)
@@ -264,9 +284,9 @@ func (a *App) handoffFromAI(account *models.WhatsAppAccount, contact *models.Con
 				_ = a.sendAndSaveTextMessage(botCtx("ai_handoff_out_of_hours"), account, contact, msg)
 			}
 		}
-		return false
+		return aiHandoffOutsideHours
 	}
-	return false
+	return aiHandoffFailedNotified
 }
 
 // errNoUnitTeam marks "go straight to the general queue" inside handoffFromAI.
