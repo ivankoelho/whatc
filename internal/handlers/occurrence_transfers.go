@@ -369,12 +369,19 @@ func (a *App) applyTransfer(r *fastglue.Request, orgID, userID uuid.UUID, occ *m
 	}
 
 	a.DB.Preload("Stage").Preload("AssignedUser").Preload("Unit").Preload("Department").Preload("Category").Preload("WhatHappened").Preload("Process").First(occ, occ.ID)
+	moved := !sameOptUUID(oldTeam, newTeamID) || !sameOptUUID(oldUser, toUser)
+	if moved {
+		a.clearOccurrenceAlerts(occ.ID)
+	}
 	resp := occurrenceToResponse(*occ)
 	if occ.TeamID != nil {
 		a.DB.Model(&models.Team{}).Where("id = ? AND organization_id = ?", *occ.TeamID, orgID).Select("name").Scan(&resp.TeamName)
 	}
 	// who is told is who can see the case NOW (the hub asks the same authorizer)
 	a.broadcastOccurrence(orgID, occ.ID, websocket.WSMessage{Type: websocket.TypeOccurrenceChanged, Payload: resp})
+	if moved {
+		a.alertOccurrence(occ, toUser, userID, "transferred") // also reaches the new team's managers; after occurrence_changed
+	}
 	return r.SendEnvelope(resp)
 }
 

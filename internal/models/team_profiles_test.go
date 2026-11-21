@@ -68,3 +68,31 @@ func TestTeamProfileKeysAreUnique(t *testing.T) {
 		seen[tp.Key] = tp.Name
 	}
 }
+
+// The seller registers no contacts and imports none; it still reads them.
+func TestVendasProfile_CannotWriteOrImportContacts(t *testing.T) {
+	var perms []string
+	for _, p := range TeamProfiles() {
+		if p.Key == "vendas" {
+			perms = p.Permissions
+		}
+	}
+	has := func(k string) bool {
+		for _, p := range perms {
+			if p == k {
+				return true
+			}
+		}
+		return false
+	}
+	for _, k := range []string{"contacts:write", "contacts:import", "contacts:delete"} {
+		if has(k) {
+			t.Errorf("vendas must not hold %s", k)
+		}
+	}
+	for _, k := range []string{"contacts:read", "chat:read", "chat:write", "sales_opportunities:write"} {
+		if !has(k) {
+			t.Errorf("vendas must keep %s", k)
+		}
+	}
+}

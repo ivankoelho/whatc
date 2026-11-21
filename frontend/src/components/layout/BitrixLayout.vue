@@ -16,6 +16,8 @@ import { useWallpaper } from '@/composables/useWallpaper'
 import OrganizationSwitcher from './OrganizationSwitcher.vue'
 import UserMenu from './UserMenu.vue'
 import WallpaperPicker from './WallpaperPicker.vue'
+import HeaderTools from './HeaderTools.vue'
+import HeaderClock from './HeaderClock.vue'
 import ActiveCallPanel from '@/components/calling/ActiveCallPanel.vue'
 import MobileTabBar from './MobileTabBar.vue'
 import { ScrollToTop } from '@/components/shared'
@@ -308,8 +310,13 @@ const handleLogout = async () => {
           <span v-else-if="activeItem" class="shell-tab is-active">{{ $t(activeItem.name) }}</span>
         </nav>
 
+        <HeaderTools />
         <WallpaperPicker />
-        <UserMenu collapsed @logout="handleLogout" />
+        <!-- clock and avatar share one pill -->
+        <div class="flex shrink-0 items-center gap-2 rounded-full bg-black/25 py-0.5 pl-3 pr-0.5" data-testid="clock-avatar-pill">
+          <HeaderClock />
+          <UserMenu collapsed @logout="handleLogout" />
+        </div>
       </header>
 
       <!-- Main content: a rounded sheet floating over the wallpaper -->

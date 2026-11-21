@@ -531,6 +531,33 @@ export const agentAnalyticsService = {
   getLive: () => api.get('/analytics/agents/live')
 }
 
+export const agentAttendanceService = {
+  get: (params?: Record<string, string>) => api.get('/analytics/agents/attendance', { params })
+}
+
+export interface OccurrenceAlert {
+  id: string
+  kind: 'assigned' | 'transferred' | 'team'
+  created_at: string
+  seen_at?: string
+  occurrence_id: string
+  protocol_number: string
+  title: string
+  contact_name: string
+  category_name?: string
+  what_happened?: string
+  priority: 'low' | 'normal' | 'high' | 'urgent'
+  opened_at: string
+  actor_name?: string
+}
+
+export const occurrenceAlertsService = {
+  list: () => api.get<ApiEnvelope<{ alerts: OccurrenceAlert[]; unseen: number }>>('/occurrence-alerts'),
+  markSeen: () => api.put('/occurrence-alerts/seen'),
+  dismiss: (id: string) => api.put(`/occurrence-alerts/${id}/dismiss`),
+  dismissAll: () => api.put('/occurrence-alerts/dismiss-all'),
+}
+
 // Meta WhatsApp Analytics Types
 export type MetaAnalyticsType =
   | 'analytics'

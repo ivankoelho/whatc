@@ -449,3 +449,40 @@ func TestOccurrences_ClosedSinceCombinesWithStageFilter(t *testing.T) {
 		"deve ser a ocorrência fechada dentro da janela, na etapa certa")
 	assert.Equal(t, wanted.ID.String(), resp.Data.Occurrences[0].StageID)
 }
+
+// "Ocorrência com Caminhão / Terceiros" are selectable reasons ("O que ocorreu")
+// for new organisations AND for organisations seeded before they existed.
+func TestWhatHappened_TruckAndThirdPartyOptions(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	role := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
+
+	// an org seeded with only the original six (legacy)
+	for i, n := range []string{"Atraso na Entrega", "Produto com Avaria"} {
+		require.NoError(t, app.DB.Create(&models.OccurrenceWhatHappened{OrganizationID: org.ID, Name: n, Position: i, IsActive: true}).Error)
+	}
+	names := func() (out []string) {
+		req := testutil.NewGETRequest(t)
+		testutil.SetAuthContext(req, org.ID, user.ID)
+		require.NoError(t, app.ListOccurrenceWhatHappened(req))
+		var body struct {
+			Data struct {
+				Reasons []struct{ Name string } `json:"reasons"`
+			} `json:"data"`
+		}
+		testutil.ParseJSONResponse(t, req, &body)
+		for _, r := range body.Data.Reasons {
+			out = append(out, r.Name)
+		}
+		return
+	}
+	got := names()
+	assert.Contains(t, got, "Ocorrência com Caminhão")
+	assert.Contains(t, got, "Ocorrência com Terceiros")
+	assert.Len(t, names(), len(got), "reading again adds nothing")
+
+	// a deliberate delete is respected
+	require.NoError(t, app.DB.Where("organization_id = ? AND name = ?", org.ID, "Ocorrência com Terceiros").Delete(&models.OccurrenceWhatHappened{}).Error)
+	assert.NotContains(t, names(), "Ocorrência com Terceiros")
+}
