@@ -79,7 +79,7 @@ func (a *App) completeAI(ctx context.Context, settings *models.ChatbotSettings, 
 		if limit := settings.AI.MonthlyTokenLimit; limit > 0 {
 			res, err := a.reserveAITokens(meta.OrgID, limit, estimateAITokens(req), time.Now())
 			if err != nil {
-				a.recordAIUsageOrLog(meta, provider, req.Model, err)
+				_ = a.recordAIUsage(meta, provider, req.Model, nil, 0, err)
 				return nil, err
 			}
 			meta.reservation = res
@@ -89,12 +89,12 @@ func (a *App) completeAI(ctx context.Context, settings *models.ChatbotSettings, 
 
 	apiKey, err := a.resolveAIAPIKey(settings)
 	if err != nil {
-		a.recordAIUsageOrLog(meta, provider, req.Model, err)
+		_ = a.recordAIUsage(meta, provider, req.Model, nil, 0, err)
 		return nil, err
 	}
 	p, err := a.newAIProvider(provider, apiKey)
 	if err != nil {
-		a.recordAIUsage(meta, provider, req.Model, nil, 0, err)
+		_ = a.recordAIUsage(meta, provider, req.Model, nil, 0, err)
 		return nil, err
 	}
 
@@ -104,7 +104,7 @@ func (a *App) completeAI(ctx context.Context, settings *models.ChatbotSettings, 
 
 	start := time.Now()
 	resp, err := p.Complete(ctx, req)
-	a.recordAIUsage(meta, provider, req.Model, resp, time.Since(start), err)
+	_ = a.recordAIUsage(meta, provider, req.Model, resp, time.Since(start), err)
 	return resp, err
 }
 
@@ -151,7 +151,7 @@ func (a *App) completeWithTools(ctx context.Context, p ai.Provider, provider str
 		meta.Out.Pending = r.Pending() // a proposal made during the loop, even if the loop failed after it
 	}
 	for i, resp := range res.Responses {
-		a.recordAIUsage(meta, provider, req.Model, resp, res.Took[i], nil)
+		_ = a.recordAIUsage(meta, provider, req.Model, resp, res.Took[i], nil)
 	}
 	if err != nil {
 		if errors.Is(err, ai.ErrToolLoopLimit) {
@@ -160,7 +160,7 @@ func (a *App) completeWithTools(ctx context.Context, p ai.Provider, provider str
 				r.RecordAborted(ctx, res.Response.ToolCalls)
 			}
 		} else {
-			a.recordAIUsage(meta, provider, req.Model, nil, res.FailedTook, err)
+			_ = a.recordAIUsage(meta, provider, req.Model, nil, res.FailedTook, err)
 		}
 		return nil, err
 	}
@@ -170,14 +170,6 @@ func (a *App) completeWithTools(ctx context.Context, p ai.Provider, provider str
 // recordAIUsage persists one AIUsageLog row. A failure to log is logged and
 // swallowed: observability must never break a customer's reply. It reports the failure to the
 // caller too, and to the call's token reservation, which then stays counted as consumption.
-// recordAIUsageOrLog records a call that failed before it reached the provider. The caller is already
-// returning the real error, so a failure to write the usage row is logged, never swallowed silently.
-func (a *App) recordAIUsageOrLog(meta aiCallMeta, provider, model string, callErr error) {
-	if err := a.recordAIUsage(meta, provider, model, nil, 0, callErr); err != nil {
-		a.Log.Error("Failed to record the AI usage of a failed call", "error", err, "feature", meta.Feature, "org_id", meta.OrgID)
-	}
-}
-
 func (a *App) recordAIUsage(meta aiCallMeta, provider, model string, resp *ai.Response, took time.Duration, callErr error) error {
 	entry := models.AIUsageLog{
 		OrganizationID:  meta.OrgID,

@@ -62,7 +62,7 @@ func (a *App) ListAIModels(r *fastglue.Request) error {
 	ctx, cancel := context.WithTimeout(context.Background(), ai.DefaultTimeout)
 	defer cancel()
 	list, err := p.ListModels(ctx)
-	a.recordAIUsage(meta, provider, "", nil, time.Since(start), err)
+	_ = a.recordAIUsage(meta, provider, "", nil, time.Since(start), err) // logs its own failure
 	if err != nil {
 		var aerr *ai.Error
 		if errors.As(err, &aerr) && aerr.Kind == ai.KindAuth {
