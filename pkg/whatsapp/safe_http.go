@@ -1,8 +1,10 @@
 package whatsapp
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -45,7 +47,29 @@ func transportError(prefix string, err error, secrets ...string) error {
 	if errors.Is(err, ErrUntrustedDownloadHost) { // a refusal of ours: callers may still recognise it
 		return &untrustedHostError{msg: msg}
 	}
-	return &redactedError{msg: msg, outcome: Classify(err)}
+	return &transportFailure{redactedError{msg: msg, outcome: Classify(err)}}
+}
+
+// transportFailure is a failure of the network call itself (the request may or may not have been handled).
+type transportFailure struct{ redactedError }
+
+func (e *transportFailure) Error() string    { return e.msg }
+func (e *transportFailure) Outcome() Outcome { return e.outcome }
+
+// DeliveryUnknown reports whether err leaves it genuinely open that the provider handled the request: the
+// network call failed or timed out, or a response arrived that proves nothing (5xx, 408/425, unreadable).
+// Errors raised BEFORE any request (validation, unsupported type, missing template) are not that: they are
+// plain failures and keep their own text.
+func DeliveryUnknown(err error) bool {
+	if err == nil || NotSent(err) {
+		return false
+	}
+	var tf *transportFailure
+	var ae *APIError
+	var ue *url.Error
+	var ne net.Error
+	return errors.As(err, &tf) || errors.As(err, &ae) || errors.As(err, &ue) || errors.As(err, &ne) ||
+		errors.Is(err, context.DeadlineExceeded)
 }
 
 // untrustedHostError keeps ErrUntrustedDownloadHost reachable through errors.Is after the text was cleaned.

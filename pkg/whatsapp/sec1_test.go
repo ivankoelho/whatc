@@ -153,3 +153,22 @@ func TestSEC1_TrustedMetaHostsAreAccepted(t *testing.T) {
 	}
 	_ = strings.TrimSpace
 }
+
+func TestDeliveryUnknown_OnlyForNetworkAndUnprovableAnswers(t *testing.T) {
+	t.Parallel()
+	// a proven refusal and a request that never left are NOT unknown
+	assert.False(t, whatsapp.DeliveryUnknown(whatsapp.NewNotSentError(errors.New("template is required"))))
+	assert.False(t, whatsapp.DeliveryUnknown(errors.New("unsupported message type: x")), "validation errors before any request keep their own text")
+	assert.False(t, whatsapp.DeliveryUnknown(nil))
+
+	// a dropped connection or a timeout IS unknown
+	client := sec1Client(deadServerURL(t))
+	acct := &whatsapp.Account{PhoneID: "PH", APIVersion: "v24.0", AccessToken: "t"}
+	_, err := client.SendTextMessage(testutil.TestContext(t), acct, whatsapp.Recipient{Phone: "5511999990000"}, "oi")
+	assert.False(t, whatsapp.DeliveryUnknown(err), "never connected: proven not sent")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusBadGateway) }))
+	t.Cleanup(srv.Close)
+	_, err = sec1Client(srv.URL).SendTextMessage(testutil.TestContext(t), acct, whatsapp.Recipient{Phone: "5511999990000"}, "oi")
+	assert.True(t, whatsapp.DeliveryUnknown(err), "a 502 proves nothing about delivery")
+}

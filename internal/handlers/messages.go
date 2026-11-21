@@ -675,12 +675,16 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 			err = errors.New(templateutil.RedactValues(err.Error(), secrets))
 		}
 		errMsg := whatsapp.PublicErrorText(err) // what is stored and broadcast: never a raw provider body
-		if !whatsapp.NotSent(err) {
+		if whatsapp.DeliveryUnknown(err) {
 			// Nothing proves Meta refused it (timeout, dropped connection, 5xx...): it may have reached the
 			// customer. Say so in plain words instead of showing a failure with transport internals, and keep
 			// the technical cause in the log only. The message is never resent automatically.
 			a.Log.Warn("Send outcome unknown: the message may have reached the customer", "error", err, "message_id", msg.ID)
 			errMsg = MessageSendUnknownText
+			var apiErr *whatsapp.APIError
+			if errors.As(err, &apiErr) { // the status is not an internal: it tells the attendant what came back
+				errMsg += fmt.Sprintf(" (HTTP %d)", apiErr.Status)
+			}
 		}
 
 		a.DB.Model(&models.Message{}).Where("id = ?", msg.ID).Updates(map[string]any{
