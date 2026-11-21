@@ -59,7 +59,9 @@ func TeamProfiles() []TeamProfile {
 			Description: "Vendedor da loja: atende o fluxo de vendas e abre oportunidades no CRM",
 			// Sellers work in the CRM, never in the internal protocols (those are for SAC, Jurídico, store supervisors
 			// and the Logística support): so the agent baseline's occurrences:* is taken out.
-			Permissions: without(with("contacts:read", "contacts:write", "tags:read", "templates:read", "sales_opportunities:read", "sales_opportunities:write"),
+			// No contacts:write: a seller works the customers that already exist and never registers one, nor starts a
+			// conversation with an unknown number (SendTemplateMessage checks contacts:write before creating a contact).
+			Permissions: without(with("contacts:read", "tags:read", "templates:read", "sales_opportunities:read", "sales_opportunities:write"),
 				"occurrences:read", "occurrences:write"),
 		},
 		{
