@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -171,4 +172,63 @@ func TestDeliveryUnknown_OnlyForNetworkAndUnprovableAnswers(t *testing.T) {
 	t.Cleanup(srv.Close)
 	_, err = sec1Client(srv.URL).SendTextMessage(testutil.TestContext(t), acct, whatsapp.Recipient{Phone: "5511999990000"}, "oi")
 	assert.True(t, whatsapp.DeliveryUnknown(err), "a 502 proves nothing about delivery")
+}
+
+func TestSEC1_TokenExchangeRequestConstructionErrorDoesNotLeak(t *testing.T) {
+	t.Parallel()
+	client := whatsapp.NewWithBaseURL(testutil.NopLogger(), "http://exa mple.invalid") // does not parse: net/http echoes the whole URL
+	const code, secret = "AQD-auth-code-9f8e7d6c", "app-secret-0123456789abcdef"
+
+	_, err := client.ExchangeCodeForToken(testutil.TestContext(t), code, "123456789", secret, "v24.0")
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), secret)
+	assert.NotContains(t, err.Error(), code)
+	assert.NotContains(t, err.Error(), "client_secret")
+}
+
+func TestSEC1_TokenExchangeEscapesTheQuery(t *testing.T) {
+	t.Parallel()
+	var got atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got.Store(r.URL.Query())
+		_ = json.NewEncoder(w).Encode(map[string]string{"access_token": "tok", "token_type": "bearer"})
+	}))
+	t.Cleanup(srv.Close)
+
+	_, err := sec1Client(srv.URL).ExchangeCodeForToken(testutil.TestContext(t), "x&client_secret=evil", "app", "real-secret", "v24.0")
+	require.NoError(t, err)
+	q := got.Load().(url.Values)
+	assert.Equal(t, []string{"x&client_secret=evil"}, q["code"], "the code is one value, whatever it contains")
+	assert.Equal(t, []string{"real-secret"}, q["client_secret"], "a hostile code cannot override the secret")
+}
+
+func TestSEC1_DownloadFollowsARedirectBetweenTrustedHostsOnly(t *testing.T) {
+	t.Parallel()
+	cdn := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("bytes")) }))
+	t.Cleanup(cdn.Close)
+	meta := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, cdn.URL+"/blob", http.StatusFound)
+	}))
+	t.Cleanup(meta.Close)
+
+	client := sec1Client(meta.URL)
+	client.TrustHost(cdn.Listener.Addr().String()) // a trusted CDN host: the chain is allowed
+	data, err := client.DownloadMedia(testutil.TestContext(t), meta.URL+"/media", "tok")
+	require.NoError(t, err)
+	assert.Equal(t, []byte("bytes"), data, "a legitimate redirect chain still works")
+}
+
+func TestSEC1_NoRedirectClientHandsBackThe3xx(t *testing.T) {
+	t.Parallel()
+	evil, seen := newCounter(t)
+	meta := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, evil.URL, http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(meta.Close)
+
+	resp, err := whatsapp.NoRedirectClient(&http.Client{}).Get(meta.URL)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	assert.Equal(t, http.StatusTemporaryRedirect, resp.StatusCode)
+	assert.EqualValues(t, 0, seen.n.Load())
 }

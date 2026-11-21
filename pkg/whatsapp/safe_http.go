@@ -132,3 +132,18 @@ func (c *Client) downloadClient() *http.Client {
 
 // noRedirects makes a client hand back a 3xx instead of following it.
 func noRedirects(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+
+// SanitizeTransportError is transportError for callers outside this package that talk to Meta with their
+// own request: the URL is dropped from the text and the secrets are masked.
+func SanitizeTransportError(prefix string, err error, secrets ...string) error {
+	return transportError(prefix, err, secrets...)
+}
+
+// NoRedirectClient returns a copy of c that hands back a 3xx instead of following it. Use it for any call
+// that carries a Meta token: the Graph API does not redirect, so following one would only replay the
+// request (and its credentials) somewhere else.
+func NoRedirectClient(c *http.Client) *http.Client {
+	cp := *c
+	cp.CheckRedirect = noRedirects
+	return &cp
+}

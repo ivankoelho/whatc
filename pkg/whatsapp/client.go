@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"time"
 
 	"github.com/zerodha/logf"
@@ -655,13 +656,15 @@ type TokenExchangeResponse struct {
 
 // ExchangeCodeForToken exchanges a Facebook authorization code for a permanent access token
 func (c *Client) ExchangeCodeForToken(ctx context.Context, code, appID, appSecret, apiVersion string) (string, error) {
-	url := fmt.Sprintf("%s/%s/oauth/access_token?client_id=%s&client_secret=%s&code=%s",
-		c.getBaseURL(), apiVersion, appID, appSecret, code)
+	// Query values are escaped: a code with '&' or '=' must not be able to add or change parameters.
+	q := neturl.Values{"client_id": {appID}, "client_secret": {appSecret}, "code": {code}}
+	url := fmt.Sprintf("%s/%s/oauth/access_token?%s", c.getBaseURL(), apiVersion, q.Encode())
 
 	// OAuth endpoint doesn't require Authorization header, so we make a direct request
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to create token exchange request: %w", err)
+		// a URL that does not parse is echoed back by net/http, query (and secrets) included
+		return "", transportError("failed to create token exchange request", err, appSecret, code)
 	}
 
 	resp, err := c.HTTPClient.Do(req)

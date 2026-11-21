@@ -1183,9 +1183,9 @@ func (a *App) sendWhatsAppReaction(account *models.WhatsAppAccount, contact *mod
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+account.AccessToken)
 
-	resp, err := a.HTTPClient.Do(req)
+	resp, err := whatsapp.NoRedirectClient(a.HTTPClient).Do(req) // carries the Meta token: no redirects
 	if err != nil {
-		a.Log.Error("Failed to send reaction", "error", err)
+		a.Log.Error("Failed to send reaction", "error", whatsapp.SanitizeTransportError("request to Meta failed", err, account.AccessToken))
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
