@@ -4823,6 +4823,8 @@
     "calendarEmptyAdmin": "Connect the Nextcloud calendar to see it here: in Integrations, Nextcloud, paste the calendar's embed code.",
     "calendarConfigure": "Set up calendar",
     "calendarOpen": "Open in a new tab",
+    "calendarOpenCta": "Open calendar",
+    "calendarExternalNote": "The office calendar opens in a new tab, in Nextcloud's own look.",
     "calendarLoadFailed": "Could not load the calendar. Try again in a moment.",
     "aiBadge": "AI",
     "aiBadgeTitle": "Opened by the AI agent",

@@ -5,7 +5,7 @@ import { CalendarDays, ExternalLink, Loader2 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { nextcloudService } from '@/services/api'
 
-// The organization's Nextcloud calendar, framed inside the CRM. The address is saved by an administrator (Integrações,
+// The organization's Nextcloud calendar, opened in its own browser tab (it is not framed inside the CRM). The address is saved by an administrator (Integrações,
 // Nextcloud) and checked by the server: it is always the calendar app's embed page on the organization's own Nextcloud.
 const { t } = useI18n()
 const loading = ref(true)
@@ -43,26 +43,15 @@ onMounted(async () => {
       </Button>
     </div>
 
-    <template v-else>
-      <div class="flex shrink-0 justify-end px-4 pt-3">
-        <a
-          :href="url"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-          data-testid="crm-calendar-open"
-        ><ExternalLink class="h-3.5 w-3.5" aria-hidden="true" />{{ t('sales.calendarOpen') }}</a>
-      </div>
-      <!-- The framed page is another origin; the sandbox lets the calendar run and open its links, nothing more -->
-      <iframe
-        :src="url"
-        :title="t('sales.tabCalendar')"
-        class="m-4 mt-2 min-h-0 flex-1 rounded-xl border-0 bg-white shadow-sm"
-        loading="lazy"
-        referrerpolicy="no-referrer"
-        sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
-        data-testid="crm-calendar-frame"
-      />
-    </template>
+    <!-- The calendar opens in its own tab: Nextcloud's page has its own layout and does not belong inside ours -->
+    <div v-else class="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center" data-testid="crm-calendar-launcher">
+      <CalendarDays class="h-10 w-10 text-muted-foreground" aria-hidden="true" />
+      <p class="max-w-md text-sm text-muted-foreground">{{ t('sales.calendarExternalNote') }}</p>
+      <Button as-child size="sm">
+        <a :href="url" target="_blank" rel="noopener noreferrer" data-testid="crm-calendar-open">
+          <ExternalLink class="mr-1.5 h-4 w-4" aria-hidden="true" />{{ t('sales.calendarOpenCta') }}
+        </a>
+      </Button>
+    </div>
   </div>
 </template>

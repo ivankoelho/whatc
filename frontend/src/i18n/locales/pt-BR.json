@@ -4812,6 +4812,8 @@
     "calendarEmptyAdmin": "Conecte a agenda do Nextcloud para vê-la aqui: em Integrações, Nextcloud, cole o código de incorporação (embed) do calendário.",
     "calendarConfigure": "Configurar calendário",
     "calendarOpen": "Abrir em nova aba",
+    "calendarOpenCta": "Abrir calendário",
+    "calendarExternalNote": "A agenda do escritório abre em uma nova aba, com o visual do próprio Nextcloud.",
     "calendarLoadFailed": "Não foi possível carregar o calendário. Tente de novo em instantes.",
     "aiBadge": "IA",
     "aiBadgeTitle": "Criada pelo agente de IA",

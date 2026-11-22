@@ -17,17 +17,14 @@ const EMBED = 'https://next.example.com/index.php/apps/calendar/embed/Mir5xf9ipM
 describe('CRM Calendar tab', () => {
   beforeEach(() => { svc.getCalendarEmbed.mockReset() })
 
-  it('frames the saved calendar in a sandboxed iframe and offers to open it in a new tab', async () => {
+  it('offers the saved calendar as a link that opens in a new tab, and frames nothing', async () => {
     svc.getCalendarEmbed.mockReturnValue(ok({ url: EMBED, can_configure: false }))
     const w = mountIt()
     await flushPromises()
-    const frame = w.find('[data-testid="crm-calendar-frame"]')
-    expect(frame.attributes('src')).toBe(EMBED)
-    expect(frame.attributes('sandbox')).toContain('allow-scripts')
-    expect(frame.attributes('sandbox')).not.toContain('allow-top-navigation')
-    expect(frame.attributes('referrerpolicy')).toBe('no-referrer')
+    expect(w.find('iframe').exists()).toBe(false)
     const open = w.find('[data-testid="crm-calendar-open"]')
     expect(open.attributes('href')).toBe(EMBED)
+    expect(open.attributes('target')).toBe('_blank')
     expect(open.attributes('rel')).toContain('noopener')
   })
 
@@ -35,7 +32,7 @@ describe('CRM Calendar tab', () => {
     svc.getCalendarEmbed.mockReturnValue(ok({ url: '', can_configure: false }))
     let w = mountIt()
     await flushPromises()
-    expect(w.find('[data-testid="crm-calendar-frame"]').exists()).toBe(false)
+    expect(w.find('[data-testid="crm-calendar-open"]').exists()).toBe(false)
     expect(w.find('[data-testid="crm-calendar-empty"]').text()).toContain('Ask an administrator')
     expect(w.find('[data-testid="to-settings"]').exists()).toBe(false)
 
@@ -51,12 +48,12 @@ describe('CRM Calendar tab', () => {
     const w = mountIt()
     await flushPromises()
     expect(w.find('[data-testid="crm-calendar-failed"]').exists()).toBe(true)
-    expect(w.find('[data-testid="crm-calendar-frame"]').exists()).toBe(false)
+    expect(w.find('[data-testid="crm-calendar-open"]').exists()).toBe(false)
   })
 
   it('has the tab strings in both languages', async () => {
     const pt = (await import('@/i18n/locales/pt-BR.json')).default as unknown as { sales: Record<string, string> }
-    for (const k of ['tabCalendar', 'calendarEmpty', 'calendarEmptyAdmin', 'calendarConfigure', 'calendarOpen', 'calendarLoadFailed']) {
+    for (const k of ['tabCalendar', 'calendarEmpty', 'calendarEmptyAdmin', 'calendarConfigure', 'calendarOpenCta', 'calendarExternalNote', 'calendarLoadFailed']) {
       expect((en as unknown as { sales: Record<string, string> }).sales[k], `en ${k}`).toBeTruthy()
       expect(pt.sales[k], `pt ${k}`).toBeTruthy()
     }
