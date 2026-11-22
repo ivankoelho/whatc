@@ -35,6 +35,9 @@ const aiHandoffErrorMessage = "Tive um problema para te encaminhar agora. Pode m
 // something was qualified (or had been, earlier in this conversation): when the extraction failed the
 // attendant gets the conversation but no summary, and the customer is not told otherwise.
 func handoffMessageFor(reason string, q *Qualification) string {
+	if reason == aiHandoffScheduled { // the customer was just told the time of the meeting: nothing more to promise
+		return ""
+	}
 	if reason == aiHandoffMarker && (q == nil || !q.ExtractionFailed) {
 		return aiHandoffWaitMessage
 	}
@@ -111,6 +114,10 @@ func aiHandoffReasonLabel(reason string) string {
 		return "limite mensal de uso de IA não configurado (e sem aceite explícito de uso sem limite)"
 	case aiHandoffFailure:
 		return "falhas seguidas do provedor de IA"
+	case aiHandoffScheduled:
+		return "reunião agendada pelo cliente na agenda (veja a oportunidade)"
+	case aiHandoffSchedulingFailed:
+		return "não foi possível agendar a reunião; o cliente aguarda um atendente"
 	}
 	return reason
 }
@@ -258,6 +265,21 @@ func (a *App) handoffFromAIOutcome(account *models.WhatsAppAccount, contact *mod
 		return aiHandoffHumanActive
 	}
 
+	// With a calendar enabled, the agent offers meeting times instead of calling a person right away: the
+	// customer picks one and the booking hands over (handleAppointmentTap). Any failure falls through to
+	// the normal transfer below.
+	if reason == aiHandoffMarker && a.agentForSession(settings, session) != nil {
+		var oppID *uuid.UUID
+		if createdOpp != uuid.Nil {
+			oppID = &createdOpp
+		} else if id, ok := a.openOpportunityID(contact); ok {
+			oppID = &id
+		}
+		if a.offerAppointment(account, contact, session, oppID, 0) {
+			return aiHandoffOffered
+		}
+	}
+
 	notes := transferNotes(reason, q)
 	var res TransferResult
 	var err error
@@ -299,8 +321,10 @@ func (a *App) handoffFromAIOutcome(account *models.WhatsAppAccount, contact *mod
 		if told { // the out-of-hours message is moot now; a later handoff may say it again
 			a.setSessionValue(session, aiSessionHandedOff, false)
 		}
-		if err := a.sendAndSaveAgentText(aiCtx("ai_handoff"), account, contact, handoffMessageFor(reason, q), sender); err != nil {
-			a.Log.Error("AI handoff: could not send the waiting message", "error", err, "contact_id", contact.ID)
+		if msg := handoffMessageFor(reason, q); msg != "" {
+			if err := a.sendAndSaveAgentText(aiCtx("ai_handoff"), account, contact, msg, sender); err != nil {
+				a.Log.Error("AI handoff: could not send the waiting message", "error", err, "contact_id", contact.ID)
+			}
 		}
 		return aiHandoffTransferred
 	case TransferAlreadyActive:

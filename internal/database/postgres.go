@@ -110,6 +110,8 @@ func GetMigrationModels() []MigrationModel {
 		{"AIPendingReply", &models.AIPendingReply{}},
 		{"AIHandoffIntent", &models.AIHandoffIntent{}},
 		{"ContactAdReferral", &models.ContactAdReferral{}},
+		{"NextcloudCalendar", &models.NextcloudCalendar{}},
+		{"AIAppointmentOffer", &models.AIAppointmentOffer{}},
 		{"AgentTransfer", &models.AgentTransfer{}},
 
 		// User tracking

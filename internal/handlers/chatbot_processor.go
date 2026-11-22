@@ -239,6 +239,11 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 		a.handleAIToolConfirmationTap(account, contact, buttonID, msg.ID)
 		return
 	}
+	// A tap on a time the agent offered for a meeting: booked here, never seen by the chatbot as a message.
+	if isAppointmentButton(buttonID) {
+		a.handleAppointmentTap(account, contact, buttonID)
+		return
+	}
 
 	// Check for active agent transfer - skip chatbot processing if transferred
 	if a.hasActiveAgentTransfer(account.OrganizationID, contact.ID) {
