@@ -176,7 +176,7 @@ function resolve(kind: 'convert' | 'lose') {
   <Dialog :open="open" @update:open="emit('update:open', $event)">
     <DialogContent class="max-h-[90vh] overflow-y-auto sm:max-w-2xl" data-testid="sales-opportunity-dialog" @click.stop>
       <DialogHeader>
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-3 pr-8">
           <Avatar class="h-10 w-10 shrink-0">
             <AvatarFallback :class="'bg-gradient-to-br text-sm font-semibold text-white ' + getAvatarGradient(contactName)">{{ getInitials(contactName) }}</AvatarFallback>
           </Avatar>
