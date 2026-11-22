@@ -35,9 +35,6 @@ const aiHandoffErrorMessage = "Tive um problema para te encaminhar agora. Pode m
 // something was qualified (or had been, earlier in this conversation): when the extraction failed the
 // attendant gets the conversation but no summary, and the customer is not told otherwise.
 func handoffMessageFor(reason string, q *Qualification) string {
-	if reason == aiHandoffScheduled { // the customer was just told the time of the meeting: nothing more to promise
-		return ""
-	}
 	if reason == aiHandoffMarker && (q == nil || !q.ExtractionFailed) {
 		return aiHandoffWaitMessage
 	}
@@ -114,8 +111,6 @@ func aiHandoffReasonLabel(reason string) string {
 		return "limite mensal de uso de IA não configurado (e sem aceite explícito de uso sem limite)"
 	case aiHandoffFailure:
 		return "falhas seguidas do provedor de IA"
-	case aiHandoffScheduled:
-		return "reunião agendada pelo cliente na agenda (veja a oportunidade)"
 	case aiHandoffSchedulingFailed:
 		return "não foi possível agendar a reunião; o cliente aguarda um atendente"
 	}
@@ -281,6 +276,9 @@ func (a *App) handoffFromAIOutcome(account *models.WhatsAppAccount, contact *mod
 	}
 
 	notes := transferNotes(reason, q)
+	if ap := a.upcomingAppointment(orgID, contact.ID); ap != nil {
+		notes += "\n" + ap.note()
+	}
 	var res TransferResult
 	var err error
 	if issue := a.aiAgentAccountUnitTeamIssue(account); issue == "" {

@@ -147,7 +147,7 @@ func TestScheduling_TheAgentOffersFreeTimesInsteadOfCallingAPersonAtOnce(t *test
 	assert.Len(t, w.opportunities(t, contact.ID), 1, "the lead is in the CRM already")
 }
 
-func TestScheduling_TappingATimeBooksItAndHandsTheCustomerToPeople(t *testing.T) {
+func TestScheduling_TappingATimeBooksItAndTheAgentStaysInCharge(t *testing.T) {
 	w, cal, contact, session := newScheduler(t)
 	require.Equal(t, aiHandoffOffered, w.app.handoffFromAIOutcome(w.f.account, contact, session, w.f.settings, aiHandoffMarker))
 	buttons := w.offeredButtons()
@@ -167,8 +167,9 @@ func TestScheduling_TappingATimeBooksItAndHandsTheCustomerToPeople(t *testing.T)
 	assert.Equal(t, models.AIAppointmentBooked, got.Status)
 	assert.NotEmpty(t, got.EventUID)
 	assert.Contains(t, strings.Join(w.textSends(), "\n"), "Agendado!")
-	assert.Len(t, w.transfers(t, contact.ID), 1, "people take the attendance after the booking")
-	assert.Equal(t, 0, countContaining(w.textSends(), aiHandoffWaitMessage[:20]), "the booking message is the only promise")
+	assert.Empty(t, w.transfers(t, contact.ID), "no attendance is opened: the agent stays in charge of the conversation")
+	assert.Equal(t, 0, countContaining(w.textSends(), aiHandoffWaitMessage[:20]), "no \"vou chamar um atendente\" either")
+	require.NotNil(t, w.app.upcomingAppointment(w.f.org.ID, contact.ID), "the meeting is known to the system")
 	assert.Contains(t, w.opportunities(t, contact.ID)[0].Interest, "Reunião agendada")
 }
 
@@ -184,7 +185,7 @@ func TestScheduling_ARepeatedTapBooksOnce(t *testing.T) {
 	}
 	wg.Wait()
 	assert.Equal(t, 1, cal.putCount(), "five taps, one event")
-	assert.Len(t, w.transfers(t, contact.ID), 1)
+	assert.Empty(t, w.transfers(t, contact.ID))
 }
 
 func TestScheduling_ATimeTakenMeanwhileIsNotBookedAndNewTimesAreOffered(t *testing.T) {
@@ -473,7 +474,10 @@ func TestScheduling_TheWholeConversationFromTheAdToTheBookedMeeting(t *testing.T
 		"cidade": map[string]any{"valor": "Salvador", "evidencia": "Moro em Salvador"},
 	})
 	// the agent's three model calls: a question, the handoff marker, and the extraction that follows it
-	w := newWiring(t, "Olá! Sinto muito pela situação. Em qual cidade você mora?", "[[TRANSFERIR]]", extraction)
+	// the agent's model calls: a question, the handoff marker, the extraction that follows it, then (after the booking)
+	// an answer about the meeting and the marker again when the customer asks to move it
+	w := newWiring(t, "Olá! Sinto muito pela situação. Em qual cidade você mora?", "[[TRANSFERIR]]", extraction,
+		"Sua conversa com o advogado está marcada, é só comparecer no horário combinado.", "[[TRANSFERIR]]")
 	require.NoError(t, w.app.DB.Model(w.f.agent).Updates(map[string]any{
 		"qualification_fields": lawFields, "objective": "Atender, qualificar e agendar uma conversa com o advogado",
 		"company_info": "Escritório de advocacia. Nunca dê parecer jurídico.",
@@ -520,13 +524,29 @@ func TestScheduling_TheWholeConversationFromTheAdToTheBookedMeeting(t *testing.T
 	t.Log("full conversation:\n  - " + strings.Join(after, "\n  - "))
 	assert.Contains(t, after[len(after)-1], "Agendado!")
 	assert.Contains(t, opps0(w, t, contact.ID).Interest, "Reunião agendada")
-	require.Len(t, w.transfers(t, contact.ID), 1, "people take it after the booking")
+	assert.Empty(t, w.transfers(t, contact.ID), "the booking opens no attendance")
+	ap := w.app.upcomingAppointment(w.f.org.ID, contact.ID)
+	require.NotNil(t, ap)
 
-	// 4. whatever the customer writes next, the agent stays out: a person has the attendance
-	before := len(w.waTexts())
-	w.inboundRaw(t, fmt.Sprintf(`{"from":%q,"id":"wamid.c3","type":"text","text":{"body":"Posso levar meus documentos?"}}`, phone))
-	assert.Len(t, w.waTexts(), before, "the agent does not answer once a person has the conversation")
+	// 4. the customer keeps talking: the agent is still there, knows the meeting, and does not qualify or offer again
+	w.inboundRaw(t, fmt.Sprintf(`{"from":%q,"id":"wamid.c3","type":"text","text":{"body":"Que horas é mesmo a conversa?"}}`, phone))
+	texts4 := w.waTexts()
+	assert.Contains(t, texts4[len(texts4)-1], "marcada", "the agent answered")
+	lastAIBody := fmt.Sprint(w.ai.bodies[len(w.ai.bodies)-1])
+	assert.Contains(t, lastAIBody, "Reunião já marcada", "the agent is told about the meeting")
+	assert.Contains(t, lastAIBody, meetingLabel(ap.Local))
+	assert.Empty(t, w.transfers(t, contact.ID))
 	assert.Equal(t, 1, cal.putCount())
+
+	// 5. it asks to move it: the agent calls people, and never offers a second time
+	w.inboundRaw(t, fmt.Sprintf(`{"from":%q,"id":"wamid.c4","type":"text","text":{"body":"Preciso remarcar para outro dia"}}`, phone))
+	final := w.waTexts()
+	t.Log("conversation after the booking:\n  - " + strings.Join(final[len(after):], "\n  - "))
+	require.Len(t, w.transfers(t, contact.ID), 1, "people take a reschedule")
+	assert.Len(t, w.offeredButtons(), 3, "no new offer: still only the first three buttons")
+	assert.Equal(t, 1, cal.putCount(), "never a second meeting")
+	assert.Contains(t, w.transfers(t, contact.ID)[0].Notes, "reunião já marcada", "the person sees the meeting")
+	assert.Contains(t, final[len(final)-1], "atendente")
 }
 
 func opps0(w *wiring, t *testing.T, contactID uuid.UUID) models.SalesOpportunity {
@@ -534,4 +554,61 @@ func opps0(w *wiring, t *testing.T, contactID uuid.UUID) models.SalesOpportunity
 	o := w.opportunities(t, contactID)
 	require.NotEmpty(t, o)
 	return o[0]
+}
+
+func TestUpcomingAppointment_OnlyTheCustomersOwnFutureBookedMeeting(t *testing.T) {
+	w := newWiring(t, "x")
+	contact, session := w.handoffSession(t, "Oi")
+	other, _ := w.handoffSession(t, "Oi")
+	mk := func(c *models.Contact, status string, start time.Time) {
+		st := start
+		require.NoError(t, w.app.DB.Create(&models.AIAppointmentOffer{
+			BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: w.f.org.ID, ContactID: c.ID, SessionID: session.ID,
+			WhatsAppAccount: w.f.account.Name, Token: uuid.NewString(), Status: status, ExpiresAt: time.Now().Add(time.Hour), BookedStart: &st,
+		}).Error)
+	}
+	assert.Nil(t, w.app.upcomingAppointment(w.f.org.ID, contact.ID), "nothing booked")
+
+	mk(contact, models.AIAppointmentBooked, time.Now().Add(-48*time.Hour)) // already happened
+	mk(contact, models.AIAppointmentExpired, time.Now().Add(48*time.Hour)) // never booked
+	mk(other, models.AIAppointmentBooked, time.Now().Add(48*time.Hour))    // somebody else's
+	assert.Nil(t, w.app.upcomingAppointment(w.f.org.ID, contact.ID))
+
+	next := time.Now().Add(72 * time.Hour)
+	mk(contact, models.AIAppointmentBooked, next)
+	mk(contact, models.AIAppointmentBooked, next.Add(48*time.Hour))
+	got := w.app.upcomingAppointment(w.f.org.ID, contact.ID)
+	require.NotNil(t, got)
+	assert.WithinDuration(t, next, got.Start, time.Second, "the next one")
+}
+
+func TestScheduling_ACustomerWhoAlreadyHasAMeetingIsNeverOfferedASecondOne(t *testing.T) {
+	w, cal, contact, session := newScheduler(t)
+	start := time.Now().Add(48 * time.Hour)
+	require.NoError(t, w.app.DB.Create(&models.AIAppointmentOffer{
+		BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: w.f.org.ID, ContactID: contact.ID, SessionID: session.ID,
+		WhatsAppAccount: w.f.account.Name, Token: uuid.NewString(), Status: models.AIAppointmentBooked,
+		ExpiresAt: time.Now().Add(time.Hour), BookedStart: &start, EventUID: "x@whatc",
+	}).Error)
+
+	out := w.app.handoffFromAIOutcome(w.f.account, contact, session, w.f.settings, aiHandoffMarker)
+
+	assert.Equal(t, aiHandoffTransferred, out, "people take it")
+	assert.Empty(t, w.offeredButtons(), "no new buttons")
+	assert.Zero(t, cal.putCount())
+	ts := w.transfers(t, contact.ID)
+	require.Len(t, ts, 1)
+	assert.Contains(t, ts[0].Notes, "reunião já marcada")
+}
+
+func TestAppointmentPromptSection_TellsTheAgentTheMeetingAndWhenToCallPeople(t *testing.T) {
+	zone, _ := time.LoadLocation("America/Sao_Paulo")
+	ap := &upcomingAppointment{Local: time.Date(2026, 11, 24, 9, 0, 0, 0, zone), Location: "Escritório Centro"}
+	got := appointmentPromptSection(ap)
+	assert.Contains(t, got, "ter, 24/11 às 09:00")
+	assert.Contains(t, got, "Escritório Centro")
+	assert.Contains(t, got, "NUNCA ofereça ou combine outros horários")
+	assert.Contains(t, got, "[[TRANSFERIR]]")
+	assert.Contains(t, got, "remarcar")
+	assert.Contains(t, got, "sobre o caso dele", "a question about the case is for the lawyer, not the agent")
 }

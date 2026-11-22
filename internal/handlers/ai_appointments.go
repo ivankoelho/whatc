@@ -40,7 +40,6 @@ const (
 	aiAppointmentNoLongerText = "Esse horário não está mais disponível."
 
 	// handoff reasons and outcomes of the scheduling path
-	aiHandoffScheduled        = "scheduled"         // the customer booked a time; people take it from here
 	aiHandoffSchedulingFailed = "scheduling_failed" // no time could be booked; people take it
 	aiHandoffOffered          = "offered_slots"     // outcome: times were offered, the customer decides
 )
@@ -143,6 +142,9 @@ func newAppointmentToken() (string, error) {
 // calendar, nothing free, the calendar down, the message not sent): the caller then hands over to people.
 func (a *App) offerAppointment(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, oppID *uuid.UUID, attempts int) bool {
 	orgID := account.OrganizationID
+	if a.upcomingAppointment(orgID, contact.ID) != nil {
+		return false // one meeting at a time: a person rebooks it
+	}
 	_, client, rules, ok := a.calendarFor(orgID)
 	if !ok {
 		return false
@@ -260,12 +262,12 @@ func (a *App) handleAppointmentTap(account *models.WhatsAppAccount, contact *mod
 
 	local := start.In(rules.Zone)
 	a.markOpportunityScheduled(&offer, local)
-	text := fmt.Sprintf("Agendado! Sua conversa com o advogado é %s, %02d/%02d às %02d:%02d. Se precisar remarcar, é só escrever aqui.",
-		strings.ToLower(ptWeekday[local.Weekday()]), local.Day(), int(local.Month()), local.Hour(), local.Minute())
+	text := fmt.Sprintf("Agendado! Sua conversa com o advogado é %s. Se precisar remarcar, é só escrever aqui.", meetingLabel(local))
 	if err := a.sendAndSaveAgentText(aiCtx("ai_appointment_booked"), account, contact, text, a.appointmentSender(account, &offer)); err != nil {
 		a.Log.Error("Scheduling: could not confirm the booking to the customer", "error", err, "contact_id", contact.ID)
 	}
-	a.handOverAfterScheduling(account, contact, &offer, aiHandoffScheduled)
+	// No attendance is opened: the agent stays in charge in "meeting booked" mode (see upcomingAppointment and
+	// appointmentPromptSection) and calls people only when the customer asks for something it must not answer.
 }
 
 // retryAppointment tells the customer the time is gone and offers new ones (once); then people take it.
@@ -550,4 +552,54 @@ func calendarErrorFor(err error) *chatHTTPError {
 		return &chatHTTPError{http.StatusUnprocessableEntity, "This user cannot add events to the calendar", "calendar_read_only"}
 	}
 	return errNextcloudUnreachable
+}
+
+// meetingLabel is how a booked time is said to the customer: "ter, 24/11 às 09:00".
+func meetingLabel(local time.Time) string {
+	return fmt.Sprintf("%s, %02d/%02d às %02d:%02d", strings.ToLower(ptWeekday[local.Weekday()]), local.Day(), int(local.Month()), local.Hour(), local.Minute())
+}
+
+// upcomingAppointment is a meeting this customer already booked and that has not happened yet.
+type upcomingAppointment struct {
+	Start    time.Time
+	Local    time.Time // Start in the calendar's zone
+	Location string
+}
+
+// upcomingAppointment returns the customer's next booked meeting, or nil. It reads the database, not the chat
+// session: a session ends when an attendance ends, and the meeting must still be known afterwards.
+func (a *App) upcomingAppointment(orgID, contactID uuid.UUID) *upcomingAppointment {
+	var offer models.AIAppointmentOffer
+	if err := a.DB.Where("organization_id = ? AND contact_id = ? AND status = ? AND booked_start > ?",
+		orgID, contactID, models.AIAppointmentBooked, time.Now()).Order("booked_start ASC").First(&offer).Error; err != nil || offer.BookedStart == nil {
+		return nil
+	}
+	zone, location := time.UTC, ""
+	var cal models.NextcloudCalendar
+	if a.DB.Where("organization_id = ?", orgID).First(&cal).Error == nil {
+		location = cal.Location
+		if l, err := time.LoadLocation(cal.TimeZone); err == nil {
+			zone = l
+		}
+	}
+	return &upcomingAppointment{Start: *offer.BookedStart, Local: offer.BookedStart.In(zone), Location: location}
+}
+
+// appointmentPromptSection tells the agent about the meeting. The time and the place are facts of the system,
+// so the agent may say them; everything else it must not take on.
+func appointmentPromptSection(ap *upcomingAppointment) string {
+	where := ""
+	if ap.Location != "" {
+		where = " Local: " + ap.Location + "."
+	}
+	return "## Reunião já marcada\n" +
+		"O cliente já tem uma conversa marcada com o advogado: " + meetingLabel(ap.Local) + "." + where + " Isso é um fato do sistema: você pode confirmá-lo. " +
+		"Não faça novas perguntas de qualificação e NUNCA ofereça ou combine outros horários. " +
+		"Responda de forma curta só dúvidas simples sobre essa reunião (quando é, onde é). " +
+		"Se o cliente quiser remarcar ou cancelar, pedir para falar com uma pessoa, ou perguntar qualquer coisa sobre o caso dele, responda SOMENTE com o marcador exato [[TRANSFERIR]]."
+}
+
+// appointmentNote is added to the attendance notes when people take over a customer who has a meeting.
+func (ap *upcomingAppointment) note() string {
+	return "Cliente com reunião já marcada: " + meetingLabel(ap.Local) + "."
 }

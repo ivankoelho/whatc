@@ -919,8 +919,13 @@ func (a *App) generateAIReplyWith(settings *models.ChatbotSettings, session *mod
 	// platform rules plus its own fields. No agent: the SystemPrompt path is exactly as before.
 	agent := a.agentForSession(settings, session)
 	system := settings.AI.SystemPrompt
+	apptFact := "" // the customer's booked meeting, as the system knows it: the agent may repeat it
 	if agent != nil {
 		system = agentRules(agent) + "\n\n" + buildAgentPrompt(agent)
+		if ap := a.upcomingAppointment(settings.OrganizationID, session.ContactID); ap != nil {
+			system += "\n\n" + appointmentPromptSection(ap)
+			apptFact = meetingLabel(ap.Local) + " " + ap.Location
+		}
 	}
 	if contextData != "" {
 		if system != "" {
@@ -999,7 +1004,7 @@ func (a *App) generateAIReplyWith(settings *models.ChatbotSettings, session *mod
 		return aiReply{ByAgent: agent != nil}, err
 	}
 	if agent != nil {
-		allowed := agentAllowedText(agent, contextData, kb.Text, userMessage)
+		allowed := agentAllowedText(agent, contextData, kb.Text, userMessage) + "\n" + apptFact
 		reply, err := a.finishAgentReply(settings, meta, aiReq, resp.Text, allowed)
 		reply.Sender = newAISender(agent)
 		return reply, err
