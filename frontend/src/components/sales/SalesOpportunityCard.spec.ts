@@ -32,7 +32,8 @@ describe('SalesOpportunityCard (compact, opens the popup)', () => {
     })
     expect(w.text()).toContain('Maria Silva')
     expect(w.find('[data-testid="sales-opportunity-ai-badge"]').exists()).toBe(true)
-    expect(w.find('[data-testid="sales-opportunity-summary"]').text()).toBe('Área do direito: Trabalhista · Cidade: Salvador')
+    const sum = w.find('[data-testid="sales-opportunity-summary"]').text()
+    for (const t of ['Área do direito', 'Trabalhista', 'Cidade', 'Salvador', 'Urgência', 'audiência na sexta']) expect(sum).toContain(t)
     expect(w.find('[data-testid="sales-opportunity-meeting"]').attributes('title')).toBe('Escritório Centro')
     expect(w.find('[data-testid="sales-opportunity-ad-origin"]').attributes('title')).toContain('Consulta jurídica gratuita')
     expect(w.text()).not.toContain('Ainda não coletado')
@@ -53,7 +54,7 @@ describe('SalesOpportunityCard (compact, opens the popup)', () => {
   })
 
   it('shows plain interest text as its first line, and nothing for an empty one', () => {
-    expect(mountCard({ interest: 'Quer piso para a sala\nsegunda linha' }).find('[data-testid="sales-opportunity-summary"]').text()).toBe('Quer piso para a sala')
+    expect(mountCard({ interest: 'Quer piso para a sala\nsegunda linha' }).find('[data-testid="sales-opportunity-summary"]').text()).toBe('Quer piso para a sala segunda linha')
     expect(mountCard({ interest: '' }).find('[data-testid="sales-opportunity-summary"]').exists()).toBe(false)
     expect(mountCard({ interest: 'Atendimento qualificado pelo agente de IA.\nQualificação não extraída: confira a conversa.' }).find('[data-testid="sales-opportunity-summary"]').text())
       .toBe('Atendimento qualificado pelo agente de IA.')

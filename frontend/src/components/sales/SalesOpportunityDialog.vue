@@ -188,23 +188,30 @@ function resolve(kind: 'convert' | 'lose') {
           </div>
           <RouterLink
             :to="`/chat/${opportunity.contact_id}`"
-            class="inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-muted dark:text-emerald-300"
+            class="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium text-emerald-700 hover:bg-muted dark:text-emerald-300"
             data-testid="dialog-open-chat"
           ><MessageCircle class="h-3.5 w-3.5" aria-hidden="true" />{{ $t('chat.openConversation') }}</RouterLink>
         </div>
       </DialogHeader>
 
-      <div class="space-y-5 py-2">
+      <div class="space-y-4 py-1">
         <!-- Where it came from and when the meeting is -->
-        <div v-if="opportunity.meeting || opportunity.ad_origin" class="flex flex-wrap gap-2">
-          <span v-if="opportunity.meeting && meetingWhen" data-testid="dialog-meeting" class="inline-flex items-center gap-1.5 rounded-lg bg-sky-500/10 px-2.5 py-1.5 text-sm text-sky-800 dark:text-sky-200">
-            <CalendarClock class="h-4 w-4 shrink-0" aria-hidden="true" />
-            <span><span class="font-medium">{{ $t('sales.meetingLabel') }}:</span> {{ meetingWhen }}<span v-if="opportunity.meeting.location"> · {{ opportunity.meeting.location }}</span></span>
-          </span>
-          <span v-if="opportunity.ad_origin" data-testid="dialog-ad-origin" class="inline-flex items-center gap-1.5 rounded-lg bg-amber-500/10 px-2.5 py-1.5 text-sm text-amber-900 dark:text-amber-200">
-            <Megaphone class="h-4 w-4 shrink-0" aria-hidden="true" />
-            <span><span class="font-medium">{{ $t('sales.adOriginTitle') }}:</span> {{ opportunity.ad_origin.headline || $t('sales.adOriginUnnamed') }}<span v-if="opportunity.ad_origin.clicks > 1"> ({{ opportunity.ad_origin.clicks }})</span></span>
-          </span>
+        <div v-if="opportunity.meeting || opportunity.ad_origin" class="grid gap-2 sm:grid-cols-2">
+          <div v-if="opportunity.meeting && meetingWhen" data-testid="dialog-meeting" class="flex items-start gap-3 rounded-lg bg-sky-500/10 p-3 text-sky-900 dark:text-sky-100">
+            <CalendarClock class="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            <div class="min-w-0 text-sm leading-snug">
+              <p class="text-xs font-medium opacity-80">{{ $t('sales.meetingLabel') }}</p>
+              <p class="font-semibold capitalize">{{ meetingWhen }}</p>
+              <p v-if="opportunity.meeting.location" class="truncate opacity-80">{{ opportunity.meeting.location }}</p>
+            </div>
+          </div>
+          <div v-if="opportunity.ad_origin" data-testid="dialog-ad-origin" class="flex items-start gap-3 rounded-lg bg-amber-500/10 p-3 text-amber-950 dark:text-amber-100">
+            <Megaphone class="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            <div class="min-w-0 text-sm leading-snug">
+              <p class="text-xs font-medium opacity-80">{{ $t('sales.adOriginTitle') }}<span v-if="opportunity.ad_origin.clicks > 1"> · {{ opportunity.ad_origin.clicks }}×</span></p>
+              <p class="font-semibold">{{ opportunity.ad_origin.headline || $t('sales.adOriginUnnamed') }}</p>
+            </div>
+          </div>
         </div>
 
         <!-- What the customer wants: the AI's qualification (or what a person wrote), editable while open -->
@@ -270,25 +277,25 @@ function resolve(kind: 'convert' | 'lose') {
         <XProcessLinkForm v-else :opportunity-id="opportunity.id" :editable="false" />
 
         <!-- Who and when -->
-        <dl class="grid gap-x-6 gap-y-1.5 text-sm sm:grid-cols-2" data-testid="dialog-facts">
-          <div class="flex items-center justify-between gap-2"><dt class="text-muted-foreground">{{ $t('sales.seller') }}</dt><dd class="font-medium">{{ sellerName || $t('sales.noSeller') }}</dd></div>
-          <div class="flex items-center justify-between gap-2"><dt class="text-muted-foreground">{{ $t('sales.openedAt') }}</dt><dd>{{ when(opportunity.opened_at) }}</dd></div>
-          <div class="flex items-center justify-between gap-2"><dt class="text-muted-foreground">{{ $t('sales.stageChangedAt') }}</dt><dd>{{ when(opportunity.stage_changed_at) }}</dd></div>
-          <div v-if="opportunity.contact?.phone_number" class="flex items-center justify-between gap-2"><dt class="text-muted-foreground">{{ $t('sales.phone') }}</dt><dd>{{ opportunity.contact.phone_number }}</dd></div>
+        <dl class="grid grid-cols-2 gap-x-4 gap-y-3 rounded-lg bg-muted/40 p-3 text-sm sm:grid-cols-4" data-testid="dialog-facts">
+          <div class="min-w-0"><dt class="text-xs text-muted-foreground">{{ $t('sales.seller') }}</dt><dd class="truncate font-medium">{{ sellerName || $t('sales.noSeller') }}</dd></div>
+          <div class="min-w-0"><dt class="text-xs text-muted-foreground">{{ $t('sales.openedAt') }}</dt><dd class="truncate">{{ when(opportunity.opened_at) }}</dd></div>
+          <div class="min-w-0"><dt class="text-xs text-muted-foreground">{{ $t('sales.stageChangedAt') }}</dt><dd class="truncate">{{ when(opportunity.stage_changed_at) }}</dd></div>
+          <div v-if="opportunity.contact?.phone_number" class="min-w-0"><dt class="text-xs text-muted-foreground">{{ $t('sales.phone') }}</dt><dd class="truncate tabular-nums">{{ opportunity.contact.phone_number }}</dd></div>
         </dl>
 
         <!-- History -->
         <div class="space-y-1.5">
           <h4 class="text-sm font-medium">{{ $t('sales.history') }}</h4>
           <div v-if="eventsLoading" class="flex justify-center py-2"><Loader2 class="h-4 w-4 animate-spin text-muted-foreground" aria-hidden="true" /></div>
-          <ul v-else-if="events.length" data-testid="dialog-events" class="space-y-1 text-xs text-muted-foreground">
-            <li v-for="e in events" :key="e.id" class="flex justify-between gap-2"><span>{{ eventLabel(e) }}</span><span class="shrink-0">{{ when(e.created_at) }}</span></li>
+          <ul v-else-if="events.length" data-testid="dialog-events" class="space-y-1.5 text-xs text-muted-foreground">
+            <li v-for="e in events" :key="e.id" class="flex items-center gap-2"><span class="h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/50" aria-hidden="true" /><span class="min-w-0 flex-1 truncate text-foreground">{{ eventLabel(e) }}</span><span class="shrink-0 tabular-nums">{{ when(e.created_at) }}</span></li>
           </ul>
           <p v-else class="text-xs text-muted-foreground">{{ $t('sales.historyEmpty') }}</p>
         </div>
       </div>
 
-      <div class="flex flex-wrap items-center justify-between gap-2">
+      <div class="flex flex-wrap items-center justify-between gap-2 border-t pt-4">
         <div v-if="canResolve" class="flex gap-2">
           <Button variant="outline" size="sm" data-testid="dialog-convert" @click="resolve('convert')">{{ $t('sales.markConvertedShort') }}</Button>
           <Button variant="outline" size="sm" data-testid="dialog-lose" @click="resolve('lose')">{{ $t('sales.markLostShort') }}</Button>
