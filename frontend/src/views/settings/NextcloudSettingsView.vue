@@ -105,6 +105,8 @@ onMounted(() => { load(); loadCalendar() })
 </script>
 
 <template>
+  <!-- The settings hub gives a tab no scroll of its own: this card list is long (the calendar), so it scrolls here -->
+  <div class="h-full overflow-y-auto" data-testid="nextcloud-settings-scroll">
   <div class="mx-auto max-w-2xl space-y-4 p-6">
     <Card>
       <CardHeader>
@@ -196,5 +198,6 @@ onMounted(() => { load(); loadCalendar() })
         </form>
       </CardContent>
     </Card>
+  </div>
   </div>
 </template>

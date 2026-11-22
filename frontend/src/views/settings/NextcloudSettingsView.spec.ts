@@ -86,6 +86,15 @@ describe('NextcloudSettingsView calendar', () => {
     expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('did not accept'))
   })
 
+  it('scrolls by itself: the hub gives a tab no scroll, and the Save button is at the bottom of a long card', async () => {
+    const w = mountIt()
+    await flushPromises()
+    const scroll = w.find('[data-testid="nextcloud-settings-scroll"]')
+    expect(scroll.classes()).toContain('overflow-y-auto')
+    expect(scroll.classes()).toContain('h-full')
+    expect(scroll.find('[data-testid="calendar-save"]').exists()).toBe(true) // the button lives inside the scrolling box
+  })
+
   it('has the calendar strings in both languages', () => {
     const keys = (o: Record<string, unknown>): string[] => Object.entries(o).flatMap(([k, v]) => (v && typeof v === 'object' ? keys(v as Record<string, unknown>).map(s => `${k}.${s}`) : [k]))
     const enKeys = keys((en as any).integrations.nextcloud.calendar).sort()

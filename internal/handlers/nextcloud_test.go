@@ -91,7 +91,7 @@ func TestNextcloud_SetupConnectBrowseAndAttach(t *testing.T) {
 
 	// Connecting checks the password against the server and stores it encrypted.
 	code, _ = chatDo(t, app.ConnectNextcloud, org.ID, user.ID, map[string]any{"username": "alice", "app_password": "wrong"}, nil, nil)
-	assert.Equal(t, fasthttp.StatusUnauthorized, code)
+	assert.Equal(t, fasthttp.StatusUnprocessableEntity, code, "a refused Nextcloud password is not a 401: that would sign the person out of Whatc")
 	code, raw = chatDo(t, app.ConnectNextcloud, org.ID, user.ID, map[string]any{"username": "alice", "app_password": "app-secret"}, nil, nil)
 	require.Equal(t, fasthttp.StatusOK, code, string(raw))
 	assert.NotContains(t, string(raw), "app-secret")

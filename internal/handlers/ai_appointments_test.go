@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/crypto"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/test/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -268,4 +269,44 @@ func TestCalendarHours_AreValidated(t *testing.T) {
 	}
 	assert.Equal(t, "Ter 24/11 às 14:30", slotLabel(time.Date(2026, 11, 24, 14, 30, 0, 0, time.UTC)))
 	assert.LessOrEqual(t, len(slotLabel(time.Date(2026, 12, 31, 23, 30, 0, 0, time.UTC))), 20, "a WhatsApp button title is at most 20 characters")
+}
+
+// A refused Nextcloud password must never come back as 401: the web app reads 401 as "the Whatc session expired"
+// and signs the person out, which is what happened when the office's password was refused.
+func TestCalendarSettings_ARefusedPasswordIsNotA401AndEnablingChecksTheCalendar(t *testing.T) {
+	w := newWiring(t, "x")
+	cal := newCalServer(t)
+	w.app.Config.App.AllowPrivateNextcloud = true
+	require.NoError(t, w.app.DB.Create(&models.NextcloudSettings{ID: uuid.New(), OrganizationID: w.f.org.ID, BaseURL: cal.srv.URL}).Error)
+	role := testutil.CreateAdminRole(t, w.app.DB, w.f.org.ID)
+	admin := testutil.CreateTestUser(t, w.app.DB, w.f.org.ID, testutil.WithRoleID(&role.ID))
+	put := func(body map[string]any) (int, string) {
+		req := testutil.NewJSONRequest(t, body)
+		testutil.SetAuthContext(req, w.f.org.ID, admin.ID)
+		require.NoError(t, w.app.PutNextcloudCalendar(req))
+		return testutil.GetResponseStatusCode(req), string(testutil.GetResponseBody(req))
+	}
+	body := map[string]any{"enabled": true, "calendar_path": "/remote.php/dav/calendars/agenda/personal/", "username": "agenda", "app_password": "s3cret-pass"}
+
+	cal.setStatus(http.StatusUnauthorized) // Nextcloud refuses the user or password
+	code, raw := put(body)
+	assert.Equal(t, 422, code)
+	assert.NotEqual(t, 401, code)
+	assert.Contains(t, raw, "nextcloud_auth")
+	assert.NotContains(t, raw, "s3cret-pass")
+
+	cal.setStatus(http.StatusNotFound)
+	code, raw = put(body)
+	assert.Equal(t, 404, code)
+	assert.Contains(t, raw, "calendar_not_found")
+
+	cal.setStatus(0) // the calendar answers
+	code, raw = put(body)
+	require.Equal(t, 200, code, raw)
+	assert.NotContains(t, raw, "s3cret-pass", "the password is never returned")
+	var row models.NextcloudCalendar
+	require.NoError(t, w.app.DB.Where("organization_id = ?", w.f.org.ID).First(&row).Error)
+	assert.True(t, row.Enabled)
+	assert.NotEqual(t, "s3cret-pass", row.AppPassword, "stored encrypted")
+	assert.NotEmpty(t, row.AppPassword)
 }
