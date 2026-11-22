@@ -225,6 +225,7 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 	}
 
 	// Convert to response format
+	adOrigins := a.adOriginsFor(orgID, contacts) // one query for the whole page, not one per contact
 	response := make([]ContactResponse, len(contacts))
 	for i, c := range contacts {
 		// Count unread messages
@@ -273,6 +274,7 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 			UnreadCount:        int(unreadCount),
 			IsPinned:           !pinned[c.ID].IsZero(),
 			PinnedAt:           pinnedAtPtr(pinned[c.ID]),
+			AdOrigin:           adOrigins[c.ID],
 			AssignedUserID:     c.AssignedUserID,
 			WhatsAppAccount:    c.WhatsAppAccount,
 			LastInboundAt:      c.LastInboundAt,

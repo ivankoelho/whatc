@@ -330,6 +330,7 @@
     "toggleMenu": "Toggle menu",
     "mainNavigation": "Main navigation",
     "wallpaper": "Background",
+    "wallpaperCustomize": "Customize",
     "wallpaperUpload": "Upload image",
     "wallpaperRemove": "Remove system image",
     "wallpaperRemoveFailed": "Could not remove the image.",

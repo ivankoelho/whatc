@@ -68,3 +68,28 @@ func clipRunes(s string, n int) string {
 	}
 	return s
 }
+
+// adOriginsFor is adOriginOf for a page of contacts in one query. A contact with no ad conversation has no entry.
+func (a *App) adOriginsFor(orgID uuid.UUID, contacts []models.Contact) map[uuid.UUID]*AdOriginResponse {
+	out := map[uuid.UUID]*AdOriginResponse{}
+	if len(contacts) == 0 {
+		return out
+	}
+	ids := make([]uuid.UUID, len(contacts))
+	for i, c := range contacts {
+		ids[i] = c.ID
+	}
+	var rows []models.ContactAdReferral
+	if err := a.DB.Where("organization_id = ? AND contact_id IN ?", orgID, ids).Order("created_at ASC").Find(&rows).Error; err != nil {
+		return out
+	}
+	for _, r := range rows {
+		if o, ok := out[r.ContactID]; ok {
+			o.Clicks++
+			continue
+		}
+		out[r.ContactID] = &AdOriginResponse{SourceID: r.SourceID, SourceType: r.SourceType, SourceURL: r.SourceURL,
+			Headline: r.Headline, Body: r.Body, Clicks: 1}
+	}
+	return out
+}

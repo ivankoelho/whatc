@@ -94,3 +94,23 @@ func TestAdReferral_TheContactResponseCarriesTheOrigin(t *testing.T) {
 	assert.Contains(t, string(raw), `"ad_origin"`)
 	assert.NotContains(t, string(raw), "AffAbc123", "the click id is for reporting, not for the screen")
 }
+
+func TestAdReferral_APageOfContactsGetsItsOriginsInOneLookup(t *testing.T) {
+	w := newWiring(t, "Olá!")
+	w.inboundRaw(t, fmt.Sprintf(adMsg, "wamid.p1", "AD-A"))
+	w.inbound(t, "5511990002222", "Oi")
+	w.inboundRaw(t, fmt.Sprintf(`{"from":"5511990003333","id":"%s","type":"text","text":{"body":"Oi"},"referral":{"source_id":"AD-B","source_type":"ad","headline":"B"}}`, "wamid.p2"))
+	w.inboundRaw(t, fmt.Sprintf(`{"from":"5511990003333","id":"%s","type":"text","text":{"body":"Oi de novo"},"referral":{"source_id":"AD-C","source_type":"ad"}}`, "wamid.p3"))
+
+	a := w.contactFor(t, "5511990001111")
+	plain := w.contactFor(t, "5511990002222")
+	b := w.contactFor(t, "5511990003333")
+	got := w.app.adOriginsFor(w.f.org.ID, []models.Contact{*a, *plain, *b})
+
+	require.Contains(t, got, a.ID)
+	assert.Equal(t, "AD-A", got[a.ID].SourceID)
+	assert.NotContains(t, got, plain.ID, "no ad, no entry")
+	assert.Equal(t, "AD-B", got[b.ID].SourceID, "the first ad is the origin")
+	assert.Equal(t, 2, got[b.ID].Clicks)
+	assert.Empty(t, w.app.adOriginsFor(w.f.org.ID, nil))
+}
