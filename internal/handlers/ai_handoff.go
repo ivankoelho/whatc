@@ -246,7 +246,7 @@ func (a *App) handoffFromAIOutcome(account *models.WhatsAppAccount, contact *mod
 				formatInterest(q), nil, nil, applyQualification(q),
 				// the contact's own account owner may belong to ANOTHER unit: an opportunity the
 				// agent opens belongs to whoever takes the attendance, not to a stranger
-				func(o *models.SalesOpportunity) { o.AssignedUserID = nil })
+				func(o *models.SalesOpportunity) { o.AssignedUserID = nil; o.CreatedByAI = true })
 			switch {
 			case err != nil:
 				a.Log.Error("AI handoff: could not register the opportunity", "error", err, "contact_id", contact.ID)

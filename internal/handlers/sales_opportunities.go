@@ -278,6 +278,19 @@ func filterSalesOpportunities(query *gorm.DB, db *gorm.DB, r *fastglue.Request) 
 			Where("teams.unit_id = ?", unitID)
 		query = query.Where("sales_opportunities.assigned_user_id IN (?)", storeSellers)
 	}
+	// The board's quick filters. Each is a yes/no: only a literal "true" turns it on.
+	if string(args.Peek("unassigned")) == "true" {
+		query = query.Where("sales_opportunities.assigned_user_id IS NULL")
+	}
+	if string(args.Peek("ai")) == "true" {
+		query = query.Where("sales_opportunities.created_by_ai = ?", true)
+	}
+	if string(args.Peek("from_ad")) == "true" {
+		query = query.Where("EXISTS (SELECT 1 FROM contact_ad_referrals r WHERE r.contact_id = sales_opportunities.contact_id AND r.organization_id = sales_opportunities.organization_id AND r.deleted_at IS NULL)")
+	}
+	if string(args.Peek("has_meeting")) == "true" {
+		query = query.Where("EXISTS (SELECT 1 FROM ai_appointment_offers m WHERE m.contact_id = sales_opportunities.contact_id AND m.organization_id = sales_opportunities.organization_id AND m.status = ? AND m.booked_start > now() AND m.deleted_at IS NULL)", models.AIAppointmentBooked)
+	}
 	return query
 }
 
@@ -351,6 +364,8 @@ func (a *App) ListSalesOpportunities(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list sales opportunities", nil, "")
 	}
 
+	a.enrichOpportunities(orgID, opportunities)
+
 	return r.SendEnvelope(map[string]any{
 		"opportunities": opportunities,
 		"total":         total,
@@ -368,6 +383,9 @@ func (a *App) GetSalesOpportunity(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
+	one := []models.SalesOpportunity{*opp}
+	a.enrichOpportunities(orgID, one)
+	*opp = one[0]
 	return r.SendEnvelope(opp)
 }
 

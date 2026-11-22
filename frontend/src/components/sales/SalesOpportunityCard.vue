@@ -14,7 +14,7 @@ import XProcessLinkForm from '@/components/sales/XProcessLinkForm.vue'
 import SalesOpportunityDetailsDialog from '@/components/sales/SalesOpportunityDetailsDialog.vue'
 import { formatQuantity, parseDecimalInput } from '@/lib/salesUnits'
 import { getInitials, getAvatarGradient, formatDate } from '@/lib/utils'
-import { Pencil, MessageCircle, AlertTriangle } from 'lucide-vue-next'
+import { Pencil, MessageCircle, AlertTriangle, Megaphone, CalendarClock, Sparkles } from 'lucide-vue-next'
 
 const props = defineProps<{ opportunity: SalesOpportunity; disabled?: boolean }>()
 
@@ -25,7 +25,7 @@ const emit = defineEmits<{
   'details-change': [opportunity: SalesOpportunity]
 }>()
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 const contactName = computed(() =>
   props.opportunity.contact?.profile_name || props.opportunity.contact?.phone_number || props.opportunity.contact_id)
@@ -41,6 +41,44 @@ const DIRECIONAMENTO_LABEL_KEY: Record<SalesDirecionamento, string> = {
   visita: 'sales.direcionamentoVisita',
   whatsapp: 'sales.direcionamentoWhatsApp',
 }
+
+// --- what the AI agent and the ad brought, shown on the card -------------------------------------------------
+// The meeting the customer booked, said the way people read a calendar: "ter., 24/11 09:00".
+const meetingWhen = computed(() => {
+  const m = props.opportunity.meeting
+  if (!m) return ''
+  const d = new Date(m.start)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleString(locale.value, { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+})
+const meetingIsToday = computed(() => {
+  const m = props.opportunity.meeting
+  return !!m && new Date(m.start).toDateString() === new Date().toDateString()
+})
+// "Informado pelo cliente:" lines of the qualification the AI wrote ("- Label: value"), at most three: the
+// rest is in the details. Text that is not that format is shown as its first line.
+const qualLines = computed<string[]>(() => {
+  const text = props.opportunity.interest ?? ''
+  if (!text.trim()) return []
+  const out: string[] = []
+  let inGiven = false
+  for (const raw of text.split('\n')) {
+    const line = raw.trim()
+    if (/^informado pelo cliente/i.test(line)) { inGiven = true; continue }
+    if (/^ainda n[aã]o coletado/i.test(line) || /^reuni[aã]o agendada/i.test(line)) { inGiven = false; continue }
+    if (inGiven && line.startsWith('- ') && !/nada informado/i.test(line)) out.push(line.slice(2))
+  }
+  if (out.length) return out.slice(0, 3)
+  const first = text.split('\n').map(l => l.trim()).find(l => l && !/^qualifica[cç][aã]o/i.test(l))
+  return first ? [first] : []
+})
+// The commercial block (value, quantity, X2 order, direcionamento) is the store's. A card the AI opened for a
+// service business keeps it out of the way until somebody uses it.
+const showCommercial = computed(() => {
+  const o = props.opportunity
+  if (!o.created_by_ai) return true
+  return o.estimated_value != null || o.estimated_quantity != null || !!o.direcionamento || !!o.xprocess_num_pedido || o.stage !== 'potencial' || o.status !== 'aberta'
+})
 
 const changingDirecionamento = ref(false)
 const detailsOpen = ref(false)
@@ -118,7 +156,15 @@ async function saveValue() {
         </AvatarFallback>
       </Avatar>
       <div class="min-w-0 flex-1">
-        <p class="truncate text-sm font-semibold text-foreground">{{ contactName }}</p>
+        <p class="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+          <span class="truncate">{{ contactName }}</span>
+          <span
+            v-if="opportunity.created_by_ai"
+            data-testid="sales-opportunity-ai-badge"
+            :title="$t('sales.aiBadgeTitle')"
+            class="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-300"
+          ><Sparkles class="h-2.5 w-2.5" aria-hidden="true" />{{ $t('sales.aiBadge') }}</span>
+        </p>
         <!-- WhatsApp line opens the contact's conversation -->
         <RouterLink
           :to="`/chat/${opportunity.contact_id}`"
@@ -147,6 +193,27 @@ async function saveValue() {
       </Button>
     </div>
 
+    <!-- The meeting the customer booked and the ad that brought them -->
+    <div v-if="opportunity.meeting || opportunity.ad_origin" class="mt-2 flex flex-wrap gap-1.5">
+      <span
+        v-if="opportunity.meeting && meetingWhen"
+        data-testid="sales-opportunity-meeting"
+        :title="opportunity.meeting.location || undefined"
+        class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium"
+        :class="meetingIsToday ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300' : 'bg-sky-500/15 text-sky-700 dark:text-sky-300'"
+      ><CalendarClock class="h-3 w-3" aria-hidden="true" />{{ meetingWhen }}</span>
+      <span
+        v-if="opportunity.ad_origin"
+        data-testid="sales-opportunity-ad-origin"
+        :title="$t('sales.adOriginTitle')"
+        class="inline-flex max-w-full items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:text-amber-300"
+      ><Megaphone class="h-3 w-3 shrink-0" aria-hidden="true" /><span class="truncate">{{ opportunity.ad_origin.headline || $t('sales.adOriginUnnamed') }}</span></span>
+    </div>
+    <ul v-if="qualLines.length" data-testid="sales-opportunity-qualification" class="mt-2 space-y-0.5 text-xs text-muted-foreground">
+      <li v-for="(line, i) in qualLines" :key="i" class="truncate" :title="line">{{ line }}</li>
+    </ul>
+
+    <template v-if="showCommercial">
     <div class="mt-2.5 flex items-baseline justify-between gap-2">
       <div v-if="editingValue" class="flex-1" @click.stop @mousedown.stop>
         <MoneyInput
@@ -197,6 +264,8 @@ async function saveValue() {
         </SelectContent>
       </Select>
     </div>
+    </template>
+    <p v-else class="mt-2.5 text-right font-mono text-[11px] text-muted-foreground">{{ opportunity.opportunity_number }}</p>
     <div v-if="opportunity.status === 'aberta' && opportunity.stage === 'direcionada'" class="mt-2 flex gap-2">
       <Button data-testid="sales-opportunity-convert-button" size="sm" variant="outline" class="flex-1 text-xs px-1" @click.stop="$emit('convert', opportunity)">
         {{ $t('sales.markConvertedShort') }}

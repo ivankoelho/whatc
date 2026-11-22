@@ -1970,6 +1970,12 @@ export interface SalesOpportunity {
   cancelled_at?: string
   sla_breached: boolean
   sla_breached_at?: string
+  /** opened by the AI agent after qualifying the customer */
+  created_by_ai?: boolean
+  /** the Meta ad that first brought the customer */
+  ad_origin?: { headline?: string; source_id?: string; clicks: number }
+  /** the customer's next booked meeting (AI agent, organization calendar) */
+  meeting?: { start: string; location?: string }
   // Populated only where the handler preloads the association: list
   // preloads both (assigned_user trimmed to id + name), get only contact.
   contact?: { id: string; profile_name?: string; phone_number?: string; cpf_cnpj?: string }

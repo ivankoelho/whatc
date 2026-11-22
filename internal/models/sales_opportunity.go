@@ -184,8 +184,28 @@ type SalesOpportunity struct {
 	SLABreached   bool       `gorm:"default:false" json:"sla_breached"`
 	SLABreachedAt *time.Time `json:"sla_breached_at,omitempty"`
 
+	// CreatedByAI marks an opportunity the AI agent opened after qualifying the customer (as opposed to a person).
+	CreatedByAI bool `gorm:"column:created_by_ai;not null;default:false" json:"created_by_ai"`
+
 	Contact      *Contact `gorm:"foreignKey:ContactID" json:"contact,omitempty"`
 	AssignedUser *User    `gorm:"foreignKey:AssignedUserID" json:"assigned_user,omitempty"`
+
+	// Read-only context the board shows on the card, filled by the list and detail handlers (never stored here).
+	AdOrigin *OpportunityAdOrigin `gorm:"-" json:"ad_origin,omitempty"`
+	Meeting  *OpportunityMeeting  `gorm:"-" json:"meeting,omitempty"`
+}
+
+// OpportunityAdOrigin is the Meta ad that first brought the customer of an opportunity.
+type OpportunityAdOrigin struct {
+	Headline string `json:"headline,omitempty"`
+	SourceID string `json:"source_id,omitempty"`
+	Clicks   int    `json:"clicks"`
+}
+
+// OpportunityMeeting is the customer's next booked meeting (made by the AI agent in the organization's calendar).
+type OpportunityMeeting struct {
+	Start    time.Time `json:"start"`
+	Location string    `json:"location,omitempty"`
 }
 
 func (SalesOpportunity) TableName() string { return "sales_opportunities" }

@@ -67,16 +67,28 @@ function onOpportunityCreated() {
 const scopeInfo = ref<SalesScopeInfo>({ scope: 'own', sellers: [], units: [] })
 const unitFilter = ref('all')
 const sellerFilter = ref('all')
+// Quick filters of the board: what the AI agent and the ads brought. Each one narrows the list, the board and
+// the indicators the same way (the server applies them to all three).
+type QuickKey = 'has_meeting' | 'from_ad' | 'ai' | 'unassigned'
+const QUICK_FILTERS: { key: QuickKey; labelKey: string }[] = [
+  { key: 'has_meeting', labelKey: 'sales.quickHasMeeting' },
+  { key: 'from_ad', labelKey: 'sales.quickFromAd' },
+  { key: 'ai', labelKey: 'sales.quickAI' },
+  { key: 'unassigned', labelKey: 'sales.quickUnassigned' },
+]
+const quick = ref<Record<QuickKey, boolean>>({ has_meeting: false, from_ad: false, ai: false, unassigned: false })
 const filterParams = computed(() => {
-  const p: { assigned_user_id?: string; unit_id?: string } = {}
+  const p: Record<string, string> = {}
   if (sellerFilter.value !== 'all') p.assigned_user_id = sellerFilter.value
   if (unitFilter.value !== 'all') p.unit_id = unitFilter.value
+  for (const k of QUICK_FILTERS) if (quick.value[k.key]) p[k.key] = 'true'
   return p
 })
-const hasFilters = computed(() => unitFilter.value !== 'all' || sellerFilter.value !== 'all')
+const hasFilters = computed(() => unitFilter.value !== 'all' || sellerFilter.value !== 'all' || QUICK_FILTERS.some(k => quick.value[k.key]))
 function clearFilters() {
   unitFilter.value = 'all'
   sellerFilter.value = 'all'
+  for (const k of QUICK_FILTERS) quick.value[k.key] = false
 }
 
 async function fetchScope() {
@@ -503,8 +515,21 @@ onMounted(() => {
       </TabsContent>
 
       <!-- Quadro: the Kanban takes the whole area, like Protocolos -->
-      <TabsContent value="board" class="mt-0 min-h-0 flex-1">
-        <div class="h-full">
+      <TabsContent value="board" class="mt-0 flex min-h-0 flex-1 flex-col">
+        <div class="flex shrink-0 flex-wrap items-center gap-2 px-4 pt-3" role="group" :aria-label="$t('sales.quickFilters')" data-testid="board-quick-filters">
+          <button
+            v-for="k in QUICK_FILTERS"
+            :key="k.key"
+            type="button"
+            :data-testid="`quick-${k.key}`"
+            :aria-pressed="quick[k.key]"
+            class="rounded-full border px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            :class="quick[k.key] ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card text-muted-foreground hover:text-foreground'"
+            @click="quick[k.key] = !quick[k.key]"
+          >{{ $t(k.labelKey) }}</button>
+          <button v-if="hasFilters" type="button" class="text-xs text-muted-foreground underline-offset-2 hover:underline" @click="clearFilters">{{ $t('common.clear') }}</button>
+        </div>
+        <div class="min-h-0 flex-1">
           <SalesOpportunityBoard
             ref="boardRef"
             :filters="filterParams"
