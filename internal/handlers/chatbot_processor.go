@@ -110,6 +110,16 @@ type IncomingTextMessage struct {
 		From string `json:"from"`
 		ID   string `json:"id"` // WhatsApp message ID being replied to
 	} `json:"context,omitempty"`
+	// Referral is present on the first message of a conversation that began with a click on a Meta ad.
+	Referral *struct {
+		SourceURL  string `json:"source_url"`
+		SourceID   string `json:"source_id"`
+		SourceType string `json:"source_type"`
+		Headline   string `json:"headline"`
+		Body       string `json:"body"`
+		MediaType  string `json:"media_type"`
+		CtwaClid   string `json:"ctwa_clid"`
+	} `json:"referral,omitempty"`
 	Reaction *struct {
 		MessageID string `json:"message_id"` // WhatsApp message ID being reacted to
 		Emoji     string `json:"emoji"`      // The emoji reaction (empty string = remove reaction)
@@ -184,6 +194,9 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 		a.Log.Error("Failed to get or create contact", "from", msg.From, "error", err)
 		return
 	}
+
+	// The first message of a conversation that began with a Meta ad carries where it came from
+	a.recordAdReferral(account.OrganizationID, contact.ID, msg)
 
 	// Store BSUID if provided and not already set
 	if msg.FromUserID != "" && contact.BSUID != msg.FromUserID {
@@ -902,7 +915,7 @@ func (a *App) generateAIReplyWith(settings *models.ChatbotSettings, session *mod
 	agent := a.agentForSession(settings, session)
 	system := settings.AI.SystemPrompt
 	if agent != nil {
-		system = aiPlatformRules + "\n\n" + buildAgentPrompt(agent)
+		system = agentRules(agent) + "\n\n" + buildAgentPrompt(agent)
 	}
 	if contextData != "" {
 		if system != "" {
@@ -926,7 +939,7 @@ func (a *App) generateAIReplyWith(settings *models.ChatbotSettings, session *mod
 		system += kb.Text
 	}
 	if agent != nil {
-		system += "\n\n" + aiPlatformReminder
+		system += "\n\n" + agentReminder(agent)
 	}
 
 	var messages []ai.Message

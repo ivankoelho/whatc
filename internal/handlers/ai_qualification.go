@@ -24,6 +24,9 @@ type Qualification struct {
 	Metragem                               *float64
 	NaoInformado                           []string // human labels of the fields not informed
 	ExtractionFailed                       bool     // the extraction call or its answer was unusable
+	// CustomMode: the agent lists its own fields; Custom holds the validated answers (the product fields above stay empty).
+	CustomMode bool
+	Custom     []QualifiedField
 }
 
 const (
@@ -183,19 +186,31 @@ const aiQualificationMaxTokens = 2000
 // or an unusable answer is reported as ExtractionFailed, never as an error that stops the handoff.
 func (a *App) extractQualification(ctx context.Context, settings *models.ChatbotSettings, account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession) *Qualification {
 	transcript, customer := a.qualificationTranscript(session)
+	agent := a.agentForSession(settings, session)
+	custom := agent != nil && len(agent.QualificationFields) > 0
 	if len(customer) == 0 {
-		return &Qualification{ExtractionFailed: true}
+		return &Qualification{ExtractionFailed: true, CustomMode: custom}
 	}
 	contactID, sessionID := contact.ID, session.ID
 	meta := aiCallMeta{Feature: aiFeatureQualification, OrgID: settings.OrganizationID, Account: account.Name,
 		ContactID: &contactID, SessionID: &sessionID, Agent: true}
-	resp, err := a.completeAI(ctx, settings, meta, ai.Request{
+	req := ai.Request{
 		Model:       settings.AI.Model,
 		System:      aiQualificationSystem,
 		Messages:    []ai.Message{{Role: ai.RoleUser, Content: transcript}},
 		MaxTokens:   aiQualificationMaxTokens,
 		Temperature: 0,
-	})
+	}
+	if custom {
+		q := extractCustomQualification(req, agent.QualificationFields, customer, func(r ai.Request) (*ai.Response, error) {
+			return a.completeAI(ctx, settings, meta, r)
+		})
+		if q.ExtractionFailed {
+			a.Log.Warn("Qualification extraction failed", "contact_id", contact.ID)
+		}
+		return q
+	}
+	resp, err := a.completeAI(ctx, settings, meta, req)
 	if err != nil {
 		a.Log.Warn("Qualification extraction failed", "error", err, "contact_id", contact.ID)
 		return &Qualification{ExtractionFailed: true}
@@ -224,6 +239,9 @@ func formatNumber(v float64, unit string) string {
 func formatInterest(q *Qualification) string {
 	if q == nil || q.ExtractionFailed {
 		return "Atendimento qualificado pelo agente de IA.\nQualificação não extraída: confira a conversa."
+	}
+	if q.CustomMode {
+		return formatCustomInterest(q)
 	}
 	var b strings.Builder
 	b.WriteString("Qualificação feita pelo agente de IA.\n\nInformado pelo cliente:\n")
@@ -274,7 +292,7 @@ func salesUnitForCount(unit string) models.SalesUnitOfMeasure {
 // that the funnel accepts (more than zero, at most three decimals).
 func applyQualification(q *Qualification) func(*models.SalesOpportunity) {
 	return func(o *models.SalesOpportunity) {
-		if q == nil || q.ExtractionFailed {
+		if q == nil || q.ExtractionFailed || q.CustomMode { // a configurable qualification has no product quantity
 			return
 		}
 		set := func(v float64, unit models.SalesUnitOfMeasure) {

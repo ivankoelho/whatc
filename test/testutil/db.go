@@ -130,6 +130,7 @@ func runMigrations(db *gorm.DB) error {
 		&models.AIAgent{},
 		&models.AIPendingReply{},
 		&models.AIHandoffIntent{},
+		&models.ContactAdReferral{},
 		&models.AgentTransfer{},
 		// Bulk message models
 		&models.BulkMessageCampaign{},

@@ -109,6 +109,7 @@ func GetMigrationModels() []MigrationModel {
 		{"AIAgent", &models.AIAgent{}},
 		{"AIPendingReply", &models.AIPendingReply{}},
 		{"AIHandoffIntent", &models.AIHandoffIntent{}},
+		{"ContactAdReferral", &models.ContactAdReferral{}},
 		{"AgentTransfer", &models.AgentTransfer{}},
 
 		// User tracking

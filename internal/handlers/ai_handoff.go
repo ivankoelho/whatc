@@ -229,6 +229,9 @@ func (a *App) handoffFromAIOutcome(account *models.WhatsAppAccount, contact *mod
 	var createdOpp uuid.UUID
 	if q != nil {
 		wanted := q.Intencao != ""
+		if q.CustomMode { // no purchase intent here: an opportunity when the customer told us anything we asked
+			wanted = len(q.Custom) > 0
+		}
 		if q.ExtractionFailed {
 			wanted = reason == aiHandoffMarker
 		}

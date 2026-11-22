@@ -42,6 +42,8 @@ type ContactResponse struct {
 	ContactStatus      models.ContactStatus `json:"contact_status"`
 	Tags               []string             `json:"tags"`
 	Metadata           any                  `json:"metadata"`
+	// AdOrigin is the Meta ad that first brought this customer (nil when none did).
+	AdOrigin           *AdOriginResponse    `json:"ad_origin,omitempty"`
 	LastMessageAt      *time.Time           `json:"last_message_at"`
 	LastMessagePreview string               `json:"last_message_preview"`
 	UnreadCount        int                  `json:"unread_count"`
@@ -2160,6 +2162,7 @@ func (a *App) buildContactResponse(contact *models.Contact, orgID uuid.UUID) Con
 		ContactStatus:      contact.ContactStatus,
 		Tags:               tags,
 		Metadata:           contact.Metadata,
+		AdOrigin:           a.adOriginOf(orgID, contact.ID),
 		LastMessageAt:      contact.LastMessageAt,
 		LastMessagePreview: contact.LastMessagePreview,
 		UnreadCount:        int(unreadCount),
