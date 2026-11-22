@@ -143,7 +143,7 @@ func TestApp_TestXProcessIntegrationConnection_MalformedBaseURL(t *testing.T) {
 }
 
 // A seller (sales read only, no access to the admin-only integration settings) learns whether X2 is on.
-func TestApp_GetXProcessEnabled(t *testing.T) {
+func TestApp_GetSalesFeatures(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
 	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "seller", []string{"sales_opportunities:read"})
@@ -151,11 +151,11 @@ func TestApp_GetXProcessEnabled(t *testing.T) {
 	enabled := func() bool {
 		req := testutil.NewJSONRequest(t, nil)
 		testutil.SetAuthContext(req, org.ID, user.ID)
-		require.NoError(t, app.GetXProcessEnabled(req))
+		require.NoError(t, app.GetSalesFeatures(req))
 		require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
-		var out struct{ Data struct{ Enabled bool } }
+		var out struct{ Data struct{ XProcess bool `json:"xprocess"` } }
 		require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &out))
-		return out.Data.Enabled
+		return out.Data.XProcess
 	}
 	assert.False(t, enabled(), "no integration")
 

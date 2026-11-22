@@ -152,6 +152,11 @@ type SalesOpportunity struct {
 	RealizedValue     *float64            `gorm:"type:numeric" json:"realized_value,omitempty"`
 	RealizedQuantity  *float64            `gorm:"type:numeric(14,3)" json:"realized_quantity,omitempty"`
 
+	// The next thing to do about this lead (a call back, a quote to send) and when: what keeps a lead from going cold.
+	// Free to edit while the opportunity is open; a task in the past is "overdue" on the board.
+	NextTaskAt   *time.Time `json:"next_task_at,omitempty"`
+	NextTaskNote string     `gorm:"size:200" json:"next_task_note,omitempty"`
+
 	// Editable any time while status=aberta, in any stage — not itself a
 	// transition. Required before entering "direcionada" (spec §5).
 	Direcionamento *SalesDirecionamento `gorm:"size:20" json:"direcionamento,omitempty"`

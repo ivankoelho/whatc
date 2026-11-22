@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -288,6 +289,9 @@ func filterSalesOpportunities(query *gorm.DB, db *gorm.DB, r *fastglue.Request) 
 	if string(args.Peek("from_ad")) == "true" {
 		query = query.Where("EXISTS (SELECT 1 FROM contact_ad_referrals r WHERE r.contact_id = sales_opportunities.contact_id AND r.organization_id = sales_opportunities.organization_id AND r.deleted_at IS NULL)")
 	}
+	if string(args.Peek("task_overdue")) == "true" {
+		query = query.Where("sales_opportunities.status = ? AND sales_opportunities.next_task_at IS NOT NULL AND sales_opportunities.next_task_at < now()", models.SalesOpportunityStatusAberta)
+	}
 	if string(args.Peek("has_meeting")) == "true" {
 		query = query.Where("EXISTS (SELECT 1 FROM ai_appointment_offers m WHERE m.contact_id = sales_opportunities.contact_id AND m.organization_id = sales_opportunities.organization_id AND m.status = ? AND m.booked_start > now() AND m.deleted_at IS NULL)", models.AIAppointmentBooked)
 	}
@@ -422,7 +426,7 @@ func (a *App) ChangeSalesOpportunityStage(r *fastglue.Request) error {
 		newStage != models.SalesOpportunityStageDirecionada {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid stage", nil, "")
 	}
-	if newStage == models.SalesOpportunityStageDirecionada && opp.Direcionamento == nil {
+	if newStage == models.SalesOpportunityStageDirecionada && opp.Direcionamento == nil && a.salesDirecionamentoEnabled(orgID) {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "direcionamento is required before entering direcionada", nil, "")
 	}
 
@@ -533,6 +537,40 @@ type updateSalesOpportunityDetailsRequest struct {
 	// opportunity is converted (see UpdateSalesOpportunityDetails).
 	RealizedValue    *float64 `json:"realized_value"`
 	RealizedQuantity *float64 `json:"realized_quantity"`
+	// NextTaskAt is an RFC 3339 instant; "" clears the task (and its note).
+	NextTaskAt   *string `json:"next_task_at"`
+	NextTaskNote *string `json:"next_task_note"`
+}
+
+// salesFeatures are the parts of the sales screens that depend on the customer profile: the X2 order (an integration)
+// and direcionamento (a retail funnel rule). The sales screens hide what the organization does not use.
+type salesFeatures struct {
+	XProcess       bool `json:"xprocess"`
+	Direcionamento bool `json:"direcionamento"`
+}
+
+// salesDirecionamentoEnabled: on unless the organization turned it off (the default keeps the retail flow as it was).
+func (a *App) salesDirecionamentoEnabled(orgID uuid.UUID) bool {
+	var org models.Organization
+	if err := a.DB.Select("id", "settings").Where("id = ?", orgID).First(&org).Error; err != nil {
+		return true
+	}
+	if v, ok := org.Settings["sales_direcionamento_enabled"].(bool); ok {
+		return v
+	}
+	return true
+}
+
+// GetSalesFeatures needs only sales read access (the integration settings are admin-only) and reveals nothing but
+// yes/no flags.
+func (a *App) GetSalesFeatures(r *fastglue.Request) error {
+	orgID, _, err := a.requireAuth(r, models.ResourceSalesOpportunities, models.ActionRead)
+	if err != nil {
+		return nil
+	}
+	var n int64
+	a.DB.Model(&models.XProcessIntegration{}).Where("organization_id = ? AND is_active = ?", orgID, true).Count(&n)
+	return r.SendEnvelope(salesFeatures{XProcess: n > 0, Direcionamento: a.salesDirecionamentoEnabled(orgID)})
 }
 
 // validateSalesQuantities checks the numeric fields of a request and returns the
@@ -584,7 +622,7 @@ func (a *App) UpdateSalesOpportunityDetails(r *fastglue.Request) error {
 		}
 	case opp.Status == models.SalesOpportunityStatusConvertida && touchesRealized:
 		required = models.SalesOpportunityStatusConvertida
-		if req.Interest != nil || req.EstimatedValue != nil || req.EstimatedQuantity != nil || req.UnitOfMeasure != nil {
+		if req.Interest != nil || req.EstimatedValue != nil || req.EstimatedQuantity != nil || req.UnitOfMeasure != nil || req.NextTaskAt != nil || req.NextTaskNote != nil {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Only open opportunities can be edited", nil, "")
 		}
 	default:
@@ -611,6 +649,25 @@ func (a *App) UpdateSalesOpportunityDetails(r *fastglue.Request) error {
 	}
 	if unitSet {
 		updates["unit_of_measure"] = unit // nil clears it
+	}
+	if req.NextTaskAt != nil {
+		if *req.NextTaskAt == "" {
+			updates["next_task_at"] = nil
+			updates["next_task_note"] = ""
+		} else {
+			at, perr := time.Parse(time.RFC3339, *req.NextTaskAt)
+			if perr != nil {
+				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "next_task_at must be an RFC 3339 date and time", nil, "")
+			}
+			updates["next_task_at"] = at
+		}
+	}
+	if req.NextTaskNote != nil && (req.NextTaskAt == nil || *req.NextTaskAt != "") {
+		note := strings.TrimSpace(*req.NextTaskNote)
+		if len([]rune(note)) > 200 {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "next_task_note is limited to 200 characters", nil, "")
+		}
+		updates["next_task_note"] = note
 	}
 	if req.RealizedValue != nil {
 		updates["realized_value"] = *req.RealizedValue
