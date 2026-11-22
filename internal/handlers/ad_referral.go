@@ -52,7 +52,7 @@ func (a *App) recordAdReferral(orgID, contactID uuid.UUID, msg IncomingTextMessa
 func (a *App) adOriginOf(orgID, contactID uuid.UUID) *AdOriginResponse {
 	var rows []models.ContactAdReferral
 	if err := a.DB.Where("organization_id = ? AND contact_id = ?", orgID, contactID).
-		Order("created_at ASC").Limit(50).Find(&rows).Error; err != nil || len(rows) == 0 {
+		Order("created_at ASC").Find(&rows).Error; err != nil || len(rows) == 0 {
 		return nil
 	}
 	first := rows[0]

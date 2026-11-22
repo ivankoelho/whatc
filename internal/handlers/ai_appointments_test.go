@@ -694,3 +694,18 @@ func TestCalendarEmbed_AdminSavesItAndPeopleOfTheCRMReadIt(t *testing.T) {
 	assert.Contains(t, raw, `"url":""`)
 	assert.Contains(t, raw, `"can_configure":true`)
 }
+
+// An offer stays valid for a day, but a time inside it can pass (or fall inside the minimum notice) before the tap.
+func TestScheduling_ATimeThatHasPassedIsNeverBooked(t *testing.T) {
+	w, cal, contact, session := newScheduler(t)
+	require.Equal(t, aiHandoffOffered, w.app.handoffFromAIOutcome(w.f.account, contact, session, w.f.settings, aiHandoffMarker))
+	past := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
+	require.NoError(t, w.app.DB.Model(&models.AIAppointmentOffer{}).Where("contact_id = ?", contact.ID).
+		Update("slots", models.StringArray{past, past, past}).Error)
+
+	w.app.handleAppointmentTap(w.f.account, contact, w.offeredButtons()[0])
+
+	assert.Equal(t, 0, cal.putCount(), "no event in the past")
+	assert.NotContains(t, strings.Join(w.textSends(), "\n"), "Agendado!")
+	assert.Contains(t, strings.Join(w.textSends(), "\n"), "não está mais disponível")
+}

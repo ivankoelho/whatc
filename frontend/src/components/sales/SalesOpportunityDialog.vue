@@ -36,12 +36,15 @@ const { t, locale } = useI18n()
 // The X2 order only exists for organizations that connected X2 (a client-profile integration). Asked once per page load;
 // until it answers, or if it fails, the X2 field stays hidden.
 // Direcionamento (visit or WhatsApp) is a retail rule the organization can turn off in Settings.
+// Nothing that depends on the profile is drawn until the answer is in; if it cannot be had, the server's defaults
+// apply (direcionamento on, as in retail; no X2).
 const xprocessEnabled = ref(false)
-const direcionamentoEnabled = ref(false)
+const direcionamentoEnabled = ref(true)
+const featuresLoaded = ref(false)
 salesFeaturesService.get().then(r => {
   xprocessEnabled.value = !!r.data.data.xprocess
   direcionamentoEnabled.value = !!r.data.data.direcionamento
-}).catch(() => {})
+}).catch(() => {}).finally(() => { featuresLoaded.value = true })
 
 const NONE = 'none' // a Select cannot hold an empty value
 const isOpen = computed(() => props.opportunity.status === 'aberta')
@@ -190,7 +193,7 @@ function eventLabel(e: SalesOpportunityEvent): string {
   return text === key ? e.type : text
 }
 // With direcionamento in use, a deal is closed from the Direcionada stage; without it there is no such stage to wait for.
-const canResolve = computed(() => isOpen.value && (props.opportunity.stage === 'direcionada' || !direcionamentoEnabled.value))
+const canResolve = computed(() => isOpen.value && (props.opportunity.stage === 'direcionada' || (featuresLoaded.value && !direcionamentoEnabled.value)))
 function resolve(kind: 'convert' | 'lose') {
   emit('update:open', false)
   if (kind === 'convert') emit('convert', props.opportunity)
@@ -303,7 +306,7 @@ function resolve(kind: 'convert' | 'lose') {
           </div>
         </div>
 
-        <div v-if="isOpen && (direcionamentoEnabled || xprocessEnabled)" class="grid items-stretch gap-3" :class="direcionamentoEnabled && xprocessEnabled ? 'sm:grid-cols-2' : ''">
+        <div v-if="isOpen && featuresLoaded && (direcionamentoEnabled || xprocessEnabled)" class="grid items-stretch gap-3" :class="direcionamentoEnabled && xprocessEnabled ? 'sm:grid-cols-2' : ''">
           <div v-if="direcionamentoEnabled" class="flex items-center justify-between gap-3 rounded-lg border p-3">
             <Label class="whitespace-nowrap text-sm font-medium">{{ $t('sales.direcionamento') }}</Label>
             <Select :model-value="opportunity.direcionamento" :disabled="changingDirecionamento" @update:model-value="onDirecionamentoChange">

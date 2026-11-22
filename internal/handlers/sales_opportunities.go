@@ -662,7 +662,9 @@ func (a *App) UpdateSalesOpportunityDetails(r *fastglue.Request) error {
 			updates["next_task_at"] = at
 		}
 	}
-	if req.NextTaskNote != nil && (req.NextTaskAt == nil || *req.NextTaskAt != "") {
+	// a note belongs to a task: without a date (in the request or already stored) there is nothing to attach it to
+	hasTask := (req.NextTaskAt != nil && *req.NextTaskAt != "") || (req.NextTaskAt == nil && opp.NextTaskAt != nil)
+	if req.NextTaskNote != nil && hasTask {
 		note := strings.TrimSpace(*req.NextTaskNote)
 		if len([]rune(note)) > 200 {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "next_task_note is limited to 200 characters", nil, "")

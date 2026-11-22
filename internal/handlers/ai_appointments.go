@@ -38,7 +38,7 @@ const (
 	aiAppointmentRetries = 1 // new offers after a chosen time turned out taken
 	aiAppointmentTimeout = 15 * time.Second
 
-	aiAppointmentOfferText    = "Para conversar com um de nossos advogados, escolha o melhor horário:"
+	aiAppointmentOfferText    = "Para marcar sua conversa com a nossa equipe, escolha o melhor horário:"
 	aiAppointmentNoLongerText = "Esse horário não está mais disponível."
 
 	// handoff reasons and outcomes of the scheduling path
@@ -232,6 +232,12 @@ func (a *App) handleAppointmentTap(account *models.WhatsAppAccount, contact *mod
 		a.failAppointment(account, contact, &offer, "calendar not available")
 		return
 	}
+	// A time that has already passed (or is inside the minimum notice) is no longer bookable, however long the offer
+	// is valid: say so and offer new ones.
+	if start.Before(time.Now().Add(rules.MinNotice)) {
+		a.retryAppointment(account, contact, &offer, aiAppointmentNoLongerText)
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), aiAppointmentTimeout)
 	defer cancel()
 	end := start.Add(rules.Slot)
@@ -265,7 +271,7 @@ func (a *App) handleAppointmentTap(account *models.WhatsAppAccount, contact *mod
 
 	local := start.In(rules.Zone)
 	a.markOpportunityScheduled(&offer, local)
-	text := fmt.Sprintf("Agendado! Sua conversa com o advogado é %s. Se precisar remarcar, é só escrever aqui.", meetingLabel(local))
+	text := fmt.Sprintf("Agendado! Sua conversa com a nossa equipe é %s. Se precisar remarcar, é só escrever aqui.", meetingLabel(local))
 	if err := a.sendAndSaveAgentText(aiCtx("ai_appointment_booked"), account, contact, text, a.appointmentSender(account, &offer)); err != nil {
 		a.Log.Error("Scheduling: could not confirm the booking to the customer", "error", err, "contact_id", contact.ID)
 	}
@@ -605,7 +611,7 @@ func appointmentPromptSection(ap *upcomingAppointment) string {
 		where = " Local: " + ap.Location + "."
 	}
 	return "## Reunião já marcada\n" +
-		"O cliente já tem uma conversa marcada com o advogado: " + meetingLabel(ap.Local) + "." + where + " Isso é um fato do sistema: você pode confirmá-lo. " +
+		"O cliente já tem uma conversa marcada com a equipe: " + meetingLabel(ap.Local) + "." + where + " Isso é um fato do sistema: você pode confirmá-lo. " +
 		"Não faça novas perguntas de qualificação e NUNCA ofereça ou combine outros horários. " +
 		"Responda de forma curta só dúvidas simples sobre essa reunião (quando é, onde é). " +
 		"Se o cliente quiser remarcar ou cancelar, pedir para falar com uma pessoa, ou perguntar qualquer coisa sobre o caso dele, responda SOMENTE com o marcador exato [[TRANSFERIR]]."

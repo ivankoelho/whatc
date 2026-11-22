@@ -75,7 +75,11 @@ func TestNextTask_RejectsBadInput(t *testing.T) {
 	for i := range long {
 		long[i] = 'a'
 	}
-	assert.Equal(t, fasthttp.StatusBadRequest, e.details(t, map[string]any{"next_task_note": string(long)}))
+	assert.Equal(t, fasthttp.StatusBadRequest, e.details(t, map[string]any{"next_task_at": time.Now().Add(time.Hour).Format(time.RFC3339), "next_task_note": string(long)}))
+
+	// a note with no task to belong to is ignored, not stored
+	assert.Equal(t, fasthttp.StatusOK, e.details(t, map[string]any{"next_task_note": "solta"}))
+	assert.Equal(t, "", e.reload(t).NextTaskNote)
 }
 
 func TestStage_DirecionamentoNotRequiredWhenTheOrganizationTurnedItOff(t *testing.T) {
@@ -103,6 +107,7 @@ func TestDetailsResponseKeepsTheBoardContext(t *testing.T) {
 	require.NoError(t, e.app.DB.First(&opp, "id = ?", e.opp.ID).Error)
 	require.NoError(t, e.app.DB.Create(&models.AIAppointmentOffer{
 		OrganizationID: e.orgID, ContactID: opp.ContactID, Status: models.AIAppointmentBooked, BookedStart: &start,
+		Token: uuid.NewString(), SessionID: uuid.New(), WhatsAppAccount: "x", ExpiresAt: time.Now().Add(time.Hour),
 	}).Error)
 
 	req := testutil.NewJSONRequest(t, map[string]any{"next_task_note": "x", "next_task_at": time.Now().Add(time.Hour).Format(time.RFC3339)})
