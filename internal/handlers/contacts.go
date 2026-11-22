@@ -79,8 +79,11 @@ type MessageResponse struct {
 	WhatsAppAccount  string               `json:"whatsapp_account,omitempty"`
 	SentByUserID     *uuid.UUID           `json:"sent_by_user_id,omitempty"`
 	SentByUserName   string               `json:"sent_by_user_name,omitempty"`
-	CreatedAt        time.Time            `json:"created_at"`
-	UpdatedAt        time.Time            `json:"updated_at"`
+	// SenderType is "ai_agent" when an AI agent wrote the message (its display name is in
+	// SentByUserName); empty for a human or an unidentified message.
+	SenderType string    `json:"sender_type,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 // ReplyPreview contains a preview of the replied-to message
@@ -466,6 +469,7 @@ func (a *App) buildMessagesResponse(messages []models.Message) []MessageResponse
 			WhatsAppAccount: m.WhatsAppAccount,
 			SentByUserID:    m.SentByUserID,
 			SentByUserName:  senderName(&m),
+			SenderType:      senderTypeOf(&m),
 			CreatedAt:       m.CreatedAt,
 			UpdatedAt:       m.UpdatedAt,
 		}
@@ -1179,9 +1183,9 @@ func (a *App) sendWhatsAppReaction(account *models.WhatsAppAccount, contact *mod
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+account.AccessToken)
 
-	resp, err := a.HTTPClient.Do(req)
+	resp, err := whatsapp.NoRedirectClient(a.HTTPClient).Do(req) // carries the Meta token: no redirects
 	if err != nil {
-		a.Log.Error("Failed to send reaction", "error", err)
+		a.Log.Error("Failed to send reaction", "error", whatsapp.SanitizeTransportError("request to Meta failed", err, account.AccessToken))
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -2205,8 +2209,17 @@ func (a *App) assignedUserNames(orgID uuid.UUID, contacts []models.Contact) map[
 // senderName returns the display name of the agent who sent an outgoing
 // message, or "" for messages with no agent (chatbot, campaign, API).
 func senderName(m *models.Message) string {
+	if name, typ := messageSender(m); typ != "" {
+		return name // an AI agent's display name; the AI is never a user row
+	}
 	if m.SentByUser == nil {
 		return ""
 	}
 	return m.SentByUser.FullName
+}
+
+// senderTypeOf is "ai_agent" for a message an AI agent wrote, "" otherwise.
+func senderTypeOf(m *models.Message) string {
+	_, typ := messageSender(m)
+	return typ
 }

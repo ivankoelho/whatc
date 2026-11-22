@@ -451,6 +451,15 @@ export const chatbotService = {
   updateAIContext: (id: string, data: any) => api.put(`/chatbot/ai-contexts/${id}`, data),
   deleteAIContext: (id: string) => api.delete(`/chatbot/ai-contexts/${id}`),
 
+  // AI Agents
+  listAIAgents: (params?: { page?: number; limit?: number }) =>
+    api.get<{ agents: any[]; total?: number }>('/chatbot/ai-agents', { params }),
+  getAIAgent: (id: string) => api.get(`/chatbot/ai-agents/${id}`),
+  createAIAgent: (data: any) => api.post('/chatbot/ai-agents', data),
+  updateAIAgent: (id: string, data: any) => api.put(`/chatbot/ai-agents/${id}`, data),
+  deleteAIAgent: (id: string) => api.delete(`/chatbot/ai-agents/${id}`),
+  getAIAgentReadiness: (id: string) => api.get(`/chatbot/ai-agents/${id}/readiness`),
+
   // Agent Transfers
   listTransfers: (params?: {
     status?: string

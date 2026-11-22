@@ -1,11 +1,11 @@
 package handlers
 
 import (
-	"github.com/shridarpatil/whatomate/internal/safehttp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/shridarpatil/whatomate/internal/safehttp"
 	"io"
 	"maps"
 	"net/url"
@@ -108,6 +108,10 @@ type MessageSendOptions struct {
 
 	// SentByUserID sets the user who sent the message (for agent messages)
 	SentByUserID *uuid.UUID
+
+	// AISender, when set, says an AI agent wrote this message: it is signed with the agent's display name
+	// and recorded in Message.Metadata["sender"]. It never sets SentByUserID: the AI is not a user.
+	AISender *AISender
 
 	// AllowOtherOwner lets a human send into a conversation owned by another
 	// agent without taking it over. Only protocol (occurrence) replies set it:
@@ -237,6 +241,17 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 	// replying. The stored message keeps the raw text — only what goes to
 	// WhatsApp is prefixed. Templates and interactive messages are never signed.
 	signedContent, signedCaption := req.Content, req.Caption
+	// An AI agent signs with its display name ("*Assistente Virtual:*"), always (it is how the customer
+	// knows they are talking to an automated agent) and never with a person's name. Same rule as the
+	// human signature: only what goes to WhatsApp is prefixed; templates and interactive messages are not.
+	if opts.AISender != nil && opts.SentByUserID == nil {
+		if signedContent != "" {
+			signedContent = opts.AISender.prefix() + signedContent
+		}
+		if signedCaption != "" {
+			signedCaption = opts.AISender.prefix() + signedCaption
+		}
+	}
 	if opts.SentByUserID != nil && req.Contact != nil && req.Account != nil {
 		if settings, _ := a.getChatbotSettingsCached(req.Contact.OrganizationID, req.Account.Name); settings != nil && settings.AgentAssignment.SignWithAgentName {
 			if prefix := a.agentNamePrefix(*opts.SentByUserID); prefix != "" {
@@ -551,6 +566,15 @@ func (a *App) createOutgoingMessage(req OutgoingMessageRequest, opts MessageSend
 		msg.ReplyToMessageID = &replyID
 	}
 
+	// Record the automated sender, so the history, the reports and the audit tell an AI agent's message
+	// from a human's. It sits next to the other metadata keys and never replaces one.
+	if opts.AISender != nil && opts.SentByUserID == nil {
+		if msg.Metadata == nil {
+			msg.Metadata = models.JSONB{}
+		}
+		msg.Metadata[metadataSender] = opts.AISender.metadata()
+	}
+
 	return msg
 }
 
@@ -627,6 +651,10 @@ func (a *App) buildInteractiveData(req OutgoingMessageRequest) models.JSONB {
 	}
 }
 
+// MessageSendUnknownText is what an attendant sees on a message whose delivery could not be confirmed. It
+// deliberately says nothing about the provider or the network: only what to do.
+const MessageSendUnknownText = "Não foi possível confirmar o envio: a mensagem pode ter chegado ao cliente. Confira a conversa antes de reenviar."
+
 // finalizeMessageSend updates message status and triggers post-send actions
 func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageRequest, opts MessageSendOptions, wamid string, err error) {
 	if opts.OnResult != nil {
@@ -647,6 +675,17 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 			err = errors.New(templateutil.RedactValues(err.Error(), secrets))
 		}
 		errMsg := whatsapp.PublicErrorText(err) // what is stored and broadcast: never a raw provider body
+		if whatsapp.DeliveryUnknown(err) {
+			// Nothing proves Meta refused it (timeout, dropped connection, 5xx...): it may have reached the
+			// customer. Say so in plain words instead of showing a failure with transport internals, and keep
+			// the technical cause in the log only. The message is never resent automatically.
+			a.Log.Warn("Send outcome unknown: the message may have reached the customer", "error", err, "message_id", msg.ID)
+			errMsg = MessageSendUnknownText
+			var apiErr *whatsapp.APIError
+			if errors.As(err, &apiErr) { // the status is not an internal: it tells the attendant what came back
+				errMsg += fmt.Sprintf(" (HTTP %d)", apiErr.Status)
+			}
+		}
 
 		a.DB.Model(&models.Message{}).Where("id = ?", msg.ID).Updates(map[string]any{
 			"status":        models.MessageStatusFailed,
@@ -746,6 +785,11 @@ func (a *App) broadcastNewMessage(orgID uuid.UUID, msg *models.Message, contact 
 	// apart from "an agent with the same display name" without a lookup.
 	if msg.SentByUserID != nil {
 		payload["sent_by_user_id"] = msg.SentByUserID.String()
+	}
+	// An AI agent's message carries its display name and type, never a user id.
+	if name, typ := messageSender(msg); typ != "" {
+		payload["sent_by_user_name"] = name
+		payload["sender_type"] = typ
 	}
 
 	// Add interactive data

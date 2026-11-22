@@ -23,7 +23,7 @@ func metaErr(status, code int) error {
 // The three categories. Only a 4xx WITH a documented rejection code proves the
 // message was not accepted; the status alone never does.
 func TestClassify_ThreeCategories(t *testing.T) {
-	refused := []int{100, 131008, 131009, 131021, 131047, 131051, 132000, 132001, 132005, 132007, 132012, 132015, 132016, 190, 368}
+	refused := []int{100, 131008, 131009, 131021, 131030, 131047, 131051, 132000, 132001, 132005, 132007, 132012, 132015, 132016, 190, 368}
 	for _, code := range refused {
 		assert.Equal(t, whatsapp.OutcomeRefused, whatsapp.Classify(metaErr(400, code)), "code %d", code)
 	}
@@ -42,7 +42,7 @@ func TestClassify_ThreeCategories(t *testing.T) {
 		"429 with an unlisted code":              metaErr(429, 4),
 		"4xx with an unlisted code":              metaErr(400, 999999),
 		"4xx whose code is delivery-side 131026": metaErr(400, 131026),
-		"4xx 131030 (not documented)":            metaErr(400, 131030),
+		"4xx 131999 (not documented)":            metaErr(400, 131999),
 		"4xx without a Meta body":                whatsapp.ParseMetaAPIError(400, []byte("bad request")),
 		"5xx with a refusal code":                metaErr(500, 131008),
 		"5xx server error 131000":                metaErr(500, 131000),

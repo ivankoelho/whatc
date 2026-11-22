@@ -39,6 +39,11 @@ type aiCallMeta struct {
 	// Out, when set, receives what happened beyond the text: a confirmation the AI proposed, which the
 	// caller must present to the customer INSTEAD of the model's text (Fase 9D).
 	Out *aiCallOut
+	// Agent marks a call made on behalf of an AI agent (or for its qualification). Only such
+	// calls run under aiCallDeadline and count against the organization's monthly token cap.
+	Agent bool
+	// reservation is the tokens held for this call (set by completeAI itself, never by callers).
+	reservation *aiReservation
 }
 
 // aiCallOut carries results of a call back to its caller.
@@ -65,14 +70,39 @@ func (a *App) newAIProvider(provider, apiKey string) (ai.Provider, error) {
 func (a *App) completeAI(ctx context.Context, settings *models.ChatbotSettings, meta aiCallMeta, req ai.Request) (*ai.Response, error) {
 	provider := string(settings.AI.Provider)
 
+	if meta.Agent {
+		// An agent call is bounded in time (so a reservation never outlives its call) and, when the
+		// organization set a monthly cap, reserves its tokens before it starts (ai_token_cap.go).
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, aiCallDeadline)
+		defer cancel()
+		//
+		// The runtime enforces the decision itself, whatever the API or the screen allowed before: an agent
+		// call with no limit AND no explicit acceptance of none does not reach the provider (fail closed). This
+		// also covers an organization whose agent was activated before this rule existed, or by a path that
+		// never went through the settings screen.
+		if limit := settings.AI.MonthlyTokenLimit; limit > 0 {
+			res, err := a.reserveAITokens(meta.OrgID, limit, estimateAITokens(req), time.Now())
+			if err != nil {
+				_ = a.recordAIUsage(meta, provider, req.Model, nil, 0, err)
+				return nil, err
+			}
+			meta.reservation = res
+			defer res.Settle() // runs after every usage row below has been written
+		} else if !settings.AI.UnlimitedAck {
+			_ = a.recordAIUsage(meta, provider, req.Model, nil, 0, ErrAICapNotConfigured)
+			return nil, ErrAICapNotConfigured
+		}
+	}
+
 	apiKey, err := a.resolveAIAPIKey(settings)
 	if err != nil {
-		a.recordAIUsage(meta, provider, req.Model, nil, 0, err)
+		_ = a.recordAIUsage(meta, provider, req.Model, nil, 0, err)
 		return nil, err
 	}
 	p, err := a.newAIProvider(provider, apiKey)
 	if err != nil {
-		a.recordAIUsage(meta, provider, req.Model, nil, 0, err)
+		_ = a.recordAIUsage(meta, provider, req.Model, nil, 0, err)
 		return nil, err
 	}
 
@@ -82,7 +112,7 @@ func (a *App) completeAI(ctx context.Context, settings *models.ChatbotSettings, 
 
 	start := time.Now()
 	resp, err := p.Complete(ctx, req)
-	a.recordAIUsage(meta, provider, req.Model, resp, time.Since(start), err)
+	_ = a.recordAIUsage(meta, provider, req.Model, resp, time.Since(start), err)
 	return resp, err
 }
 
@@ -129,7 +159,7 @@ func (a *App) completeWithTools(ctx context.Context, p ai.Provider, provider str
 		meta.Out.Pending = r.Pending() // a proposal made during the loop, even if the loop failed after it
 	}
 	for i, resp := range res.Responses {
-		a.recordAIUsage(meta, provider, req.Model, resp, res.Took[i], nil)
+		_ = a.recordAIUsage(meta, provider, req.Model, resp, res.Took[i], nil)
 	}
 	if err != nil {
 		if errors.Is(err, ai.ErrToolLoopLimit) {
@@ -138,7 +168,7 @@ func (a *App) completeWithTools(ctx context.Context, p ai.Provider, provider str
 				r.RecordAborted(ctx, res.Response.ToolCalls)
 			}
 		} else {
-			a.recordAIUsage(meta, provider, req.Model, nil, res.FailedTook, err)
+			_ = a.recordAIUsage(meta, provider, req.Model, nil, res.FailedTook, err)
 		}
 		return nil, err
 	}
@@ -146,8 +176,9 @@ func (a *App) completeWithTools(ctx context.Context, p ai.Provider, provider str
 }
 
 // recordAIUsage persists one AIUsageLog row. A failure to log is logged and
-// swallowed: observability must never break a customer's reply.
-func (a *App) recordAIUsage(meta aiCallMeta, provider, model string, resp *ai.Response, took time.Duration, callErr error) {
+// swallowed: observability must never break a customer's reply. It reports the failure to the
+// caller too, and to the call's token reservation, which then stays counted as consumption.
+func (a *App) recordAIUsage(meta aiCallMeta, provider, model string, resp *ai.Response, took time.Duration, callErr error) error {
 	entry := models.AIUsageLog{
 		OrganizationID:  meta.OrgID,
 		Provider:        provider,
@@ -181,13 +212,22 @@ func (a *App) recordAIUsage(meta aiCallMeta, provider, model string, resp *ai.Re
 			entry.ErrorKind, entry.HTTPStatus, entry.ErrorMessage = string(aerr.Kind), aerr.Status, truncate(aerr.Message, 500)
 		case errors.Is(callErr, ErrAIKeyUnavailable):
 			entry.ErrorKind, entry.ErrorMessage = "credentials", "AI API key is not available"
+		case errors.Is(callErr, ErrAICapNotConfigured):
+			entry.ErrorKind, entry.ErrorMessage = "cap_not_configured", "no monthly AI token limit is set and none was explicitly accepted"
+		case errors.Is(callErr, ErrAICapReached):
+			entry.ErrorKind, entry.ErrorMessage = "cap_reached", "monthly AI token limit reached"
 		default:
 			entry.ErrorKind, entry.ErrorMessage = "error", truncate(callErr.Error(), 500)
 		}
 	}
 	if err := a.DB.Create(&entry).Error; err != nil {
 		a.Log.Error("Failed to record AI usage", "error", err, "provider", provider, "feature", meta.Feature)
+		if meta.reservation != nil {
+			meta.reservation.noteUsageFailure()
+		}
+		return err
 	}
+	return nil
 }
 
 func truncate(s string, n int) string {
