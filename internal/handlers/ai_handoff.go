@@ -218,7 +218,10 @@ func (a *App) handoffFromAIOutcome(account *models.WhatsAppAccount, contact *mod
 	told := sessionFlag(session, aiSessionHandedOff) // the out-of-hours message was already given
 
 	var q *Qualification
-	if !sessionFlag(session, aiSessionQualified) && (reason == aiHandoffMarker || reason == aiHandoffUnsafe) {
+	// A customer with a booked meeting was qualified before the booking: the new session (a session ends with an
+	// attendance) only holds what was said since, so a second extraction would find nothing and write noise.
+	alreadyQualified := sessionFlag(session, aiSessionQualified) || a.upcomingAppointment(orgID, contact.ID) != nil
+	if !alreadyQualified && (reason == aiHandoffMarker || reason == aiHandoffUnsafe) {
 		q = a.extractQualification(ctx, settings, account, contact, session)
 		if !q.ExtractionFailed {
 			a.setSessionValue(session, aiSessionQualified, true) // do not pay for it again on this conversation

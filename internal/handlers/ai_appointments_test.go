@@ -547,6 +547,8 @@ func TestScheduling_TheWholeConversationFromTheAdToTheBookedMeeting(t *testing.T
 	assert.Equal(t, 1, cal.putCount(), "never a second meeting")
 	assert.Contains(t, w.transfers(t, contact.ID)[0].Notes, "reunião já marcada", "the person sees the meeting")
 	assert.Contains(t, final[len(final)-1], "atendente")
+	assert.Len(t, w.ai.bodies, 5, "no second qualification call: the customer was qualified before the booking")
+	assert.NotContains(t, w.transfers(t, contact.ID)[0].Notes, "não extraída", "no noise from an extraction that had nothing to read")
 }
 
 func opps0(w *wiring, t *testing.T, contactID uuid.UUID) models.SalesOpportunity {
