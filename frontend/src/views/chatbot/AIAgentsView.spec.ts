@@ -89,6 +89,47 @@ describe('AIAgentsView', () => {
     }))
   })
 
+  it('sends the qualification fields the organization defined, with a key made from the label', async () => {
+    svc.createAIAgent.mockResolvedValue({ data: { data: { id: 'new' } } })
+    const w = mountView()
+    await flushPromises()
+
+    await w.find('[data-testid="new-agent"]').trigger('click')
+    await w.find('[data-testid="field-name"]').setValue('Triagem')
+    await w.find('[data-testid="qual-add"]').trigger('click')
+    await w.find('[data-testid="qual-label-0"]').setValue('Área do direito')
+    await w.find('[data-testid="qual-type-0"]').setValue('choice')
+    await w.find('[data-testid="qual-options-0"]').setValue('Trabalhista, Família , Cível')
+    await w.find('[data-testid="qual-add"]').trigger('click')
+    await w.find('[data-testid="qual-label-1"]').setValue('Cidade')
+    await w.find('[data-testid="qual-add"]').trigger('click') // an empty row is dropped
+    await w.find('[data-testid="submit"]').trigger('click')
+    await flushPromises()
+
+    expect(svc.createAIAgent).toHaveBeenCalledWith(expect.objectContaining({
+      qualification_fields: [
+        { key: 'area_do_direito', label: 'Área do direito', type: 'choice', description: '', required: false, options: ['Trabalhista', 'Família', 'Cível'] },
+        { key: 'cidade', label: 'Cidade', type: 'text', description: '', required: false, options: [] },
+      ],
+    }))
+  })
+
+  it('shows the saved qualification fields when editing and can remove one', async () => {
+    svc.listAIAgents.mockResolvedValue({ data: { data: { agents: [agent({ qualification_fields: [
+      { key: 'urgencia', label: 'Urgência', type: 'text', description: 'há prazo?', required: true, options: [] },
+    ] })], total: 1 } } })
+    svc.updateAIAgent.mockResolvedValue({ data: { data: {} } })
+    const w = mountView()
+    await flushPromises()
+
+    await w.find('[data-testid="agent-row-ag-1"] button[aria-label="Edit agent"]').trigger('click')
+    expect((w.find('[data-testid="qual-label-0"]').element as HTMLInputElement).value).toBe('Urgência')
+    await w.find('[data-testid="qual-remove-0"]').trigger('click')
+    await w.find('[data-testid="submit"]').trigger('click')
+    await flushPromises()
+    expect(svc.updateAIAgent).toHaveBeenCalledWith('ag-1', expect.objectContaining({ qualification_fields: [] }))
+  })
+
   it('starts a new agent with an 8 second wait, not at once', async () => {
     svc.createAIAgent.mockResolvedValue({ data: { data: {} } })
     const w = mountView()

@@ -1230,6 +1230,20 @@ export interface NextcloudStatus {
   can_configure: boolean
 }
 
+export interface NextcloudCalendarSettings {
+  enabled: boolean
+  calendar_path: string
+  username: string
+  time_zone: string
+  slot_minutes: number
+  buffer_minutes: number
+  min_notice_hours: number
+  lookahead_days: number
+  /** weekday (0 = Sunday) to "HH:MM-HH:MM"; a missing weekday is closed */
+  hours: Record<string, string>
+  location: string
+}
+
 export interface NextcloudEntry {
   name: string
   path: string
@@ -1244,6 +1258,8 @@ export const nextcloudService = {
   connect: (username: string, appPassword: string) =>
     api.put('/integrations/nextcloud/me', { username, app_password: appPassword }),
   disconnect: () => api.delete('/integrations/nextcloud/me'),
+  getCalendar: () => api.get<{ configured: boolean; calendar?: NextcloudCalendarSettings; password_set?: boolean }>('/integrations/nextcloud/calendar'),
+  saveCalendar: (body: Partial<NextcloudCalendarSettings> & { app_password?: string }) => api.put('/integrations/nextcloud/calendar', body),
   files: (path: string) => api.get<{ path: string; entries: NextcloudEntry[] }>('/integrations/nextcloud/files', { params: { path } })
 }
 
