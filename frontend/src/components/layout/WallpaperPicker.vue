@@ -48,9 +48,13 @@ async function onRemove() {
         <Palette class="h-4 w-4" aria-hidden="true" />
       </button>
     </PopoverTrigger>
-    <PopoverContent align="end" class="w-72 p-3">
-      <div class="mb-2 text-[13px] font-semibold">{{ $t('nav.wallpaper') }}</div>
-      <div class="grid grid-cols-3 gap-2" role="radiogroup" :aria-label="$t('nav.wallpaper')">
+    <PopoverContent
+      align="end"
+      class="w-[264px] rounded-2xl border border-white/10 bg-neutral-900/95 p-4 text-white shadow-2xl backdrop-blur"
+      data-testid="wallpaper-popover"
+    >
+      <div class="mb-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-white/60">{{ $t('nav.wallpaperCustomize') }}</div>
+      <div class="flex flex-wrap items-center gap-3" role="radiogroup" :aria-label="$t('nav.wallpaper')">
         <button
           v-if="orgWallpaperUrl"
           type="button"
@@ -59,12 +63,12 @@ async function onRemove() {
           :aria-checked="active === 'system'"
           :aria-label="$t('nav.wallpaperSystem')"
           :title="$t('nav.wallpaperSystem')"
-          class="relative aspect-[4/3] rounded-lg bg-cover bg-center ring-offset-2 ring-offset-popover transition hover:scale-[1.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          :class="active === 'system' && 'ring-2 ring-primary'"
+          class="swatch bg-cover bg-center"
+          :class="active === 'system' && 'swatch-active'"
           :style="{ backgroundImage: `url(${orgWallpaperUrl})` }"
           @click="useSystemImage"
         >
-          <Check v-if="active === 'system'" class="absolute right-1 top-1 h-3.5 w-3.5 text-white drop-shadow" aria-hidden="true" />
+          <Check v-if="active === 'system'" class="h-4 w-4 text-white drop-shadow" aria-hidden="true" />
         </button>
         <button
           v-for="p in wallpaperPresets"
@@ -74,36 +78,53 @@ async function onRemove() {
           :aria-checked="active === p.id"
           :aria-label="p.name"
           :title="p.name"
-          class="relative aspect-[4/3] rounded-lg ring-offset-2 ring-offset-popover transition hover:scale-[1.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          :class="active === p.id && 'ring-2 ring-primary'"
+          class="swatch"
+          :class="active === p.id && 'swatch-active'"
           :style="{ background: p.css }"
           @click="select(p.id)"
         >
-          <Check v-if="active === p.id" class="absolute right-1 top-1 h-3.5 w-3.5 text-white drop-shadow" aria-hidden="true" />
-        </button>
-        <button
-          v-if="isSuperAdmin"
-          type="button"
-          data-testid="wallpaper-upload"
-          class="flex aspect-[4/3] flex-col items-center justify-center gap-1 rounded-lg border border-dashed text-[11px] text-muted-foreground transition hover:border-primary hover:text-foreground"
-          @click="fileInput?.click()"
-        >
-          <ImagePlus class="h-4 w-4" aria-hidden="true" />
-          {{ $t('nav.wallpaperUpload') }}
+          <Check v-if="active === p.id" class="h-4 w-4 text-white drop-shadow" aria-hidden="true" />
         </button>
       </div>
+      <button
+        v-if="isSuperAdmin"
+        type="button"
+        data-testid="wallpaper-upload"
+        class="mt-4 flex w-full items-center justify-center gap-2 rounded-full bg-white/10 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+        @click="fileInput?.click()"
+      >
+        <ImagePlus class="h-4 w-4" aria-hidden="true" />
+        {{ $t('nav.wallpaperUpload') }}
+      </button>
       <button
         v-if="isSuperAdmin && orgWallpaperUrl"
         type="button"
         data-testid="wallpaper-remove"
-        class="mt-3 flex items-center gap-1.5 text-[12px] text-muted-foreground hover:text-destructive"
+        class="mt-3 flex items-center gap-1.5 text-[12px] text-white/60 hover:text-red-300"
         @click="onRemove"
       >
         <Trash2 class="h-3.5 w-3.5" aria-hidden="true" />
         {{ $t('nav.wallpaperRemove') }}
       </button>
-      <p v-if="isSuperAdmin" class="mt-2 text-[11px] text-muted-foreground">{{ $t('nav.wallpaperAppliesToAll') }}</p>
+      <p v-if="isSuperAdmin" class="mt-2 text-[11px] leading-snug text-white/50">{{ $t('nav.wallpaperAppliesToAll') }}</p>
       <input v-if="isSuperAdmin" ref="fileInput" type="file" accept="image/*" class="hidden" @change="onFile">
     </PopoverContent>
   </Popover>
 </template>
+
+<style scoped>
+/* round colour swatches: a faint ring, and a white ring with a check on the one in use */
+.swatch {
+  display: inline-flex;
+  height: 2.25rem;
+  width: 2.25rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.18);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.swatch:hover { transform: scale(1.06); }
+.swatch:focus-visible { outline: none; box-shadow: 0 0 0 2px rgb(255 255 255 / 0.7); }
+.swatch-active { box-shadow: 0 0 0 2px #1d1d1f, 0 0 0 4px rgb(255 255 255 / 0.9); }
+</style>

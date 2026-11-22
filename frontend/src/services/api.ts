@@ -190,6 +190,12 @@ export interface XProcessIntegrationStatus {
   is_configured: boolean
 }
 
+// Which parts of the sales screens this organization uses (the X2 order needs the integration; direcionamento is a
+// retail funnel rule that can be switched off in Settings).
+export const salesFeaturesService = {
+  get: () => api.get<{ data: { xprocess: boolean; direcionamento: boolean } }>('/sales-features'),
+}
+
 export const xprocessIntegrationService = {
   get: () => api.get<{ data: XProcessIntegrationStatus }>('/xprocess-integration'),
   upsert: (payload: { base_url: string; api_key: string }) =>
@@ -805,6 +811,7 @@ export const organizationService = {
   getSettings: () => api.get('/org/settings'),
   updateSettings: (data: {
     mask_phone_numbers?: boolean
+    sales_direcionamento_enabled?: boolean
     timezone?: string
     date_format?: string
     name?: string
@@ -1230,6 +1237,22 @@ export interface NextcloudStatus {
   can_configure: boolean
 }
 
+export interface NextcloudCalendarSettings {
+  enabled: boolean
+  calendar_path: string
+  username: string
+  time_zone: string
+  slot_minutes: number
+  buffer_minutes: number
+  min_notice_hours: number
+  lookahead_days: number
+  /** weekday (0 = Sunday) to "HH:MM-HH:MM"; a missing weekday is closed */
+  hours: Record<string, string>
+  location: string
+  /** the calendar's public embed page (the CRM's Calendar tab); accepts the <iframe> code or the link when saving */
+  embed_url?: string
+}
+
 export interface NextcloudEntry {
   name: string
   path: string
@@ -1244,6 +1267,12 @@ export const nextcloudService = {
   connect: (username: string, appPassword: string) =>
     api.put('/integrations/nextcloud/me', { username, app_password: appPassword }),
   disconnect: () => api.delete('/integrations/nextcloud/me'),
+  getCalendar: () => api.get<{ configured: boolean; calendar?: NextcloudCalendarSettings; password_set?: boolean }>('/integrations/nextcloud/calendar'),
+  saveCalendar: (body: Partial<NextcloudCalendarSettings> & { app_password?: string }) => api.put('/integrations/nextcloud/calendar', body),
+  /** the address of the CRM's Calendar tab (anyone who reads the pipeline); empty when none is set */
+  getCalendarEmbed: () => api.get<{ url: string; can_configure: boolean }>('/integrations/nextcloud/calendar/embed'),
+  /** reads the free times, writes one test event and removes it */
+  testCalendar: () => api.post<{ slots: string[]; write_checked: boolean; cleanup_failed?: boolean }>('/integrations/nextcloud/calendar/test'),
   files: (path: string) => api.get<{ path: string; entries: NextcloudEntry[] }>('/integrations/nextcloud/files', { params: { path } })
 }
 
@@ -1935,6 +1964,8 @@ export interface SalesOpportunity {
   interest?: string
   estimated_value?: number
   estimated_quantity?: number
+  next_task_at?: string
+  next_task_note?: string
   xprocess_num_pedido?: string
   xprocess_documento?: string
   unit_of_measure?: 'UN' | 'M' | 'M2' | 'KG' | 'PCT' | 'CX'
@@ -1952,6 +1983,12 @@ export interface SalesOpportunity {
   cancelled_at?: string
   sla_breached: boolean
   sla_breached_at?: string
+  /** opened by the AI agent after qualifying the customer */
+  created_by_ai?: boolean
+  /** the Meta ad that first brought the customer */
+  ad_origin?: { headline?: string; source_id?: string; clicks: number }
+  /** the customer's next booked meeting (AI agent, organization calendar) */
+  meeting?: { start: string; location?: string }
   // Populated only where the handler preloads the association: list
   // preloads both (assigned_user trimmed to id + name), get only contact.
   contact?: { id: string; profile_name?: string; phone_number?: string; cpf_cnpj?: string }
@@ -2012,7 +2049,7 @@ export const salesOpportunitiesService = {
     api.put<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/stage`, { stage }),
   changeDirecionamento: (id: string, direcionamento: SalesDirecionamento) =>
     api.put<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/direcionamento`, { direcionamento }),
-  updateDetails: (id: string, details: { interest?: string; estimated_value?: number; estimated_quantity?: number; unit_of_measure?: string; realized_value?: number; realized_quantity?: number }) =>
+  updateDetails: (id: string, details: { interest?: string; estimated_value?: number; estimated_quantity?: number; unit_of_measure?: string; realized_value?: number; realized_quantity?: number; next_task_at?: string; next_task_note?: string }) =>
     api.put<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/details`, details),
   convert: (id: string, realized?: { realized_value?: number; realized_quantity?: number }) =>
     api.post<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/convert`, realized),

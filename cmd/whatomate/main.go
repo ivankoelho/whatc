@@ -987,6 +987,10 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.PUT("/api/integrations/nextcloud/me", app.ConnectNextcloud)
 	g.DELETE("/api/integrations/nextcloud/me", app.DisconnectNextcloud)
 	g.GET("/api/integrations/nextcloud/files", app.ListNextcloudFiles)
+	g.GET("/api/integrations/nextcloud/calendar", app.GetNextcloudCalendar)
+	g.PUT("/api/integrations/nextcloud/calendar", app.PutNextcloudCalendar)
+	g.POST("/api/integrations/nextcloud/calendar/test", app.TestNextcloudCalendar)
+	g.GET("/api/integrations/nextcloud/calendar/embed", app.GetCalendarEmbed)
 	g.PUT("/api/team-chat/messages/{id}/poll-vote", app.VoteChatPoll)
 	g.PUT("/api/team-chat/messages/{id}/reactions/{code}", app.PutChatReaction)
 	g.DELETE("/api/team-chat/messages/{id}/reactions/{code}", app.DeleteChatReaction)
@@ -1069,6 +1073,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.DELETE("/api/sales-opportunities/{id}", app.DeleteSalesOpportunity)
 
 	// CRM — integração X2 ERP
+	g.GET("/api/sales-features", app.GetSalesFeatures)
 	g.GET("/api/xprocess-integration", app.GetXProcessIntegration)
 	g.PUT("/api/xprocess-integration", app.UpsertXProcessIntegration)
 	g.POST("/api/xprocess-integration/test", app.TestXProcessIntegrationConnection)

@@ -141,3 +141,28 @@ func TestApp_TestXProcessIntegrationConnection_MalformedBaseURL(t *testing.T) {
 	require.NoError(t, app.TestXProcessIntegrationConnection(req))
 	testutil.AssertErrorResponse(t, req, fasthttp.StatusBadGateway, "")
 }
+
+// A seller (sales read only, no access to the admin-only integration settings) learns whether X2 is on.
+func TestApp_GetSalesFeatures(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "seller", []string{"sales_opportunities:read"})
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
+	enabled := func() bool {
+		req := testutil.NewJSONRequest(t, nil)
+		testutil.SetAuthContext(req, org.ID, user.ID)
+		require.NoError(t, app.GetSalesFeatures(req))
+		require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+		var out struct{ Data struct{ XProcess bool `json:"xprocess"` } }
+		require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &out))
+		return out.Data.XProcess
+	}
+	assert.False(t, enabled(), "no integration")
+
+	integ := models.XProcessIntegration{OrganizationID: org.ID, BaseURL: "https://x", APIKey: "k", IsActive: true}
+	require.NoError(t, app.DB.Create(&integ).Error)
+	assert.True(t, enabled())
+
+	require.NoError(t, app.DB.Model(&integ).Update("is_active", false).Error)
+	assert.False(t, enabled(), "an inactive integration counts as off")
+}

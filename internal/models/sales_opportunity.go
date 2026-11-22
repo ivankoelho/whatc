@@ -152,6 +152,11 @@ type SalesOpportunity struct {
 	RealizedValue     *float64            `gorm:"type:numeric" json:"realized_value,omitempty"`
 	RealizedQuantity  *float64            `gorm:"type:numeric(14,3)" json:"realized_quantity,omitempty"`
 
+	// The next thing to do about this lead (a call back, a quote to send) and when: what keeps a lead from going cold.
+	// Free to edit while the opportunity is open; a task in the past is "overdue" on the board.
+	NextTaskAt   *time.Time `json:"next_task_at,omitempty"`
+	NextTaskNote string     `gorm:"size:200" json:"next_task_note,omitempty"`
+
 	// Editable any time while status=aberta, in any stage — not itself a
 	// transition. Required before entering "direcionada" (spec §5).
 	Direcionamento *SalesDirecionamento `gorm:"size:20" json:"direcionamento,omitempty"`
@@ -184,8 +189,28 @@ type SalesOpportunity struct {
 	SLABreached   bool       `gorm:"default:false" json:"sla_breached"`
 	SLABreachedAt *time.Time `json:"sla_breached_at,omitempty"`
 
+	// CreatedByAI marks an opportunity the AI agent opened after qualifying the customer (as opposed to a person).
+	CreatedByAI bool `gorm:"column:created_by_ai;not null;default:false" json:"created_by_ai"`
+
 	Contact      *Contact `gorm:"foreignKey:ContactID" json:"contact,omitempty"`
 	AssignedUser *User    `gorm:"foreignKey:AssignedUserID" json:"assigned_user,omitempty"`
+
+	// Read-only context the board shows on the card, filled by the list and detail handlers (never stored here).
+	AdOrigin *OpportunityAdOrigin `gorm:"-" json:"ad_origin,omitempty"`
+	Meeting  *OpportunityMeeting  `gorm:"-" json:"meeting,omitempty"`
+}
+
+// OpportunityAdOrigin is the Meta ad that first brought the customer of an opportunity.
+type OpportunityAdOrigin struct {
+	Headline string `json:"headline,omitempty"`
+	SourceID string `json:"source_id,omitempty"`
+	Clicks   int    `json:"clicks"`
+}
+
+// OpportunityMeeting is the customer's next booked meeting (made by the AI agent in the organization's calendar).
+type OpportunityMeeting struct {
+	Start    time.Time `json:"start"`
+	Location string    `json:"location,omitempty"`
 }
 
 func (SalesOpportunity) TableName() string { return "sales_opportunities" }

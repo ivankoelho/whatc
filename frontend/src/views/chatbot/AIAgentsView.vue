@@ -19,8 +19,20 @@ import { Plus, Pencil, Trash2, Bot, AlertTriangle } from 'lucide-vue-next'
 
 const { t } = useI18n()
 
+// What an agent qualifies the customer on. Empty list = the original product qualification.
+interface QualField {
+  key: string
+  label: string
+  type: 'text' | 'number' | 'choice'
+  description: string
+  required: boolean
+  options: string[]
+  optionsText?: string // what is typed in the options box (comma separated); never sent
+}
+
 interface AIAgent {
   id: string
+  qualification_fields?: QualField[]
   name: string
   display_name?: string
   wait_seconds?: number
@@ -62,6 +74,7 @@ const DEFAULT_WAIT_SECONDS = 8
 const emptyForm = () => ({
   name: '', display_name: '', objective: '', instructions: '', company_info: '', tone: '', handoff_rules: '',
   is_enabled: false, whatsapp_accounts: [] as string[], wait_seconds: DEFAULT_WAIT_SECONDS,
+  qualification_fields: [] as QualField[],
 })
 const form = ref(emptyForm())
 
@@ -151,8 +164,42 @@ function openEdit(agent: AIAgent) {
     company_info: agent.company_info ?? '', tone: agent.tone ?? '', handoff_rules: agent.handoff_rules ?? '',
     is_enabled: agent.is_enabled, whatsapp_accounts: [...(agent.whatsapp_accounts ?? [])],
     wait_seconds: agent.wait_seconds ?? 0,
+    qualification_fields: (agent.qualification_fields ?? []).map(f => ({ ...f, description: f.description ?? '', options: [...(f.options ?? [])], optionsText: (f.options ?? []).join(', ') })),
   }
   dialogOpen.value = true
+}
+
+// --- qualification fields -------------------------------------------------------------------
+function addQualField() {
+  if (form.value.qualification_fields.length >= 12) return
+  form.value.qualification_fields.push({ key: '', label: '', type: 'text', description: '', required: false, options: [], optionsText: '' })
+}
+
+function removeQualField(i: number) {
+  form.value.qualification_fields.splice(i, 1)
+}
+
+// A stable machine key from the label (a-z, 0-9, _), kept when the field already has one.
+function slugKey(label: string, taken: Set<string>): string {
+  let base = label.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+  if (!/^[a-z]/.test(base)) base = `f_${base}`
+  base = base.slice(0, 26).replace(/_+$/, '') || 'campo'
+  let key = base
+  for (let n = 2; taken.has(key); n++) key = `${base}_${n}`
+  return key
+}
+
+// The list as the API takes it: keys filled in, options split, empty rows dropped.
+function qualPayload(): QualField[] {
+  const taken = new Set<string>()
+  return form.value.qualification_fields
+    .filter(f => f.label.trim() !== '')
+    .map(f => {
+      const key = f.key && !taken.has(f.key) ? f.key : slugKey(f.label, taken)
+      taken.add(key)
+      const options = f.type === 'choice' ? (f.optionsText ?? f.options.join(', ')).split(',').map(o => o.trim()).filter(Boolean) : []
+      return { key, label: f.label.trim(), type: f.type, description: f.description.trim(), required: f.required, options }
+    })
 }
 
 function toggleAccount(name: string, on: boolean) {
@@ -171,8 +218,9 @@ async function save() {
   form.value.wait_seconds = Math.min(60, Math.max(0, Math.floor(Number(form.value.wait_seconds) || 0)))
   isSubmitting.value = true
   try {
-    if (editing.value) await chatbotService.updateAIAgent(editing.value.id, form.value)
-    else await chatbotService.createAIAgent(form.value)
+    const body = { ...form.value, qualification_fields: qualPayload() }
+    if (editing.value) await chatbotService.updateAIAgent(editing.value.id, body)
+    else await chatbotService.createAIAgent(body)
     toast.success(t('aiAgents.saved'))
     dialogOpen.value = false
     await load()
@@ -365,6 +413,32 @@ const issueLabel = (i: Issue) => `${i.account}: ${t('aiAgents.issues.' + i.probl
         <div class="space-y-2">
           <Label>{{ $t('aiAgents.handoffRules') }}</Label>
           <Textarea v-model="form.handoff_rules" :rows="3" maxlength="4000" data-testid="field-handoff" />
+        </div>
+        <div class="space-y-2" data-testid="qualification-fields">
+          <Label>{{ $t('aiAgents.qualFields') }}</Label>
+          <p class="text-xs text-muted-foreground">{{ $t('aiAgents.qualFieldsHelp') }}</p>
+          <div v-for="(f, i) in form.qualification_fields" :key="i" class="space-y-2 rounded-lg border p-3" :data-testid="`qual-field-${i}`">
+            <div class="flex gap-2">
+              <Input v-model="f.label" maxlength="60" :placeholder="$t('aiAgents.qualLabel')" :data-testid="`qual-label-${i}`" />
+              <select v-model="f.type" class="h-9 rounded-md border bg-background px-2 text-sm" :aria-label="$t('aiAgents.qualType')" :data-testid="`qual-type-${i}`">
+                <option value="text">{{ $t('aiAgents.qualTypeText') }}</option>
+                <option value="number">{{ $t('aiAgents.qualTypeNumber') }}</option>
+                <option value="choice">{{ $t('aiAgents.qualTypeChoice') }}</option>
+              </select>
+              <Button type="button" variant="ghost" size="icon" :aria-label="$t('aiAgents.qualRemove')" :data-testid="`qual-remove-${i}`" @click="removeQualField(i)">
+                <Trash2 class="h-4 w-4" aria-hidden="true" />
+              </Button>
+            </div>
+            <Input v-if="f.type === 'choice'" v-model="f.optionsText" :placeholder="$t('aiAgents.qualOptions')" :data-testid="`qual-options-${i}`" />
+            <Input v-model="f.description" maxlength="200" :placeholder="$t('aiAgents.qualDescription')" />
+            <label class="flex items-center gap-2 text-sm">
+              <Checkbox :checked="f.required" @update:checked="(v: boolean | 'indeterminate') => (f.required = v === true)" />
+              {{ $t('aiAgents.qualRequired') }}
+            </label>
+          </div>
+          <Button type="button" variant="outline" size="sm" :disabled="form.qualification_fields.length >= 12" data-testid="qual-add" @click="addQualField">
+            <Plus class="mr-1.5 h-4 w-4" aria-hidden="true" />{{ $t('aiAgents.qualAdd') }}
+          </Button>
         </div>
         <div class="space-y-2">
           <Label>{{ $t('aiAgents.accounts') }}</Label>

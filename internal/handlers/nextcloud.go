@@ -36,7 +36,9 @@ const (
 var (
 	errNextcloudNotConfigured = &chatHTTPError{http.StatusConflict, "Nextcloud is not set up for this organization", "nextcloud_not_configured"}
 	errNextcloudNotConnected  = &chatHTTPError{http.StatusConflict, "Connect your Nextcloud account first", "nextcloud_not_connected"}
-	errNextcloudAuth          = &chatHTTPError{http.StatusUnauthorized, "Nextcloud did not accept the user or app password", "nextcloud_auth"}
+	// Not a 401: that status means "your Whatc session expired" to the web app, which would sign the person out of Whatc
+	// just because the password they typed for Nextcloud was refused.
+	errNextcloudAuth          = &chatHTTPError{http.StatusUnprocessableEntity, "Nextcloud did not accept the user or app password", "nextcloud_auth"}
 	errNextcloudUnreachable   = &chatHTTPError{http.StatusBadGateway, "Nextcloud could not be reached", "nextcloud_unreachable"}
 	errNextcloudBadURL        = &chatHTTPError{http.StatusBadRequest, "Use the https address of your Nextcloud", "nextcloud_bad_url"}
 	errNextcloudBadPath       = &chatHTTPError{http.StatusBadRequest, "Invalid path", "nextcloud_bad_path"}

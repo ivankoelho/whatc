@@ -21,8 +21,20 @@ export type ContactType = 'cliente' | 'fornecedor' | 'colaborador'
 export type ContactStatus = 'new' | 'in_progress' | 'resolved'
 export type ContactStatusFilter = 'all' | ContactStatus
 
+export interface AdOrigin {
+  source_id?: string
+  source_type?: string
+  source_url?: string
+  headline?: string
+  body?: string
+  /** how many times the customer came from an ad */
+  clicks: number
+}
+
 export interface Contact {
   id: string
+  /** the Meta ad that first brought this customer, when one did */
+  ad_origin?: AdOrigin
   phone_number: string
   name: string
   profile_name?: string
