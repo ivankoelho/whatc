@@ -3,6 +3,7 @@ package testutil
 import (
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 
@@ -34,7 +35,7 @@ func SetupTestDB(t *testing.T) *gorm.DB {
 	// Initialize database and run migrations only once
 	testDBOnce.Do(func() {
 		var err error
-		testDB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
+		testDB, err = gorm.Open(postgres.Open(withoutPlanCache(dsn)), &gorm.Config{
 			Logger: logger.Default.LogMode(logger.Silent),
 		})
 		if err != nil {
@@ -72,6 +73,22 @@ func SetupTestDB(t *testing.T) *gorm.DB {
 
 	// Return a new session for this test to avoid connection conflicts
 	return testDB.Session(&gorm.Session{})
+}
+
+// withoutPlanCache asks the driver to describe every statement instead of keeping a prepared one per connection.
+// Some tests change the schema of a table on the shared test database (a legacy column added to chatbot_flows,
+// for instance); a connection that still held the old plan then fails its next query on that table with
+// "cached plan must not change result type", in whichever unrelated test happens to run next. Production never
+// meets this: migrations run before the server takes connections.
+func withoutPlanCache(dsn string) string {
+	if strings.Contains(dsn, "default_query_exec_mode=") {
+		return dsn
+	}
+	sep := "?"
+	if strings.Contains(dsn, "?") {
+		sep = "&"
+	}
+	return dsn + sep + "default_query_exec_mode=describe_exec"
 }
 
 // SetupTestDBWithCleanup is like SetupTestDB but allows controlling cleanup behavior.
