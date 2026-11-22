@@ -72,8 +72,11 @@ func (a *App) startAITyping(account *models.WhatsAppAccount, contactID uuid.UUID
 		}
 	}
 	waAccount := a.toWhatsAppAccount(account)
+	// The timings are read once, here: the loop below outlives this call, and a test that shortens them
+	// restores them at its end while the loop may still be running.
+	callTimeout, checkEvery, renewEvery := aiTypingCallTimeout, aiTypingCheckEvery, aiTypingRenewEvery
 	send := func(first bool) {
-		callCtx, cancelCall := context.WithTimeout(ctx, aiTypingCallTimeout)
+		callCtx, cancelCall := context.WithTimeout(ctx, callTimeout)
 		defer cancelCall()
 		if ctx.Err() != nil {
 			return
@@ -91,7 +94,7 @@ func (a *App) startAITyping(account *models.WhatsAppAccount, contactID uuid.UUID
 	go func() {
 		send(true)
 		last := time.Now()
-		tick := time.NewTicker(aiTypingCheckEvery)
+		tick := time.NewTicker(checkEvery)
 		defer tick.Stop()
 		for {
 			select {
@@ -105,7 +108,7 @@ func (a *App) startAITyping(account *models.WhatsAppAccount, contactID uuid.UUID
 					cancel()
 					return
 				}
-				if time.Since(last) >= aiTypingRenewEvery {
+				if time.Since(last) >= renewEvery {
 					send(false)
 					last = time.Now()
 				}
