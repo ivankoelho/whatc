@@ -660,7 +660,7 @@ func validCalendarEmbedURL(raw, base string, allowPrivate bool) (string, bool) {
 	if err != nil || berr != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 		return "", false
 	}
-	if u.Scheme != "https" && !(allowPrivate && u.Scheme == "http") {
+	if u.Scheme != "https" && (!allowPrivate || u.Scheme != "http") {
 		return "", false
 	}
 	if !strings.EqualFold(u.Host, b.Host) || u.Scheme != b.Scheme {
