@@ -190,6 +190,10 @@ export interface XProcessIntegrationStatus {
   is_configured: boolean
 }
 
+export const xprocessEnabledService = {
+  get: () => api.get<{ data: { enabled: boolean } }>('/sales-xprocess-enabled'),
+}
+
 export const xprocessIntegrationService = {
   get: () => api.get<{ data: XProcessIntegrationStatus }>('/xprocess-integration'),
   upsert: (payload: { base_url: string; api_key: string }) =>

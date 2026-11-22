@@ -5,7 +5,8 @@ import { createI18n } from 'vue-i18n'
 import en from '@/i18n/locales/en.json'
 
 const svc = vi.hoisted(() => ({ updateDetails: vi.fn(), changeDirecionamento: vi.fn(), listEvents: vi.fn() }))
-vi.mock('@/services/api', () => ({ salesOpportunitiesService: svc }))
+const x2 = vi.hoisted(() => ({ get: vi.fn() }))
+vi.mock('@/services/api', () => ({ salesOpportunitiesService: svc, xprocessEnabledService: x2 }))
 const toast = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }))
 vi.mock('vue-sonner', () => ({ toast }))
 
@@ -25,7 +26,7 @@ const mountIt = (opp: Record<string, unknown>, open = false) => mount(SalesOppor
     plugins: [i18n],
     stubs: {
       Dialog: { props: ['open'], template: '<div v-if="open"><slot /></div>' }, DialogContent: pass, DialogHeader: pass, DialogTitle: pass, DialogDescription: pass,
-      RouterLink: { template: '<a><slot /></a>' }, XProcessLinkForm: true,
+      RouterLink: { template: '<a><slot /></a>' }, XProcessLinkForm: { template: '<div data-testid="x2-form" />' },
       MoneyInput: { props: ['modelValue'], emits: ['update:modelValue'], template: '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />' },
       Select: { template: '<div><slot /></div>' }, SelectTrigger: true, SelectValue: true, SelectContent: true, SelectItem: true,
     },
@@ -36,6 +37,8 @@ const openIt = async (w: ReturnType<typeof mountIt>) => { await w.setProps({ ope
 describe('SalesOpportunityDialog', () => {
   beforeEach(() => {
     Object.values(svc).forEach(f => { f.mockReset() })
+    x2.get.mockReset()
+    x2.get.mockResolvedValue({ data: { data: { enabled: true } } })
     toast.error.mockReset()
     toast.success.mockReset()
     svc.listEvents.mockReturnValue(ok({ events: [{ id: 'e1', type: 'opened', created_at: '2026-11-22T10:00:00Z', source: 'system' }, { id: 'e2', type: 'stage_changed', created_at: '2026-11-22T11:00:00Z', source: 'manual' }] }))
@@ -119,6 +122,18 @@ describe('SalesOpportunityDialog', () => {
     await w.find('[data-testid="dialog-lose"]').trigger('click')
     expect(w.emitted('convert')).toHaveLength(1)
     expect(w.emitted('lose')).toHaveLength(1)
+  })
+
+  it('hides the X2 order field when the organization has no X2 integration', async () => {
+    let w = mountIt(base())
+    await openIt(w)
+    expect(w.find('[data-testid="x2-form"]').exists()).toBe(true)
+
+    x2.get.mockResolvedValue({ data: { data: { enabled: false } } })
+    w = mountIt(base())
+    await openIt(w)
+    expect(w.find('[data-testid="x2-form"]').exists()).toBe(false)
+    expect(w.find('[data-testid="dialog-direcionamento"]').exists()).toBe(true)
   })
 
   it('does not break when the history cannot be loaded', async () => {

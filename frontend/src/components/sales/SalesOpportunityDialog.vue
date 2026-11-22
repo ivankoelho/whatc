@@ -12,7 +12,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { salesOpportunitiesService } from '@/services/api'
+import { salesOpportunitiesService, xprocessEnabledService } from '@/services/api'
 import type { SalesOpportunity, SalesOpportunityEvent, SalesDirecionamento } from '@/services/api'
 import { SALES_UNITS, parseDecimalInput } from '@/lib/salesUnits'
 import { formatMoneyInput } from '@/lib/currency'
@@ -32,6 +32,11 @@ const emit = defineEmits<{
 }>()
 
 const { t, locale } = useI18n()
+
+// The X2 order only exists for organizations that connected X2 (a client-profile integration). Asked once per page load;
+// until it answers, or if it fails, the X2 field stays hidden.
+const xprocessEnabled = ref(false)
+xprocessEnabledService.get().then(r => { xprocessEnabled.value = !!r.data.data.enabled }).catch(() => {})
 
 const NONE = 'none' // a Select cannot hold an empty value
 const isOpen = computed(() => props.opportunity.status === 'aberta')
@@ -260,7 +265,7 @@ function resolve(kind: 'convert' | 'lose') {
           </div>
         </div>
 
-        <div v-if="isOpen" class="grid items-stretch gap-3 sm:grid-cols-2">
+        <div v-if="isOpen" class="grid items-stretch gap-3" :class="xprocessEnabled ? 'sm:grid-cols-2' : ''">
           <div class="flex items-center justify-between gap-3 rounded-lg border p-3">
             <Label class="whitespace-nowrap text-sm font-medium">{{ $t('sales.direcionamento') }}</Label>
             <Select :model-value="opportunity.direcionamento" :disabled="changingDirecionamento" @update:model-value="onDirecionamentoChange">
@@ -270,11 +275,11 @@ function resolve(kind: 'convert' | 'lose') {
               </SelectContent>
             </Select>
           </div>
-          <div class="h-full">
+          <div v-if="xprocessEnabled" class="h-full">
             <XProcessLinkForm class="h-full" :opportunity-id="opportunity.id" :editable="isOpen" />
           </div>
         </div>
-        <XProcessLinkForm v-else :opportunity-id="opportunity.id" :editable="false" />
+        <XProcessLinkForm v-else-if="xprocessEnabled" :opportunity-id="opportunity.id" :editable="false" />
 
         <!-- Who and when -->
         <dl class="grid grid-cols-2 gap-x-4 gap-y-3 rounded-lg bg-muted/40 p-3 text-sm sm:grid-cols-4" data-testid="dialog-facts">

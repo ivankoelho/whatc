@@ -36,6 +36,19 @@ func (a *App) GetXProcessIntegration(r *fastglue.Request) error {
 	})
 }
 
+// GetXProcessEnabled tells the sales screens whether this organization has an active X2 integration, so they can hide
+// the X2 order fields when it does not. It needs only sales read access (the integration settings are admin-only) and
+// reveals nothing but the yes/no.
+func (a *App) GetXProcessEnabled(r *fastglue.Request) error {
+	orgID, _, err := a.requireAuth(r, models.ResourceSalesOpportunities, models.ActionRead)
+	if err != nil {
+		return nil
+	}
+	var n int64
+	a.DB.Model(&models.XProcessIntegration{}).Where("organization_id = ? AND is_active = ?", orgID, true).Count(&n)
+	return r.SendEnvelope(map[string]bool{"enabled": n > 0})
+}
+
 type upsertXProcessIntegrationRequest struct {
 	BaseURL string `json:"base_url"`
 	APIKey  string `json:"api_key"`
