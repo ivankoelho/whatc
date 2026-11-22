@@ -270,8 +270,8 @@ function resolve(kind: 'convert' | 'lose') {
               </SelectContent>
             </Select>
           </div>
-          <div>
-            <XProcessLinkForm :opportunity-id="opportunity.id" :editable="isOpen" />
+          <div class="h-full">
+            <XProcessLinkForm class="h-full" :opportunity-id="opportunity.id" :editable="isOpen" />
           </div>
         </div>
         <XProcessLinkForm v-else :opportunity-id="opportunity.id" :editable="false" />
