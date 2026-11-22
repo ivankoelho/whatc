@@ -15,7 +15,7 @@ import { PageHeader, DataTable, ErrorState, DeleteConfirmDialog, DateRangePicker
 import { Plus, TrendingUp, Briefcase, Target, CheckCircle2, XCircle, Percent, AlertTriangle, Trash2, Pencil, Columns3, List, Store, UserRound, X, LayoutDashboard, CalendarDays } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { useDateRange } from '@/composables/useDateRange'
-import { salesOpportunitiesService } from '@/services/api'
+import { salesOpportunitiesService, salesFeaturesService } from '@/services/api'
 import type { SalesOpportunity, SalesScopeInfo, SalesSummary } from '@/services/api'
 import { getErrorMessage } from '@/lib/api-utils'
 import { formatDate } from '@/lib/utils'
@@ -70,14 +70,15 @@ const unitFilter = ref('all')
 const sellerFilter = ref('all')
 // Quick filters of the board: what the AI agent and the ads brought. Each one narrows the list, the board and
 // the indicators the same way (the server applies them to all three).
-type QuickKey = 'has_meeting' | 'from_ad' | 'ai' | 'unassigned'
+type QuickKey = 'has_meeting' | 'from_ad' | 'ai' | 'unassigned' | 'task_overdue'
 const QUICK_FILTERS: { key: QuickKey; labelKey: string }[] = [
   { key: 'has_meeting', labelKey: 'sales.quickHasMeeting' },
   { key: 'from_ad', labelKey: 'sales.quickFromAd' },
   { key: 'ai', labelKey: 'sales.quickAI' },
   { key: 'unassigned', labelKey: 'sales.quickUnassigned' },
+  { key: 'task_overdue', labelKey: 'sales.quickTaskOverdue' },
 ]
-const quick = ref<Record<QuickKey, boolean>>({ has_meeting: false, from_ad: false, ai: false, unassigned: false })
+const quick = ref<Record<QuickKey, boolean>>({ has_meeting: false, from_ad: false, ai: false, unassigned: false, task_overdue: false })
 const filterParams = computed(() => {
   const p: Record<string, string> = {}
   if (sellerFilter.value !== 'all') p.assigned_user_id = sellerFilter.value
@@ -168,6 +169,10 @@ const statsLoading = computed(() => summary.value === null)
 
 // Painel KPI tiles. Tones are semantic (sky = volume, amber = early stage,
 // emerald = won, rose = lost, teal = rate, orange = needs action).
+// The "without direcionamento" tile only exists for organizations that use direcionamento.
+const usesDirecionamento = ref(true)
+salesFeaturesService.get().then(r => { usesDirecionamento.value = !!r.data.data.direcionamento }).catch(() => {})
+
 const kpis = computed(() => [
   { key: 'total', label: t('sales.statAttendances'), value: String(stats.value.total), icon: Briefcase, tone: 'bg-sky-500/15 text-sky-600 dark:text-sky-300' },
   { key: 'potencial', label: t('sales.statPotential'), value: String(stats.value.potencial), icon: Target, tone: 'bg-amber-500/15 text-amber-600 dark:text-amber-300' },
@@ -175,7 +180,7 @@ const kpis = computed(() => [
   { key: 'perdida', label: t('sales.statLost'), value: String(stats.value.perdida), icon: XCircle, tone: 'bg-rose-500/15 text-rose-600 dark:text-rose-300' },
   { key: 'conversion', label: t('sales.statConversion'), value: `${stats.value.conversionRate.toFixed(1)}%`, icon: Percent, tone: 'bg-teal-500/15 text-teal-600 dark:text-teal-300' },
   { key: 'semDirecionamento', label: t('sales.statNoDirecionamento'), value: String(stats.value.semDirecionamento), icon: AlertTriangle, tone: 'bg-orange-500/15 text-orange-600 dark:text-orange-300' },
-])
+].filter(k => k.key !== 'semDirecionamento' || usesDirecionamento.value))
 
 // Value distribution: 3 slices, so a donut fits; the legend beside it is a
 // table with value and share (the accessible view, and no need to hover).

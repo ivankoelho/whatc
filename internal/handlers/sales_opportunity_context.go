@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/zerodha/fastglue"
 )
 
 // enrichOpportunities fills what the board card shows besides the opportunity itself: the Meta ad that brought the
@@ -55,4 +56,12 @@ func (a *App) enrichOpportunities(orgID uuid.UUID, opps []models.SalesOpportunit
 		opps[i].AdOrigin = origins[opps[i].ContactID]
 		opps[i].Meeting = meetings[opps[i].ContactID]
 	}
+}
+
+// sendOpportunity answers a write with the opportunity as the board shows it (ad origin and booked meeting included),
+// so the card does not lose those chips when the response replaces it.
+func (a *App) sendOpportunity(r *fastglue.Request, orgID uuid.UUID, opp *models.SalesOpportunity) error {
+	one := []models.SalesOpportunity{*opp}
+	a.enrichOpportunities(orgID, one)
+	return r.SendEnvelope(one[0])
 }

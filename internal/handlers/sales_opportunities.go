@@ -436,7 +436,7 @@ func (a *App) ChangeSalesOpportunityStage(r *fastglue.Request) error {
 	// left the stage, and log a spurious "X → X" stage_changed event. Mirrors
 	// ChangeOccurrenceStage's identical guard in occurrences.go.
 	if newStage == opp.Stage {
-		return r.SendEnvelope(opp)
+		return a.sendOpportunity(r, orgID, opp)
 	}
 
 	fromStage := opp.Stage
@@ -467,7 +467,7 @@ func (a *App) ChangeSalesOpportunityStage(r *fastglue.Request) error {
 	}
 
 	a.DB.First(opp, "id = ?", opp.ID)
-	return r.SendEnvelope(opp)
+	return a.sendOpportunity(r, orgID, opp)
 }
 
 type changeSalesOpportunityDirecionamentoRequest struct {
@@ -503,7 +503,7 @@ func (a *App) ChangeSalesOpportunityDirecionamento(r *fastglue.Request) error {
 	// guard it would write another direcionamento_changed event every time,
 	// same class of issue as ChangeSalesOpportunityStage's stage guard above.
 	if opp.Direcionamento != nil && *opp.Direcionamento == direcionamento {
-		return r.SendEnvelope(opp)
+		return a.sendOpportunity(r, orgID, opp)
 	}
 
 	// Finding 8 (TOCTOU): re-check status=aberta atomically, same reasoning
@@ -525,7 +525,7 @@ func (a *App) ChangeSalesOpportunityDirecionamento(r *fastglue.Request) error {
 	}
 
 	a.DB.First(opp, "id = ?", opp.ID)
-	return r.SendEnvelope(opp)
+	return a.sendOpportunity(r, orgID, opp)
 }
 
 type updateSalesOpportunityDetailsRequest struct {
@@ -676,7 +676,7 @@ func (a *App) UpdateSalesOpportunityDetails(r *fastglue.Request) error {
 		updates["realized_quantity"] = *req.RealizedQuantity
 	}
 	if len(updates) == 0 {
-		return r.SendEnvelope(opp)
+		return a.sendOpportunity(r, orgID, opp)
 	}
 
 	// Same TOCTOU guard as the other mutating handlers (finding 8): re-check
@@ -694,7 +694,7 @@ func (a *App) UpdateSalesOpportunityDetails(r *fastglue.Request) error {
 	}
 
 	a.DB.First(opp, "id = ?", opp.ID)
-	return r.SendEnvelope(opp)
+	return a.sendOpportunity(r, orgID, opp)
 }
 
 type convertSalesOpportunityRequest struct {
@@ -766,7 +766,7 @@ func (a *App) ConvertSalesOpportunity(r *fastglue.Request) error {
 	}
 
 	a.DB.First(opp, "id = ?", opp.ID)
-	return r.SendEnvelope(opp)
+	return a.sendOpportunity(r, orgID, opp)
 }
 
 type loseSalesOpportunityRequest struct {
@@ -823,7 +823,7 @@ func (a *App) LoseSalesOpportunity(r *fastglue.Request) error {
 	}
 
 	a.DB.First(opp, "id = ?", opp.ID)
-	return r.SendEnvelope(opp)
+	return a.sendOpportunity(r, orgID, opp)
 }
 
 // ListSalesOpportunityEvents returns an opportunity's event timeline, oldest first.

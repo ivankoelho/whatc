@@ -190,8 +190,10 @@ export interface XProcessIntegrationStatus {
   is_configured: boolean
 }
 
-export const xprocessEnabledService = {
-  get: () => api.get<{ data: { enabled: boolean } }>('/sales-xprocess-enabled'),
+// Which parts of the sales screens this organization uses (the X2 order needs the integration; direcionamento is a
+// retail funnel rule that can be switched off in Settings).
+export const salesFeaturesService = {
+  get: () => api.get<{ data: { xprocess: boolean; direcionamento: boolean } }>('/sales-features'),
 }
 
 export const xprocessIntegrationService = {
@@ -809,6 +811,7 @@ export const organizationService = {
   getSettings: () => api.get('/org/settings'),
   updateSettings: (data: {
     mask_phone_numbers?: boolean
+    sales_direcionamento_enabled?: boolean
     timezone?: string
     date_format?: string
     name?: string
@@ -1961,6 +1964,8 @@ export interface SalesOpportunity {
   interest?: string
   estimated_value?: number
   estimated_quantity?: number
+  next_task_at?: string
+  next_task_note?: string
   xprocess_num_pedido?: string
   xprocess_documento?: string
   unit_of_measure?: 'UN' | 'M' | 'M2' | 'KG' | 'PCT' | 'CX'
@@ -2044,7 +2049,7 @@ export const salesOpportunitiesService = {
     api.put<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/stage`, { stage }),
   changeDirecionamento: (id: string, direcionamento: SalesDirecionamento) =>
     api.put<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/direcionamento`, { direcionamento }),
-  updateDetails: (id: string, details: { interest?: string; estimated_value?: number; estimated_quantity?: number; unit_of_measure?: string; realized_value?: number; realized_quantity?: number }) =>
+  updateDetails: (id: string, details: { interest?: string; estimated_value?: number; estimated_quantity?: number; unit_of_measure?: string; realized_value?: number; realized_quantity?: number; next_task_at?: string; next_task_note?: string }) =>
     api.put<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/details`, details),
   convert: (id: string, realized?: { realized_value?: number; realized_quantity?: number }) =>
     api.post<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/convert`, realized),

@@ -6,7 +6,7 @@ import en from '@/i18n/locales/en.json'
 
 const svc = vi.hoisted(() => ({ updateDetails: vi.fn(), changeDirecionamento: vi.fn(), listEvents: vi.fn() }))
 const x2 = vi.hoisted(() => ({ get: vi.fn() }))
-vi.mock('@/services/api', () => ({ salesOpportunitiesService: svc, xprocessEnabledService: x2 }))
+vi.mock('@/services/api', () => ({ salesOpportunitiesService: svc, salesFeaturesService: x2 }))
 const toast = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }))
 vi.mock('vue-sonner', () => ({ toast }))
 
@@ -38,7 +38,7 @@ describe('SalesOpportunityDialog', () => {
   beforeEach(() => {
     Object.values(svc).forEach(f => { f.mockReset() })
     x2.get.mockReset()
-    x2.get.mockResolvedValue({ data: { data: { enabled: true } } })
+    x2.get.mockResolvedValue({ data: { data: { xprocess: true, direcionamento: true } } })
     toast.error.mockReset()
     toast.success.mockReset()
     svc.listEvents.mockReturnValue(ok({ events: [{ id: 'e1', type: 'opened', created_at: '2026-11-22T10:00:00Z', source: 'system' }, { id: 'e2', type: 'stage_changed', created_at: '2026-11-22T11:00:00Z', source: 'manual' }] }))
@@ -129,11 +129,49 @@ describe('SalesOpportunityDialog', () => {
     await openIt(w)
     expect(w.find('[data-testid="x2-form"]').exists()).toBe(true)
 
-    x2.get.mockResolvedValue({ data: { data: { enabled: false } } })
+    x2.get.mockResolvedValue({ data: { data: { xprocess: false, direcionamento: true } } })
     w = mountIt(base())
     await openIt(w)
     expect(w.find('[data-testid="x2-form"]').exists()).toBe(false)
     expect(w.find('[data-testid="dialog-direcionamento"]').exists()).toBe(true)
+  })
+
+  it('hides direcionamento for an organization that turned it off, and keeps the rest', async () => {
+    x2.get.mockResolvedValue({ data: { data: { xprocess: true, direcionamento: false } } })
+    const w = mountIt(base())
+    await openIt(w)
+    expect(w.find('[data-testid="dialog-direcionamento"]').exists()).toBe(false)
+    expect(w.find('[data-testid="x2-form"]').exists()).toBe(true)
+    expect(w.find('[data-testid="dialog-task-at"]').exists()).toBe(true)
+  })
+
+  it('lets an organization without direcionamento convert or lose from any open stage', async () => {
+    x2.get.mockResolvedValue({ data: { data: { xprocess: false, direcionamento: false } } })
+    const w = mountIt(base())
+    await openIt(w)
+    expect(w.find('[data-testid="dialog-convert"]').exists()).toBe(true)
+    expect(w.find('[data-testid="dialog-lose"]').exists()).toBe(true)
+  })
+
+  it('schedules the next task, edits its note and clears it', async () => {
+    const w = mountIt(base())
+    await openIt(w)
+    await w.find('[data-testid="dialog-task-at"]').setValue('2030-05-04T10:30')
+    await w.find('[data-testid="dialog-task-note"]').setValue('Ligar com o orçamento')
+    await w.find('[data-testid="dialog-save"]').trigger('click')
+    await flushPromises()
+    const sent = svc.updateDetails.mock.calls[0][1] as Record<string, string>
+    expect(new Date(sent.next_task_at).getTime()).toBe(new Date('2030-05-04T10:30').getTime())
+    expect(sent.next_task_note).toBe('Ligar com o orçamento')
+
+    svc.updateDetails.mockClear()
+    const at = new Date('2030-05-04T10:30').toISOString()
+    const w2 = mountIt(base({ next_task_at: at, next_task_note: 'Ligar' }))
+    await openIt(w2)
+    await w2.find('[data-testid="dialog-task-at"]').setValue('')
+    await w2.find('[data-testid="dialog-save"]').trigger('click')
+    await flushPromises()
+    expect(svc.updateDetails).toHaveBeenCalledWith('s1', { next_task_at: '' })
   })
 
   it('does not break when the history cannot be loaded', async () => {

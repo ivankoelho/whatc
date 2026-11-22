@@ -16,7 +16,7 @@ import { byOpenedAtDesc, cardOrder, placePreview } from '@/lib/board-order'
 
 // Manual filters from the sales screen (seller / store). The backend already
 // scopes every request to what the user may see (own / team / all).
-type QuickFilters = { ai?: string; from_ad?: string; has_meeting?: string; unassigned?: string }
+type QuickFilters = { ai?: string; from_ad?: string; has_meeting?: string; unassigned?: string; task_overdue?: string }
 const props = defineProps<{ filters?: { assigned_user_id?: string; unit_id?: string } & QuickFilters }>()
 
 const emit = defineEmits<{
@@ -79,7 +79,7 @@ function paramsFor(key: ColumnKey, offset: number): Record<string, string> {
   const params: Record<string, string> = { limit: String(PAGE_SIZE), offset: String(offset) }
   if (props.filters?.assigned_user_id) params.assigned_user_id = props.filters.assigned_user_id
   if (props.filters?.unit_id) params.unit_id = props.filters.unit_id
-  for (const k of ['ai', 'from_ad', 'has_meeting', 'unassigned'] as const) {
+  for (const k of ['ai', 'from_ad', 'has_meeting', 'unassigned', 'task_overdue'] as const) {
     if (props.filters?.[k] === 'true') params[k] = 'true'
   }
   if (key === 'convertida' || key === 'perdida') {
@@ -241,7 +241,7 @@ function onDialogDirecionamento(updated: SalesOpportunity) {
 
 onMounted(loadAll)
 watch(() => [props.filters?.assigned_user_id, props.filters?.unit_id, props.filters?.ai, props.filters?.from_ad,
-  props.filters?.has_meeting, props.filters?.unassigned], loadAll)
+  props.filters?.has_meeting, props.filters?.unassigned, props.filters?.task_overdue], loadAll)
 
 // How many cards of a column have their meeting today (of the cards loaded: a hint, not a report).
 function meetingsToday(col: ColumnState): number {

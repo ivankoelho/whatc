@@ -94,3 +94,21 @@ func TestStage_DirecionamentoNotRequiredWhenTheOrganizationTurnedItOff(t *testin
 		Update("settings", models.JSONB{"sales_direcionamento_enabled": false}).Error)
 	assert.Equal(t, fasthttp.StatusOK, move())
 }
+
+// The board replaces a card with what a write returns: the meeting and ad chips must survive that.
+func TestDetailsResponseKeepsTheBoardContext(t *testing.T) {
+	e := newNextTaskEnv(t)
+	start := time.Now().Add(72 * time.Hour)
+	var opp models.SalesOpportunity
+	require.NoError(t, e.app.DB.First(&opp, "id = ?", e.opp.ID).Error)
+	require.NoError(t, e.app.DB.Create(&models.AIAppointmentOffer{
+		OrganizationID: e.orgID, ContactID: opp.ContactID, Status: models.AIAppointmentBooked, BookedStart: &start,
+	}).Error)
+
+	req := testutil.NewJSONRequest(t, map[string]any{"next_task_note": "x", "next_task_at": time.Now().Add(time.Hour).Format(time.RFC3339)})
+	testutil.SetAuthContext(req, e.orgID, e.user)
+	req.RequestCtx.SetUserValue("id", e.opp.ID.String())
+	require.NoError(t, e.app.UpdateSalesOpportunityDetails(req))
+	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+	assert.Contains(t, string(testutil.GetResponseBody(req)), `"meeting"`)
+}

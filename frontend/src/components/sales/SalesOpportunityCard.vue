@@ -4,8 +4,8 @@ import { useI18n } from 'vue-i18n'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import type { SalesOpportunity } from '@/services/api'
 import { formatCurrency } from '@/lib/currency'
-import { getInitials, getAvatarGradient, formatDate } from '@/lib/utils'
-import { MessageCircle, AlertTriangle, Megaphone, CalendarClock, Sparkles } from 'lucide-vue-next'
+import { getInitials, getAvatarGradient } from '@/lib/utils'
+import { MessageCircle, AlertTriangle, Megaphone, CalendarClock, Sparkles, AlarmClock } from 'lucide-vue-next'
 
 // A compact, rectangular card: who it is, what they want, when the meeting is and where they came from. Everything
 // else (editing, the X2 order, direcionamento, history, actions) lives in the popup that opens on click.
@@ -17,10 +17,6 @@ const { locale } = useI18n()
 const contactName = computed(() =>
   props.opportunity.contact?.profile_name || props.opportunity.contact?.phone_number || props.opportunity.contact_id)
 const sellerName = computed(() => props.opportunity.assigned_user?.full_name || '')
-const openedAt = computed(() => {
-  const d = new Date(props.opportunity.opened_at)
-  return Number.isNaN(d.getTime()) ? '' : formatDate(d)
-})
 
 // The meeting the customer booked: "ter., 24/11 09:00". Green when it is today.
 const meetingWhen = computed(() => {
@@ -54,6 +50,19 @@ const facts = computed(() => {
 const plainSummary = computed(() => {
   if (facts.value.length) return ''
   return (props.opportunity.interest ?? '').split('\n').map(l => l.trim()).filter(l => l && !/^qualifica[cç][aã]o/i.test(l)).slice(0, 2).join(' ')
+})
+// The next task: red once it is in the past, amber today, quiet when it is later. Only an open opportunity has one.
+const task = computed(() => {
+  const o = props.opportunity
+  if (!o.next_task_at || o.status !== 'aberta') return null
+  const d = new Date(o.next_task_at)
+  if (Number.isNaN(d.getTime())) return null
+  const today = d.toDateString() === new Date().toDateString()
+  const overdue = d.getTime() < Date.now()
+  const label = today
+    ? d.toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleDateString(locale.value, { day: '2-digit', month: '2-digit' })
+  return { label, overdue, today }
 })
 const hasValue = computed(() => props.opportunity.estimated_value != null && props.opportunity.estimated_value > 0)
 </script>
@@ -125,9 +134,15 @@ const hasValue = computed(() => props.opportunity.estimated_value != null && pro
         :title="`${$t('sales.adOriginTitle')}: ${opportunity.ad_origin.headline || $t('sales.adOriginUnnamed')}`"
         class="inline-flex shrink-0 items-center rounded-md bg-amber-500/15 p-1 text-amber-800 dark:text-amber-300"
       ><Megaphone class="h-3 w-3" aria-hidden="true" /></span>
+      <span
+        v-if="task"
+        data-testid="sales-opportunity-task"
+        :title="[task.overdue ? $t('sales.taskOverdue') : $t('sales.nextTask'), opportunity.next_task_note].filter(Boolean).join(': ')"
+        class="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 font-medium"
+        :class="task.overdue ? 'bg-red-500/15 text-red-700 dark:text-red-300' : task.today ? 'bg-amber-500/20 text-amber-800 dark:text-amber-300' : 'bg-muted text-muted-foreground'"
+      ><AlarmClock class="h-3 w-3" aria-hidden="true" />{{ task.label }}</span>
       <span v-if="hasValue" data-testid="sales-opportunity-value" class="truncate font-semibold text-foreground">{{ formatCurrency(opportunity.estimated_value) }}</span>
       <span class="ml-auto flex shrink-0 items-center gap-1.5 text-muted-foreground">
-        <span v-if="openedAt">{{ openedAt }}</span>
         <Avatar class="h-5 w-5" :title="sellerName || $t('sales.noSeller')">
           <AvatarFallback :class="sellerName ? 'bg-gradient-to-br text-[9px] text-white ' + getAvatarGradient(sellerName) : 'bg-muted text-[9px]'">
             {{ sellerName ? getInitials(sellerName) : '?' }}

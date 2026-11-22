@@ -12,7 +12,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { salesOpportunitiesService, xprocessEnabledService } from '@/services/api'
+import { salesOpportunitiesService, salesFeaturesService } from '@/services/api'
 import type { SalesOpportunity, SalesOpportunityEvent, SalesDirecionamento } from '@/services/api'
 import { SALES_UNITS, parseDecimalInput } from '@/lib/salesUnits'
 import { formatMoneyInput } from '@/lib/currency'
@@ -35,8 +35,13 @@ const { t, locale } = useI18n()
 
 // The X2 order only exists for organizations that connected X2 (a client-profile integration). Asked once per page load;
 // until it answers, or if it fails, the X2 field stays hidden.
+// Direcionamento (visit or WhatsApp) is a retail rule the organization can turn off in Settings.
 const xprocessEnabled = ref(false)
-xprocessEnabledService.get().then(r => { xprocessEnabled.value = !!r.data.data.enabled }).catch(() => {})
+const direcionamentoEnabled = ref(false)
+salesFeaturesService.get().then(r => {
+  xprocessEnabled.value = !!r.data.data.xprocess
+  direcionamentoEnabled.value = !!r.data.data.direcionamento
+}).catch(() => {})
 
 const NONE = 'none' // a Select cannot hold an empty value
 const isOpen = computed(() => props.opportunity.status === 'aberta')
@@ -58,13 +63,26 @@ const estimatedValue = ref('')
 const unit = ref<string>(NONE)
 const realizedValue = ref('')
 const realizedQuantity = ref('')
+// The next task: a date/time (the value of a datetime-local input, in the viewer's zone) and a short note.
+const taskAt = ref('')
+const taskNote = ref('')
 const saving = ref(false)
 
 const events = ref<SalesOpportunityEvent[]>([])
 const eventsLoading = ref(false)
 
+function toLocalInput(iso?: string): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
 function fill() {
   const o = props.opportunity
+  taskAt.value = toLocalInput(o.next_task_at)
+  taskNote.value = o.next_task_note ?? ''
   interest.value = o.interest ?? ''
   estimatedQuantity.value = o.estimated_quantity != null ? String(o.estimated_quantity) : ''
   estimatedValue.value = formatMoneyInput(o.estimated_value)
@@ -97,6 +115,13 @@ async function save() {
   const o = props.opportunity
   const details: Record<string, unknown> = {}
   if (interest.value !== (o.interest ?? '') && !isConverted.value) details.interest = interest.value
+
+  if (isOpen.value) {
+    if (taskAt.value !== toLocalInput(o.next_task_at)) {
+      details.next_task_at = taskAt.value ? new Date(taskAt.value).toISOString() : ''
+    }
+    if (taskAt.value && taskNote.value.trim() !== (o.next_task_note ?? '')) details.next_task_note = taskNote.value.trim()
+  }
 
   if (isConverted.value) {
     const rv = parseDecimalInput(realizedValue.value)
@@ -164,7 +189,8 @@ function eventLabel(e: SalesOpportunityEvent): string {
   const text = t(key)
   return text === key ? e.type : text
 }
-const canResolve = computed(() => isOpen.value && props.opportunity.stage === 'direcionada')
+// With direcionamento in use, a deal is closed from the Direcionada stage; without it there is no such stage to wait for.
+const canResolve = computed(() => isOpen.value && (props.opportunity.stage === 'direcionada' || !direcionamentoEnabled.value))
 function resolve(kind: 'convert' | 'lose') {
   emit('update:open', false)
   if (kind === 'convert') emit('convert', props.opportunity)
@@ -232,6 +258,18 @@ function resolve(kind: 'convert' | 'lose') {
           />
         </div>
 
+        <!-- Next task: what keeps the lead from going cold -->
+        <div v-if="isOpen" class="grid gap-3 sm:grid-cols-[13rem_minmax(0,1fr)]">
+          <div class="space-y-1.5">
+            <Label for="sales-dialog-task-at">{{ $t('sales.nextTask') }}</Label>
+            <Input id="sales-dialog-task-at" v-model="taskAt" data-testid="dialog-task-at" type="datetime-local" />
+          </div>
+          <div class="space-y-1.5">
+            <Label for="sales-dialog-task-note">{{ $t('sales.nextTaskNote') }}</Label>
+            <Input id="sales-dialog-task-note" v-model="taskNote" data-testid="dialog-task-note" maxlength="200" :disabled="!taskAt" :placeholder="$t('sales.nextTaskNotePlaceholder')" />
+          </div>
+        </div>
+
         <!-- Commercial -->
         <div v-if="isOpen" class="grid gap-3 sm:grid-cols-3">
           <div class="space-y-1.5">
@@ -265,8 +303,8 @@ function resolve(kind: 'convert' | 'lose') {
           </div>
         </div>
 
-        <div v-if="isOpen" class="grid items-stretch gap-3" :class="xprocessEnabled ? 'sm:grid-cols-2' : ''">
-          <div class="flex items-center justify-between gap-3 rounded-lg border p-3">
+        <div v-if="isOpen && (direcionamentoEnabled || xprocessEnabled)" class="grid items-stretch gap-3" :class="direcionamentoEnabled && xprocessEnabled ? 'sm:grid-cols-2' : ''">
+          <div v-if="direcionamentoEnabled" class="flex items-center justify-between gap-3 rounded-lg border p-3">
             <Label class="whitespace-nowrap text-sm font-medium">{{ $t('sales.direcionamento') }}</Label>
             <Select :model-value="opportunity.direcionamento" :disabled="changingDirecionamento" @update:model-value="onDirecionamentoChange">
               <SelectTrigger class="h-8 w-40" data-testid="dialog-direcionamento"><SelectValue :placeholder="$t('sales.direcionamentoPlaceholder')" /></SelectTrigger>

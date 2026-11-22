@@ -75,6 +75,16 @@ describe('SalesOpportunityCard (compact, opens the popup)', () => {
     expect(w.emitted('open')).toHaveLength(2)
   })
 
+  it('shows the next task: red when overdue, amber today, quiet later, and not on a closed one', () => {
+    const chip = (o: Record<string, unknown>) => mountCard({ status: 'aberta', ...o }).find('[data-testid="sales-opportunity-task"]')
+    const day = 24 * 3600 * 1000
+    expect(chip({}).exists()).toBe(false)
+    expect(chip({ next_task_at: new Date(Date.now() - 2 * day).toISOString() }).classes().join(' ')).toContain('red')
+    expect(chip({ next_task_at: new Date(Date.now() + 3 * day).toISOString(), next_task_note: 'Ligar' }).classes().join(' ')).toContain('muted')
+    expect(chip({ next_task_at: new Date(Date.now() + 3 * day).toISOString(), next_task_note: 'Ligar' }).attributes('title')).toContain('Ligar')
+    expect(chip({ status: 'convertida', next_task_at: new Date(Date.now() - day).toISOString() }).exists()).toBe(false)
+  })
+
   it('has the card strings in both languages', async () => {
     const pt = (await import('@/i18n/locales/pt-BR.json')).default as unknown as { sales: Record<string, string> }
     for (const k of ['aiBadge', 'aiBadgeTitle', 'adOriginTitle', 'adOriginUnnamed', 'meetingsTodayTitle', 'quickFilters', 'quickHasMeeting', 'quickFromAd', 'quickAI', 'quickUnassigned', 'seller', 'openedAt', 'stageChangedAt', 'phone', 'history', 'historyEmpty', 'meetingLabel']) {
