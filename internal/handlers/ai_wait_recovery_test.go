@@ -33,11 +33,22 @@ func (w *wiring) sessionLogCount(t *testing.T, step string) int64 {
 	return n
 }
 
+// waCalls counts the messages the fake WhatsApp API received. The handler runs on the server's goroutine
+// and the test reads the count on its own, so both go through the same mutex.
+type waCalls struct {
+	mu sync.Mutex
+	n  int
+}
+
+func (c *waCalls) add() { c.mu.Lock(); c.n++; c.mu.Unlock() }
+
+// N is how many messages arrived so far.
+func (c *waCalls) N() int { c.mu.Lock(); defer c.mu.Unlock(); return c.n }
+
 // waServer replaces the fake WhatsApp API with one whose answer to a message is chosen by the test.
-func (w *wiring) waServer(t *testing.T, handle func(rw http.ResponseWriter, r *http.Request, body string)) *int {
+func (w *wiring) waServer(t *testing.T, handle func(rw http.ResponseWriter, r *http.Request, body string)) *waCalls {
 	t.Helper()
-	var mu sync.Mutex
-	calls := 0
+	calls := &waCalls{}
 	srv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		body := string(raw)
@@ -45,14 +56,12 @@ func (w *wiring) waServer(t *testing.T, handle func(rw http.ResponseWriter, r *h
 			_ = json.NewEncoder(rw).Encode(map[string]bool{"success": true})
 			return
 		}
-		mu.Lock()
-		calls++
-		mu.Unlock()
+		calls.add()
 		handle(rw, r, body)
 	}))
 	t.Cleanup(srv.Close)
 	w.app.WhatsApp = whatsapp.NewWithBaseURL(testutil.NopLogger(), srv.URL)
-	return &calls
+	return calls
 }
 
 // --- 1. the worker dies and the customer writes again: the two rows are merged ------------------
@@ -180,7 +189,7 @@ func TestAIWaitRecovery_TheSendMarkerIsPersistedBeforeTheMessageLeaves(t *testin
 	})
 	w.inbound(t, "5511988880001", "Oi")
 	require.Equal(t, 1, w.app.drainAIWait(later()))
-	assert.Equal(t, 1, *calls)
+	assert.Equal(t, 1, calls.N())
 	require.NotNil(t, markerSeenAtSend, "when Meta was called, the database already said a send had started")
 }
 
@@ -202,9 +211,9 @@ func TestAIWaitRecovery_UnknownSendOutcomeIsAmbiguous(t *testing.T) {
 	assert.Equal(t, aiOutcomeAmbiguousSend, row.Outcome)
 	assert.NotNil(t, row.SendStartedAt)
 	assert.Zero(t, w.sessionLogCount(t, "ai_response"), "an answer that may not have arrived is not recorded as an answer")
-	assert.Equal(t, 1, *calls)
+	assert.Equal(t, 1, calls.N())
 	assert.Zero(t, w.app.drainAIWait(later()), "and nothing is resent")
-	assert.Equal(t, 1, *calls)
+	assert.Equal(t, 1, calls.N())
 }
 
 // --- 4. a definitive failure is not recorded as an answer ---------------------------------------
@@ -224,9 +233,9 @@ func TestAIWaitRecovery_DefinitiveSendFailureIsNotAnAnswer(t *testing.T) {
 	var failed int64
 	w.app.DB.Model(&models.Message{}).Where("organization_id = ? AND status = ?", w.f.org.ID, models.MessageStatusFailed).Count(&failed)
 	assert.EqualValues(t, 1, failed, "the message row says it failed")
-	assert.Equal(t, 1, *calls)
+	assert.Equal(t, 1, calls.N())
 	assert.Zero(t, w.app.drainAIWait(later()))
-	assert.Equal(t, 1, *calls, "no automatic retry")
+	assert.Equal(t, 1, calls.N(), "no automatic retry")
 }
 
 // --- 5. a worker that lost its claim cannot send ------------------------------------------------
