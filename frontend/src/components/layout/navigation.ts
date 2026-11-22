@@ -124,6 +124,7 @@ export const navigationSections: NavSection[] = [
           { name: 'nav.keywords', path: '/chatbot/keywords', icon: Key, permission: 'chatbot.keywords' },
           { name: 'nav.flows', path: '/chatbot/flows', icon: Workflow, permission: 'flows.chatbot' },
           { name: 'nav.aiContexts', path: '/chatbot/ai', icon: Sparkles, permission: 'chatbot.ai' },
+          { name: 'nav.aiAgents', path: '/chatbot/agents', icon: Bot, permission: 'chatbot.ai' },
           { name: 'nav.transfers', path: '/chatbot/transfers', icon: UserX, permission: 'transfers' }
         ]
       },

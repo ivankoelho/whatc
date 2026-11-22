@@ -155,6 +155,10 @@ const (
 	// TransferSourceAIConfirmed marks a transfer the chatbot's AI proposed and the CUSTOMER
 	// confirmed (Fase 9D). TransferredByUserID stays NULL: nobody on the staff did it.
 	TransferSourceAIConfirmed TransferSource = "ai_confirmed"
+
+	// TransferSourceAIAgent marks a handoff made by an AI agent (qualified customer, request for a
+	// human, an unsafe reply or an AI failure). TransferredByUserID stays NULL.
+	TransferSourceAIAgent TransferSource = "ai_agent"
 )
 
 // Why a flow's transfer node sent the contact where it did (agent_transfers.routing_reason). A
@@ -163,6 +167,11 @@ const (
 const (
 	// RoutingReasonTeamFixed: the node's fixed team (or the general queue), the original behavior.
 	RoutingReasonTeamFixed = "team_fixed"
+	// RoutingReasonAINoUnitTeam: an AI agent handoff whose number lost its unit team (deactivated
+	// meanwhile); the contact went to the general queue instead of the unit's team.
+	RoutingReasonAINoUnitTeam = "ai_no_unit_team"
+	// RoutingReasonAIUnitTeam: an AI agent handoff to the team of the number's unit.
+	RoutingReasonAIUnitTeam = "ai_unit_team"
 	// RoutingReasonContactPlacement: the contact's unit + department matched exactly one team.
 	RoutingReasonContactPlacement = "contact_placement"
 	// RoutingReasonNoContactPlacement: the contact is not a colaborador or lacks the unit or the department.

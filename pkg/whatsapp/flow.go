@@ -142,7 +142,7 @@ func (c *Client) UpdateFlowJSON(ctx context.Context, account *Account, flowID st
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("request failed: %w", err)
+		return transportError("request failed", err, account.AccessToken)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -296,16 +296,19 @@ func (c *Client) GetFlowAssets(ctx context.Context, account *Account, flowID str
 		return nil, nil // No flow JSON yet
 	}
 
-	// Download the flow JSON
+	// Download the flow JSON. The token goes only to Meta's hosts (the URL comes from the answer above).
+	if err := c.checkCredentialedURL(downloadURL); err != nil {
+		return nil, err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create download request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+account.AccessToken)
 
-	resp, err := c.HTTPClient.Do(req)
+	resp, err := c.downloadClient().Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to download flow JSON: %w", err)
+		return nil, transportError("failed to download flow JSON", err, account.AccessToken)
 	}
 	defer func() { _ = resp.Body.Close() }()
 

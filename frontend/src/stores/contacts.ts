@@ -99,6 +99,8 @@ export interface Message {
   whatsapp_account?: string
   sent_by_user_id?: string
   sent_by_user_name?: string
+  // "ai_agent" when an AI agent wrote the message (its display name is in sent_by_user_name)
+  sender_type?: string
   created_at: string
   updated_at: string
 }
@@ -389,6 +391,7 @@ export const useContactsStore = defineStore('contacts', () => {
         ...messages.value[index],
         sent_by_user_id: message.sent_by_user_id ?? messages.value[index].sent_by_user_id,
         sent_by_user_name: message.sent_by_user_name,
+        sender_type: message.sender_type ?? messages.value[index].sender_type,
       }
     }
   }

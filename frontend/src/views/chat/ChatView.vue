@@ -2508,6 +2508,12 @@ async function sendMediaMessage() {
                   class="text-[11px] font-medium text-white/50 light:text-gray-500 mb-0.5"
                 >
                   {{ message.sent_by_user_name }}
+                  <!-- An AI agent is labelled as such, never as a person -->
+                  <span
+                    v-if="message.sender_type === 'ai_agent'"
+                    class="ml-1 rounded bg-emerald-500/20 px-1 py-px text-[10px] font-semibold uppercase tracking-wide text-emerald-300 light:text-emerald-700"
+                    data-testid="ai-sender-badge"
+                  >{{ $t('aiAgents.aiBadge') }}</span>
                 </div>
                 <!-- Reply preview (if this message is replying to another) -->
                 <div

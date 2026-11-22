@@ -497,9 +497,10 @@ func (a *App) fetchMetaJSON(url, accessToken string) (map[string]any, int, error
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 
-	resp, err := a.HTTPClient.Do(req)
+	// the Meta token travels here: never follow a redirect, and never return the URL inside the error
+	resp, err := whatsapp.NoRedirectClient(a.HTTPClient).Do(req)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, whatsapp.SanitizeTransportError("request to Meta failed", err, accessToken)
 	}
 	defer func() { _ = resp.Body.Close() }()
 

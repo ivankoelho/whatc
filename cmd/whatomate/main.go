@@ -498,6 +498,8 @@ func runServer(args []string) {
 	notifierCtx, notifierCancel := context.WithCancel(context.Background())
 	go app.StartOccurrenceNotifier(notifierCtx)
 	go app.StartSendIntentReconciler(notifierCtx)
+	// AI agent wait: answers customers once they paused; recovers waits left by a previous run
+	go app.StartAIWaitWorker(notifierCtx)
 
 	// Start presence reaper (sweeps every 10s; grace is 60s)
 	presenceCtx, presenceCancel := context.WithCancel(context.Background())
@@ -759,6 +761,9 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/branding/logo", app.ServeLogo)
 	g.POST("/api/branding/logo", app.UploadLogo)
 	g.DELETE("/api/branding/logo", app.DeleteLogo)
+	g.GET("/api/branding/wallpaper", app.ServeWallpaper)
+	g.POST("/api/branding/wallpaper", app.UploadWallpaper)
+	g.DELETE("/api/branding/wallpaper", app.DeleteWallpaper)
 
 	// Webhook routes (public - for Meta)
 	g.GET("/api/webhook", app.WebhookVerify)
@@ -785,7 +790,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 		// /api/branding/login-background and /api/branding/logo are public for
 		// GET (the login page loads them before any auth) but the POST/DELETE
 		// below require auth — only skip the middleware for the read.
-		if (path == "/api/branding/login-background" || path == "/api/branding/logo") &&
+		if (path == "/api/branding/login-background" || path == "/api/branding/logo" || path == "/api/branding/wallpaper") &&
 			string(r.RequestCtx.Method()) == "GET" {
 			return r
 		}
@@ -1201,6 +1206,14 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/chatbot/ai-contexts/{id}", app.GetAIContext)
 	g.PUT("/api/chatbot/ai-contexts/{id}", app.UpdateAIContext)
 	g.DELETE("/api/chatbot/ai-contexts/{id}", app.DeleteAIContext)
+
+	// AI Agents
+	g.GET("/api/chatbot/ai-agents", app.ListAIAgents)
+	g.POST("/api/chatbot/ai-agents", app.CreateAIAgent)
+	g.GET("/api/chatbot/ai-agents/{id}", app.GetAIAgent)
+	g.PUT("/api/chatbot/ai-agents/{id}", app.UpdateAIAgent)
+	g.DELETE("/api/chatbot/ai-agents/{id}", app.DeleteAIAgent)
+	g.GET("/api/chatbot/ai-agents/{id}/readiness", app.GetAIAgentReadiness)
 
 	// Agent Transfers
 	g.GET("/api/chatbot/transfers", app.ListAgentTransfers)

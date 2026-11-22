@@ -20,13 +20,21 @@ const maxBody = 4 << 20 // 4 MiB is far above any chat completion
 // comes back as *Error with the key redacted.
 func doJSON(ctx context.Context, client *http.Client, provider, apiKey, method, endpoint string, headers map[string]string, payload any) ([]byte, *Error) {
 	var body io.Reader
+	contentType := ""
 	if payload != nil {
 		b, err := json.Marshal(payload)
 		if err != nil {
 			return nil, &Error{Provider: provider, Kind: KindInvalidRequest, Message: "failed to encode request"}
 		}
 		body = bytes.NewReader(b)
+		contentType = "application/json"
 	}
+	return doBody(ctx, client, provider, apiKey, method, endpoint, headers, body, contentType)
+}
+
+// doBody is doJSON with the body already encoded (a multipart upload, for instance): same deadline, same
+// redaction, same error classification.
+func doBody(ctx context.Context, client *http.Client, provider, apiKey, method, endpoint string, headers map[string]string, body io.Reader, contentType string) ([]byte, *Error) {
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, DefaultTimeout)
@@ -37,8 +45,8 @@ func doJSON(ctx context.Context, client *http.Client, provider, apiKey, method, 
 	if err != nil {
 		return nil, &Error{Provider: provider, Kind: KindInvalidRequest, Message: "failed to build request"}
 	}
-	if payload != nil {
-		req.Header.Set("Content-Type", "application/json")
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)

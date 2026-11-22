@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"time"
 
 	"github.com/zerodha/logf"
@@ -25,13 +26,21 @@ type Client struct {
 	HTTPClient *http.Client
 	Log        logf.Logger
 	baseURL    string // For testing with mock servers
+	// extraTrustedHosts are exact host:port values (besides Meta's hosts and baseURL) that may receive
+	// credentialed downloads. Empty in production; see TrustHost.
+	extraTrustedHosts []string
 }
+
+// TrustHost allows credentialed downloads from one more exact host:port. It exists for tests that serve
+// media from a local server; production code must never call it.
+func (c *Client) TrustHost(hostPort string) { c.extraTrustedHosts = append(c.extraTrustedHosts, hostPort) }
 
 // New creates a new WhatsApp client
 func New(log logf.Logger) *Client {
 	return &Client{
 		HTTPClient: &http.Client{
-			Timeout: DefaultTimeout,
+			Timeout:       DefaultTimeout,
+			CheckRedirect: noRedirects,
 		},
 		Log:     log,
 		baseURL: BaseURL,
@@ -42,7 +51,8 @@ func New(log logf.Logger) *Client {
 func NewWithTimeout(log logf.Logger, timeout time.Duration) *Client {
 	return &Client{
 		HTTPClient: &http.Client{
-			Timeout: timeout,
+			Timeout:       timeout,
+			CheckRedirect: noRedirects,
 		},
 		Log:     log,
 		baseURL: BaseURL,
@@ -53,7 +63,8 @@ func NewWithTimeout(log logf.Logger, timeout time.Duration) *Client {
 func NewWithBaseURL(log logf.Logger, baseURL string) *Client {
 	return &Client{
 		HTTPClient: &http.Client{
-			Timeout: DefaultTimeout,
+			Timeout:       DefaultTimeout,
+			CheckRedirect: noRedirects,
 		},
 		Log:     log,
 		baseURL: baseURL,
@@ -113,7 +124,7 @@ func (c *Client) doRequest(ctx context.Context, method, url string, body any, ac
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return nil, redactError(fmt.Errorf("request failed: %w", err), secrets)
+		return nil, transportError("request failed", err, secrets...)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -293,6 +304,11 @@ func (c *Client) GetMediaURL(ctx context.Context, mediaID string, account *Accou
 
 // DownloadMedia downloads media content from Meta's CDN URL
 func (c *Client) DownloadMedia(ctx context.Context, mediaURL string, accessToken string) ([]byte, error) {
+	// The token goes only to Meta: the URL comes from a network answer, so it is checked first (and on
+	// every redirect hop, see downloadClient).
+	if err := c.checkCredentialedURL(mediaURL); err != nil {
+		return nil, err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, mediaURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create download request: %w", err)
@@ -301,9 +317,9 @@ func (c *Client) DownloadMedia(ctx context.Context, mediaURL string, accessToken
 	// Meta requires Bearer token for media download
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 
-	resp, err := c.HTTPClient.Do(req)
+	resp, err := c.downloadClient().Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to download media: %w", err)
+		return nil, transportError("failed to download media", err, accessToken)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -355,7 +371,7 @@ func (c *Client) UploadMedia(ctx context.Context, account *Account, data []byte,
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("failed to upload media: %w", err)
+		return "", transportError("failed to upload media", err, account.AccessToken)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -455,6 +471,26 @@ func (c *Client) MarkMessageRead(ctx context.Context, account *Account, messageI
 	return nil
 }
 
+// SendTypingIndicator shows "typing…" to the customer who sent messageID (a message RECEIVED by the
+// number). It also marks that message as read. The indicator goes away when a message is sent, when
+// the customer writes again, or after about 25 s, so a long wait needs it sent again.
+//
+// Only the type "text" exists: the API answers HTTP 400 to anything else (checked on a real test
+// number on 10/11/2026, docs/homologacao/spike-digitacao/relatorio-2026-11-10.md). The call returns
+// no message id, so it creates nothing to bill. The type is fixed here on purpose.
+func (c *Client) SendTypingIndicator(ctx context.Context, account *Account, messageID string) error {
+	payload := map[string]any{
+		"messaging_product": "whatsapp",
+		"status":            "read",
+		"message_id":        messageID,
+		"typing_indicator":  map[string]any{"type": "text"},
+	}
+	if _, err := c.doRequest(ctx, "POST", c.buildMessagesURL(account), payload, account.AccessToken); err != nil {
+		return fmt.Errorf("failed to send typing indicator: %w", err)
+	}
+	return nil
+}
+
 // ResumableUploadResponse represents response from creating upload session
 type ResumableUploadResponse struct {
 	ID string `json:"id"` // Upload session ID
@@ -514,7 +550,7 @@ func (c *Client) ResumableUpload(ctx context.Context, account *Account, data []b
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("failed to upload file data: %w", err)
+		return "", transportError("failed to upload file data", err, account.AccessToken)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -620,18 +656,21 @@ type TokenExchangeResponse struct {
 
 // ExchangeCodeForToken exchanges a Facebook authorization code for a permanent access token
 func (c *Client) ExchangeCodeForToken(ctx context.Context, code, appID, appSecret, apiVersion string) (string, error) {
-	url := fmt.Sprintf("%s/%s/oauth/access_token?client_id=%s&client_secret=%s&code=%s",
-		c.getBaseURL(), apiVersion, appID, appSecret, code)
+	// Query values are escaped: a code with '&' or '=' must not be able to add or change parameters.
+	q := neturl.Values{"client_id": {appID}, "client_secret": {appSecret}, "code": {code}}
+	url := fmt.Sprintf("%s/%s/oauth/access_token?%s", c.getBaseURL(), apiVersion, q.Encode())
 
 	// OAuth endpoint doesn't require Authorization header, so we make a direct request
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to create token exchange request: %w", err)
+		// a URL that does not parse is echoed back by net/http, query (and secrets) included
+		return "", transportError("failed to create token exchange request", err, appSecret, code)
 	}
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("token exchange request failed: %w", err)
+		// the URL of this call holds client_secret and code: transportError drops it and masks both
+		return "", transportError("token exchange request failed", err, appSecret, code)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
