@@ -122,8 +122,9 @@ test.describe('Central de Vendas', () => {
   })
 
   test('dragging into Direcionada without direcionamento is blocked', async ({ page }) => {
-    const contact = await createContactFresh(scope.phone(), scope.name('drag-block'))
-    const { opportunityNumber } = await seedOpportunity({
+    const contactName = scope.name('drag-block')
+    const contact = await createContactFresh(scope.phone(), contactName)
+    await seedOpportunity({
       orgId,
       contactId: contact.id,
       assignedUserId: adminUserId,
@@ -137,7 +138,7 @@ test.describe('Central de Vendas', () => {
     // into "Direcionada". The backend's Task 7 guard must reject it since
     // direcionamento is null, surfacing a toast and leaving the card put.
     const sourceColumn = page.locator('[data-board-column="abrir_orcamento"]')
-    const card = sourceColumn.locator('[data-board-card]').filter({ hasText: opportunityNumber })
+    const card = sourceColumn.locator('[data-board-card]').filter({ hasText: contactName })
     await expect(card).toBeVisible({ timeout: 10_000 })
 
     const direcionadaDropzone = page.locator('[data-board-column="direcionada"] [data-board-dropzone]')
@@ -148,15 +149,16 @@ test.describe('Central de Vendas', () => {
 
     // The failed drag must actually revert: the card stays in its original
     // column and never lands in Direcionada.
-    await expect(sourceColumn.locator('[data-board-card]').filter({ hasText: opportunityNumber })).toBeVisible()
+    await expect(sourceColumn.locator('[data-board-card]').filter({ hasText: contactName })).toBeVisible()
     await expect(
-      page.locator('[data-board-column="direcionada"] [data-board-card]').filter({ hasText: opportunityNumber }),
+      page.locator('[data-board-column="direcionada"] [data-board-card]').filter({ hasText: contactName }),
     ).toHaveCount(0)
   })
 
   test('marking lost requires a loss reason', async ({ page }) => {
-    const contact = await createContactFresh(scope.phone(), scope.name('loss-reason'))
-    const { opportunityNumber } = await seedOpportunity({
+    const contactName = scope.name('loss-reason')
+    const contact = await createContactFresh(scope.phone(), contactName)
+    await seedOpportunity({
       orgId,
       contactId: contact.id,
       assignedUserId: adminUserId,
@@ -167,14 +169,15 @@ test.describe('Central de Vendas', () => {
     await loginAsAdmin(page)
     await gotoOperationAndWaitLoad(page)
 
-    // The lose button only renders on cards in "Direcionada"
-    // (SalesOpportunityCard.vue's v-if="opportunity.stage === 'direcionada'").
-    const card = page.locator('[data-board-column="direcionada"] [data-board-card]').filter({ hasText: opportunityNumber })
+    // The compact card has no buttons: it opens a popup, whose "lose" action only exists for a card in "Direcionada".
+    const card = page.locator('[data-board-column="direcionada"] [data-board-card]').filter({ hasText: contactName })
     await expect(card).toBeVisible({ timeout: 10_000 })
 
-    const loseButton = card.locator('[data-testid="sales-opportunity-lose-button"]')
+    await card.click()
+    const loseButton = page.locator('[data-testid="dialog-lose"]')
     await expect(loseButton).toBeVisible()
     await loseButton.click()
+    await expect(loseButton).toHaveCount(0) // the popup hands over to the loss dialog and closes
 
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible()
