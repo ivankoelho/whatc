@@ -260,17 +260,17 @@ function resolve(kind: 'convert' | 'lose') {
           </div>
         </div>
 
-        <div v-if="isOpen" class="grid gap-3 sm:grid-cols-2">
-          <div class="space-y-1.5">
-            <Label>{{ $t('sales.direcionamentoPlaceholder') }}</Label>
+        <div v-if="isOpen" class="grid items-stretch gap-3 sm:grid-cols-2">
+          <div class="flex items-center justify-between gap-3 rounded-lg border p-3">
+            <Label class="whitespace-nowrap text-sm font-medium">{{ $t('sales.direcionamento') }}</Label>
             <Select :model-value="opportunity.direcionamento" :disabled="changingDirecionamento" @update:model-value="onDirecionamentoChange">
-              <SelectTrigger data-testid="dialog-direcionamento"><SelectValue :placeholder="$t('sales.direcionamentoPlaceholder')" /></SelectTrigger>
+              <SelectTrigger class="h-8 w-40" data-testid="dialog-direcionamento"><SelectValue :placeholder="$t('sales.direcionamentoPlaceholder')" /></SelectTrigger>
               <SelectContent>
                 <SelectItem v-for="d in DIRECIONAMENTOS" :key="d" :value="d">{{ $t(DIRECIONAMENTO_LABEL[d]) }}</SelectItem>
               </SelectContent>
             </Select>
           </div>
-          <div class="space-y-1.5">
+          <div>
             <XProcessLinkForm :opportunity-id="opportunity.id" :editable="isOpen" />
           </div>
         </div>
