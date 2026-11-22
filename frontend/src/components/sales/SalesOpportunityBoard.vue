@@ -11,6 +11,7 @@ import { CalendarClock } from 'lucide-vue-next'
 import { salesOpportunitiesService } from '@/services/api'
 import type { SalesOpportunity, SalesOpportunityStage } from '@/services/api'
 import SalesOpportunityCard from './SalesOpportunityCard.vue'
+import SalesOpportunityDialog from './SalesOpportunityDialog.vue'
 import { byOpenedAtDesc, cardOrder, placePreview } from '@/lib/board-order'
 
 // Manual filters from the sales screen (seller / store). The backend already
@@ -221,6 +222,23 @@ function onDetailsChange(updated: SalesOpportunity) {
   emit('details-change', updated)
 }
 
+// The popup of the card that was clicked (one for the whole board). It keeps its own copy of the opportunity, and the
+// copy follows what the popup saves.
+const selected = ref<SalesOpportunity | null>(null)
+const dialogOpen = ref(false)
+function openCard(o: SalesOpportunity) {
+  selected.value = o
+  dialogOpen.value = true
+}
+function onDialogSaved(updated: SalesOpportunity) {
+  selected.value = updated
+  onDetailsChange(updated)
+}
+function onDialogDirecionamento(updated: SalesOpportunity) {
+  selected.value = updated
+  onDirecionamentoChange(updated)
+}
+
 onMounted(loadAll)
 watch(() => [props.filters?.assigned_user_id, props.filters?.unit_id, props.filters?.ai, props.filters?.from_ad,
   props.filters?.has_meeting, props.filters?.unassigned], loadAll)
@@ -306,10 +324,7 @@ defineExpose({ refresh: loadAll })
                 :style="{ order: cardOrder(index) }"
                 :opportunity="element"
                 :disabled="pending.has(element.id)"
-                @convert="emit('convert', $event)"
-                @lose="emit('lose', $event)"
-                @direcionamento-change="onDirecionamentoChange"
-                @details-change="onDetailsChange"
+                @open="openCard"
               />
             </template>
             <!-- my-auto centres the state in the empty column (it is a flex column) -->
@@ -338,5 +353,14 @@ defineExpose({ refresh: loadAll })
         </div>
       </div>
     </template>
+    <SalesOpportunityDialog
+      v-if="selected"
+      v-model:open="dialogOpen"
+      :opportunity="selected"
+      @saved="onDialogSaved"
+      @direcionamento-change="onDialogDirecionamento"
+      @convert="emit('convert', $event)"
+      @lose="emit('lose', $event)"
+    />
   </div>
 </template>
