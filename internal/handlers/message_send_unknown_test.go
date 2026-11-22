@@ -45,9 +45,9 @@ func TestSendOutcome_UnknownIsPlainAndFreeOfInternals(t *testing.T) {
 	for _, internal := range []string{"http", "127.0.0.1", "/messages", w.f.account.PhoneID, "EOF", "Post"} {
 		assert.NotContains(t, m.ErrorMessage, internal, "the attendant must not see %q", internal)
 	}
-	assert.Equal(t, 1, *calls, "never resent on its own")
+	assert.Equal(t, 1, calls.N(), "never resent on its own")
 	assert.Zero(t, w.app.drainAIWait(later()))
-	assert.Equal(t, 1, *calls)
+	assert.Equal(t, 1, calls.N())
 }
 
 func TestSendOutcome_ARefusalIsAConfirmedFailureWithMetasPublicReason(t *testing.T) {

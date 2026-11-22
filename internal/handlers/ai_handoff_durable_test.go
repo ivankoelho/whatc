@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -241,7 +242,13 @@ func TestDurableHandoff_ConcurrentRecoveryAndAHuman_OneAttendanceOneMessage(t *t
 			}
 			if withHuman {
 				wg.Add(1)
-				go func() { defer wg.Done(); w.openAttendance(t, c.ID) }()
+				go func() {
+					defer wg.Done()
+					// the recovery may open the attendance first: that is the other valid outcome
+					if err := w.tryOpenAttendance(t, c.ID); err != nil && !errors.Is(err, ErrTransferAlreadyActive) {
+						t.Errorf("a person opening the conversation failed: %v", err)
+					}
+				}()
 			}
 			wg.Wait()
 

@@ -133,13 +133,20 @@ func (w *wiring) contactFor(t *testing.T, from string) *models.Contact {
 // openAttendance makes a human own the contact, the way an attendant opening the conversation does.
 func (w *wiring) openAttendance(t *testing.T, contactID uuid.UUID) {
 	t.Helper()
+	require.NoError(t, w.tryOpenAttendance(t, contactID))
+}
+
+// tryOpenAttendance is openAttendance that hands back the error, for tests where another actor may have
+// opened the attendance first (ErrTransferAlreadyActive is then a valid outcome, not a failure).
+func (w *wiring) tryOpenAttendance(t *testing.T, contactID uuid.UUID) error {
+	t.Helper()
 	agent := testutil.CreateTestUser(t, w.app.DB, w.f.org.ID)
 	tr := models.AgentTransfer{
 		BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: w.f.org.ID, ContactID: contactID,
 		WhatsAppAccount: w.f.account.Name, PhoneNumber: "x", Status: models.TransferStatusActive,
 		Source: models.TransferSourceAgentInitiated, AgentID: &agent.ID, TransferredAt: time.Now(),
 	}
-	require.NoError(t, w.app.createTransferRow(&tr))
+	return w.app.createTransferRow(&tr)
 }
 
 // --- humanTookOver ---------------------------------------------------------------------------
