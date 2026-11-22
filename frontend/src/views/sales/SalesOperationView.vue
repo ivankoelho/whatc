@@ -15,7 +15,7 @@ import { PageHeader, DataTable, ErrorState, DeleteConfirmDialog, DateRangePicker
 import { Plus, TrendingUp, Briefcase, Target, CheckCircle2, XCircle, Percent, AlertTriangle, Trash2, Pencil, Columns3, List, Store, UserRound, X, LayoutDashboard, CalendarDays } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { useDateRange } from '@/composables/useDateRange'
-import { salesOpportunitiesService, salesFeaturesService } from '@/services/api'
+import { salesOpportunitiesService, salesFeaturesService, nextcloudService } from '@/services/api'
 import type { SalesOpportunity, SalesScopeInfo, SalesSummary } from '@/services/api'
 import { getErrorMessage } from '@/lib/api-utils'
 import { formatDate } from '@/lib/utils'
@@ -23,7 +23,6 @@ import { formatCurrency } from '@/lib/currency'
 import { formatQuantity } from '@/lib/salesUnits'
 import { Doughnut } from '@/lib/charts'
 import SalesOpportunityBoard from '@/components/sales/SalesOpportunityBoard.vue'
-import SalesCalendarTab from '@/components/sales/SalesCalendarTab.vue'
 import LoseSalesOpportunityDialog from '@/components/sales/LoseSalesOpportunityDialog.vue'
 import SalesOpportunityDetailsDialog from '@/components/sales/SalesOpportunityDetailsDialog.vue'
 import PickContactForOpportunityDialog from '@/components/sales/PickContactForOpportunityDialog.vue'
@@ -34,8 +33,16 @@ const authStore = useAuthStore()
 
 // Painel | Quadro | Lista. The Kanban is the day-to-day view, so it opens
 // first; ?tab= keeps the choice shareable and survives a reload.
-type CrmTab = 'dashboard' | 'board' | 'list' | 'calendar'
-const CRM_TABS: CrmTab[] = ['dashboard', 'board', 'list', 'calendar']
+type CrmTab = 'dashboard' | 'board' | 'list'
+const CRM_TABS: CrmTab[] = ['dashboard', 'board', 'list']
+
+// The office calendar (Nextcloud) opens in its own browser tab from a button in the top bar; no button until an
+// administrator has saved its address.
+const calendarUrl = ref('')
+nextcloudService.getCalendarEmbed().then(res => {
+  const d = res.data as { data?: { url?: string }; url?: string }
+  calendarUrl.value = d.data?.url ?? d.url ?? ''
+}).catch(() => {})
 const route = useRoute()
 const router = useRouter()
 const activeTab = computed<CrmTab>({
@@ -402,7 +409,6 @@ onMounted(() => {
         <TabsTrigger value="dashboard" :title="$t('sales.tabDashboard')" class="page-rail-item"><LayoutDashboard class="h-5 w-5" aria-hidden="true" /><span class="page-rail-label">{{ $t('sales.tabDashboard') }}</span></TabsTrigger>
         <TabsTrigger value="board" :title="$t('sales.tabBoard')" class="page-rail-item"><Columns3 class="h-5 w-5" aria-hidden="true" /><span class="page-rail-label">{{ $t('sales.tabBoard') }}</span></TabsTrigger>
         <TabsTrigger value="list" :title="$t('sales.tabList')" class="page-rail-item"><List class="h-5 w-5" aria-hidden="true" /><span class="page-rail-label">{{ $t('sales.tabList') }}</span></TabsTrigger>
-        <TabsTrigger value="calendar" :title="$t('sales.tabCalendar')" class="page-rail-item" data-testid="crm-tab-calendar"><CalendarDays class="h-5 w-5" aria-hidden="true" /><span class="page-rail-label">{{ $t('sales.tabCalendar') }}</span></TabsTrigger>
       </TabsList>
 
       <div class="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -436,6 +442,11 @@ onMounted(() => {
           <X class="mr-1 h-3.5 w-3.5" aria-hidden="true" />{{ $t('common.clear') }}
         </Button>
         </template>
+          <Button v-if="calendarUrl" as-child variant="outline" size="sm" class="h-9 text-[13px]">
+            <a :href="calendarUrl" target="_blank" rel="noopener noreferrer" data-testid="crm-calendar-open">
+              <CalendarDays class="mr-1 h-3.5 w-3.5" aria-hidden="true" />{{ $t('sales.tabCalendar') }}
+            </a>
+          </Button>
           <Button v-if="canCreateOpportunity" size="sm" class="h-9 text-[13px]" @click="pickContactOpen = true">
             <Plus class="mr-1 h-3.5 w-3.5" aria-hidden="true" />{{ $t('sales.newOpportunity') }}
           </Button>
@@ -665,10 +676,6 @@ onMounted(() => {
         </ScrollArea>
       </TabsContent>
 
-      <!-- Calendário: the organization's Nextcloud calendar, framed -->
-      <TabsContent value="calendar" class="mt-0 min-h-0 flex-1">
-        <SalesCalendarTab v-if="activeTab === 'calendar'" />
-      </TabsContent>
       </div>
     </Tabs>
 
