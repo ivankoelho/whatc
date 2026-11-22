@@ -119,6 +119,9 @@ const hasValue = computed(() => props.opportunity.estimated_value != null && pro
     </dl>
     <p v-else-if="plainSummary" data-testid="sales-opportunity-summary" class="mt-2 line-clamp-2 pl-9 text-xs leading-snug text-muted-foreground" :title="plainSummary">{{ plainSummary }}</p>
 
+    <!-- The expected value gets a line of its own: it is what the deal is worth, and it must never be cut -->
+    <p v-if="hasValue" data-testid="sales-opportunity-value" class="mt-1.5 pl-9 text-sm font-semibold tabular-nums leading-none text-emerald-700 dark:text-emerald-300">{{ formatCurrency(opportunity.estimated_value) }}</p>
+
     <!-- Footer: the time-sensitive things on the left, who owns it and since when on the right -->
     <div class="mt-2 flex items-center gap-1.5 border-t border-border/60 pt-1.5 text-[11px]">
       <span
@@ -141,7 +144,6 @@ const hasValue = computed(() => props.opportunity.estimated_value != null && pro
         class="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 font-medium"
         :class="task.overdue ? 'bg-red-500/15 text-red-700 dark:text-red-300' : task.today ? 'bg-amber-500/20 text-amber-800 dark:text-amber-300' : 'bg-muted text-muted-foreground'"
       ><AlarmClock class="h-3 w-3" aria-hidden="true" />{{ task.label }}</span>
-      <span v-if="hasValue" data-testid="sales-opportunity-value" class="truncate font-semibold text-foreground">{{ formatCurrency(opportunity.estimated_value) }}</span>
       <span class="ml-auto flex shrink-0 items-center gap-1.5 text-muted-foreground">
         <Avatar class="h-5 w-5" :title="sellerName || $t('sales.noSeller')">
           <AvatarFallback :class="sellerName ? 'bg-gradient-to-br text-[9px] text-white ' + getAvatarGradient(sellerName) : 'bg-muted text-[9px]'">
