@@ -52,7 +52,7 @@ const (
 // still "offered" and unexpired. The row holds no message text.
 type AIAppointmentOffer struct {
 	BaseModel
-	OrganizationID  uuid.UUID  `gorm:"type:uuid;index;not null" json:"organization_id"`
+	OrganizationID  uuid.UUID  `gorm:"type:uuid;index;not null;uniqueIndex:idx_ai_offer_booked_slot,priority:1,where:status = 'booked' AND booked_start IS NOT NULL" json:"organization_id"`
 	ContactID       uuid.UUID  `gorm:"type:uuid;index;not null" json:"contact_id"`
 	SessionID       uuid.UUID  `gorm:"type:uuid;not null" json:"session_id"`
 	WhatsAppAccount string     `gorm:"size:100;not null" json:"whatsapp_account"`
@@ -64,7 +64,9 @@ type AIAppointmentOffer struct {
 	ExpiresAt time.Time   `gorm:"not null" json:"expires_at"`
 	// Attempts counts how many times booking was tried on a slot the calendar had taken meanwhile.
 	Attempts    int        `gorm:"not null;default:0" json:"attempts"`
-	BookedStart *time.Time `json:"booked_start,omitempty"`
+	// BookedStart is set when the offer is claimed. The partial unique index above makes it the lock on the time: two
+	// customers tapping the same time cannot both hold it (a released offer, not "booked" any more, frees it).
+	BookedStart *time.Time `gorm:"uniqueIndex:idx_ai_offer_booked_slot,priority:2" json:"booked_start,omitempty"`
 	EventUID    string     `gorm:"size:100" json:"event_uid"`
 }
 

@@ -709,3 +709,39 @@ func TestScheduling_ATimeThatHasPassedIsNeverBooked(t *testing.T) {
 	assert.NotContains(t, strings.Join(w.textSends(), "\n"), "Agendado!")
 	assert.Contains(t, strings.Join(w.textSends(), "\n"), "não está mais disponível")
 }
+
+// Two customers tapping the same time in the same second: the database lets only one hold it.
+func TestScheduling_TwoCustomersTappingTheSameTimeBookItOnlyOnce(t *testing.T) {
+	w, cal, contact, session := newScheduler(t)
+	require.Equal(t, aiHandoffOffered, w.app.handoffFromAIOutcome(w.f.account, contact, session, w.f.settings, aiHandoffMarker))
+	offer := w.offers(t, contact.ID)[0]
+	when, _ := time.Parse(time.RFC3339, offer.Slots[0])
+	// another customer already holds that time (booked, event not yet visible in the calendar)
+	rival := models.AIAppointmentOffer{BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: w.f.org.ID, ContactID: uuid.New(), SessionID: uuid.New(),
+		WhatsAppAccount: w.f.account.Name, Token: uuid.NewString(), Slots: models.StringArray{offer.Slots[0]}, Status: models.AIAppointmentBooked,
+		ExpiresAt: time.Now().Add(time.Hour), BookedStart: &when}
+	require.NoError(t, w.app.DB.Create(&rival).Error)
+
+	w.app.handleAppointmentTap(w.f.account, contact, w.offeredButtons()[0])
+
+	assert.Equal(t, 0, cal.putCount(), "the time is held by someone else")
+	assert.Contains(t, strings.Join(w.textSends(), "\n"), "não está mais disponível")
+	assert.NotContains(t, strings.Join(w.textSends(), "\n"), "Agendado!")
+}
+
+// When the calendar fails after maybe creating the event, the event is removed so it is not left orphaned.
+func TestScheduling_AFailedBookingRemovesItsEventByTheSameUID(t *testing.T) {
+	w, cal, contact, session := newScheduler(t)
+	require.Equal(t, aiHandoffOffered, w.app.handoffFromAIOutcome(w.f.account, contact, session, w.f.settings, aiHandoffMarker))
+	offer := w.offers(t, contact.ID)[0]
+	cal.mu.Lock()
+	cal.putSt = http.StatusInternalServerError
+	cal.mu.Unlock()
+
+	w.app.handleAppointmentTap(w.f.account, contact, w.offeredButtons()[0])
+
+	cal.mu.Lock()
+	defer cal.mu.Unlock()
+	require.Len(t, cal.dels, 1)
+	assert.Contains(t, cal.dels[0], "offer-"+offer.ID.String(), "the UID comes from the offer, so the cleanup finds the event")
+}

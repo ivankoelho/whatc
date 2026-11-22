@@ -215,17 +215,23 @@ func (a *App) handleAppointmentTap(account *models.WhatsAppAccount, contact *mod
 	if idx < 0 || idx >= len(offer.Slots) {
 		return
 	}
-	// claim: only one tap turns "offered" into "booked"
-	claim := a.DB.Model(&models.AIAppointmentOffer{}).
-		Where("id = ? AND status = ? AND expires_at > ?", offer.ID, models.AIAppointmentOffered, time.Now()).
-		Update("status", models.AIAppointmentBooked)
-	if claim.Error != nil || claim.RowsAffected == 0 {
-		return // already used, replaced or expired: a repeated tap says nothing
-	}
 	start, err := time.Parse(time.RFC3339, offer.Slots[idx])
 	if err != nil {
-		a.failAppointment(account, contact, &offer, "invalid slot")
 		return
+	}
+	// claim: only one tap turns "offered" into "booked", and the unique index on (organization, booked start) lets only
+	// one customer hold a given time: the second one is told it is gone and gets new options.
+	claim := a.DB.Model(&models.AIAppointmentOffer{}).
+		Where("id = ? AND status = ? AND expires_at > ?", offer.ID, models.AIAppointmentOffered, time.Now()).
+		Updates(map[string]any{"status": models.AIAppointmentBooked, "booked_start": start})
+	if claim.Error != nil {
+		if strings.Contains(claim.Error.Error(), "23505") || strings.Contains(strings.ToLower(claim.Error.Error()), "duplicate key") {
+			a.retryAppointment(account, contact, &offer, aiAppointmentNoLongerText)
+		}
+		return
+	}
+	if claim.RowsAffected == 0 {
+		return // already used, replaced or expired: a repeated tap says nothing
 	}
 	_, client, rules, ok := a.calendarFor(orgID)
 	if !ok {
@@ -253,7 +259,8 @@ func (a *App) handleAppointmentTap(account *models.WhatsAppAccount, contact *mod
 			return
 		}
 	}
-	uid := uuid.NewString() + "@whatc"
+	// Derived from the offer: a retry of the same booking overwrites its own event instead of duplicating it.
+	uid := "offer-" + offer.ID.String() + "@whatc"
 	ev := caldav.Event{
 		UID: uid, Summary: "Conversa com " + a.appointmentCustomerName(contact), Start: start, End: end,
 		Description: a.appointmentDescription(contact, &offer), Location: a.appointmentLocation(orgID),
@@ -264,6 +271,12 @@ func (a *App) handleAppointmentTap(account *models.WhatsAppAccount, contact *mod
 		a.retryAppointment(account, contact, &offer, aiAppointmentNoLongerText)
 		return
 	default:
+		// The answer may have been lost after the server created the event: take it out so it is not left orphaned.
+		delCtx, delCancel := context.WithTimeout(context.Background(), aiAppointmentTimeout)
+		if derr := client.DeleteEvent(delCtx, uid); derr != nil {
+			a.Log.Warn("Scheduling: could not clean up after a failed booking", "error", derr, "uid", uid)
+		}
+		delCancel()
 		a.failAppointment(account, contact, &offer, "event not created")
 		return
 	}
