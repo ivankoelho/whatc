@@ -18,7 +18,6 @@ import (
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 // Scheduling by the AI agent, in the organization's Nextcloud calendar.
@@ -464,7 +463,15 @@ func (a *App) PutNextcloudCalendar(r *fastglue.Request) error {
 		}
 	}
 	cal.UpdatedByID = &userID
-	if err := a.DB.Clauses(clause.OnConflict{UpdateAll: true}).Create(&cal).Error; err != nil {
+	// An existing row is SAVED (every column), not upserted: GORM's UpdateAll leaves out a column that has a SQL
+	// default, and that dropped the opening hours (default '{}') from every update after the first.
+	var saveErr error
+	if exists {
+		saveErr = a.DB.Save(&cal).Error
+	} else {
+		saveErr = a.DB.Create(&cal).Error
+	}
+	if err := saveErr; err != nil {
 		a.Log.Error("Failed to save the calendar settings", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save the calendar", nil, "")
 	}

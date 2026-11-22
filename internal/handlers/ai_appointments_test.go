@@ -17,6 +17,7 @@ import (
 	"github.com/shridarpatil/whatomate/test/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/zerodha/fastglue"
 )
 
 // calServer is a Nextcloud calendar as the agent sees it: it answers REPORT with whatever is busy and
@@ -363,4 +364,61 @@ func TestCalendarTest_NeedsTheCalendarEnabled(t *testing.T) {
 	require.NoError(t, w.app.TestNextcloudCalendar(req))
 	assert.Equal(t, 409, testutil.GetResponseStatusCode(req))
 	assert.Contains(t, string(testutil.GetResponseBody(req)), "calendar_not_enabled")
+}
+
+// The opening hours the administrator ticked must survive a save and a reload, and a later save that does not
+// send them must keep them.
+func TestCalendarSettings_TheOpeningHoursSurviveSavingAndReloading(t *testing.T) {
+	w := newWiring(t, "x")
+	cal := newCalServer(t)
+	w.app.Config.App.AllowPrivateNextcloud = true
+	require.NoError(t, w.app.DB.Create(&models.NextcloudSettings{ID: uuid.New(), OrganizationID: w.f.org.ID, BaseURL: cal.srv.URL}).Error)
+	role := testutil.CreateAdminRole(t, w.app.DB, w.f.org.ID)
+	admin := testutil.CreateTestUser(t, w.app.DB, w.f.org.ID, testutil.WithRoleID(&role.ID))
+	call := func(h func(*fastglue.Request) error, body any) (int, string) {
+		req := testutil.NewJSONRequest(t, body)
+		testutil.SetAuthContext(req, w.f.org.ID, admin.ID)
+		require.NoError(t, h(req))
+		return testutil.GetResponseStatusCode(req), string(testutil.GetResponseBody(req))
+	}
+	base := map[string]any{"enabled": true, "calendar_path": "/remote.php/dav/calendars/agente/whatsapp/", "username": "agente", "app_password": "p"}
+
+	hours := map[string]any{"1": "09:00-18:00", "2": "09:00-18:00", "6": "08:00-12:00"}
+	code, raw := call(w.app.PutNextcloudCalendar, merge(base, map[string]any{"hours": hours}))
+	require.Equal(t, 200, code, raw)
+	_, raw = call(w.app.GetNextcloudCalendar, map[string]any{})
+	assert.Contains(t, raw, `"6":"08:00-12:00"`, "Saturday was saved")
+	assert.Contains(t, raw, `"1":"09:00-18:00"`)
+
+	// a second save of the same hours (the administrator changes the meeting length) keeps them
+	code, raw = call(w.app.PutNextcloudCalendar, merge(base, map[string]any{"hours": hours, "slot_minutes": 45}))
+	require.Equal(t, 200, code, raw)
+	// CHANGING the hours of a calendar that already exists must take effect (it did not: an upsert left the
+	// column with a SQL default out of the update, so the first save won forever)
+	changed := map[string]any{"3": "10:00-16:00", "0": "09:00-12:00"}
+	code, raw = call(w.app.PutNextcloudCalendar, merge(base, map[string]any{"hours": changed}))
+	require.Equal(t, 200, code, raw)
+	_, raw = call(w.app.GetNextcloudCalendar, map[string]any{})
+	assert.Contains(t, raw, `"3":"10:00-16:00"`, "the new hours")
+	assert.Contains(t, raw, `"0":"09:00-12:00"`)
+	assert.NotContains(t, raw, `"6":"08:00-12:00"`, "the old Saturday is gone")
+	code, raw = call(w.app.PutNextcloudCalendar, merge(base, map[string]any{"hours": hours}))
+	require.Equal(t, 200, code, raw)
+	// and a save that does not mention the hours keeps them too
+	code, raw = call(w.app.PutNextcloudCalendar, map[string]any{"location": "Centro"})
+	require.Equal(t, 200, code, raw)
+	_, raw = call(w.app.GetNextcloudCalendar, map[string]any{})
+	assert.Contains(t, raw, `"6":"08:00-12:00"`)
+	assert.Contains(t, raw, `"slot_minutes":45`)
+}
+
+func merge(a, b map[string]any) map[string]any {
+	out := map[string]any{}
+	for k, v := range a {
+		out[k] = v
+	}
+	for k, v := range b {
+		out[k] = v
+	}
+	return out
 }
