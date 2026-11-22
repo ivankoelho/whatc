@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -421,4 +422,116 @@ func merge(a, b map[string]any) map[string]any {
 		out[k] = v
 	}
 	return out
+}
+
+// --- the whole conversation, as the customer lives it ------------------------------------------------
+
+// waTexts reads what the customer was sent, in order: the text of a message or the body and buttons of an
+// interactive one. Typing indicators are not messages.
+func (w *wiring) waTexts() []string {
+	var out []string
+	for _, b := range w.textSends() {
+		var m struct {
+			Text        *struct{ Body string } `json:"text"`
+			Interactive *struct {
+				Body   struct{ Text string } `json:"body"`
+				Action struct {
+					Buttons []struct {
+						Reply struct{ ID, Title string } `json:"reply"`
+					} `json:"buttons"`
+				} `json:"action"`
+			} `json:"interactive"`
+		}
+		if json.Unmarshal([]byte(b), &m) != nil {
+			continue
+		}
+		switch {
+		case m.Text != nil:
+			out = append(out, m.Text.Body)
+		case m.Interactive != nil:
+			line := m.Interactive.Body.Text
+			for _, btn := range m.Interactive.Action.Buttons {
+				line += " [" + btn.Reply.Title + "]"
+			}
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+// tap delivers the customer's tap on a button exactly as Meta's webhook spells it.
+func (w *wiring) tap(t *testing.T, from, buttonID, title string) {
+	t.Helper()
+	w.inboundRaw(t, fmt.Sprintf(`{"from":%q,"id":"wamid.tap%s","type":"interactive","interactive":{"type":"button_reply","button_reply":{"id":%q,"title":%q}}}`,
+		from, uuid.NewString()[:6], buttonID, title))
+}
+
+func TestScheduling_TheWholeConversationFromTheAdToTheBookedMeeting(t *testing.T) {
+	const phone = "5571988887777"
+	extraction := qualJSON(map[string]any{
+		"area":   map[string]any{"valor": "Trabalhista", "evidencia": "ação trabalhista"},
+		"cidade": map[string]any{"valor": "Salvador", "evidencia": "Moro em Salvador"},
+	})
+	// the agent's three model calls: a question, the handoff marker, and the extraction that follows it
+	w := newWiring(t, "Olá! Sinto muito pela situação. Em qual cidade você mora?", "[[TRANSFERIR]]", extraction)
+	require.NoError(t, w.app.DB.Model(w.f.agent).Updates(map[string]any{
+		"qualification_fields": lawFields, "objective": "Atender, qualificar e agendar uma conversa com o advogado",
+		"company_info": "Escritório de advocacia. Nunca dê parecer jurídico.",
+	}).Error)
+	cal := newCalServer(t)
+	w.withCalendar(t, cal)
+
+	// 1. the customer arrives from the ad
+	w.inboundRaw(t, fmt.Sprintf(`{"from":%q,"id":"wamid.c1","type":"text","text":{"body":"Oi, vi o anúncio. Fui demitida ontem"},`+
+		`"referral":{"source_id":"AD-77","source_type":"ad","headline":"Consulta jurídica","ctwa_clid":"clk"}}`, phone))
+	contact := w.contactFor(t, phone)
+	require.NotNil(t, w.app.adOriginOf(w.f.org.ID, contact.ID), "the ad that brought them is on the contact")
+
+	// 2. they answer the agent's question; the agent decides it has what it needs
+	w.inboundRaw(t, fmt.Sprintf(`{"from":%q,"id":"wamid.c2","type":"text","text":{"body":"Moro em Salvador, quero entrar com uma ação trabalhista"}}`, phone))
+
+	texts := w.waTexts()
+	t.Log("conversation so far:\n  - " + strings.Join(texts, "\n  - "))
+	require.GreaterOrEqual(t, len(texts), 2)
+	assert.Contains(t, texts[len(texts)-2]+texts[len(texts)-1], "Em qual cidade", "the agent asked before offering")
+	offer := texts[len(texts)-1]
+	assert.Contains(t, offer, "escolha o melhor horário")
+	assert.Len(t, w.offeredButtons(), 3)
+	assert.NotContains(t, strings.Join(texts, " "), "TRANSFERIR", "the marker never reaches the customer")
+	assert.Empty(t, w.transfers(t, contact.ID), "no attendant yet: the customer is choosing a time")
+	opps := w.opportunities(t, contact.ID)
+	require.Len(t, opps, 1)
+	assert.Contains(t, opps[0].Interest, "Área do direito: Trabalhista")
+	assert.Contains(t, opps[0].Interest, "Cidade: Salvador")
+	assert.Zero(t, cal.putCount(), "nothing is booked until the customer picks")
+
+	// 3. they tap the second time
+	slots := w.offers(t, contact.ID)[0].Slots
+	w.tap(t, phone, w.offeredButtons()[1], "horário 2")
+
+	require.Equal(t, 1, cal.putCount(), "the tap reached the booking through the webhook path")
+	ics := strings.ReplaceAll(cal.puts[0], "\r\n ", "")
+	want, _ := time.Parse(time.RFC3339, slots[1])
+	assert.Contains(t, ics, "DTSTART:"+want.UTC().Format("20060102T150405Z"))
+	assert.Contains(t, ics, "Telefone: ")
+	assert.Contains(t, ics, "Cidade: Salvador")
+	assert.Contains(t, ics, "LOCATION:Escritório Centro")
+	after := w.waTexts()
+	t.Log("full conversation:\n  - " + strings.Join(after, "\n  - "))
+	assert.Contains(t, after[len(after)-1], "Agendado!")
+	assert.Contains(t, opps0(w, t, contact.ID).Interest, "Reunião agendada")
+	require.Len(t, w.transfers(t, contact.ID), 1, "people take it after the booking")
+
+	// 4. whatever the customer writes next, the agent stays out: a person has the attendance
+	before := len(w.waTexts())
+	w.inboundRaw(t, fmt.Sprintf(`{"from":%q,"id":"wamid.c3","type":"text","text":{"body":"Posso levar meus documentos?"}}`, phone))
+	assert.Len(t, w.waTexts(), before, "the agent does not answer once a person has the conversation")
+	assert.Equal(t, 1, cal.putCount())
+}
+
+func opps0(w *wiring, t *testing.T, contactID uuid.UUID) models.SalesOpportunity {
+	t.Helper()
+	o := w.opportunities(t, contactID)
+	require.NotEmpty(t, o)
+	return o[0]
 }
