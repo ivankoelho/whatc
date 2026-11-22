@@ -1260,6 +1260,8 @@ export const nextcloudService = {
   disconnect: () => api.delete('/integrations/nextcloud/me'),
   getCalendar: () => api.get<{ configured: boolean; calendar?: NextcloudCalendarSettings; password_set?: boolean }>('/integrations/nextcloud/calendar'),
   saveCalendar: (body: Partial<NextcloudCalendarSettings> & { app_password?: string }) => api.put('/integrations/nextcloud/calendar', body),
+  /** reads the free times, writes one test event and removes it */
+  testCalendar: () => api.post<{ slots: string[]; write_checked: boolean; cleanup_failed?: boolean }>('/integrations/nextcloud/calendar/test'),
   files: (path: string) => api.get<{ path: string; entries: NextcloudEntry[] }>('/integrations/nextcloud/files', { params: { path } })
 }
 

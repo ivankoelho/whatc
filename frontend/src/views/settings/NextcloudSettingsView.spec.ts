@@ -5,7 +5,7 @@ import { createI18n } from 'vue-i18n'
 import en from '@/i18n/locales/en.json'
 import ptBR from '@/i18n/locales/pt-BR.json'
 
-const svc = vi.hoisted(() => ({ status: vi.fn(), saveServer: vi.fn(), getCalendar: vi.fn(), saveCalendar: vi.fn() }))
+const svc = vi.hoisted(() => ({ status: vi.fn(), saveServer: vi.fn(), getCalendar: vi.fn(), saveCalendar: vi.fn(), testCalendar: vi.fn() }))
 vi.mock('@/services/api', async (orig) => ({ ...(await orig<object>()), nextcloudService: svc }))
 const toast = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }))
 vi.mock('vue-sonner', () => ({ toast }))
@@ -93,6 +93,41 @@ describe('NextcloudSettingsView calendar', () => {
     expect(scroll.classes()).toContain('overflow-y-auto')
     expect(scroll.classes()).toContain('h-full')
     expect(scroll.find('[data-testid="calendar-save"]').exists()).toBe(true) // the button lives inside the scrolling box
+  })
+
+  it('tests a saved, enabled calendar and shows the times the agent would offer', async () => {
+    svc.getCalendar.mockReturnValue(ok({
+      configured: true, password_set: true,
+      calendar: { enabled: true, calendar_path: '/remote.php/dav/calendars/t/p/', username: 't', time_zone: 'America/Sao_Paulo', slot_minutes: 30, buffer_minutes: 0, min_notice_hours: 2, lookahead_days: 14, hours: { 1: '09:00-18:00' }, location: '' },
+    }))
+    svc.testCalendar.mockReturnValue(ok({ slots: ['Seg 24/11 às 09:00', 'Ter 25/11 às 09:00', 'Qua 26/11 às 09:00'], write_checked: true }))
+    const w = mountIt()
+    await flushPromises()
+    await w.find('[data-testid="calendar-test"]').trigger('click')
+    await flushPromises()
+    const result = w.find('[data-testid="calendar-test-result"]')
+    expect(svc.testCalendar).toHaveBeenCalledTimes(1)
+    expect(result.text()).toContain('Seg 24/11 às 09:00')
+    expect(result.text()).toContain('created and removed')
+  })
+
+  it('does not offer the test until the calendar is saved enabled', async () => {
+    const w = mountIt() // nothing saved yet
+    await flushPromises()
+    expect(w.find('[data-testid="calendar-test"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('explains a calendar the user cannot write to', async () => {
+    svc.getCalendar.mockReturnValue(ok({
+      configured: true, password_set: true,
+      calendar: { enabled: true, calendar_path: '/remote.php/dav/calendars/t/p/', username: 't', time_zone: 'America/Sao_Paulo', slot_minutes: 30, buffer_minutes: 0, min_notice_hours: 2, lookahead_days: 14, hours: { 1: '09:00-18:00' }, location: '' },
+    }))
+    svc.testCalendar.mockRejectedValue({ response: { data: { error_type: 'calendar_read_only' } } })
+    const w = mountIt()
+    await flushPromises()
+    await w.find('[data-testid="calendar-test"]').trigger('click')
+    await flushPromises()
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('cannot add events'))
   })
 
   it('has the calendar strings in both languages', () => {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -487,6 +488,59 @@ func (a *App) probeCalendar(cal *models.NextcloudCalendar, base string) *chatHTT
 		return errNextcloudAuth
 	case caldav.ErrNotFound:
 		return &chatHTTPError{http.StatusNotFound, "Calendar not found: check the address", "calendar_not_found"}
+	}
+	return errNextcloudUnreachable
+}
+
+// TestNextcloudCalendar proves the calendar works end to end without leaving anything behind: it reads the
+// free times the agent would offer, writes one test event at the first of them and removes it at once. It is
+// what tells the administrator the user may WRITE here (reading alone, which saving checks, does not).
+func (a *App) TestNextcloudCalendar(r *fastglue.Request) error {
+	orgID, _, err := a.requireAuth(r, models.ResourceSettingsGeneral, models.ActionWrite)
+	if err != nil {
+		return nil
+	}
+	_, client, rules, ok := a.calendarFor(orgID)
+	if !ok {
+		return a.sendChatError(r, &chatHTTPError{http.StatusConflict, "Enable the calendar first", "calendar_not_enabled"}, "test the calendar")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*aiAppointmentTimeout)
+	defer cancel()
+	slots, err := freeSlots(ctx, client, rules, time.Now())
+	if err != nil {
+		return a.sendChatError(r, calendarErrorFor(err), "test the calendar")
+	}
+	labels := make([]string, len(slots))
+	for i, s := range slots {
+		labels[i] = slotLabel(s.In(rules.Zone))
+	}
+	out := map[string]any{"slots": labels, "write_checked": false}
+	if len(slots) > 0 {
+		uid := uuid.NewString() + "@whatc-test"
+		ev := caldav.Event{UID: uid, Summary: "Teste do Whatc (removido em seguida)", Start: slots[0], End: slots[0].Add(rules.Slot),
+			Description: "Evento criado e removido pelo teste da agenda do Whatc."}
+		if err := client.CreateEvent(ctx, ev); err != nil {
+			return a.sendChatError(r, calendarErrorFor(err), "test the calendar")
+		}
+		if err := client.DeleteEvent(ctx, uid); err != nil {
+			// the write worked but the clean-up did not: say so, the event has to be removed by hand
+			a.Log.Warn("Calendar test: the test event could not be removed", "error", err, "uid", uid)
+			out["cleanup_failed"] = true
+		}
+		out["write_checked"] = true
+	}
+	return r.SendEnvelope(out)
+}
+
+// calendarErrorFor maps what the calendar answered to the error the screen explains.
+func calendarErrorFor(err error) *chatHTTPError {
+	switch {
+	case errors.Is(err, caldav.ErrAuth):
+		return errNextcloudAuth
+	case errors.Is(err, caldav.ErrNotFound):
+		return &chatHTTPError{http.StatusNotFound, "Calendar not found: check the address", "calendar_not_found"}
+	case errors.Is(err, caldav.ErrReadOnly):
+		return &chatHTTPError{http.StatusUnprocessableEntity, "This user cannot add events to the calendar", "calendar_read_only"}
 	}
 	return errNextcloudUnreachable
 }

@@ -27,6 +27,7 @@ var (
 	ErrNotFound    = errors.New("the calendar was not found")
 	ErrUnavailable = errors.New("the calendar server could not be reached or answered something unexpected")
 	ErrConflict    = errors.New("an event with this id already exists")
+	ErrReadOnly    = errors.New("the calendar does not accept new events (read-only for this user)")
 )
 
 // Interval is a stretch of time in which the calendar is busy.
@@ -102,12 +103,33 @@ func (c *Client) CreateEvent(ctx context.Context, ev Event) error {
 	switch resp.StatusCode {
 	case http.StatusCreated, http.StatusNoContent, http.StatusOK:
 		return nil
-	case http.StatusUnauthorized, http.StatusForbidden:
+	case http.StatusUnauthorized:
 		return ErrAuth
+	case http.StatusForbidden: // the user is known but may not write here (a calendar shared read-only)
+		return ErrReadOnly
 	case http.StatusNotFound:
 		return ErrNotFound
 	case http.StatusPreconditionFailed, http.StatusConflict:
 		return ErrConflict
+	}
+	return ErrUnavailable
+}
+
+// DeleteEvent removes the event written as <calendar>/<uid>.ics. An event that is already gone is not an error.
+func (c *Client) DeleteEvent(ctx context.Context, uid string) error {
+	target := strings.TrimRight(c.CalendarURL, "/") + "/" + url.PathEscape(uid) + ".ics"
+	resp, err := c.do(ctx, "DELETE", target, nil, nil)
+	if err != nil {
+		return ErrUnavailable
+	}
+	defer func() { _ = resp.Body.Close() }()
+	switch resp.StatusCode {
+	case http.StatusNoContent, http.StatusOK, http.StatusNotFound:
+		return nil
+	case http.StatusUnauthorized:
+		return ErrAuth
+	case http.StatusForbidden:
+		return ErrReadOnly
 	}
 	return ErrUnavailable
 }

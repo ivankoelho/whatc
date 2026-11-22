@@ -60,6 +60,9 @@ const days = ref<Record<number, { on: boolean; from: string; to: string }>>(
 )
 const calPasswordSet = ref(false)
 const calSaving = ref(false)
+const calSavedEnabled = ref(false) // what the server has: the test only makes sense on a saved, enabled calendar
+const calTesting = ref(false)
+const calTestResult = ref<{ slots: string[]; writeChecked: boolean; cleanupFailed: boolean } | null>(null)
 
 function hoursPayload(): Record<string, string> {
   const out: Record<string, string> = {}
@@ -75,12 +78,28 @@ async function loadCalendar() {
     cal.value = { ...cal.value, enabled: c.enabled, calendar_path: c.calendar_path, username: c.username, time_zone: c.time_zone,
       slot_minutes: c.slot_minutes, buffer_minutes: c.buffer_minutes, min_notice_hours: c.min_notice_hours, lookahead_days: c.lookahead_days, location: c.location ?? '' }
     calPasswordSet.value = !!res.password_set
+    calSavedEnabled.value = !!c.enabled
     for (const d of [0, 1, 2, 3, 4, 5, 6]) {
       const h = c.hours?.[String(d)]
       days.value[d] = h ? { on: true, from: h.split('-')[0], to: h.split('-')[1] } : { ...days.value[d], on: false }
     }
   } catch {
     // the calendar is optional: the card simply starts empty
+  }
+}
+
+async function testCalendar() {
+  calTesting.value = true
+  calTestResult.value = null
+  try {
+    const res = unwrap<{ slots: string[]; write_checked: boolean; cleanup_failed?: boolean }>(await nextcloudService.testCalendar())
+    calTestResult.value = { slots: res.slots ?? [], writeChecked: !!res.write_checked, cleanupFailed: !!res.cleanup_failed }
+  } catch (err) {
+    const c = chatErrorCode(err)
+    const key = `integrations.nextcloud.calendar.errors.${c}`
+    toast.error(c && t(key) !== key ? t(key) : t('teamChat.errors.generic'))
+  } finally {
+    calTesting.value = false
   }
 }
 
@@ -190,7 +209,16 @@ onMounted(() => { load(); loadCalendar() })
               <Input v-model="days[d].to" type="time" class="w-28" :disabled="!days[d].on" :aria-label="t('integrations.nextcloud.calendar.to')" />
             </div>
           </fieldset>
-          <div class="flex justify-end">
+          <div v-if="calTestResult" class="rounded-lg border p-3 text-sm" data-testid="calendar-test-result">
+            <p class="font-medium">{{ calTestResult.writeChecked ? t('integrations.nextcloud.calendar.testOk') : t('integrations.nextcloud.calendar.testReadOnly') }}</p>
+            <p v-if="calTestResult.slots.length" class="mt-1 text-muted-foreground">{{ t('integrations.nextcloud.calendar.testSlots') }} {{ calTestResult.slots.join(' · ') }}</p>
+            <p v-else class="mt-1 text-amber-600">{{ t('integrations.nextcloud.calendar.testNoSlots') }}</p>
+            <p v-if="calTestResult.cleanupFailed" class="mt-1 text-amber-600">{{ t('integrations.nextcloud.calendar.testCleanup') }}</p>
+          </div>
+          <div class="flex justify-end gap-2">
+            <Button type="button" variant="outline" :disabled="calTesting || calSaving || !calSavedEnabled" data-testid="calendar-test" @click="testCalendar">
+              <Loader2 v-if="calTesting" class="mr-2 h-4 w-4 animate-spin" />{{ t('integrations.nextcloud.calendar.test') }}
+            </Button>
             <Button type="submit" :disabled="calSaving" data-testid="calendar-save">
               <Loader2 v-if="calSaving" class="mr-2 h-4 w-4 animate-spin" />{{ t('common.save') }}
             </Button>

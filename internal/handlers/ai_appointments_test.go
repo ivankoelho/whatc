@@ -26,6 +26,8 @@ type calServer struct {
 	busy   []time.Time // each busy for one hour
 	status int         // REPORT status (0 = 207)
 	puts   []string
+	dels   []string // paths of the events removed
+	putSt  int      // status of a PUT (0 = 201 Created)
 	srv    *httptest.Server
 }
 
@@ -57,8 +59,15 @@ END:VCALENDAR</c:calendar-data></d:prop></d:propstat></d:response>`, i, i, s.UTC
 			_, _ = w.Write([]byte(b.String()))
 		case "PUT":
 			body, _ := io.ReadAll(r.Body)
+			if c.putSt != 0 {
+				w.WriteHeader(c.putSt)
+				return
+			}
 			c.puts = append(c.puts, string(body))
 			w.WriteHeader(http.StatusCreated)
+		case "DELETE":
+			c.dels = append(c.dels, r.URL.Path)
+			w.WriteHeader(http.StatusNoContent)
 		}
 	}))
 	t.Cleanup(c.srv.Close)
@@ -309,4 +318,49 @@ func TestCalendarSettings_ARefusedPasswordIsNotA401AndEnablingChecksTheCalendar(
 	assert.True(t, row.Enabled)
 	assert.NotEqual(t, "s3cret-pass", row.AppPassword, "stored encrypted")
 	assert.NotEmpty(t, row.AppPassword)
+}
+
+func (c *calServer) setPutStatus(s int) { c.mu.Lock(); c.putSt = s; c.mu.Unlock() }
+
+func TestCalendarTest_ReadsFreeTimesWritesOneEventAndRemovesIt(t *testing.T) {
+	w := newWiring(t, "x")
+	cal := newCalServer(t)
+	w.withCalendar(t, cal)
+	role := testutil.CreateAdminRole(t, w.app.DB, w.f.org.ID)
+	admin := testutil.CreateTestUser(t, w.app.DB, w.f.org.ID, testutil.WithRoleID(&role.ID))
+	run := func() (int, string) {
+		req := testutil.NewJSONRequest(t, map[string]any{})
+		testutil.SetAuthContext(req, w.f.org.ID, admin.ID)
+		require.NoError(t, w.app.TestNextcloudCalendar(req))
+		return testutil.GetResponseStatusCode(req), string(testutil.GetResponseBody(req))
+	}
+
+	code, raw := run()
+	require.Equal(t, 200, code, raw)
+	assert.Contains(t, raw, `"write_checked":true`)
+	assert.Regexp(t, `"slots":\["[A-Za-zÀ-ú]{3} \d\d/\d\d às \d\d:\d\d"`, raw, "the times the agent would offer")
+	assert.Equal(t, 1, cal.putCount(), "one test event written")
+	require.Len(t, cal.dels, 1, "and removed at once")
+	assert.Contains(t, cal.dels[0], "@whatc-test.ics", "only the test event")
+
+	cal.setPutStatus(http.StatusForbidden) // the user may read the calendar but not add to it
+	code, raw = run()
+	assert.Equal(t, 422, code)
+	assert.Contains(t, raw, "calendar_read_only")
+
+	cal.setStatus(http.StatusUnauthorized)
+	code, raw = run()
+	assert.Equal(t, 422, code, "never a 401: that would sign the person out of Whatc")
+	assert.Contains(t, raw, "nextcloud_auth")
+}
+
+func TestCalendarTest_NeedsTheCalendarEnabled(t *testing.T) {
+	w := newWiring(t, "x")
+	role := testutil.CreateAdminRole(t, w.app.DB, w.f.org.ID)
+	admin := testutil.CreateTestUser(t, w.app.DB, w.f.org.ID, testutil.WithRoleID(&role.ID))
+	req := testutil.NewJSONRequest(t, map[string]any{})
+	testutil.SetAuthContext(req, w.f.org.ID, admin.ID)
+	require.NoError(t, w.app.TestNextcloudCalendar(req))
+	assert.Equal(t, 409, testutil.GetResponseStatusCode(req))
+	assert.Contains(t, string(testutil.GetResponseBody(req)), "calendar_not_enabled")
 }

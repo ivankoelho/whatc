@@ -161,3 +161,28 @@ func TestClient_DoesNotFollowARedirectToAnotherHost(t *testing.T) {
 	_, err := c.Busy(context.Background(), time.Now(), time.Now().Add(time.Hour))
 	assert.ErrorIs(t, err, ErrUnavailable)
 }
+
+func TestClient_DeleteEventAndAReadOnlyCalendar(t *testing.T) {
+	var gotMethod, gotPath string
+	status := http.StatusNoContent
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		w.WriteHeader(status)
+	}))
+	defer srv.Close()
+	c := &Client{HTTP: srv.Client(), CalendarURL: srv.URL + "/cal/x/", User: "u", Pass: "p"}
+	ctx := context.Background()
+
+	require.NoError(t, c.DeleteEvent(ctx, "e1@whatc-test"))
+	assert.Equal(t, "DELETE", gotMethod)
+	assert.Equal(t, "/cal/x/e1@whatc-test.ics", gotPath)
+
+	status = http.StatusNotFound
+	assert.NoError(t, c.DeleteEvent(ctx, "gone"), "already removed is fine")
+
+	status = http.StatusForbidden // a calendar shared read-only: known user, no write
+	assert.ErrorIs(t, c.DeleteEvent(ctx, "x"), ErrReadOnly)
+	assert.ErrorIs(t, c.CreateEvent(ctx, Event{UID: "x", Start: time.Now(), End: time.Now().Add(time.Hour)}), ErrReadOnly)
+	status = http.StatusUnauthorized
+	assert.ErrorIs(t, c.CreateEvent(ctx, Event{UID: "x", Start: time.Now(), End: time.Now().Add(time.Hour)}), ErrAuth)
+}
