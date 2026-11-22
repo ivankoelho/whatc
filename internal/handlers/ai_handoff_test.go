@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"maps"
 	"strings"
 	"sync"
 	"testing"
@@ -157,7 +158,9 @@ func TestHandoffFromAI_CapSkipsExtraction(t *testing.T) {
 func TestHandoffFromAI_NoDuplicateOnConcurrentCalls(t *testing.T) {
 	w := newWiring(t, qualHappy)
 	contact, session := w.handoffSession(t, "Oi, quero porcelanato", "para a sala, uns 40 m²")
-	session2 := *session // a second in-memory copy, as a second webhook goroutine would have
+	// a second in-memory copy, as a second webhook goroutine would have: its own SessionData map, never shared
+	session2 := *session
+	session2.SessionData = maps.Clone(session.SessionData)
 
 	var wg sync.WaitGroup
 	start := make(chan struct{})
