@@ -831,6 +831,7 @@ export const brandingService = {
   getPublic: () => api.get<ApiEnvelope<{
     login_background_url: string | null
     logo_url: string | null
+    wallpaper_url: string | null
     system_name: string | null
     footer_text: string | null
     footer_version: string | null
@@ -853,6 +854,14 @@ export const brandingService = {
     })
   },
   deleteLogo: () => api.delete('/branding/logo'),
+  uploadWallpaper: (file: Blob) => {
+    const formData = new FormData()
+    formData.append('file', file, 'wallpaper.jpg')
+    return api.post<ApiEnvelope<{ wallpaper_url: string }>>('/branding/wallpaper', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+  },
+  deleteWallpaper: () => api.delete('/branding/wallpaper'),
   updateFooter: (data: { system_name?: string; footer_text?: string; footer_version?: string; ui_theme?: 'bitrix' | 'classic' }) =>
     api.put<ApiEnvelope<{ system_name: string; footer_text: string; footer_version: string; ui_theme: string }>>('/branding/footer', data),
 }
