@@ -759,6 +759,9 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/branding/logo", app.ServeLogo)
 	g.POST("/api/branding/logo", app.UploadLogo)
 	g.DELETE("/api/branding/logo", app.DeleteLogo)
+	g.GET("/api/branding/wallpaper", app.ServeWallpaper)
+	g.POST("/api/branding/wallpaper", app.UploadWallpaper)
+	g.DELETE("/api/branding/wallpaper", app.DeleteWallpaper)
 
 	// Webhook routes (public - for Meta)
 	g.GET("/api/webhook", app.WebhookVerify)
@@ -785,7 +788,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 		// /api/branding/login-background and /api/branding/logo are public for
 		// GET (the login page loads them before any auth) but the POST/DELETE
 		// below require auth — only skip the middleware for the read.
-		if (path == "/api/branding/login-background" || path == "/api/branding/logo") &&
+		if (path == "/api/branding/login-background" || path == "/api/branding/logo" || path == "/api/branding/wallpaper") &&
 			string(r.RequestCtx.Method()) == "GET" {
 			return r
 		}

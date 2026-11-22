@@ -34,6 +34,12 @@ type BrandingSettings struct {
 	FooterText    string `gorm:"size:255" json:"footer_text,omitempty"`
 	FooterVersion string `gorm:"size:50" json:"footer_version,omitempty"`
 
+	// Workspace wallpaper image: set only by a super admin and shown to every
+	// user of the system (it replaces the per-user wallpaper choice). Empty
+	// means no image: each user keeps the preset they picked.
+	WallpaperPath        string `gorm:"size:500" json:"wallpaper_path,omitempty"`
+	WallpaperContentType string `gorm:"size:100" json:"wallpaper_content_type,omitempty"`
+
 	// UITheme is the app shell layout for every user: "bitrix" (wallpaper,
 	// glass sidebar, top tabs) or "classic" (the original solid sidebar).
 	// Empty reads as the default, UIThemeDefault.
