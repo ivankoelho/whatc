@@ -130,6 +130,21 @@ describe('NextcloudSettingsView calendar', () => {
     expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('cannot add events'))
   })
 
+  it('sends what is pasted for the CRM calendar (the iframe code works too) and explains a refused one', async () => {
+    const w = mountIt()
+    await flushPromises()
+    const code = '<iframe width="400" height="215" src="https://next.example.com/index.php/apps/calendar/embed/Mir5xf9ipMDzY3jN"></iframe>'
+    await w.find('[data-testid="calendar-embed"]').setValue(code)
+    await w.find('[data-testid="calendar-form"]').trigger('submit')
+    await flushPromises()
+    expect(svc.saveCalendar.mock.calls[0][0].embed_url).toBe(code)
+
+    svc.saveCalendar.mockRejectedValue({ response: { data: { error_type: 'calendar_embed_invalid' } } })
+    await w.find('[data-testid="calendar-form"]').trigger('submit')
+    await flushPromises()
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('embed code'))
+  })
+
   it('has the calendar strings in both languages', () => {
     const keys = (o: Record<string, unknown>): string[] => Object.entries(o).flatMap(([k, v]) => (v && typeof v === 'object' ? keys(v as Record<string, unknown>).map(s => `${k}.${s}`) : [k]))
     const enKeys = keys((en as any).integrations.nextcloud.calendar).sort()

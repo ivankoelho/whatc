@@ -12,7 +12,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Skeleton } from '@/components/ui/skeleton'
 import { PageHeader, DataTable, ErrorState, DeleteConfirmDialog, DateRangePicker, type Column } from '@/components/shared'
-import { Plus, TrendingUp, Briefcase, Target, CheckCircle2, XCircle, Percent, AlertTriangle, Trash2, Pencil, Columns3, List, Store, UserRound, X, LayoutDashboard } from 'lucide-vue-next'
+import { Plus, TrendingUp, Briefcase, Target, CheckCircle2, XCircle, Percent, AlertTriangle, Trash2, Pencil, Columns3, List, Store, UserRound, X, LayoutDashboard, CalendarDays } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { useDateRange } from '@/composables/useDateRange'
 import { salesOpportunitiesService } from '@/services/api'
@@ -23,6 +23,7 @@ import { formatCurrency } from '@/lib/currency'
 import { formatQuantity } from '@/lib/salesUnits'
 import { Doughnut } from '@/lib/charts'
 import SalesOpportunityBoard from '@/components/sales/SalesOpportunityBoard.vue'
+import SalesCalendarTab from '@/components/sales/SalesCalendarTab.vue'
 import LoseSalesOpportunityDialog from '@/components/sales/LoseSalesOpportunityDialog.vue'
 import SalesOpportunityDetailsDialog from '@/components/sales/SalesOpportunityDetailsDialog.vue'
 import PickContactForOpportunityDialog from '@/components/sales/PickContactForOpportunityDialog.vue'
@@ -33,8 +34,8 @@ const authStore = useAuthStore()
 
 // Painel | Quadro | Lista. The Kanban is the day-to-day view, so it opens
 // first; ?tab= keeps the choice shareable and survives a reload.
-type CrmTab = 'dashboard' | 'board' | 'list'
-const CRM_TABS: CrmTab[] = ['dashboard', 'board', 'list']
+type CrmTab = 'dashboard' | 'board' | 'list' | 'calendar'
+const CRM_TABS: CrmTab[] = ['dashboard', 'board', 'list', 'calendar']
 const route = useRoute()
 const router = useRouter()
 const activeTab = computed<CrmTab>({
@@ -396,6 +397,7 @@ onMounted(() => {
         <TabsTrigger value="dashboard" :title="$t('sales.tabDashboard')" class="page-rail-item"><LayoutDashboard class="h-5 w-5" aria-hidden="true" /><span class="page-rail-label">{{ $t('sales.tabDashboard') }}</span></TabsTrigger>
         <TabsTrigger value="board" :title="$t('sales.tabBoard')" class="page-rail-item"><Columns3 class="h-5 w-5" aria-hidden="true" /><span class="page-rail-label">{{ $t('sales.tabBoard') }}</span></TabsTrigger>
         <TabsTrigger value="list" :title="$t('sales.tabList')" class="page-rail-item"><List class="h-5 w-5" aria-hidden="true" /><span class="page-rail-label">{{ $t('sales.tabList') }}</span></TabsTrigger>
+        <TabsTrigger value="calendar" :title="$t('sales.tabCalendar')" class="page-rail-item" data-testid="crm-tab-calendar"><CalendarDays class="h-5 w-5" aria-hidden="true" /><span class="page-rail-label">{{ $t('sales.tabCalendar') }}</span></TabsTrigger>
       </TabsList>
 
       <div class="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -515,7 +517,10 @@ onMounted(() => {
       </TabsContent>
 
       <!-- Quadro: the Kanban takes the whole area, like Protocolos -->
-      <TabsContent value="board" class="mt-0 flex min-h-0 flex-1 flex-col">
+      <!-- No display class on the TabsContent itself: an inactive tab is hidden by the [hidden] attribute, and a `flex`
+           class would override it and leave an empty block taking space on the other tabs. -->
+      <TabsContent value="board" class="mt-0 min-h-0 flex-1">
+        <div class="flex h-full min-h-0 flex-col">
         <div class="flex shrink-0 flex-wrap items-center gap-2 px-4 pt-3" role="group" :aria-label="$t('sales.quickFilters')" data-testid="board-quick-filters">
           <button
             v-for="k in QUICK_FILTERS"
@@ -540,6 +545,7 @@ onMounted(() => {
             @details-change="handleDetailsChange"
           />
         </div>
+      </div>
       </TabsContent>
 
       <!-- Lista: the full table -->
@@ -652,6 +658,11 @@ onMounted(() => {
             </Card>
           </div>
         </ScrollArea>
+      </TabsContent>
+
+      <!-- Calendário: the organization's Nextcloud calendar, framed -->
+      <TabsContent value="calendar" class="mt-0 min-h-0 flex-1">
+        <SalesCalendarTab v-if="activeTab === 'calendar'" />
       </TabsContent>
       </div>
     </Tabs>

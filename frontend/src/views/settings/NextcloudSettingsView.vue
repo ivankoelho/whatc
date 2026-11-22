@@ -53,7 +53,7 @@ async function save() {
 const WEEKDAYS = [1, 2, 3, 4, 5, 6, 0] // Monday first
 const cal = ref({
   enabled: false, calendar_path: '', username: '', app_password: '', time_zone: 'America/Sao_Paulo',
-  slot_minutes: 30, buffer_minutes: 0, min_notice_hours: 2, lookahead_days: 14, location: '',
+  slot_minutes: 30, buffer_minutes: 0, min_notice_hours: 2, lookahead_days: 14, location: '', embed_url: '',
 })
 const days = ref<Record<number, { on: boolean; from: string; to: string }>>(
   Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map(d => [d, { on: d >= 1 && d <= 5, from: '09:00', to: '18:00' }])),
@@ -76,7 +76,7 @@ async function loadCalendar() {
     if (!res.configured || !res.calendar) return
     const c = res.calendar
     cal.value = { ...cal.value, enabled: c.enabled, calendar_path: c.calendar_path, username: c.username, time_zone: c.time_zone,
-      slot_minutes: c.slot_minutes, buffer_minutes: c.buffer_minutes, min_notice_hours: c.min_notice_hours, lookahead_days: c.lookahead_days, location: c.location ?? '' }
+      slot_minutes: c.slot_minutes, buffer_minutes: c.buffer_minutes, min_notice_hours: c.min_notice_hours, lookahead_days: c.lookahead_days, location: c.location ?? '', embed_url: c.embed_url ?? '' }
     calPasswordSet.value = !!res.password_set
     calSavedEnabled.value = !!c.enabled
     for (const d of [0, 1, 2, 3, 4, 5, 6]) {
@@ -196,6 +196,11 @@ onMounted(() => { load(); loadCalendar() })
           <div class="space-y-1.5">
             <Label for="cal-loc">{{ t('integrations.nextcloud.calendar.location') }}</Label>
             <Input id="cal-loc" v-model="cal.location" maxlength="200" />
+          </div>
+          <div class="space-y-1.5">
+            <Label for="cal-embed">{{ t('integrations.nextcloud.calendar.embed') }}</Label>
+            <Input id="cal-embed" v-model="cal.embed_url" placeholder="https://nextcloud.suaempresa.com.br/index.php/apps/calendar/embed/..." data-testid="calendar-embed" />
+            <p class="text-xs text-muted-foreground">{{ t('integrations.nextcloud.calendar.embedHelp') }}</p>
           </div>
           <fieldset class="space-y-1.5">
             <legend class="text-sm font-medium">{{ t('integrations.nextcloud.calendar.hours') }}</legend>

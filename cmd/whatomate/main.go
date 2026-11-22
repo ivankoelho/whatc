@@ -990,6 +990,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/integrations/nextcloud/calendar", app.GetNextcloudCalendar)
 	g.PUT("/api/integrations/nextcloud/calendar", app.PutNextcloudCalendar)
 	g.POST("/api/integrations/nextcloud/calendar/test", app.TestNextcloudCalendar)
+	g.GET("/api/integrations/nextcloud/calendar/embed", app.GetCalendarEmbed)
 	g.PUT("/api/team-chat/messages/{id}/poll-vote", app.VoteChatPoll)
 	g.PUT("/api/team-chat/messages/{id}/reactions/{code}", app.PutChatReaction)
 	g.DELETE("/api/team-chat/messages/{id}/reactions/{code}", app.DeleteChatReaction)

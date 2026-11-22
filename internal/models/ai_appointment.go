@@ -29,6 +29,9 @@ type NextcloudCalendar struct {
 	Hours JSONB `gorm:"type:jsonb;default:'{}'" json:"hours"`
 	// Location is written on the event (an address, or "videochamada").
 	Location string `gorm:"size:200" json:"location"`
+	// EmbedURL is the calendar's public "embed" page on the same Nextcloud, shown inside the CRM (a tab) so people
+	// see the agenda without leaving it. Empty = no calendar tab content.
+	EmbedURL string `gorm:"size:500" json:"embed_url"`
 
 	UpdatedByID *uuid.UUID `gorm:"type:uuid" json:"updated_by_id,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`

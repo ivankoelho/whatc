@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -47,6 +49,7 @@ const (
 var (
 	errCalBadPath = &chatHTTPError{http.StatusBadRequest, "Use the calendar address Nextcloud shows (/remote.php/dav/calendars/user/name/)", "calendar_bad_path"}
 	errCalInvalid = &chatHTTPError{http.StatusBadRequest, "Invalid calendar settings", "calendar_invalid"}
+	errCalEmbedInvalid = &chatHTTPError{http.StatusBadRequest, "Use the calendar's embed address from the same Nextcloud", "calendar_embed_invalid"}
 )
 
 var ptWeekday = [...]string{"Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"}
@@ -372,6 +375,8 @@ type calendarRequest struct {
 	LookaheadDay *int         `json:"lookahead_days"`
 	Hours        models.JSONB `json:"hours"`
 	Location     *string      `json:"location"`
+	// EmbedURL accepts the address or the whole <iframe> code Nextcloud gives; empty clears it.
+	EmbedURL *string `json:"embed_url"`
 }
 
 // GetNextcloudCalendar returns the calendar settings of the organization (never the password).
@@ -452,6 +457,13 @@ func (a *App) PutNextcloudCalendar(r *fastglue.Request) error {
 	}
 	if req.Location != nil {
 		cal.Location = strings.TrimSpace(*req.Location)
+	}
+	if req.EmbedURL != nil {
+		embed, ok := validCalendarEmbedURL(*req.EmbedURL, st.BaseURL, a.Config.App.AllowPrivateNextcloud)
+		if !ok {
+			return a.sendChatError(r, errCalEmbedInvalid, "save the calendar")
+		}
+		cal.EmbedURL = embed
 	}
 	if req.Enabled != nil {
 		cal.Enabled = *req.Enabled
@@ -602,4 +614,64 @@ func appointmentPromptSection(ap *upcomingAppointment) string {
 // appointmentNote is added to the attendance notes when people take over a customer who has a meeting.
 func (ap *upcomingAppointment) note() string {
 	return "Cliente com reunião já marcada: " + meetingLabel(ap.Local) + "."
+}
+
+// --- the calendar shown inside the CRM ---------------------------------------------------------------
+
+var (
+	iframeSrcRE   = regexp.MustCompile(`(?i)<iframe[^>]*\ssrc\s*=\s*["']([^"']+)["']`)
+	embedTokenRE  = regexp.MustCompile(`^[A-Za-z0-9]{8,64}$`)
+	embedPathRE   = regexp.MustCompile(`(?i)^(/index\.php)?/apps/calendar/(embed|p)/([^/]+)/?$`)
+)
+
+// validCalendarEmbedURL turns what the administrator pasted (the address, the public link, or the whole <iframe>
+// code) into the one address the CRM may frame: https, on the organization's own Nextcloud host, the calendar app's
+// embed page. Anything else is refused, so the CRM can never be made to frame an arbitrary site. An empty value
+// is valid and clears it.
+func validCalendarEmbedURL(raw, base string, allowPrivate bool) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", true
+	}
+	if m := iframeSrcRE.FindStringSubmatch(raw); m != nil {
+		raw = strings.TrimSpace(m[1])
+	}
+	u, err := url.Parse(raw)
+	b, berr := url.Parse(base)
+	if err != nil || berr != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return "", false
+	}
+	if u.Scheme != "https" && !(allowPrivate && u.Scheme == "http") {
+		return "", false
+	}
+	if !strings.EqualFold(u.Host, b.Host) || u.Scheme != b.Scheme {
+		return "", false
+	}
+	// the address may live under a sub-path of the host (https://host/nextcloud): it must start with the base's
+	prefix := strings.TrimRight(b.Path, "/")
+	if !strings.HasPrefix(u.Path, prefix) {
+		return "", false
+	}
+	m := embedPathRE.FindStringSubmatch(strings.TrimPrefix(u.Path, prefix))
+	if m == nil || !embedTokenRE.MatchString(m[3]) {
+		return "", false
+	}
+	// the public link (/p/<token>) and the embed page (/embed/<token>) show the same calendar: always frame the embed
+	prefix += m[1]
+	return fmt.Sprintf("%s://%s%s/apps/calendar/embed/%s", u.Scheme, u.Host, prefix, m[3]), true
+}
+
+// GetCalendarEmbed gives the CRM the address of the calendar tab. Anyone who may read the sales pipeline may see
+// it (it is the organization's own agenda page), but only an administrator can change it.
+func (a *App) GetCalendarEmbed(r *fastglue.Request) error {
+	orgID, userID, err := a.requireAuth(r, models.ResourceSalesOpportunities, models.ActionRead)
+	if err != nil {
+		return nil
+	}
+	var cal models.NextcloudCalendar
+	url := ""
+	if a.DB.Select("embed_url").Where("organization_id = ?", orgID).First(&cal).Error == nil {
+		url = cal.EmbedURL
+	}
+	return r.SendEnvelope(map[string]any{"url": url, "can_configure": a.HasPermission(userID, models.ResourceSettingsGeneral, models.ActionWrite, orgID)})
 }

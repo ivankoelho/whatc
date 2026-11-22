@@ -1242,6 +1242,8 @@ export interface NextcloudCalendarSettings {
   /** weekday (0 = Sunday) to "HH:MM-HH:MM"; a missing weekday is closed */
   hours: Record<string, string>
   location: string
+  /** the calendar's public embed page (the CRM's Calendar tab); accepts the <iframe> code or the link when saving */
+  embed_url?: string
 }
 
 export interface NextcloudEntry {
@@ -1260,6 +1262,8 @@ export const nextcloudService = {
   disconnect: () => api.delete('/integrations/nextcloud/me'),
   getCalendar: () => api.get<{ configured: boolean; calendar?: NextcloudCalendarSettings; password_set?: boolean }>('/integrations/nextcloud/calendar'),
   saveCalendar: (body: Partial<NextcloudCalendarSettings> & { app_password?: string }) => api.put('/integrations/nextcloud/calendar', body),
+  /** the address of the CRM's Calendar tab (anyone who reads the pipeline); empty when none is set */
+  getCalendarEmbed: () => api.get<{ url: string; can_configure: boolean }>('/integrations/nextcloud/calendar/embed'),
   /** reads the free times, writes one test event and removes it */
   testCalendar: () => api.post<{ slots: string[]; write_checked: boolean; cleanup_failed?: boolean }>('/integrations/nextcloud/calendar/test'),
   files: (path: string) => api.get<{ path: string; entries: NextcloudEntry[] }>('/integrations/nextcloud/files', { params: { path } })

@@ -614,3 +614,83 @@ func TestAppointmentPromptSection_TellsTheAgentTheMeetingAndWhenToCallPeople(t *
 	assert.Contains(t, got, "remarcar")
 	assert.Contains(t, got, "sobre o caso dele", "a question about the case is for the lawyer, not the agent")
 }
+
+// --- the calendar tab of the CRM ----------------------------------------------------------------------
+
+func TestValidCalendarEmbedURL_OnlyTheOrganizationsOwnCalendarEmbed(t *testing.T) {
+	base := "https://next.example.com"
+	const want = "https://next.example.com/index.php/apps/calendar/embed/Mir5xf9ipMDzY3jN"
+	ok := func(in string) string {
+		got, valid := validCalendarEmbedURL(in, base, false)
+		require.True(t, valid, in)
+		return got
+	}
+	assert.Equal(t, want, ok(`<iframe width="400" height="215" src="`+want+`"></iframe>`), "the whole code Nextcloud gives")
+	assert.Equal(t, want, ok(want))
+	assert.Equal(t, want, ok("https://next.example.com/index.php/apps/calendar/p/Mir5xf9ipMDzY3jN"), "the public link becomes the embed")
+	assert.Equal(t, "https://next.example.com/apps/calendar/embed/Mir5xf9ipMDzY3jN", ok("https://next.example.com/apps/calendar/p/Mir5xf9ipMDzY3jN"))
+	assert.Equal(t, "", ok("   "), "empty clears")
+	got, valid := validCalendarEmbedURL("https://host/nextcloud/index.php/apps/calendar/embed/Mir5xf9ipMDzY3jN", "https://host/nextcloud", false)
+	require.True(t, valid)
+	assert.Equal(t, "https://host/nextcloud/index.php/apps/calendar/embed/Mir5xf9ipMDzY3jN", got, "a Nextcloud under a sub-path")
+
+	for _, bad := range []string{
+		"https://evil.example.org/index.php/apps/calendar/embed/Mir5xf9ipMDzY3jN",          // another host
+		"https://next.example.com.evil.org/index.php/apps/calendar/embed/Mir5xf9ipMDzY3jN", // a look-alike host
+		"http://next.example.com/index.php/apps/calendar/embed/Mir5xf9ipMDzY3jN",           // not https
+		"javascript:alert(1)",
+		"https://user:pw@next.example.com/index.php/apps/calendar/embed/Mir5xf9ipMDzY3jN",
+		"https://next.example.com/index.php/apps/calendar/embed/Mir5xf9ipMDzY3jN?x=1",
+		"https://next.example.com/index.php/apps/files/",               // not the calendar app
+		"https://next.example.com/index.php/apps/calendar/embed/short", // not a token
+		"https://next.example.com/index.php/apps/calendar/embed/../../admin",
+		`<iframe src="https://evil.example.org/index.php/apps/calendar/embed/Mir5xf9ipMDzY3jN"></iframe>`,
+		"nonsense",
+	} {
+		_, valid := validCalendarEmbedURL(bad, base, false)
+		assert.False(t, valid, bad)
+	}
+	_, valid = validCalendarEmbedURL("https://host/other/index.php/apps/calendar/embed/Mir5xf9ipMDzY3jN", "https://host/nextcloud", false)
+	assert.False(t, valid, "outside the Nextcloud's own sub-path")
+}
+
+func TestCalendarEmbed_AdminSavesItAndPeopleOfTheCRMReadIt(t *testing.T) {
+	w := newWiring(t, "x")
+	require.NoError(t, w.app.DB.Create(&models.NextcloudSettings{ID: uuid.New(), OrganizationID: w.f.org.ID, BaseURL: "https://next.example.com"}).Error)
+	adminRole := testutil.CreateAdminRole(t, w.app.DB, w.f.org.ID)
+	admin := testutil.CreateTestUser(t, w.app.DB, w.f.org.ID, testutil.WithRoleID(&adminRole.ID))
+	salesRole := testutil.CreateTestRoleWithKeys(t, w.app.DB, w.f.org.ID, "seller", []string{"sales_opportunities:read"})
+	seller := testutil.CreateTestUser(t, w.app.DB, w.f.org.ID, testutil.WithRoleID(&salesRole.ID))
+	noRole := testutil.CreateTestRoleWithKeys(t, w.app.DB, w.f.org.ID, "none", []string{"contacts:read"})
+	outsider := testutil.CreateTestUser(t, w.app.DB, w.f.org.ID, testutil.WithRoleID(&noRole.ID))
+	call := func(h func(*fastglue.Request) error, uid uuid.UUID, body any) (int, string) {
+		req := testutil.NewJSONRequest(t, body)
+		testutil.SetAuthContext(req, w.f.org.ID, uid)
+		require.NoError(t, h(req))
+		return testutil.GetResponseStatusCode(req), string(testutil.GetResponseBody(req))
+	}
+
+	code, raw := call(w.app.GetCalendarEmbed, seller.ID, map[string]any{})
+	require.Equal(t, 200, code, raw)
+	assert.Contains(t, raw, `"url":""`, "nothing configured yet")
+	assert.Contains(t, raw, `"can_configure":false`)
+
+	code, raw = call(w.app.PutNextcloudCalendar, admin.ID, map[string]any{"embed_url": `<iframe src="https://evil.example.org/index.php/apps/calendar/embed/Mir5xf9ipMDzY3jN"></iframe>`})
+	assert.Equal(t, 400, code)
+	assert.Contains(t, raw, "calendar_embed_invalid")
+
+	code, raw = call(w.app.PutNextcloudCalendar, admin.ID, map[string]any{"embed_url": `<iframe width="400" src="https://next.example.com/index.php/apps/calendar/p/Mir5xf9ipMDzY3jN"></iframe>`})
+	require.Equal(t, 200, code, raw)
+	code, raw = call(w.app.GetCalendarEmbed, seller.ID, map[string]any{})
+	require.Equal(t, 200, code, raw)
+	assert.Contains(t, raw, `"url":"https://next.example.com/index.php/apps/calendar/embed/Mir5xf9ipMDzY3jN"`)
+
+	code, _ = call(w.app.GetCalendarEmbed, outsider.ID, map[string]any{})
+	assert.Equal(t, 403, code, "somebody who cannot see the pipeline does not get the agenda")
+
+	code, _ = call(w.app.PutNextcloudCalendar, admin.ID, map[string]any{"embed_url": ""})
+	require.Equal(t, 200, code)
+	_, raw = call(w.app.GetCalendarEmbed, admin.ID, map[string]any{})
+	assert.Contains(t, raw, `"url":""`)
+	assert.Contains(t, raw, `"can_configure":true`)
+}
