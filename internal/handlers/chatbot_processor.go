@@ -110,6 +110,16 @@ type IncomingTextMessage struct {
 		From string `json:"from"`
 		ID   string `json:"id"` // WhatsApp message ID being replied to
 	} `json:"context,omitempty"`
+	// Referral is present on the first message of a conversation that began with a click on a Meta ad.
+	Referral *struct {
+		SourceURL  string `json:"source_url"`
+		SourceID   string `json:"source_id"`
+		SourceType string `json:"source_type"`
+		Headline   string `json:"headline"`
+		Body       string `json:"body"`
+		MediaType  string `json:"media_type"`
+		CtwaClid   string `json:"ctwa_clid"`
+	} `json:"referral,omitempty"`
 	Reaction *struct {
 		MessageID string `json:"message_id"` // WhatsApp message ID being reacted to
 		Emoji     string `json:"emoji"`      // The emoji reaction (empty string = remove reaction)
@@ -185,6 +195,9 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 		return
 	}
 
+	// The first message of a conversation that began with a Meta ad carries where it came from
+	a.recordAdReferral(account.OrganizationID, contact.ID, msg)
+
 	// Store BSUID if provided and not already set
 	if msg.FromUserID != "" && contact.BSUID != msg.FromUserID {
 		a.DB.Model(contact).Update("bsuid", msg.FromUserID)
@@ -224,6 +237,11 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	// answered (or deliberately ignored) even if a transfer meanwhile became active.
 	if isAIToolConfirmationButton(buttonID) {
 		a.handleAIToolConfirmationTap(account, contact, buttonID, msg.ID)
+		return
+	}
+	// A tap on a time the agent offered for a meeting: booked here, never seen by the chatbot as a message.
+	if isAppointmentButton(buttonID) {
+		a.handleAppointmentTap(account, contact, buttonID)
 		return
 	}
 
@@ -901,8 +919,13 @@ func (a *App) generateAIReplyWith(settings *models.ChatbotSettings, session *mod
 	// platform rules plus its own fields. No agent: the SystemPrompt path is exactly as before.
 	agent := a.agentForSession(settings, session)
 	system := settings.AI.SystemPrompt
+	apptFact := "" // the customer's booked meeting, as the system knows it: the agent may repeat it
 	if agent != nil {
-		system = aiPlatformRules + "\n\n" + buildAgentPrompt(agent)
+		system = agentRules(agent) + "\n\n" + buildAgentPrompt(agent)
+		if ap := a.upcomingAppointment(settings.OrganizationID, session.ContactID); ap != nil {
+			system += "\n\n" + appointmentPromptSection(ap)
+			apptFact = meetingLabel(ap.Local) + " " + ap.Location
+		}
 	}
 	if contextData != "" {
 		if system != "" {
@@ -926,7 +949,7 @@ func (a *App) generateAIReplyWith(settings *models.ChatbotSettings, session *mod
 		system += kb.Text
 	}
 	if agent != nil {
-		system += "\n\n" + aiPlatformReminder
+		system += "\n\n" + agentReminder(agent)
 	}
 
 	var messages []ai.Message
@@ -981,7 +1004,7 @@ func (a *App) generateAIReplyWith(settings *models.ChatbotSettings, session *mod
 		return aiReply{ByAgent: agent != nil}, err
 	}
 	if agent != nil {
-		allowed := agentAllowedText(agent, contextData, kb.Text, userMessage)
+		allowed := agentAllowedText(agent, contextData, kb.Text, userMessage) + "\n" + apptFact
 		reply, err := a.finishAgentReply(settings, meta, aiReq, resp.Text, allowed)
 		reply.Sender = newAISender(agent)
 		return reply, err

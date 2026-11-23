@@ -111,6 +111,8 @@ func aiHandoffReasonLabel(reason string) string {
 		return "limite mensal de uso de IA não configurado (e sem aceite explícito de uso sem limite)"
 	case aiHandoffFailure:
 		return "falhas seguidas do provedor de IA"
+	case aiHandoffSchedulingFailed:
+		return "não foi possível agendar a reunião; o cliente aguarda um atendente"
 	}
 	return reason
 }
@@ -216,7 +218,10 @@ func (a *App) handoffFromAIOutcome(account *models.WhatsAppAccount, contact *mod
 	told := sessionFlag(session, aiSessionHandedOff) // the out-of-hours message was already given
 
 	var q *Qualification
-	if !sessionFlag(session, aiSessionQualified) && (reason == aiHandoffMarker || reason == aiHandoffUnsafe) {
+	// A customer with a booked meeting was qualified before the booking: the new session (a session ends with an
+	// attendance) only holds what was said since, so a second extraction would find nothing and write noise.
+	alreadyQualified := sessionFlag(session, aiSessionQualified) || a.upcomingAppointment(orgID, contact.ID) != nil
+	if !alreadyQualified && (reason == aiHandoffMarker || reason == aiHandoffUnsafe) {
 		q = a.extractQualification(ctx, settings, account, contact, session)
 		if !q.ExtractionFailed {
 			a.setSessionValue(session, aiSessionQualified, true) // do not pay for it again on this conversation
@@ -229,6 +234,9 @@ func (a *App) handoffFromAIOutcome(account *models.WhatsAppAccount, contact *mod
 	var createdOpp uuid.UUID
 	if q != nil {
 		wanted := q.Intencao != ""
+		if q.CustomMode { // no purchase intent here: an opportunity when the customer told us anything we asked
+			wanted = len(q.Custom) > 0
+		}
 		if q.ExtractionFailed {
 			wanted = reason == aiHandoffMarker
 		}
@@ -238,7 +246,7 @@ func (a *App) handoffFromAIOutcome(account *models.WhatsAppAccount, contact *mod
 				formatInterest(q), nil, nil, applyQualification(q),
 				// the contact's own account owner may belong to ANOTHER unit: an opportunity the
 				// agent opens belongs to whoever takes the attendance, not to a stranger
-				func(o *models.SalesOpportunity) { o.AssignedUserID = nil })
+				func(o *models.SalesOpportunity) { o.AssignedUserID = nil; o.CreatedByAI = true })
 			switch {
 			case err != nil:
 				a.Log.Error("AI handoff: could not register the opportunity", "error", err, "contact_id", contact.ID)
@@ -255,7 +263,25 @@ func (a *App) handoffFromAIOutcome(account *models.WhatsAppAccount, contact *mod
 		return aiHandoffHumanActive
 	}
 
+	// With a calendar enabled, the agent offers meeting times instead of calling a person right away: the
+	// customer picks one and the booking hands over (handleAppointmentTap). Any failure falls through to
+	// the normal transfer below.
+	if reason == aiHandoffMarker && a.agentForSession(settings, session) != nil {
+		var oppID *uuid.UUID
+		if createdOpp != uuid.Nil {
+			oppID = &createdOpp
+		} else if id, ok := a.openOpportunityID(contact); ok {
+			oppID = &id
+		}
+		if a.offerAppointment(account, contact, session, oppID, 0) {
+			return aiHandoffOffered
+		}
+	}
+
 	notes := transferNotes(reason, q)
+	if ap := a.upcomingAppointment(orgID, contact.ID); ap != nil {
+		notes += "\n" + ap.note()
+	}
 	var res TransferResult
 	var err error
 	if issue := a.aiAgentAccountUnitTeamIssue(account); issue == "" {
@@ -296,8 +322,10 @@ func (a *App) handoffFromAIOutcome(account *models.WhatsAppAccount, contact *mod
 		if told { // the out-of-hours message is moot now; a later handoff may say it again
 			a.setSessionValue(session, aiSessionHandedOff, false)
 		}
-		if err := a.sendAndSaveAgentText(aiCtx("ai_handoff"), account, contact, handoffMessageFor(reason, q), sender); err != nil {
-			a.Log.Error("AI handoff: could not send the waiting message", "error", err, "contact_id", contact.ID)
+		if msg := handoffMessageFor(reason, q); msg != "" {
+			if err := a.sendAndSaveAgentText(aiCtx("ai_handoff"), account, contact, msg, sender); err != nil {
+				a.Log.Error("AI handoff: could not send the waiting message", "error", err, "contact_id", contact.ID)
+			}
 		}
 		return aiHandoffTransferred
 	case TransferAlreadyActive:

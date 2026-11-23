@@ -53,6 +53,7 @@ type OrganizationSettings struct {
 	Timezone            string `json:"timezone"`
 	DateFormat          string `json:"date_format"`
 	CallingEnabled      bool   `json:"calling_enabled"`
+	SalesDirecionamento bool   `json:"sales_direcionamento_enabled"`
 	MaxCallDuration     int    `json:"max_call_duration"`
 	TransferTimeoutSecs int    `json:"transfer_timeout_secs"`
 	HoldMusicFile       string `json:"hold_music_file"`
@@ -83,6 +84,7 @@ func (a *App) GetOrganizationSettings(r *fastglue.Request) error {
 		Timezone:            "America/Bahia",
 		DateFormat:          "YYYY-MM-DD",
 		CallingEnabled:      false,
+		SalesDirecionamento: true,
 		MaxCallDuration:     callingConfigDefault(a.Config.Calling.MaxCallDuration, 3600),
 		TransferTimeoutSecs: callingConfigDefault(a.Config.Calling.TransferTimeoutSecs, 60),
 		HoldMusicFile:       a.Config.Calling.HoldMusicFile,
@@ -101,6 +103,9 @@ func (a *App) GetOrganizationSettings(r *fastglue.Request) error {
 		}
 		if v, ok := org.Settings["calling_enabled"].(bool); ok {
 			settings.CallingEnabled = v
+		}
+		if v, ok := org.Settings["sales_direcionamento_enabled"].(bool); ok {
+			settings.SalesDirecionamento = v
 		}
 		if v, ok := org.Settings["max_call_duration"].(float64); ok && v > 0 {
 			settings.MaxCallDuration = int(v)
@@ -153,6 +158,7 @@ func (a *App) UpdateOrganizationSettings(r *fastglue.Request) error {
 		DateFormat          *string `json:"date_format"`
 		Name                *string `json:"name"`
 		CallingEnabled      *bool   `json:"calling_enabled"`
+		SalesDirecionamento *bool   `json:"sales_direcionamento_enabled"`
 		MaxCallDuration     *int    `json:"max_call_duration"`
 		TransferTimeoutSecs *int    `json:"transfer_timeout_secs"`
 		HoldMusicFile       *string `json:"hold_music_file"`
@@ -194,6 +200,9 @@ func (a *App) UpdateOrganizationSettings(r *fastglue.Request) error {
 
 	if req.MaskPhoneNumbers != nil {
 		org.Settings["mask_phone_numbers"] = *req.MaskPhoneNumbers
+	}
+	if req.SalesDirecionamento != nil {
+		org.Settings["sales_direcionamento_enabled"] = *req.SalesDirecionamento
 	}
 	if req.Timezone != nil {
 		org.Settings["timezone"] = *req.Timezone

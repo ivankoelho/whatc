@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -278,6 +279,22 @@ func filterSalesOpportunities(query *gorm.DB, db *gorm.DB, r *fastglue.Request) 
 			Where("teams.unit_id = ?", unitID)
 		query = query.Where("sales_opportunities.assigned_user_id IN (?)", storeSellers)
 	}
+	// The board's quick filters. Each is a yes/no: only a literal "true" turns it on.
+	if string(args.Peek("unassigned")) == "true" {
+		query = query.Where("sales_opportunities.assigned_user_id IS NULL")
+	}
+	if string(args.Peek("ai")) == "true" {
+		query = query.Where("sales_opportunities.created_by_ai = ?", true)
+	}
+	if string(args.Peek("from_ad")) == "true" {
+		query = query.Where("EXISTS (SELECT 1 FROM contact_ad_referrals r WHERE r.contact_id = sales_opportunities.contact_id AND r.organization_id = sales_opportunities.organization_id AND r.deleted_at IS NULL)")
+	}
+	if string(args.Peek("task_overdue")) == "true" {
+		query = query.Where("sales_opportunities.status = ? AND sales_opportunities.next_task_at IS NOT NULL AND sales_opportunities.next_task_at < now()", models.SalesOpportunityStatusAberta)
+	}
+	if string(args.Peek("has_meeting")) == "true" {
+		query = query.Where("EXISTS (SELECT 1 FROM ai_appointment_offers m WHERE m.contact_id = sales_opportunities.contact_id AND m.organization_id = sales_opportunities.organization_id AND m.status = ? AND m.booked_start > now() AND m.deleted_at IS NULL)", models.AIAppointmentBooked)
+	}
 	return query
 }
 
@@ -351,6 +368,8 @@ func (a *App) ListSalesOpportunities(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list sales opportunities", nil, "")
 	}
 
+	a.enrichOpportunities(orgID, opportunities)
+
 	return r.SendEnvelope(map[string]any{
 		"opportunities": opportunities,
 		"total":         total,
@@ -368,6 +387,9 @@ func (a *App) GetSalesOpportunity(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
+	one := []models.SalesOpportunity{*opp}
+	a.enrichOpportunities(orgID, one)
+	*opp = one[0]
 	return r.SendEnvelope(opp)
 }
 
@@ -404,7 +426,7 @@ func (a *App) ChangeSalesOpportunityStage(r *fastglue.Request) error {
 		newStage != models.SalesOpportunityStageDirecionada {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid stage", nil, "")
 	}
-	if newStage == models.SalesOpportunityStageDirecionada && opp.Direcionamento == nil {
+	if newStage == models.SalesOpportunityStageDirecionada && opp.Direcionamento == nil && a.salesDirecionamentoEnabled(orgID) {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "direcionamento is required before entering direcionada", nil, "")
 	}
 
@@ -414,7 +436,7 @@ func (a *App) ChangeSalesOpportunityStage(r *fastglue.Request) error {
 	// left the stage, and log a spurious "X → X" stage_changed event. Mirrors
 	// ChangeOccurrenceStage's identical guard in occurrences.go.
 	if newStage == opp.Stage {
-		return r.SendEnvelope(opp)
+		return a.sendOpportunity(r, orgID, opp)
 	}
 
 	fromStage := opp.Stage
@@ -445,7 +467,7 @@ func (a *App) ChangeSalesOpportunityStage(r *fastglue.Request) error {
 	}
 
 	a.DB.First(opp, "id = ?", opp.ID)
-	return r.SendEnvelope(opp)
+	return a.sendOpportunity(r, orgID, opp)
 }
 
 type changeSalesOpportunityDirecionamentoRequest struct {
@@ -481,7 +503,7 @@ func (a *App) ChangeSalesOpportunityDirecionamento(r *fastglue.Request) error {
 	// guard it would write another direcionamento_changed event every time,
 	// same class of issue as ChangeSalesOpportunityStage's stage guard above.
 	if opp.Direcionamento != nil && *opp.Direcionamento == direcionamento {
-		return r.SendEnvelope(opp)
+		return a.sendOpportunity(r, orgID, opp)
 	}
 
 	// Finding 8 (TOCTOU): re-check status=aberta atomically, same reasoning
@@ -503,7 +525,7 @@ func (a *App) ChangeSalesOpportunityDirecionamento(r *fastglue.Request) error {
 	}
 
 	a.DB.First(opp, "id = ?", opp.ID)
-	return r.SendEnvelope(opp)
+	return a.sendOpportunity(r, orgID, opp)
 }
 
 type updateSalesOpportunityDetailsRequest struct {
@@ -515,6 +537,40 @@ type updateSalesOpportunityDetailsRequest struct {
 	// opportunity is converted (see UpdateSalesOpportunityDetails).
 	RealizedValue    *float64 `json:"realized_value"`
 	RealizedQuantity *float64 `json:"realized_quantity"`
+	// NextTaskAt is an RFC 3339 instant; "" clears the task (and its note).
+	NextTaskAt   *string `json:"next_task_at"`
+	NextTaskNote *string `json:"next_task_note"`
+}
+
+// salesFeatures are the parts of the sales screens that depend on the customer profile: the X2 order (an integration)
+// and direcionamento (a retail funnel rule). The sales screens hide what the organization does not use.
+type salesFeatures struct {
+	XProcess       bool `json:"xprocess"`
+	Direcionamento bool `json:"direcionamento"`
+}
+
+// salesDirecionamentoEnabled: on unless the organization turned it off (the default keeps the retail flow as it was).
+func (a *App) salesDirecionamentoEnabled(orgID uuid.UUID) bool {
+	var org models.Organization
+	if err := a.DB.Select("id", "settings").Where("id = ?", orgID).First(&org).Error; err != nil {
+		return true
+	}
+	if v, ok := org.Settings["sales_direcionamento_enabled"].(bool); ok {
+		return v
+	}
+	return true
+}
+
+// GetSalesFeatures needs only sales read access (the integration settings are admin-only) and reveals nothing but
+// yes/no flags.
+func (a *App) GetSalesFeatures(r *fastglue.Request) error {
+	orgID, _, err := a.requireAuth(r, models.ResourceSalesOpportunities, models.ActionRead)
+	if err != nil {
+		return nil
+	}
+	var n int64
+	a.DB.Model(&models.XProcessIntegration{}).Where("organization_id = ? AND is_active = ?", orgID, true).Count(&n)
+	return r.SendEnvelope(salesFeatures{XProcess: n > 0, Direcionamento: a.salesDirecionamentoEnabled(orgID)})
 }
 
 // validateSalesQuantities checks the numeric fields of a request and returns the
@@ -566,7 +622,7 @@ func (a *App) UpdateSalesOpportunityDetails(r *fastglue.Request) error {
 		}
 	case opp.Status == models.SalesOpportunityStatusConvertida && touchesRealized:
 		required = models.SalesOpportunityStatusConvertida
-		if req.Interest != nil || req.EstimatedValue != nil || req.EstimatedQuantity != nil || req.UnitOfMeasure != nil {
+		if req.Interest != nil || req.EstimatedValue != nil || req.EstimatedQuantity != nil || req.UnitOfMeasure != nil || req.NextTaskAt != nil || req.NextTaskNote != nil {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Only open opportunities can be edited", nil, "")
 		}
 	default:
@@ -594,6 +650,27 @@ func (a *App) UpdateSalesOpportunityDetails(r *fastglue.Request) error {
 	if unitSet {
 		updates["unit_of_measure"] = unit // nil clears it
 	}
+	if req.NextTaskAt != nil {
+		if *req.NextTaskAt == "" {
+			updates["next_task_at"] = nil
+			updates["next_task_note"] = ""
+		} else {
+			at, perr := time.Parse(time.RFC3339, *req.NextTaskAt)
+			if perr != nil {
+				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "next_task_at must be an RFC 3339 date and time", nil, "")
+			}
+			updates["next_task_at"] = at
+		}
+	}
+	// a note belongs to a task: without a date (in the request or already stored) there is nothing to attach it to
+	hasTask := (req.NextTaskAt != nil && *req.NextTaskAt != "") || (req.NextTaskAt == nil && opp.NextTaskAt != nil)
+	if req.NextTaskNote != nil && hasTask {
+		note := strings.TrimSpace(*req.NextTaskNote)
+		if len([]rune(note)) > 200 {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "next_task_note is limited to 200 characters", nil, "")
+		}
+		updates["next_task_note"] = note
+	}
 	if req.RealizedValue != nil {
 		updates["realized_value"] = *req.RealizedValue
 	}
@@ -601,7 +678,7 @@ func (a *App) UpdateSalesOpportunityDetails(r *fastglue.Request) error {
 		updates["realized_quantity"] = *req.RealizedQuantity
 	}
 	if len(updates) == 0 {
-		return r.SendEnvelope(opp)
+		return a.sendOpportunity(r, orgID, opp)
 	}
 
 	// Same TOCTOU guard as the other mutating handlers (finding 8): re-check
@@ -619,7 +696,7 @@ func (a *App) UpdateSalesOpportunityDetails(r *fastglue.Request) error {
 	}
 
 	a.DB.First(opp, "id = ?", opp.ID)
-	return r.SendEnvelope(opp)
+	return a.sendOpportunity(r, orgID, opp)
 }
 
 type convertSalesOpportunityRequest struct {
@@ -691,7 +768,7 @@ func (a *App) ConvertSalesOpportunity(r *fastglue.Request) error {
 	}
 
 	a.DB.First(opp, "id = ?", opp.ID)
-	return r.SendEnvelope(opp)
+	return a.sendOpportunity(r, orgID, opp)
 }
 
 type loseSalesOpportunityRequest struct {
@@ -748,7 +825,7 @@ func (a *App) LoseSalesOpportunity(r *fastglue.Request) error {
 	}
 
 	a.DB.First(opp, "id = ?", opp.ID)
-	return r.SendEnvelope(opp)
+	return a.sendOpportunity(r, orgID, opp)
 }
 
 // ListSalesOpportunityEvents returns an opportunity's event timeline, oldest first.

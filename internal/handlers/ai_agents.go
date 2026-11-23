@@ -30,6 +30,8 @@ type aiAgentRequest struct {
 	IsEnabled        *bool     `json:"is_enabled"`
 	WhatsAppAccounts *[]string `json:"whatsapp_accounts"`
 	WaitSeconds      *int      `json:"wait_seconds"`
+	// QualificationFields replaces the whole list; an empty list goes back to the product qualification.
+	QualificationFields *[]models.QualificationField `json:"qualification_fields"`
 }
 
 // Bounds of the agent's wait before answering (seconds). 0 means "answer at once".
@@ -56,6 +58,11 @@ func (a *App) validateAIAgentRequest(orgID uuid.UUID, req *aiAgentRequest) strin
 			return "Text fields accept at most 4000 characters"
 		}
 	}
+	if req.QualificationFields != nil {
+		if msg := validateQualificationFields(*req.QualificationFields); msg != "" {
+			return msg
+		}
+	}
 	if req.WhatsAppAccounts != nil {
 		if len(*req.WhatsAppAccounts) > aiAgentAccountsMax {
 			return "Too many WhatsApp accounts"
@@ -77,6 +84,9 @@ func applyAIAgentRequest(agent *models.AIAgent, req *aiAgentRequest) {
 	}
 	if req.DisplayName != nil {
 		agent.DisplayName = cleanDisplayName(*req.DisplayName) // never stores characters that would format the signature
+	}
+	if req.QualificationFields != nil {
+		agent.QualificationFields = normalizeQualificationFields(*req.QualificationFields)
 	}
 	if req.Objective != nil {
 		agent.Objective = *req.Objective

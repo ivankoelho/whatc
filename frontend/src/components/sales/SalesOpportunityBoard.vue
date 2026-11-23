@@ -7,14 +7,17 @@ import { toast } from 'vue-sonner'
 import { getErrorMessage } from '@/lib/api-utils'
 import { Spinner } from '@/components/ui/spinner'
 import { Button } from '@/components/ui/button'
+import { CalendarClock } from 'lucide-vue-next'
 import { salesOpportunitiesService } from '@/services/api'
 import type { SalesOpportunity, SalesOpportunityStage } from '@/services/api'
 import SalesOpportunityCard from './SalesOpportunityCard.vue'
+import SalesOpportunityDialog from './SalesOpportunityDialog.vue'
 import { byOpenedAtDesc, cardOrder, placePreview } from '@/lib/board-order'
 
 // Manual filters from the sales screen (seller / store). The backend already
 // scopes every request to what the user may see (own / team / all).
-const props = defineProps<{ filters?: { assigned_user_id?: string; unit_id?: string } }>()
+type QuickFilters = { ai?: string; from_ad?: string; has_meeting?: string; unassigned?: string; task_overdue?: string }
+const props = defineProps<{ filters?: { assigned_user_id?: string; unit_id?: string } & QuickFilters }>()
 
 const emit = defineEmits<{
   convert: [opportunity: SalesOpportunity]
@@ -76,6 +79,9 @@ function paramsFor(key: ColumnKey, offset: number): Record<string, string> {
   const params: Record<string, string> = { limit: String(PAGE_SIZE), offset: String(offset) }
   if (props.filters?.assigned_user_id) params.assigned_user_id = props.filters.assigned_user_id
   if (props.filters?.unit_id) params.unit_id = props.filters.unit_id
+  for (const k of ['ai', 'from_ad', 'has_meeting', 'unassigned', 'task_overdue'] as const) {
+    if (props.filters?.[k] === 'true') params[k] = 'true'
+  }
   if (key === 'convertida' || key === 'perdida') {
     params.status = key
   } else {
@@ -216,8 +222,32 @@ function onDetailsChange(updated: SalesOpportunity) {
   emit('details-change', updated)
 }
 
+// The popup of the card that was clicked (one for the whole board). It keeps its own copy of the opportunity, and the
+// copy follows what the popup saves.
+const selected = ref<SalesOpportunity | null>(null)
+const dialogOpen = ref(false)
+function openCard(o: SalesOpportunity) {
+  selected.value = o
+  dialogOpen.value = true
+}
+function onDialogSaved(updated: SalesOpportunity) {
+  selected.value = updated
+  onDetailsChange(updated)
+}
+function onDialogDirecionamento(updated: SalesOpportunity) {
+  selected.value = updated
+  onDirecionamentoChange(updated)
+}
+
 onMounted(loadAll)
-watch(() => [props.filters?.assigned_user_id, props.filters?.unit_id], loadAll)
+watch(() => [props.filters?.assigned_user_id, props.filters?.unit_id, props.filters?.ai, props.filters?.from_ad,
+  props.filters?.has_meeting, props.filters?.unassigned, props.filters?.task_overdue], loadAll)
+
+// How many cards of a column have their meeting today (of the cards loaded: a hint, not a report).
+function meetingsToday(col: ColumnState): number {
+  const today = new Date().toDateString()
+  return col.items.filter(o => o.meeting && new Date(o.meeting.start).toDateString() === today).length
+}
 
 defineExpose({ refresh: loadAll })
 </script>
@@ -250,10 +280,18 @@ defineExpose({ refresh: loadAll })
             <span class="h-2.5 w-2.5 shrink-0 rounded-full" :style="{ backgroundColor: columnDef(col.key).color }" aria-hidden="true" />
             <span class="truncate">{{ $t(columnDef(col.key).labelKey) }}</span>
           </span>
-          <span
-            class="min-w-[24px] rounded-full bg-card/80 px-2 py-0.5 text-center text-xs font-semibold text-foreground"
-            data-board-column-count
-          >{{ col.total }}</span>
+          <span class="flex shrink-0 items-center gap-1.5">
+            <span
+              v-if="meetingsToday(col) > 0"
+              data-board-meetings-today
+              :title="$t('sales.meetingsTodayTitle')"
+              class="inline-flex items-center gap-0.5 rounded-full bg-emerald-500/20 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300"
+            ><CalendarClock class="h-3 w-3" aria-hidden="true" />{{ meetingsToday(col) }}</span>
+            <span
+              class="min-w-[24px] rounded-full bg-card/80 px-2 py-0.5 text-center text-xs font-semibold text-foreground"
+              data-board-column-count
+            >{{ col.total }}</span>
+          </span>
         </div>
 
         <!-- Column fills the board's height with its own scrollbar — the board
@@ -286,10 +324,7 @@ defineExpose({ refresh: loadAll })
                 :style="{ order: cardOrder(index) }"
                 :opportunity="element"
                 :disabled="pending.has(element.id)"
-                @convert="emit('convert', $event)"
-                @lose="emit('lose', $event)"
-                @direcionamento-change="onDirecionamentoChange"
-                @details-change="onDetailsChange"
+                @open="openCard"
               />
             </template>
             <!-- my-auto centres the state in the empty column (it is a flex column) -->
@@ -318,5 +353,14 @@ defineExpose({ refresh: loadAll })
         </div>
       </div>
     </template>
+    <SalesOpportunityDialog
+      v-if="selected"
+      v-model:open="dialogOpen"
+      :opportunity="selected"
+      @saved="onDialogSaved"
+      @direcionamento-change="onDialogDirecionamento"
+      @convert="emit('convert', $event)"
+      @lose="emit('lose', $event)"
+    />
   </div>
 </template>
