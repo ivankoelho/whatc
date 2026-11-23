@@ -836,6 +836,7 @@ export const organizationService = {
 // Branding (system-wide, not per-organization — see docs/superpowers/specs/2026-09-15-login-branding-design.md)
 export const brandingService = {
   getPublic: () => api.get<ApiEnvelope<{
+    environment_label?: string | null
     login_background_url: string | null
     logo_url: string | null
     wallpaper_url: string | null

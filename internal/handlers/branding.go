@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -28,8 +29,16 @@ func brandingPublicNullFields() map[string]any {
 		"system_name":          nil,
 		"footer_text":          nil,
 		"footer_version":       nil,
+		"environment_label":    nil,
 		// Never null: the app shell always needs a layout to render.
 		"ui_theme": models.UIThemeDefault,
+	}
+}
+
+// addEnvironmentLabel puts the instance label (training/test ribbon) in the public branding response.
+func (a *App) addEnvironmentLabel(resp map[string]any) {
+	if l := strings.TrimSpace(a.Config.App.EnvironmentLabel); l != "" {
+		resp["environment_label"] = l
 	}
 }
 
@@ -41,10 +50,13 @@ func (a *App) GetPublicBranding(r *fastglue.Request) error {
 	var row models.BrandingSettings
 	if err := a.DB.Where("id = ?", models.BrandingSettingsSingletonID).First(&row).Error; err != nil {
 		a.Log.Error("Failed to load branding settings", "error", err)
-		return r.SendEnvelope(brandingPublicNullFields())
+		resp := brandingPublicNullFields()
+		a.addEnvironmentLabel(resp)
+		return r.SendEnvelope(resp)
 	}
 
 	resp := brandingPublicNullFields()
+	a.addEnvironmentLabel(resp)
 	if row.LoginBackgroundPath != "" {
 		resp["login_background_url"] = fmt.Sprintf("/api/branding/login-background?v=%d", row.UpdatedAt.Unix())
 	}

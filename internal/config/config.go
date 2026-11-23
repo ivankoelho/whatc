@@ -131,6 +131,9 @@ type CallingConfig struct {
 type AppConfig struct {
 	Name          string `koanf:"name"`
 	Environment   string `koanf:"environment"` // development, staging, production
+	// EnvironmentLabel, when set (e.g. "Treinamento"), shows a ribbon with that text on every screen so nobody
+	// mistakes a training or test instance for production. Cosmetic only: it changes no behavior.
+	EnvironmentLabel string `koanf:"environment_label"`
 	Debug         bool   `koanf:"debug"`
 	EncryptionKey string `koanf:"encryption_key"` // AES-256 key for encrypting secrets at rest
 	// AllowPrivateNextcloud lets the organization's Nextcloud address be plain http or on a

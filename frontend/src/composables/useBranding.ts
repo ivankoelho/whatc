@@ -10,6 +10,8 @@ const wallpaperUrl = ref<string | null>(null)
 const systemName = ref<string | null>(null)
 const footerText = ref<string | null>(null)
 const footerVersion = ref<string | null>(null)
+// Set by the server on a training/test instance (config app.environment_label): shows a ribbon on every screen.
+const environmentLabel = ref<string | null>(null)
 // System theme (app shell), the same for every user; set by a super admin.
 export type UiTheme = 'bitrix' | 'classic'
 const uiTheme = ref<UiTheme>('bitrix')
@@ -31,6 +33,7 @@ async function loadBranding() {
     systemName.value = data?.system_name ?? null
     footerText.value = data?.footer_text ?? null
     footerVersion.value = data?.footer_version ?? null
+    environmentLabel.value = data?.environment_label ?? null
     uiTheme.value = data?.ui_theme === 'classic' ? 'classic' : 'bitrix'
   } catch {
     // Branding is purely cosmetic and optional -- a failure here (network,
@@ -41,6 +44,7 @@ async function loadBranding() {
     systemName.value = null
     footerText.value = null
     footerVersion.value = null
+    environmentLabel.value = null
   } finally {
     loaded.value = true
   }
@@ -51,5 +55,5 @@ export function useBranding() {
   const setUiTheme = (theme: UiTheme) => { uiTheme.value = theme }
   // setWallpaperUrl: after a super admin uploads or removes it, this session follows (url from the API, or null).
   const setWallpaperUrl = (url: string | null) => { wallpaperUrl.value = url ? withBasePath(url) : null }
-  return { loginBackgroundUrl, logoUrl, wallpaperUrl, setWallpaperUrl, systemName, footerText, footerVersion, uiTheme, setUiTheme, loadBranding, brandingLoaded: loaded }
+  return { loginBackgroundUrl, logoUrl, wallpaperUrl, setWallpaperUrl, systemName, footerText, footerVersion, environmentLabel, uiTheme, setUiTheme, loadBranding, brandingLoaded: loaded }
 }

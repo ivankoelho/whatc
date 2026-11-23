@@ -840,3 +840,18 @@ func TestDeleteWallpaper_OnlySuperAdminAndItClearsTheRow(t *testing.T) {
 	require.NoError(t, app.DB.Where("id = ?", models.BrandingSettingsSingletonID).First(&row).Error)
 	assert.Empty(t, row.WallpaperPath)
 }
+
+// A training or test instance says so in the public branding (the ribbon), and the real system says nothing.
+func TestGetPublicBranding_EnvironmentLabelOnlyWhenConfigured(t *testing.T) {
+	app := newTestApp(t)
+	require.NoError(t, database.EnsureBrandingSettingsRow(app.DB))
+
+	req := testutil.NewGETRequest(t)
+	require.NoError(t, app.GetPublicBranding(req))
+	assert.Contains(t, string(testutil.GetResponseBody(req)), `"environment_label":null`)
+
+	app.Config.App.EnvironmentLabel = "  Ambiente de treinamento "
+	req = testutil.NewGETRequest(t)
+	require.NoError(t, app.GetPublicBranding(req))
+	assert.Contains(t, string(testutil.GetResponseBody(req)), `"environment_label":"Ambiente de treinamento"`)
+}
