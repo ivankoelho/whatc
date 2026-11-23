@@ -1,0 +1,79 @@
+# Ambiente de TREINAMENTO do WhatC, no mesmo servidor da producao e totalmente separado dela:
+# projeto Compose proprio (whatc-treino), banco proprio, Redis proprio, volumes proprios, porta propria.
+# Nada aqui aponta para a base, o Redis ou os uploads de producao.
+#
+# Instalacao em /opt/whatc-treino (ver docker/treino/README.md):
+#   docker-compose.yml  (este arquivo, copiado pelo deploy-whatc-treino)
+#   .env                (a partir de .env.example)
+#   config.toml         (a partir de config.example.toml)
+name: whatc-treino
+
+services:
+  app:
+    build:
+      context: /opt/whatc-treino-repo
+      dockerfile: docker/Dockerfile
+    image: whatomate:treino
+    container_name: whatc_treino_app
+    restart: unless-stopped
+    # So o proxy local fala com ele; o subdominio publico passa pelo proxy reverso.
+    ports:
+      - "127.0.0.1:${TREINO_PORT:-8081}:8080"
+    networks:
+      - treino
+      # Rede da producao SOMENTE para alcancar o ClamAV (scanner sem estado). Remova este bloco, e o
+      # [antimalware] do config.toml, se preferir um scanner proprio (precisa de ~2 GB de RAM livres).
+      - producao
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    volumes:
+      - ./uploads:/app/uploads:rw
+      - ./config.toml:/app/config.toml:ro
+    command: ["server", "-migrate", "-config", "/app/config.toml"]
+
+  db:
+    image: postgres:17-alpine
+    container_name: whatc_treino_db
+    restart: unless-stopped
+    networks:
+      - treino
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    volumes:
+      - treino-postgres:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: whatc_treino_redis
+    restart: unless-stopped
+    networks:
+      - treino
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - treino-redis:/data
+
+networks:
+  treino:
+  producao:
+    external: true
+    name: docker_whatomate
+
+volumes:
+  treino-postgres:
+  treino-redis:

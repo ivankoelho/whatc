@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import EnvironmentRibbon from '@/components/layout/EnvironmentRibbon.vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
@@ -92,6 +93,7 @@ const initiateSSO = (provider: string) => {
 
 <template>
   <div class="min-h-screen relative overflow-hidden bg-[#0a0a0b]">
+    <EnvironmentRibbon />
     <!-- Fundo em tela cheia; o conteúdo fica centralizado, sem texto de marketing. -->
     <div
       class="absolute inset-0 bg-gradient-to-br from-emerald-600 to-green-900"

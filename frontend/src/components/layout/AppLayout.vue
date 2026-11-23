@@ -6,6 +6,7 @@ import { onMounted } from 'vue'
 import { useBranding } from '@/composables/useBranding'
 import BitrixLayout from './BitrixLayout.vue'
 import ClassicLayout from './ClassicLayout.vue'
+import EnvironmentRibbon from './EnvironmentRibbon.vue'
 
 // Nothing renders until the theme is known (one quick public request; on
 // failure loadBranding still flags it loaded and the default applies), so
@@ -16,6 +17,7 @@ onMounted(loadBranding)
 
 <template>
   <template v-if="brandingLoaded">
+    <EnvironmentRibbon />
     <ClassicLayout v-if="uiTheme === 'classic'" />
     <BitrixLayout v-else />
   </template>
