@@ -116,6 +116,11 @@ log "Construindo a imagem"
 if docker image inspect "$APP_IMAGE" >/dev/null 2>&1; then
     docker tag "$APP_IMAGE" "$ROLLBACK_IMAGE"
 fi
+# Poda: mantem so as KEEP_ROLLBACK (padrao 1) tags de rollback mais recentes.
+KEEP_ROLLBACK="${KEEP_ROLLBACK:-1}"
+docker image ls --format '{{.Repository}}:{{.Tag}}' whatomate \
+    | grep -E '^whatomate:treino-rollback-[0-9]{8}-[0-9]{6}$' | sort -r | tail -n +"$((KEEP_ROLLBACK + 1))" \
+    | xargs -r docker image rm >/dev/null 2>&1 || true
 docker compose build app || fail "Falha no build."
 
 log "Subindo o treino"
