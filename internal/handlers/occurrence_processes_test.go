@@ -420,7 +420,7 @@ func TestDeleteOccurrenceProcess_RefusesWhenOccurrenceUsesIt(t *testing.T) {
 	stage, err := app.InitialStageForTest(org.ID)
 	require.NoError(t, err)
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "x", StageID: stage.ID,
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "x", StageID: stage.ID,
 		OpenedByUserID: user.ID, ProcessID: &process.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))

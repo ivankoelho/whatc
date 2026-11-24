@@ -210,7 +210,7 @@ func TestSendIdempotency_TwoConcurrentRequestsWithTheSameKey_OneSend(t *testing.
 
 func TestSendIdempotency_SameKeyDifferentRequest_Is409AndSendsNothing(t *testing.T) {
 	w := newMsgWorld(t)
-	other := models.Occurrence{OrganizationID: w.org.ID, ContactID: w.contact.ID, Title: "Outro caso", StageID: w.occ.StageID,
+	other := models.Occurrence{OrganizationID: w.org.ID, ContactID: &w.contact.ID, Title: "Outro caso", StageID: w.occ.StageID,
 		OpenedByUserID: w.agent.ID, AssignedUserID: &w.agent.ID}
 	require.NoError(t, w.app.CreateOccurrenceForTest(&other))
 
@@ -504,7 +504,7 @@ func TestSendState_Get_AuthorizationAndIsolation(t *testing.T) {
 	// Isolation: another organization, another case, another id.
 	code, _ = w.getSend(t, w.outsider, w.occ, sendID)
 	assert.Contains(t, []int{fasthttp.StatusNotFound, fasthttp.StatusForbidden}, code, "another organization")
-	other := models.Occurrence{OrganizationID: w.org.ID, ContactID: w.contact.ID, Title: "Outro", StageID: w.occ.StageID,
+	other := models.Occurrence{OrganizationID: w.org.ID, ContactID: &w.contact.ID, Title: "Outro", StageID: w.occ.StageID,
 		OpenedByUserID: w.agent.ID, AssignedUserID: &w.agent.ID}
 	require.NoError(t, w.app.CreateOccurrenceForTest(&other))
 	code, _ = w.getSend(t, w.agent, &other, sendID)
@@ -518,7 +518,7 @@ func TestSendState_Get_AuthorizationAndIsolation(t *testing.T) {
 // newCase makes another case of the same contact and agent: the open-send rule is per case.
 func (w *msgWorld) newCase(t *testing.T) *models.Occurrence {
 	t.Helper()
-	occ := models.Occurrence{OrganizationID: w.org.ID, ContactID: w.contact.ID, Title: "Outro " + uuid.NewString()[:6], StageID: w.occ.StageID,
+	occ := models.Occurrence{OrganizationID: w.org.ID, ContactID: &w.contact.ID, Title: "Outro " + uuid.NewString()[:6], StageID: w.occ.StageID,
 		OpenedByUserID: w.agent.ID, AssignedUserID: &w.agent.ID}
 	require.NoError(t, w.app.CreateOccurrenceForTest(&occ))
 	return &occ
@@ -651,7 +651,7 @@ func TestSendState_ByKey_UnknownKeyIsNotFoundAndClaimsNothing(t *testing.T) {
 func TestSendState_ByKey_SeveralCasesNeverMixTheirStates(t *testing.T) {
 	w := newMsgWorld(t)
 	mk := func(title string) *models.Occurrence {
-		o := models.Occurrence{OrganizationID: w.org.ID, ContactID: w.contact.ID, Title: title, StageID: w.occ.StageID,
+		o := models.Occurrence{OrganizationID: w.org.ID, ContactID: &w.contact.ID, Title: title, StageID: w.occ.StageID,
 			OpenedByUserID: w.agent.ID, AssignedUserID: &w.agent.ID}
 		require.NoError(t, w.app.CreateOccurrenceForTest(&o))
 		return &o

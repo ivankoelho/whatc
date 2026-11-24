@@ -147,7 +147,7 @@ func TestOccurrences_UpdateBroadcastsOccurrenceChanged(t *testing.T) {
 	require.NoError(t, err)
 
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Original",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Original",
 		StageID: stage.ID, OpenedByUserID: user.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))
@@ -177,7 +177,7 @@ func TestOccurrences_UpdateFailureBroadcastsNothing(t *testing.T) {
 	require.NoError(t, err)
 
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Original",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Original",
 		StageID: stage.ID, OpenedByUserID: user.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))
@@ -214,7 +214,7 @@ func TestOccurrences_ChangeStageBroadcastsBothEventTypes(t *testing.T) {
 	from, to := stages[0], stages[1]
 
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Muda de etapa",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Muda de etapa",
 		StageID: from.ID, OpenedByUserID: user.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))
@@ -266,7 +266,7 @@ func TestOccurrences_ChangeStageToClosingBroadcastsStageChangeOnly(t *testing.T)
 		First(&closing).Error)
 
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Fecha com broadcast",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Fecha com broadcast",
 		StageID: initial.ID, OpenedByUserID: user.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))
@@ -306,7 +306,7 @@ func TestOccurrences_ChangeStageSameStageBroadcastsNothing(t *testing.T) {
 	require.NoError(t, err)
 
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Mesma etapa",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Mesma etapa",
 		StageID: stage.ID, OpenedByUserID: user.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))
@@ -332,7 +332,7 @@ func TestOccurrences_ChangeStageFailureBroadcastsNothing(t *testing.T) {
 	require.NoError(t, err)
 
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Falha",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Falha",
 		StageID: stage.ID, OpenedByUserID: user.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))
@@ -357,7 +357,7 @@ func TestOccurrences_CreateEventBroadcastsOccurrenceEventCreated(t *testing.T) {
 	require.NoError(t, err)
 
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Nota manual",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Nota manual",
 		StageID: stage.ID, OpenedByUserID: user.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))
@@ -391,7 +391,7 @@ func TestOccurrences_CreateEventFailureBroadcastsNothing(t *testing.T) {
 	require.NoError(t, err)
 
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Conteúdo vazio",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Conteúdo vazio",
 		StageID: stage.ID, OpenedByUserID: user.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))

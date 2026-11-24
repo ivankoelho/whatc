@@ -25,7 +25,7 @@ func TestOccurrences_ClaimIsExclusiveUnderConcurrency(t *testing.T) {
 	team := models.Team{OrganizationID: org.ID, Name: "log-" + uuid.NewString()[:6], IsActive: true}
 	require.NoError(t, app.DB.Create(&team).Error)
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Atraso", StageID: stage.ID,
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Atraso", StageID: stage.ID,
 		OpenedByUserID: opener.ID, TeamID: &team.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))

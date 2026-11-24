@@ -77,7 +77,7 @@ func TestOccurrenceStages_Reorder(t *testing.T) {
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
 	initial, err := app.InitialStageForTest(org.ID)
 	require.NoError(t, err)
-	occ := models.Occurrence{OrganizationID: org.ID, ContactID: contact.ID, Title: "Parado", StageID: initial.ID, OpenedByUserID: admin.ID}
+	occ := models.Occurrence{OrganizationID: org.ID, ContactID: &contact.ID, Title: "Parado", StageID: initial.ID, OpenedByUserID: admin.ID}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))
 	code, raw := call(admin, org.ID, map[string]any{"ids": reversed, "expected": before})
 	require.Equal(t, fasthttp.StatusOK, code, string(raw))

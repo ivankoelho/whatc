@@ -360,6 +360,11 @@ func coreIndexes() []string {
 		`DROP INDEX IF EXISTS idx_occ_stage_org_name`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_occ_stage_org_name_org ON occurrence_stages(organization_id, name) WHERE team_id IS NULL AND deleted_at IS NULL`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_occ_stage_team_name ON occurrence_stages(organization_id, team_id, name) WHERE team_id IS NOT NULL AND deleted_at IS NULL`,
+		// Internal tickets have no customer, so occurrences.contact_id must accept NULL. GORM's AutoMigrate
+		// does NOT drop NOT NULL from a column that already has it, so a database created by the code
+		// before internal tickets would keep the constraint and every internal ticket would fail with a
+		// 500. Idempotent: a no-op on a column that is already nullable.
+		`ALTER TABLE occurrences ALTER COLUMN contact_id DROP NOT NULL`,
 		// Automations: one configuration per scope and event (team, unit, organization).
 		`DROP INDEX IF EXISTS idx_occ_channel_org`,
 		`DROP INDEX IF EXISTS idx_occ_channel_unit`,

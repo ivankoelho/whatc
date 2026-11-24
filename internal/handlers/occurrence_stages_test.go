@@ -24,7 +24,7 @@ func TestOccurrenceStages_DeleteInUseIsRejected(t *testing.T) {
 	require.NoError(t, err)
 
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "Em uso",
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "Em uso",
 		StageID: stage.ID, OpenedByUserID: user.ID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))

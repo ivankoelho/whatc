@@ -39,7 +39,7 @@ func occurrenceForProcess(t *testing.T, app *handlers.App, org *models.Organizat
 	stage, err := app.InitialStageForTest(org.ID)
 	require.NoError(t, err)
 	occ := models.Occurrence{
-		OrganizationID: org.ID, ContactID: contact.ID, Title: "x", StageID: stage.ID,
+		OrganizationID: org.ID, ContactID: &contact.ID, Title: "x", StageID: stage.ID,
 		OpenedByUserID: user.ID, ProcessID: processID,
 	}
 	require.NoError(t, app.CreateOccurrenceForTest(&occ))

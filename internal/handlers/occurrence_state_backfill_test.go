@@ -28,7 +28,7 @@ func TestMigration_GeneralStateBackfillIsAdditiveAndIdempotent(t *testing.T) {
 	wait := mk("Aguardando cliente", false, false)
 	done := mk("Resolvido", false, true)
 
-	occ := models.Occurrence{OrganizationID: org.ID, ContactID: contact.ID, Title: "x",
+	occ := models.Occurrence{OrganizationID: org.ID, ContactID: &contact.ID, Title: "x",
 		StageID: wait.ID, OpenedByUserID: opener.ID, ProtocolNumber: "T-" + org.ID.String()[:8]}
 	require.NoError(t, app.DB.Create(&occ).Error)
 

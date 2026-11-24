@@ -757,8 +757,8 @@ func (p *SLAProcessor) processOccurrenceSLA(orgID uuid.UUID, now time.Time) {
 	// Occurrence's SLA field, not a separate top-level column) — raw SQL still
 	// addresses it by its column name.
 	if err := p.app.DB.Model(&models.Occurrence{}).
-		Where("organization_id = ? AND sla_response_deadline < ? AND first_response_at IS NULL AND sla_breached = ?",
-			orgID, now, false).
+		Where("organization_id = ? AND kind <> ? AND sla_response_deadline < ? AND first_response_at IS NULL AND sla_breached = ?",
+			orgID, models.OccurrenceKindInternal, now, false).
 		Updates(map[string]any{"sla_breached": true, "sla_breached_at": now}).Error; err != nil {
 		p.app.Log.Error("Failed to mark occurrence response SLA breach", "error", err, "organization_id", orgID)
 	}
