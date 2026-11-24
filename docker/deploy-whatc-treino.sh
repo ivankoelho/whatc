@@ -90,6 +90,8 @@ echo "Commit no treino: $COMMIT ($REF)"
 
 [ -f "$REPO_DIR/docker/treino/docker-compose.yml" ] || fail "A versao $COMMIT ($REF) nao tem docker/treino (ainda nao inclui o ambiente de treinamento)."
 cp "$REPO_DIR/docker/treino/docker-compose.yml" "$COMPOSE_FILE"
+# Garante o nome unico do servico (idempotente) mesmo se o repo antigo ainda trouxer "app".
+sed -i 's/^  app:$/  treino-app:/' "$COMPOSE_FILE"
 cd "$TREINO_DIR"
 docker compose config -q || fail "Compose do treino invalido."
 
@@ -121,7 +123,7 @@ KEEP_ROLLBACK="${KEEP_ROLLBACK:-1}"
 docker image ls --format '{{.Repository}}:{{.Tag}}' whatomate \
     | grep -E '^whatomate:treino-rollback-[0-9]{8}-[0-9]{6}$' | sort -r | tail -n +"$((KEEP_ROLLBACK + 1))" \
     | xargs -r docker image rm >/dev/null 2>&1 || true
-docker compose build app || fail "Falha no build."
+docker compose build treino-app || fail "Falha no build."
 
 log "Subindo o treino"
 docker compose up -d || fail "Falha ao subir o treino."
@@ -147,7 +149,7 @@ if [ "$READY" -ne 1 ]; then
     if docker image inspect "$ROLLBACK_IMAGE" >/dev/null 2>&1; then
         echo "Revertendo para a imagem anterior..."
         docker tag "$ROLLBACK_IMAGE" "$APP_IMAGE"
-        docker compose up -d app || true
+        docker compose up -d treino-app || true
     fi
     fail "A versao $COMMIT ($REF) nao subiu. A producao nao foi afetada."
 fi

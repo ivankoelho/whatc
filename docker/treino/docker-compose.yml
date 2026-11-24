@@ -9,7 +9,9 @@
 name: whatc-treino
 
 services:
-  app:
+  # Nome unico: o alias do servico na rede da producao (docker_whatomate) nao pode ser "app",
+  # senao o proxy de bot.atcpisos.com (app:8080) passa a cair neste container.
+  treino-app:
     build:
       context: /opt/whatc-treino-repo
       dockerfile: docker/Dockerfile
