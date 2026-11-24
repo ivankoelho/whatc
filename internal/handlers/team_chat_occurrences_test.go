@@ -92,3 +92,21 @@ func TestChatInterno_ListsAndSearchesCaseDiscussions(t *testing.T) {
 	_, found = w.search(t, w.org.ID, noCRM.ID, occ.ProtocolNumber)
 	assert.Empty(t, found, "chat access without occurrences:read")
 }
+
+// The chat tells service cases from internal tickets (the sidebar shows a badge); the channel,
+// its name and who sees it are the same for both.
+func TestChatInterno_CaseDiscussionCarriesTheCaseKind(t *testing.T) {
+	w := newChatWorld(t)
+	w.run()
+	require.Equal(t, fasthttp.StatusOK, w.say(t, w.sac.ID, "primeira mensagem"))
+
+	ch := w.caseChannel(w.channelsOf(t, w.org.ID, w.sac.ID))
+	require.NotNil(t, ch)
+	assert.Equal(t, models.OccurrenceKindService, ch.OccurrenceKind)
+
+	require.NoError(t, w.app.DB.Model(&models.Occurrence{}).Where("id = ?", w.occID).Update("kind", models.OccurrenceKindInternal).Error)
+	again := w.caseChannel(w.channelsOf(t, w.org.ID, w.sac.ID))
+	require.NotNil(t, again)
+	assert.Equal(t, ch.ID, again.ID, "still one channel per case")
+	assert.Equal(t, models.OccurrenceKindInternal, again.OccurrenceKind)
+}

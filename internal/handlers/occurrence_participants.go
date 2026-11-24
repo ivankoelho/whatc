@@ -310,6 +310,10 @@ func (a *App) RemoveOccurrenceParticipant(r *fastglue.Request) error {
 	if target != userID && !acc.interact && !acc.supervisor {
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You cannot remove other participants", nil, "")
 	}
+	// On an internal ticket the requester is always on the case.
+	if occ.IsInternal() && target == occ.OpenedByUserID {
+		return r.SendErrorEnvelope(fasthttp.StatusConflict, "The requester cannot be removed from an internal ticket", nil, "")
+	}
 	var cur models.OccurrenceParticipant
 	if a.DB.Where("occurrence_id = ? AND organization_id = ? AND user_id = ?", occ.ID, orgID, target).First(&cur).Error != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Participant not found", nil, "")

@@ -17,7 +17,8 @@ import { ArrowDown, MessagesSquare, Lock } from 'lucide-vue-next'
 // (store, composer, attachments, realtime); the server decides who may read and
 // write from the case itself. Nothing typed here goes to the customer: that is
 // the WhatsApp card, with its own button and its own endpoint.
-const props = defineProps<{ occurrenceId: string }>()
+// internal: an internal ticket has no customer, so the hint speaks about the people on it instead.
+const props = defineProps<{ occurrenceId: string; internal?: boolean }>()
 const { t, locale } = useI18n()
 const timeOf = (iso: string) => formatTime(iso)
 const dayText = (iso: string) => dayLabel(iso, locale.value, { today: t('teamChat.today'), yesterday: t('teamChat.yesterday') })
@@ -90,7 +91,7 @@ onBeforeUnmount(() => { if (store.activeChannelId === channelId.value) void stor
           {{ $t('occurrences.openInChat') }}
         </RouterLink>
       </CardTitle>
-      <p class="text-xs text-muted-foreground max-sm:hidden">{{ $t('occurrences.internalChatHint') }}</p>
+      <p class="text-xs text-muted-foreground max-sm:hidden">{{ $t(internal ? 'occurrences.internalChatHintInternal' : 'occurrences.internalChatHint') }}</p>
     </CardHeader>
     <CardContent class="flex flex-1 flex-col gap-3 max-sm:px-2">
       <p v-if="failed" class="text-sm text-destructive">{{ $t('occurrences.internalChatFailed') }}</p>

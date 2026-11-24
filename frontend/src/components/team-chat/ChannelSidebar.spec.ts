@@ -116,6 +116,17 @@ describe('ChannelSidebar (case discussions)', () => {
     expect(wrapper.get('[data-testid="channel-c1"]').text()).toContain('2')
   })
 
+  it('marks internal tickets with a badge and leaves service cases unmarked', async () => {
+    const { store, wrapper } = render([
+      occ('c1', '2026-000222 · Pedido 55501', { occurrence_kind: 'service' }),
+      occ('c2', '2026-000223 · Notebook sem VPN', { occurrence_kind: 'internal' }),
+    ])
+    await store.fetchChannels()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="internal-badge-c1"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="internal-badge-c2"]').text()).toBe('Internal')
+  })
+
   it('typing filters the list and looks the rest of the cases up on the server; picking a result adopts it', async () => {
     vi.useFakeTimers()
     try {

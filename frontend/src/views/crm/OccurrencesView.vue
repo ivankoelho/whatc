@@ -38,7 +38,7 @@ const error = ref(false)
 const columns = computed<Column<Occurrence>[]>(() => [
   { key: 'protocol_number', label: t('occurrences.columnProtocol') },
   { key: 'title', label: t('occurrences.columnTitle') },
-  { key: 'contact_name', label: t('occurrences.columnContact') },
+  { key: 'contact_name', label: t('occurrences.columnContactOrRequester') },
   { key: 'contact_phone', label: t('occurrences.columnPhone') },
   { key: 'stage_name', label: t('occurrences.columnStage') },
   { key: 'unit_name', label: t('occurrences.columnUnit') },
