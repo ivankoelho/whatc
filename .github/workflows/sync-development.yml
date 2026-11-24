@@ -1,0 +1,39 @@
+# Mantem `development` igual a `main` depois de cada promocao (merge commit), sem ninguem lembrar de fazer.
+# So avanca (fast-forward). Se `development` tiver commits que a `main` nao tem, NAO sobrescreve: falha
+# de proposito para alguem olhar. Se a branch sumir, recria a partir da `main`.
+name: Sync development with main
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-development
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fast-forward development to main
+        run: |
+          set -euo pipefail
+          if ! git ls-remote --exit-code --heads origin development >/dev/null 2>&1; then
+            echo "development nao existe: recriando a partir de main"
+            git push origin "${GITHUB_SHA}:refs/heads/development"
+            exit 0
+          fi
+          git fetch origin development
+          if git merge-base --is-ancestor origin/development "${GITHUB_SHA}"; then
+            git push origin "${GITHUB_SHA}:refs/heads/development"
+            echo "development avancou para ${GITHUB_SHA}"
+          else
+            echo "::error::development tem commits que a main nao tem; nao vou sobrescrever. Resolva a divergencia."
+            exit 1
+          fi

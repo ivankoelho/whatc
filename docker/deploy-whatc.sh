@@ -370,6 +370,13 @@ else
     echo "Nenhuma imagem anterior encontrada; sem ponto de rollback."
 fi
 
+# Poda: cada deploy cria uma tag de rollback e nada as removia (~1 GB cada).
+# Mantem so as N mais recentes (padrao 1); ajuste com KEEP_ROLLBACK=N.
+KEEP_ROLLBACK="${KEEP_ROLLBACK:-1}"
+docker image ls --format '{{.Repository}}:{{.Tag}}' "whatomate" \
+    | grep -E '^whatomate:rollback-[0-9]{8}-[0-9]{6}$' | sort -r | tail -n +"$((KEEP_ROLLBACK + 1))" \
+    | xargs -r docker image rm >/dev/null 2>&1 || true
+
 docker compose build app \
     || fail "Falha no build da aplicacao."
 
