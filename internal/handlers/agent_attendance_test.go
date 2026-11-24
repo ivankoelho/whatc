@@ -22,6 +22,20 @@ type attendanceResp struct {
 
 func getAttendance(t *testing.T, app *handlers.App, org, user uuid.UUID, q map[string]string) (int, attendanceResp) {
 	t.Helper()
+	// The report's default period is "today so far" in the organisation's time zone. These tests build their
+	// events relative to now ("1h ago"), which falls on the previous calendar day during the first hour after
+	// local midnight, so the default period would leave them out and the test would fail only at that hour.
+	// Ask for a window that always contains them: from two days back, to tomorrow (the end is capped at now).
+	if _, ok := q["from"]; !ok {
+		merged := map[string]string{
+			"from": time.Now().AddDate(0, 0, -2).UTC().Format("2006-01-02"),
+			"to":   time.Now().AddDate(0, 0, 1).UTC().Format("2006-01-02"),
+		}
+		for k, v := range q {
+			merged[k] = v
+		}
+		q = merged
+	}
 	req := testutil.NewGETRequest(t)
 	testutil.SetAuthContext(req, org, user)
 	for k, v := range q {
