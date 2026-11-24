@@ -1,0 +1,88 @@
+# Configuracao do ambiente de TREINAMENTO (copie para /opt/whatc-treino/config.toml, chmod 600).
+# Regra de ouro: NENHUM segredo daqui pode ser igual ao da producao (/opt/whatc/config/config.toml).
+# Gere cada um com: openssl rand -hex 32
+
+[app]
+name = "WhatC Treinamento"
+environment = "production"          # mesmo endurecimento da producao (cookies seguros, chave obrigatoria)
+debug = false
+encryption_key = "GERE-UMA-CHAVE-PROPRIA-32+"   # DIFERENTE da producao: uma copia de configuracao nao pode abrir dados reais
+environment_label = "Ambiente de treinamento"   # faixa amarela no topo de todas as telas
+
+[server]
+host = "0.0.0.0"
+port = 8080
+read_timeout = 30
+write_timeout = 30
+base_path = ""
+allowed_origins = "https://botdemo.atcpisos.com"
+
+[database]
+host = "whatc_treino_db"            # o banco do treino. NAO use "db": na rede docker_whatomate esse apelido e o banco da PRODUCAO
+port = 5432
+user = "whatc_treino"
+password = "IGUAL-AO-POSTGRES_PASSWORD-DO-.env"
+name = "whatc_treino"
+ssl_mode = "disable"
+max_open_conns = 15
+max_idle_conns = 3
+conn_max_lifetime = 300
+
+[redis]
+host = "whatc_treino_redis"         # o Redis do treino. NAO use "redis": na rede docker_whatomate esse apelido e o Redis da PRODUCAO
+port = 6379
+password = ""
+db = 0
+tls = false
+
+[jwt]
+secret = "GERE-OUTRO-SEGREDO-32+"   # DIFERENTE da producao: um token de um ambiente nao vale no outro
+access_expiry_mins = 15
+refresh_expiry_days = 1
+
+[storage]
+type = "local"
+local_path = "./uploads"
+
+[whatsapp]
+# O aplicativo da Meta do NUMERO DE TESTE (separado do de producao): callback https://botdemo.atcpisos.com/api/webhook
+webhook_verify_token = "GERE-UM-TOKEN-PROPRIO"
+api_version = "v24.0"
+base_url = "https://graph.facebook.com"
+app_id = ""
+app_secret = ""
+config_id = ""
+
+[cookie]
+domain = ""
+secure = true
+
+[rate_limit]
+enabled = false
+trust_proxy = true                  # atras do proxy reverso
+
+# Primeiro acesso do treino. Troque a senha logo depois de entrar.
+[default_admin]
+email = "admin@botdemo.local"
+password = "TROQUE-NO-PRIMEIRO-ACESSO"
+full_name = "Administrador do Treinamento"
+
+# Scanner de arquivos: o gate de uploads e fail-closed, sem scanner nenhum upload passa. Aponta para o ClamAV da
+# producao (so alcancavel pela rede interna do Docker, que o compose do treino tambem entra).
+[antimalware]
+address = "whatomate_clamav:3310"
+timeout_seconds = 30
+max_mb = 25
+inline_max_kb = 2048
+
+# Mantenha desligado ate haver um motivo: o treino nao precisa de integracoes que mexem em sistemas reais.
+[xprocess]
+discovery_enabled = false
+
+[ai_tools]
+enabled = false
+providers = []
+write_enabled = false
+
+[usage]
+record_enabled = true

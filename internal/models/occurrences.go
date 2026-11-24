@@ -477,3 +477,21 @@ const (
 
 	OccurrenceEventReturned OccurrenceEventType = "returned"
 )
+
+// OccurrenceAlert is the in-app notice that a protocol landed on a user
+// ("assigned" at opening, "transferred" when reassigned or forwarded) or on
+// their team ("team", for team managers). It is NOT OccurrenceNotification,
+// which is the WhatsApp message to the customer. Dismissal is stored per user
+// so it survives browsers and devices; SeenAt separates new from viewed.
+type OccurrenceAlert struct {
+	BaseModel
+	OrganizationID uuid.UUID  `gorm:"type:uuid;index;not null" json:"organization_id"`
+	UserID         uuid.UUID  `gorm:"type:uuid;index:idx_occ_alert_user_active,priority:1;not null" json:"user_id"`
+	OccurrenceID   uuid.UUID  `gorm:"type:uuid;index;not null" json:"occurrence_id"`
+	Kind           string     `gorm:"size:20;not null" json:"kind"` // assigned | transferred | team
+	ActorUserID    *uuid.UUID `gorm:"type:uuid" json:"actor_user_id,omitempty"`
+	SeenAt         *time.Time `json:"seen_at,omitempty"`
+	DismissedAt    *time.Time `gorm:"index:idx_occ_alert_user_active,priority:2" json:"dismissed_at,omitempty"`
+}
+
+func (OccurrenceAlert) TableName() string { return "occurrence_alerts" }

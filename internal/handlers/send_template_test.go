@@ -756,11 +756,11 @@ func TestApp_SendTemplateMessage(t *testing.T) {
 		app := newMsgTestApp(t, mockServer)
 		org := testutil.CreateTestOrganization(t, app.DB)
 		enableStrictVisibility(t, app, org.ID)
-		// A plain agent with no special conversation/contact permissions —
-		// proves the gate is truly skipped for brand-new initiation, not just
-		// satisfied by some other permission. It does hold chat:write: writing to a
-		// customer needs it on every endpoint.
-		role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "plain-agent", []string{"chat:read", "chat:write"})
+		// Brand-new initiation creates a contact, so it needs contacts:write
+		// (profiles without it, e.g. sellers, are in seller_restrictions_test.go).
+		// No conversation visibility permission: that gate is still skipped for a
+		// brand-new conversation. chat:write is needed on every send endpoint.
+		role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "contact-writer", []string{"chat:read", "chat:write", "contacts:write"})
 		user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
 		account := createTestAccount(t, app, org.ID)
 		tpl := createTestTemplate(t, app, org.ID, account.Name)

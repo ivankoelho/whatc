@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -65,8 +66,23 @@ func isActiveTransferConflict(err error) bool {
 
 // createTransferRow inserts a new active transfer, translating the unique-index
 // violation into ErrTransferAlreadyActive.
+//
+// It is the single place where an active attendance comes into being, and it takes the contact's
+// advisory lock first (see ai_takeover.go): an AI reply that is being sent finishes before the
+// attendance is confirmed, and one that has not started its send finds the attendance and stays
+// silent. Keep it that way: any other INSERT of an active AgentTransfer would bypass the lock.
 func (a *App) createTransferRow(transfer *models.AgentTransfer) error {
-	if err := a.DB.Create(transfer).Error; err != nil {
+	err := a.DB.Transaction(func(tx *gorm.DB) error {
+		// An AI send in flight may hold the lock for a moment; never wait for it forever.
+		if err := tx.Exec(fmt.Sprintf("SET LOCAL lock_timeout = %d", createTransferLockTimeout/time.Millisecond)).Error; err != nil {
+			return err
+		}
+		if err := lockContact(tx, transfer.OrganizationID, transfer.ContactID); err != nil {
+			return err
+		}
+		return tx.Create(transfer).Error
+	})
+	if err != nil {
 		if isActiveTransferConflict(err) {
 			return ErrTransferAlreadyActive
 		}
@@ -102,6 +118,10 @@ func (a *App) claimTransfer(db *gorm.DB, t *models.AgentTransfer, agentID uuid.U
 	}
 	t.AgentID = &agentID
 	t.SLA = sla.SLA
+	// The opportunity an AI agent opened with THIS handoff belongs to whoever takes the attendance,
+	// whatever the "assign to the same agent" setting says (the seller sees in the funnel only what
+	// is assigned to them). Only that opportunity, and only while it has no owner.
+	a.assignAIOpportunity(db, t, agentID)
 	return true, nil
 }
 

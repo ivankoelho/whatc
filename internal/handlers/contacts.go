@@ -42,6 +42,8 @@ type ContactResponse struct {
 	ContactStatus      models.ContactStatus `json:"contact_status"`
 	Tags               []string             `json:"tags"`
 	Metadata           any                  `json:"metadata"`
+	// AdOrigin is the Meta ad that first brought this customer (nil when none did).
+	AdOrigin           *AdOriginResponse    `json:"ad_origin,omitempty"`
 	LastMessageAt      *time.Time           `json:"last_message_at"`
 	LastMessagePreview string               `json:"last_message_preview"`
 	UnreadCount        int                  `json:"unread_count"`
@@ -79,8 +81,11 @@ type MessageResponse struct {
 	WhatsAppAccount  string               `json:"whatsapp_account,omitempty"`
 	SentByUserID     *uuid.UUID           `json:"sent_by_user_id,omitempty"`
 	SentByUserName   string               `json:"sent_by_user_name,omitempty"`
-	CreatedAt        time.Time            `json:"created_at"`
-	UpdatedAt        time.Time            `json:"updated_at"`
+	// SenderType is "ai_agent" when an AI agent wrote the message (its display name is in
+	// SentByUserName); empty for a human or an unidentified message.
+	SenderType string    `json:"sender_type,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 // ReplyPreview contains a preview of the replied-to message
@@ -220,6 +225,7 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 	}
 
 	// Convert to response format
+	adOrigins := a.adOriginsFor(orgID, contacts) // one query for the whole page, not one per contact
 	response := make([]ContactResponse, len(contacts))
 	for i, c := range contacts {
 		// Count unread messages
@@ -268,6 +274,7 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 			UnreadCount:        int(unreadCount),
 			IsPinned:           !pinned[c.ID].IsZero(),
 			PinnedAt:           pinnedAtPtr(pinned[c.ID]),
+			AdOrigin:           adOrigins[c.ID],
 			AssignedUserID:     c.AssignedUserID,
 			WhatsAppAccount:    c.WhatsAppAccount,
 			LastInboundAt:      c.LastInboundAt,
@@ -466,6 +473,7 @@ func (a *App) buildMessagesResponse(messages []models.Message) []MessageResponse
 			WhatsAppAccount: m.WhatsAppAccount,
 			SentByUserID:    m.SentByUserID,
 			SentByUserName:  senderName(&m),
+			SenderType:      senderTypeOf(&m),
 			CreatedAt:       m.CreatedAt,
 			UpdatedAt:       m.UpdatedAt,
 		}
@@ -1179,9 +1187,9 @@ func (a *App) sendWhatsAppReaction(account *models.WhatsAppAccount, contact *mod
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+account.AccessToken)
 
-	resp, err := a.HTTPClient.Do(req)
+	resp, err := whatsapp.NoRedirectClient(a.HTTPClient).Do(req) // carries the Meta token: no redirects
 	if err != nil {
-		a.Log.Error("Failed to send reaction", "error", err)
+		a.Log.Error("Failed to send reaction", "error", whatsapp.SanitizeTransportError("request to Meta failed", err, account.AccessToken))
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -2156,6 +2164,7 @@ func (a *App) buildContactResponse(contact *models.Contact, orgID uuid.UUID) Con
 		ContactStatus:      contact.ContactStatus,
 		Tags:               tags,
 		Metadata:           contact.Metadata,
+		AdOrigin:           a.adOriginOf(orgID, contact.ID),
 		LastMessageAt:      contact.LastMessageAt,
 		LastMessagePreview: contact.LastMessagePreview,
 		UnreadCount:        int(unreadCount),
@@ -2205,8 +2214,17 @@ func (a *App) assignedUserNames(orgID uuid.UUID, contacts []models.Contact) map[
 // senderName returns the display name of the agent who sent an outgoing
 // message, or "" for messages with no agent (chatbot, campaign, API).
 func senderName(m *models.Message) string {
+	if name, typ := messageSender(m); typ != "" {
+		return name // an AI agent's display name; the AI is never a user row
+	}
 	if m.SentByUser == nil {
 		return ""
 	}
 	return m.SentByUser.FullName
+}
+
+// senderTypeOf is "ai_agent" for a message an AI agent wrote, "" otherwise.
+func senderTypeOf(m *models.Message) string {
+	_, typ := messageSender(m)
+	return typ
 }

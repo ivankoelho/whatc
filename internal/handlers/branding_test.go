@@ -756,3 +756,102 @@ func TestBrandingUITheme_DefaultSetAndValidated(t *testing.T) {
 	assert.Equal(t, fasthttp.StatusOK, put(superAdmin, "classic"))
 	assert.Contains(t, publicBody(), `"ui_theme":"classic"`)
 }
+
+// --- Workspace wallpaper: same slot machinery, so these cover what is specific to it:
+// only a super admin may set it, and it is published to every user via /api/branding. ---
+
+func TestUploadWallpaper_RejectedForOrgAdminNotSuperAdmin(t *testing.T) {
+	app := newTestApp(t)
+	app.Config.Storage.LocalPath = t.TempDir()
+	require.NoError(t, database.EnsureBrandingSettingsRow(app.DB))
+
+	org := testutil.CreateTestOrganization(t, app.DB)
+	admin := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&admin.ID))
+
+	req := newMultipartUploadRequest(t, "file", "wall.jpg", jpegMagicBytes())
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	require.NoError(t, app.UploadWallpaper(req))
+	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(req))
+
+	var row models.BrandingSettings
+	require.NoError(t, app.DB.Where("id = ?", models.BrandingSettingsSingletonID).First(&row).Error)
+	assert.Empty(t, row.WallpaperPath, "a refused upload must not touch the row")
+}
+
+func TestWallpaper_SuperAdminSetsItAndEveryoneSeesTheURL(t *testing.T) {
+	app := newTestApp(t)
+	dir := t.TempDir()
+	app.Config.Storage.LocalPath = dir
+	require.NoError(t, database.EnsureBrandingSettingsRow(app.DB))
+
+	org := testutil.CreateTestOrganization(t, app.DB)
+	admin := testutil.CreateAdminRole(t, app.DB, org.ID)
+	super := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&admin.ID), testutil.WithSuperAdmin())
+
+	// Public branding says "no wallpaper" before anything is set.
+	before := testutil.NewGETRequest(t)
+	require.NoError(t, app.GetPublicBranding(before))
+	assert.Contains(t, string(testutil.GetResponseBody(before)), `"wallpaper_url":null`)
+
+	req := newMultipartUploadRequest(t, "file", "wall.jpg", jpegMagicBytes())
+	testutil.SetAuthContext(req, org.ID, super.ID)
+	require.NoError(t, app.UploadWallpaper(req))
+	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+	assert.FileExists(t, filepath.Join(dir, "branding", "wallpaper.jpg"))
+
+	// An unauthenticated read (any user, any org) now gets the URL, and the file itself.
+	after := testutil.NewGETRequest(t)
+	require.NoError(t, app.GetPublicBranding(after))
+	assert.Contains(t, string(testutil.GetResponseBody(after)), `"wallpaper_url":"/api/branding/wallpaper?v=`)
+	serve := testutil.NewGETRequest(t)
+	require.NoError(t, app.ServeWallpaper(serve))
+	assert.Equal(t, jpegMagicBytes(), testutil.GetResponseBody(serve))
+}
+
+func TestDeleteWallpaper_OnlySuperAdminAndItClearsTheRow(t *testing.T) {
+	app := newTestApp(t)
+	dir := t.TempDir()
+	app.Config.Storage.LocalPath = dir
+	require.NoError(t, database.EnsureBrandingSettingsRow(app.DB))
+
+	org := testutil.CreateTestOrganization(t, app.DB)
+	admin := testutil.CreateAdminRole(t, app.DB, org.ID)
+	plain := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&admin.ID))
+	super := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&admin.ID), testutil.WithSuperAdmin())
+
+	up := newMultipartUploadRequest(t, "file", "wall.png", pngMagicBytes())
+	testutil.SetAuthContext(up, org.ID, super.ID)
+	require.NoError(t, app.UploadWallpaper(up))
+	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(up))
+
+	denied := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(denied, org.ID, plain.ID)
+	require.NoError(t, app.DeleteWallpaper(denied))
+	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(denied))
+
+	del := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(del, org.ID, super.ID)
+	require.NoError(t, app.DeleteWallpaper(del))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(del))
+	assert.NoFileExists(t, filepath.Join(dir, "branding", "wallpaper.png"))
+
+	var row models.BrandingSettings
+	require.NoError(t, app.DB.Where("id = ?", models.BrandingSettingsSingletonID).First(&row).Error)
+	assert.Empty(t, row.WallpaperPath)
+}
+
+// A training or test instance says so in the public branding (the ribbon), and the real system says nothing.
+func TestGetPublicBranding_EnvironmentLabelOnlyWhenConfigured(t *testing.T) {
+	app := newTestApp(t)
+	require.NoError(t, database.EnsureBrandingSettingsRow(app.DB))
+
+	req := testutil.NewGETRequest(t)
+	require.NoError(t, app.GetPublicBranding(req))
+	assert.Contains(t, string(testutil.GetResponseBody(req)), `"environment_label":null`)
+
+	app.Config.App.EnvironmentLabel = "  Ambiente de treinamento "
+	req = testutil.NewGETRequest(t)
+	require.NoError(t, app.GetPublicBranding(req))
+	assert.Contains(t, string(testutil.GetResponseBody(req)), `"environment_label":"Ambiente de treinamento"`)
+}

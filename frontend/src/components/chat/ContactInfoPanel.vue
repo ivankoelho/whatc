@@ -22,7 +22,7 @@ import {
   CommandItem,
   CommandList
 } from '@/components/ui/command'
-import { X, ArrowLeft, ChevronDown, Phone, Plus, Check, Tags, Loader2, Copy, Pencil, SquareUser } from 'lucide-vue-next'
+import { X, ArrowLeft, ChevronDown, Phone, Plus, Check, Tags, Loader2, Copy, Pencil, SquareUser, Megaphone } from 'lucide-vue-next'
 import { TagBadge } from '@/components/ui/tag-badge'
 import { IconButton } from '@/components/shared'
 import { Input } from '@/components/ui/input'
@@ -368,7 +368,7 @@ async function updateContactTags(tags: string[]) {
   <div
     class="flex flex-col bg-muted/60 h-full relative"
     :class="isMobile && 'w-full'"
-    :style="!isMobile && { width: `${panelWidth}px` }"
+    :style="!isMobile && { width: `${panelWidth}px`, minWidth: `${MIN_WIDTH}px` }"
   >
     <!-- Resize Handle — desktop only, the mobile pane is always full-width -->
     <div
@@ -431,6 +431,19 @@ async function updateContactTags(tags: string[]) {
               class="h-6 w-6"
               @click="copyText(contact.phone_number)"
             />
+          </div>
+          <!-- Which Meta ad brought this customer (first touch), when one did -->
+          <div
+            v-if="contact.ad_origin"
+            class="mt-1 flex items-center justify-center gap-1 text-xs text-muted-foreground"
+            data-testid="ad-origin"
+            :title="contact.ad_origin.body || undefined"
+          >
+            <Megaphone class="h-3 w-3 shrink-0" aria-hidden="true" />
+            <span class="truncate">
+              {{ $t('contacts.adOrigin') }}: {{ contact.ad_origin.headline || contact.ad_origin.source_id || $t('contacts.adOriginUnnamed') }}
+            </span>
+            <span v-if="contact.ad_origin.clicks > 1">({{ $t('contacts.adOriginClicks', { n: contact.ad_origin.clicks }) }})</span>
           </div>
           </div>
           <IconButton

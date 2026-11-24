@@ -18,6 +18,38 @@ var defaultWhatHappened = []string{
 	"Quantidade Divergente",
 	"Erro no cadastro Fiscal",
 	"Duvida sobre o Produto",
+	"Ocorrência com Caminhão",
+	"Ocorrência com Terceiros",
+}
+
+// whatHappenedAdditions are reasons added after the first six. Organisations
+// seeded earlier get them on their next read; see ensureWhatHappenedAdditions.
+var whatHappenedAdditions = []string{"Ocorrência com Caminhão", "Ocorrência com Terceiros"}
+
+// ensureWhatHappenedAdditions appends the later default reasons to an
+// organisation that was seeded before they existed. Existence is checked by
+// name INCLUDING soft-deleted rows, so an admin who deleted one is not
+// overruled, and a rename keeps the old name out of the way only if the
+// admin chooses so.
+func (a *App) ensureWhatHappenedAdditions(orgID uuid.UUID) error {
+	var maxPos int
+	a.DB.Model(&models.OccurrenceWhatHappened{}).Where("organization_id = ?", orgID).
+		Select("COALESCE(MAX(position), -1)").Scan(&maxPos)
+	for _, name := range whatHappenedAdditions {
+		var n int64
+		if err := a.DB.Unscoped().Model(&models.OccurrenceWhatHappened{}).
+			Where("organization_id = ? AND name = ?", orgID, name).Count(&n).Error; err != nil {
+			return err
+		}
+		if n > 0 {
+			continue
+		}
+		maxPos++
+		if err := a.DB.Create(&models.OccurrenceWhatHappened{OrganizationID: orgID, Name: name, Position: maxPos, IsActive: true}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ensureDefaultWhatHappened seeds the six default reasons on first read.
@@ -34,7 +66,7 @@ func (a *App) ensureDefaultWhatHappened(orgID uuid.UUID) error {
 		return err
 	}
 	if count > 0 {
-		return nil
+		return a.ensureWhatHappenedAdditions(orgID)
 	}
 
 	rows := make([]models.OccurrenceWhatHappened, len(defaultWhatHappened))

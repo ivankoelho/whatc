@@ -78,6 +78,7 @@ const generalSettings = ref({
   default_timezone: 'America/Bahia',
   date_format: 'YYYY-MM-DD',
   mask_phone_numbers: false,
+  sales_direcionamento_enabled: true,
   meta_app_id: '',
   meta_config_id: '',
   meta_app_secret: '',
@@ -202,6 +203,7 @@ onMounted(async () => {
         default_timezone: orgData.settings?.timezone || 'UTC',
         date_format: orgData.settings?.date_format || 'YYYY-MM-DD',
         mask_phone_numbers: orgData.settings?.mask_phone_numbers || false,
+        sales_direcionamento_enabled: orgData.settings?.sales_direcionamento_enabled !== false,
         meta_app_id: orgData.settings?.meta_app_id || '',
         meta_config_id: orgData.settings?.meta_config_id || '',
         meta_app_secret: '',
@@ -239,7 +241,8 @@ async function saveGeneralSettings() {
       name: generalSettings.value.organization_name,
       timezone: generalSettings.value.default_timezone,
       date_format: generalSettings.value.date_format,
-      mask_phone_numbers: generalSettings.value.mask_phone_numbers
+      mask_phone_numbers: generalSettings.value.mask_phone_numbers,
+      sales_direcionamento_enabled: generalSettings.value.sales_direcionamento_enabled
     }
     if (canWriteAccounts.value) {
       payload.meta_app_id = generalSettings.value.meta_app_id
@@ -525,6 +528,17 @@ function togglePlayAudio(type: 'hold_music' | 'ringback') {
                   <Switch
                     :checked="generalSettings.mask_phone_numbers"
                     @update:checked="generalSettings.mask_phone_numbers = $event"
+                  />
+                </div>
+                <Separator class="bg-white/[0.08] light:bg-gray-200" />
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="font-medium text-white light:text-gray-900">{{ $t('settings.salesDirecionamento') }}</p>
+                    <p class="text-sm text-white/40 light:text-gray-500">{{ $t('settings.salesDirecionamentoDesc') }}</p>
+                  </div>
+                  <Switch
+                    :checked="generalSettings.sales_direcionamento_enabled"
+                    @update:checked="generalSettings.sales_direcionamento_enabled = $event"
                   />
                 </div>
                 <div class="flex justify-end">

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,11 +25,20 @@ func brandingPublicNullFields() map[string]any {
 	return map[string]any{
 		"login_background_url": nil,
 		"logo_url":             nil,
+		"wallpaper_url":        nil,
 		"system_name":          nil,
 		"footer_text":          nil,
 		"footer_version":       nil,
+		"environment_label":    nil,
 		// Never null: the app shell always needs a layout to render.
 		"ui_theme": models.UIThemeDefault,
+	}
+}
+
+// addEnvironmentLabel puts the instance label (training/test ribbon) in the public branding response.
+func (a *App) addEnvironmentLabel(resp map[string]any) {
+	if l := strings.TrimSpace(a.Config.App.EnvironmentLabel); l != "" {
+		resp["environment_label"] = l
 	}
 }
 
@@ -40,15 +50,21 @@ func (a *App) GetPublicBranding(r *fastglue.Request) error {
 	var row models.BrandingSettings
 	if err := a.DB.Where("id = ?", models.BrandingSettingsSingletonID).First(&row).Error; err != nil {
 		a.Log.Error("Failed to load branding settings", "error", err)
-		return r.SendEnvelope(brandingPublicNullFields())
+		resp := brandingPublicNullFields()
+		a.addEnvironmentLabel(resp)
+		return r.SendEnvelope(resp)
 	}
 
 	resp := brandingPublicNullFields()
+	a.addEnvironmentLabel(resp)
 	if row.LoginBackgroundPath != "" {
 		resp["login_background_url"] = fmt.Sprintf("/api/branding/login-background?v=%d", row.UpdatedAt.Unix())
 	}
 	if row.LogoPath != "" {
 		resp["logo_url"] = fmt.Sprintf("/api/branding/logo?v=%d", row.UpdatedAt.Unix())
+	}
+	if row.WallpaperPath != "" {
+		resp["wallpaper_url"] = fmt.Sprintf("/api/branding/wallpaper?v=%d", row.UpdatedAt.Unix())
 	}
 	if row.SystemName != "" {
 		resp["system_name"] = row.SystemName
@@ -174,7 +190,17 @@ var logoSlot = brandingImageSlot{
 	getContentType: func(r *models.BrandingSettings) string { return r.LogoContentType },
 }
 
-func (s brandingImageSlot) pathColumn() string    { return s.key + "_path" }
+// wallpaperSlot is the workspace wallpaper every user sees. JPEG/PNG/WebP like the
+// login background; only a super admin may change it (same checks as the other slots).
+var wallpaperSlot = brandingImageSlot{
+	key: "wallpaper", slug: "wallpaper",
+	notFoundMsg:    "No wallpaper configured",
+	allowedTypes:   brandingAllowedContentTypes,
+	getPath:        func(r *models.BrandingSettings) string { return r.WallpaperPath },
+	getContentType: func(r *models.BrandingSettings) string { return r.WallpaperContentType },
+}
+
+func (s brandingImageSlot) pathColumn() string   { return s.key + "_path" }
 func (s brandingImageSlot) contentColumn() string { return s.key + "_content_type" }
 
 // serveBrandingImage serves a configured branding image file. Public, same
@@ -230,6 +256,21 @@ func (a *App) ServeLoginBackground(r *fastglue.Request) error {
 // ServeLogo serves the configured system logo file.
 func (a *App) ServeLogo(r *fastglue.Request) error {
 	return a.serveBrandingImage(r, logoSlot)
+}
+
+// ServeWallpaper serves the configured workspace wallpaper file.
+func (a *App) ServeWallpaper(r *fastglue.Request) error {
+	return a.serveBrandingImage(r, wallpaperSlot)
+}
+
+// UploadWallpaper replaces the workspace wallpaper (super admin only).
+func (a *App) UploadWallpaper(r *fastglue.Request) error {
+	return a.uploadBrandingImage(r, wallpaperSlot)
+}
+
+// DeleteWallpaper clears the workspace wallpaper: users go back to their own preset.
+func (a *App) DeleteWallpaper(r *fastglue.Request) error {
+	return a.deleteBrandingImage(r, wallpaperSlot)
 }
 
 // brandingAllowedContentTypes are the image types this endpoint accepts —

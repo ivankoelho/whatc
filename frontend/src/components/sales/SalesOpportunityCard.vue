@@ -1,230 +1,156 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { toast } from 'vue-sonner'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { Button } from '@/components/ui/button'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { salesOpportunitiesService } from '@/services/api'
-import type { SalesOpportunity, SalesDirecionamento } from '@/services/api'
-import { getErrorMessage } from '@/lib/api-utils'
-import { formatCurrency, formatMoneyInput } from '@/lib/currency'
-import MoneyInput from '@/components/sales/MoneyInput.vue'
-import XProcessLinkForm from '@/components/sales/XProcessLinkForm.vue'
-import SalesOpportunityDetailsDialog from '@/components/sales/SalesOpportunityDetailsDialog.vue'
-import { formatQuantity, parseDecimalInput } from '@/lib/salesUnits'
-import { getInitials, getAvatarGradient, formatDate } from '@/lib/utils'
-import { Pencil, MessageCircle, AlertTriangle } from 'lucide-vue-next'
+import type { SalesOpportunity } from '@/services/api'
+import { formatCurrency } from '@/lib/currency'
+import { getInitials, getAvatarGradient } from '@/lib/utils'
+import { MessageCircle, AlertTriangle, Megaphone, CalendarClock, Sparkles, AlarmClock } from 'lucide-vue-next'
 
+// A compact, rectangular card: who it is, what they want, when the meeting is and where they came from. Everything
+// else (editing, the X2 order, direcionamento, history, actions) lives in the popup that opens on click.
 const props = defineProps<{ opportunity: SalesOpportunity; disabled?: boolean }>()
+const emit = defineEmits<{ open: [opportunity: SalesOpportunity] }>()
 
-const emit = defineEmits<{
-  convert: [opportunity: SalesOpportunity]
-  lose: [opportunity: SalesOpportunity]
-  'direcionamento-change': [opportunity: SalesOpportunity]
-  'details-change': [opportunity: SalesOpportunity]
-}>()
-
-const { t } = useI18n()
+const { locale } = useI18n()
 
 const contactName = computed(() =>
   props.opportunity.contact?.profile_name || props.opportunity.contact?.phone_number || props.opportunity.contact_id)
 const sellerName = computed(() => props.opportunity.assigned_user?.full_name || '')
-const openedAt = computed(() => {
-  const d = new Date(props.opportunity.opened_at)
-  return Number.isNaN(d.getTime()) ? '' : formatDate(d)
+
+// The meeting the customer booked: "ter., 24/11 09:00". Green when it is today.
+const meetingWhen = computed(() => {
+  const m = props.opportunity.meeting
+  if (!m) return ''
+  const d = new Date(m.start)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleString(locale.value, { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+})
+const meetingIsToday = computed(() => {
+  const m = props.opportunity.meeting
+  return !!m && new Date(m.start).toDateString() === new Date().toDateString()
 })
 
-// As 2 chaves fechadas de SalesDirecionamento (services/api.ts).
-const DIRECIONAMENTO_OPTIONS: SalesDirecionamento[] = ['visita', 'whatsapp']
-const DIRECIONAMENTO_LABEL_KEY: Record<SalesDirecionamento, string> = {
-  visita: 'sales.direcionamentoVisita',
-  whatsapp: 'sales.direcionamentoWhatsApp',
-}
-
-const changingDirecionamento = ref(false)
-const detailsOpen = ref(false)
-
-async function onDirecionamentoChange(value: unknown) {
-  const direcionamento = value as SalesDirecionamento
-  if (!direcionamento || direcionamento === props.opportunity.direcionamento) return
-  changingDirecionamento.value = true
-  try {
-    const { data } = await salesOpportunitiesService.changeDirecionamento(props.opportunity.id, direcionamento)
-    toast.success(t('sales.direcionamentoChanged'))
-    emit('direcionamento-change', data.data)
-  } catch (e) {
-    toast.error(getErrorMessage(e, t('sales.direcionamentoChangeFailed')))
-  } finally {
-    changingDirecionamento.value = false
+// What the customer said, as label/value pairs: the "- Label: value" lines under "Informado pelo cliente" in the AI's
+// qualification (the first three). A plain interest text has no labels, so it shows as its first two lines instead.
+const facts = computed(() => {
+  const out: { label: string; value: string }[] = []
+  let inGiven = false
+  for (const raw of (props.opportunity.interest ?? '').split('\n')) {
+    const line = raw.trim()
+    if (/^informado pelo cliente/i.test(line)) { inGiven = true; continue }
+    if (/^ainda n[aã]o coletado/i.test(line) || /^reuni[aã]o agendada/i.test(line)) { inGiven = false; continue }
+    if (!inGiven || !line.startsWith('- ') || /nada informado/i.test(line)) continue
+    const i = line.indexOf(':')
+    if (i > 0) out.push({ label: line.slice(2, i).trim(), value: line.slice(i + 1).trim() })
+    else out.push({ label: '', value: line.slice(2) })
   }
-}
-
-// Click-to-edit for estimated_value — the one field with real downstream
-// impact (the "Valor estimado do funil" dashboard widget, finding 3).
-// interest/estimated_quantity share the write path (PUT .../details) but
-// aren't worth their own inline editors in this first cut.
-const editingValue = ref(false)
-const valueDraft = ref('')
-const savingValue = ref(false)
-
-function startEditValue() {
-  if (props.opportunity.status !== 'aberta') return
-  valueDraft.value = formatMoneyInput(props.opportunity.estimated_value)
-  editingValue.value = true
-}
-
-async function saveValue() {
-  editingValue.value = false
-  const raw = valueDraft.value.trim()
-  // Clearing the field back to empty isn't a supported "unset" here (the
-  // details endpoint only ever sets fields it's given, spec §4 has no
-  // requirement to unset) — treat it as a no-op cancel instead of erroring.
-  if (raw === '') return
-  const parsed = parseDecimalInput(raw)
-  if (parsed === undefined || Number.isNaN(parsed)) {
-    toast.error(t('sales.estimatedValueInvalid'))
-    return
-  }
-  if (parsed === props.opportunity.estimated_value) return
-  savingValue.value = true
-  try {
-    const { data } = await salesOpportunitiesService.updateDetails(props.opportunity.id, { estimated_value: parsed })
-    toast.success(t('sales.estimatedValueChanged'))
-    emit('details-change', data.data)
-  } catch (e) {
-    toast.error(getErrorMessage(e, t('sales.estimatedValueChangeFailed')))
-  } finally {
-    savingValue.value = false
-  }
-}
+  return out.filter(f => f.value).slice(0, 3)
+})
+const plainSummary = computed(() => {
+  if (facts.value.length) return ''
+  return (props.opportunity.interest ?? '').split('\n').map(l => l.trim()).filter(l => l && !/^qualifica[cç][aã]o/i.test(l)).slice(0, 2).join(' ')
+})
+// The next task: red once it is in the past, amber today, quiet when it is later. Only an open opportunity has one.
+const task = computed(() => {
+  const o = props.opportunity
+  if (!o.next_task_at || o.status !== 'aberta') return null
+  const d = new Date(o.next_task_at)
+  if (Number.isNaN(d.getTime())) return null
+  const today = d.toDateString() === new Date().toDateString()
+  const overdue = d.getTime() < Date.now()
+  const label = today
+    ? d.toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleDateString(locale.value, { day: '2-digit', month: '2-digit' })
+  return { label, overdue, today }
+})
+const hasValue = computed(() => props.opportunity.estimated_value != null && props.opportunity.estimated_value > 0)
 </script>
 
 <template>
   <div
     data-board-card
-    class="rounded-xl bg-card p-3 shadow-sm ring-1 ring-black/[0.05] transition-shadow hover:shadow-md dark:ring-white/[0.07]"
-    :class="disabled ? 'opacity-50 cursor-wait' : 'cursor-grab active:cursor-grabbing'"
+    role="button"
+    tabindex="0"
+    :aria-label="contactName"
+    class="rounded-lg bg-card px-3 py-2.5 shadow-sm ring-1 ring-black/[0.05] transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:ring-white/[0.07]"
+    :class="disabled ? 'opacity-50 cursor-wait' : 'cursor-pointer active:cursor-grabbing'"
+    @click="emit('open', opportunity)"
+    @keydown.enter.prevent="emit('open', opportunity)"
+    @keydown.space.prevent="emit('open', opportunity)"
   >
-    <!-- Contact-first card, same layout as the CRM board's OccurrenceCard: who
-         on top, the deal and its actions in the middle, seller + date below. -->
-    <!-- Single root element on purpose: vuedraggable maps each item through
-         the component's root node, so nothing (not even a comment) may sit
-         beside it, or dragging breaks. -->
-    <div class="flex items-start gap-2.5">
-      <Avatar class="h-9 w-9 shrink-0">
-        <AvatarFallback :class="'bg-gradient-to-br text-xs font-semibold text-white ' + getAvatarGradient(contactName)">
+    <!-- Single root element on purpose: vuedraggable maps each item through the component's root node, so nothing
+         (not even a comment) may sit BESIDE it, or dragging breaks. The whole card opens the popup; a drag does not click. -->
+    <div class="flex items-center gap-2">
+      <Avatar class="h-7 w-7 shrink-0">
+        <AvatarFallback :class="'bg-gradient-to-br text-[10px] font-semibold text-white ' + getAvatarGradient(contactName)">
           {{ getInitials(contactName) }}
         </AvatarFallback>
       </Avatar>
-      <div class="min-w-0 flex-1">
-        <p class="truncate text-sm font-semibold text-foreground">{{ contactName }}</p>
-        <!-- WhatsApp line opens the contact's conversation -->
-        <RouterLink
-          :to="`/chat/${opportunity.contact_id}`"
-          :title="$t('chat.openConversation')"
-          :aria-label="`${$t('chat.openConversation')}: ${contactName}`"
-          class="mt-0.5 inline-flex max-w-full items-center gap-1 rounded-md text-xs text-muted-foreground transition-colors hover:text-emerald-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:hover:text-emerald-400"
-          @click.stop
-          @mousedown.stop
-        >
-          <MessageCircle class="h-3 w-3 shrink-0 text-emerald-500" aria-hidden="true" />
-          <span class="truncate">{{ opportunity.contact?.phone_number || $t('chat.openConversation') }}</span>
-        </RouterLink>
-      </div>
-      <Button
-        v-if="opportunity.status === 'aberta'"
-        data-testid="sales-opportunity-edit-details"
-        variant="ghost"
-        size="icon"
-        class="-mr-1 -mt-1 h-7 w-7 shrink-0 text-muted-foreground"
-        :title="$t('sales.editDetails')"
-        :aria-label="$t('sales.editDetails')"
-        @click.stop="detailsOpen = true"
+      <p class="min-w-0 flex-1 truncate text-[13px] font-semibold leading-tight text-foreground">{{ contactName }}</p>
+      <span
+        v-if="opportunity.created_by_ai"
+        data-testid="sales-opportunity-ai-badge"
+        :title="$t('sales.aiBadgeTitle')"
+        class="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-300"
+      ><Sparkles class="h-2.5 w-2.5" aria-hidden="true" />{{ $t('sales.aiBadge') }}</span>
+      <span
+        v-if="opportunity.sla_breached"
+        data-testid="sales-opportunity-sla"
+        :title="$t('sales.slaBreached')"
+        class="inline-flex shrink-0 items-center rounded-full bg-red-500/15 p-0.5 text-red-700 dark:text-red-300"
+      ><AlertTriangle class="h-3 w-3" aria-hidden="true" /></span>
+      <RouterLink
+        :to="`/chat/${opportunity.contact_id}`"
+        :title="$t('chat.openConversation')"
+        :aria-label="`${$t('chat.openConversation')}: ${contactName}`"
+        class="shrink-0 rounded-md p-0.5 text-emerald-500 transition-colors hover:text-emerald-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        @click.stop
         @mousedown.stop
-      >
-        <Pencil class="h-3.5 w-3.5" />
-      </Button>
+      ><MessageCircle class="h-3.5 w-3.5" aria-hidden="true" /></RouterLink>
     </div>
 
-    <div class="mt-2.5 flex items-baseline justify-between gap-2">
-      <div v-if="editingValue" class="flex-1" @click.stop @mousedown.stop>
-        <MoneyInput
-          v-model="valueDraft"
-          data-testid="sales-opportunity-value-input"
-          class="h-7 text-xs"
-          autofocus
-          @keyup.enter="saveValue"
-          @keyup.escape="editingValue = false"
-          @blur="saveValue"
-        />
-      </div>
-      <p
-        v-else
-        data-testid="sales-opportunity-value"
-        class="truncate text-[15px] font-semibold text-foreground"
-        :class="{ 'cursor-text hover:underline': opportunity.status === 'aberta', 'opacity-50': savingValue }"
-        @click.stop="startEditValue"
-      >
-        {{ formatCurrency(opportunity.estimated_value) }}
-      </p>
-      <span class="shrink-0 font-mono text-[11px] text-muted-foreground">{{ opportunity.opportunity_number }}</span>
-    </div>
-    <p v-if="opportunity.estimated_quantity != null" data-testid="sales-opportunity-quantity" class="mt-0.5 text-xs text-muted-foreground">
-      {{ formatQuantity(opportunity.estimated_quantity, opportunity.unit_of_measure) }}
-    </p>
-    <p v-if="opportunity.status === 'convertida' && opportunity.conversion_source" class="mt-0.5 text-xs text-muted-foreground">
-      {{ opportunity.conversion_source === 'xprocess' ? $t('sales.conversionSourceXProcess') : $t('sales.conversionSourceManual') }}
-    </p>
+    <!-- What they said: labels line up in one column, values in the next -->
+    <dl v-if="facts.length" data-testid="sales-opportunity-summary" class="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-0.5 pl-9 text-xs leading-snug">
+      <template v-for="f in facts" :key="f.label + f.value">
+        <dt class="truncate text-muted-foreground" :class="f.label ? '' : 'sr-only'">{{ f.label }}</dt>
+        <dd class="truncate font-medium text-foreground" :title="f.value">{{ f.value }}</dd>
+      </template>
+    </dl>
+    <p v-else-if="plainSummary" data-testid="sales-opportunity-summary" class="mt-2 line-clamp-2 pl-9 text-xs leading-snug text-muted-foreground" :title="plainSummary">{{ plainSummary }}</p>
 
-    <div class="mt-2" @click.stop @mousedown.stop>
-      <XProcessLinkForm :opportunity-id="opportunity.id" :editable="opportunity.status === 'aberta'" />
-    </div>
-    <div v-if="opportunity.status === 'aberta'" class="mt-2" @click.stop @mousedown.stop>
-      <Select
-        data-testid="sales-opportunity-direcionamento-select"
-        :model-value="opportunity.direcionamento"
-        :disabled="changingDirecionamento"
-        @update:model-value="onDirecionamentoChange"
-      >
-        <SelectTrigger class="h-7 text-xs">
-          <SelectValue :placeholder="$t('sales.direcionamentoPlaceholder')" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem v-for="option in DIRECIONAMENTO_OPTIONS" :key="option" :value="option">
-            {{ $t(DIRECIONAMENTO_LABEL_KEY[option]) }}
-          </SelectItem>
-        </SelectContent>
-      </Select>
-    </div>
-    <div v-if="opportunity.status === 'aberta' && opportunity.stage === 'direcionada'" class="mt-2 flex gap-2">
-      <Button data-testid="sales-opportunity-convert-button" size="sm" variant="outline" class="flex-1 text-xs px-1" @click.stop="$emit('convert', opportunity)">
-        {{ $t('sales.markConvertedShort') }}
-      </Button>
-      <Button data-testid="sales-opportunity-lose-button" size="sm" variant="outline" class="flex-1 text-xs px-1" @click.stop="$emit('lose', opportunity)">
-        {{ $t('sales.markLostShort') }}
-      </Button>
-    </div>
+    <!-- The expected value gets a line of its own: it is what the deal is worth, and it must never be cut -->
+    <p v-if="hasValue" data-testid="sales-opportunity-value" class="mt-1.5 pl-9 text-sm font-semibold tabular-nums leading-none text-emerald-700 dark:text-emerald-300">{{ formatCurrency(opportunity.estimated_value) }}</p>
 
-    <div class="mt-3 flex items-center justify-between gap-2 border-t pt-2.5">
-      <div class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-        <Avatar class="h-5 w-5 shrink-0">
+    <!-- Footer: the time-sensitive things on the left, who owns it and since when on the right -->
+    <div class="mt-2 flex items-center gap-1.5 border-t border-border/60 pt-1.5 text-[11px]">
+      <span
+        v-if="opportunity.meeting && meetingWhen"
+        data-testid="sales-opportunity-meeting"
+        :title="opportunity.meeting.location || undefined"
+        class="inline-flex min-w-0 shrink items-center gap-1 rounded-md px-1.5 py-0.5 font-medium"
+        :class="meetingIsToday ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300' : 'bg-sky-500/15 text-sky-700 dark:text-sky-300'"
+      ><CalendarClock class="h-3 w-3 shrink-0" aria-hidden="true" /><span class="truncate">{{ meetingWhen }}</span></span>
+      <span
+        v-if="opportunity.ad_origin"
+        data-testid="sales-opportunity-ad-origin"
+        :title="`${$t('sales.adOriginTitle')}: ${opportunity.ad_origin.headline || $t('sales.adOriginUnnamed')}`"
+        class="inline-flex shrink-0 items-center rounded-md bg-amber-500/15 p-1 text-amber-800 dark:text-amber-300"
+      ><Megaphone class="h-3 w-3" aria-hidden="true" /></span>
+      <span
+        v-if="task"
+        data-testid="sales-opportunity-task"
+        :title="[task.overdue ? $t('sales.taskOverdue') : $t('sales.nextTask'), opportunity.next_task_note].filter(Boolean).join(': ')"
+        class="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 font-medium"
+        :class="task.overdue ? 'bg-red-500/15 text-red-700 dark:text-red-300' : task.today ? 'bg-amber-500/20 text-amber-800 dark:text-amber-300' : 'bg-muted text-muted-foreground'"
+      ><AlarmClock class="h-3 w-3" aria-hidden="true" />{{ task.label }}</span>
+      <span class="ml-auto flex shrink-0 items-center gap-1.5 text-muted-foreground">
+        <Avatar class="h-5 w-5" :title="sellerName || $t('sales.noSeller')">
           <AvatarFallback :class="sellerName ? 'bg-gradient-to-br text-[9px] text-white ' + getAvatarGradient(sellerName) : 'bg-muted text-[9px]'">
             {{ sellerName ? getInitials(sellerName) : '?' }}
           </AvatarFallback>
         </Avatar>
-        <span class="truncate" :class="!sellerName && 'italic'">{{ sellerName || $t('sales.noSeller') }}</span>
-      </div>
-      <div class="flex shrink-0 items-center gap-1.5 text-[11px]">
-        <span
-          v-if="opportunity.sla_breached"
-          class="inline-flex items-center gap-0.5 rounded-full bg-red-500/15 px-1.5 py-0.5 font-medium text-red-700 dark:text-red-300"
-        >
-          <AlertTriangle class="h-3 w-3" aria-hidden="true" />{{ $t('sales.slaBreached') }}
-        </span>
-        <span v-if="openedAt" class="text-muted-foreground">{{ openedAt }}</span>
-      </div>
+      </span>
     </div>
-    <SalesOpportunityDetailsDialog v-model:open="detailsOpen" :opportunity="opportunity" @saved="$emit('details-change', $event)" />
   </div>
 </template>

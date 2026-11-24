@@ -33,13 +33,13 @@ const (
 var (
 	// refusedCodes are validation, template, authentication and policy errors raised
 	// before a message exists: 100 invalid parameter, 131008/131009 missing or invalid
-	// parameter, 131021 same sender and recipient, 131047 outside the 24h window,
+	// parameter, 131021 same sender and recipient, 131030 recipient not in the allowed list (test numbers), 131047 outside the 24h window,
 	// 131051 unsupported type, 132000/132001/132005/132007/132012 template parameter
 	// and language errors, 132015/132016 paused or disabled template, 190 expired
 	// token, 368 restricted account.
 	refusedCodes = map[int]bool{
 		100: true, 131008: true, 131009: true, 131021: true, 131047: true, 131051: true,
-		132000: true, 132001: true, 132005: true, 132007: true, 132012: true,
+		131030: true, 132000: true, 132001: true, 132005: true, 132007: true, 132012: true,
 		132015: true, 132016: true, 190: true, 368: true,
 	}
 	// throttleCodes are the documented "retry later" limits: 130429 throughput,

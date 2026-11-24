@@ -190,6 +190,12 @@ export interface XProcessIntegrationStatus {
   is_configured: boolean
 }
 
+// Which parts of the sales screens this organization uses (the X2 order needs the integration; direcionamento is a
+// retail funnel rule that can be switched off in Settings).
+export const salesFeaturesService = {
+  get: () => api.get<{ data: { xprocess: boolean; direcionamento: boolean } }>('/sales-features'),
+}
+
 export const xprocessIntegrationService = {
   get: () => api.get<{ data: XProcessIntegrationStatus }>('/xprocess-integration'),
   upsert: (payload: { base_url: string; api_key: string }) =>
@@ -451,6 +457,15 @@ export const chatbotService = {
   updateAIContext: (id: string, data: any) => api.put(`/chatbot/ai-contexts/${id}`, data),
   deleteAIContext: (id: string) => api.delete(`/chatbot/ai-contexts/${id}`),
 
+  // AI Agents
+  listAIAgents: (params?: { page?: number; limit?: number }) =>
+    api.get<{ agents: any[]; total?: number }>('/chatbot/ai-agents', { params }),
+  getAIAgent: (id: string) => api.get(`/chatbot/ai-agents/${id}`),
+  createAIAgent: (data: any) => api.post('/chatbot/ai-agents', data),
+  updateAIAgent: (id: string, data: any) => api.put(`/chatbot/ai-agents/${id}`, data),
+  deleteAIAgent: (id: string) => api.delete(`/chatbot/ai-agents/${id}`),
+  getAIAgentReadiness: (id: string) => api.get(`/chatbot/ai-agents/${id}/readiness`),
+
   // Agent Transfers
   listTransfers: (params?: {
     status?: string
@@ -529,6 +544,33 @@ export const agentAnalyticsService = {
   getSummary: (params?: { from?: string; to?: string; agent_id?: string }) =>
     api.get('/analytics/agents', { params }),
   getLive: () => api.get('/analytics/agents/live')
+}
+
+export const agentAttendanceService = {
+  get: (params?: Record<string, string>) => api.get('/analytics/agents/attendance', { params })
+}
+
+export interface OccurrenceAlert {
+  id: string
+  kind: 'assigned' | 'transferred' | 'team'
+  created_at: string
+  seen_at?: string
+  occurrence_id: string
+  protocol_number: string
+  title: string
+  contact_name: string
+  category_name?: string
+  what_happened?: string
+  priority: 'low' | 'normal' | 'high' | 'urgent'
+  opened_at: string
+  actor_name?: string
+}
+
+export const occurrenceAlertsService = {
+  list: () => api.get<ApiEnvelope<{ alerts: OccurrenceAlert[]; unseen: number }>>('/occurrence-alerts'),
+  markSeen: () => api.put('/occurrence-alerts/seen'),
+  dismiss: (id: string) => api.put(`/occurrence-alerts/${id}/dismiss`),
+  dismissAll: () => api.put('/occurrence-alerts/dismiss-all'),
 }
 
 // Meta WhatsApp Analytics Types
@@ -769,6 +811,7 @@ export const organizationService = {
   getSettings: () => api.get('/org/settings'),
   updateSettings: (data: {
     mask_phone_numbers?: boolean
+    sales_direcionamento_enabled?: boolean
     timezone?: string
     date_format?: string
     name?: string
@@ -793,8 +836,10 @@ export const organizationService = {
 // Branding (system-wide, not per-organization — see docs/superpowers/specs/2026-09-15-login-branding-design.md)
 export const brandingService = {
   getPublic: () => api.get<ApiEnvelope<{
+    environment_label?: string | null
     login_background_url: string | null
     logo_url: string | null
+    wallpaper_url: string | null
     system_name: string | null
     footer_text: string | null
     footer_version: string | null
@@ -817,6 +862,14 @@ export const brandingService = {
     })
   },
   deleteLogo: () => api.delete('/branding/logo'),
+  uploadWallpaper: (file: Blob) => {
+    const formData = new FormData()
+    formData.append('file', file, 'wallpaper.jpg')
+    return api.post<ApiEnvelope<{ wallpaper_url: string }>>('/branding/wallpaper', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+  },
+  deleteWallpaper: () => api.delete('/branding/wallpaper'),
   updateFooter: (data: { system_name?: string; footer_text?: string; footer_version?: string; ui_theme?: 'bitrix' | 'classic' }) =>
     api.put<ApiEnvelope<{ system_name: string; footer_text: string; footer_version: string; ui_theme: string }>>('/branding/footer', data),
 }
@@ -1186,6 +1239,22 @@ export interface NextcloudStatus {
   can_configure: boolean
 }
 
+export interface NextcloudCalendarSettings {
+  enabled: boolean
+  calendar_path: string
+  username: string
+  time_zone: string
+  slot_minutes: number
+  buffer_minutes: number
+  min_notice_hours: number
+  lookahead_days: number
+  /** weekday (0 = Sunday) to "HH:MM-HH:MM"; a missing weekday is closed */
+  hours: Record<string, string>
+  location: string
+  /** the calendar's public embed page (the CRM's Calendar tab); accepts the <iframe> code or the link when saving */
+  embed_url?: string
+}
+
 export interface NextcloudEntry {
   name: string
   path: string
@@ -1200,6 +1269,12 @@ export const nextcloudService = {
   connect: (username: string, appPassword: string) =>
     api.put('/integrations/nextcloud/me', { username, app_password: appPassword }),
   disconnect: () => api.delete('/integrations/nextcloud/me'),
+  getCalendar: () => api.get<{ configured: boolean; calendar?: NextcloudCalendarSettings; password_set?: boolean }>('/integrations/nextcloud/calendar'),
+  saveCalendar: (body: Partial<NextcloudCalendarSettings> & { app_password?: string }) => api.put('/integrations/nextcloud/calendar', body),
+  /** the address of the CRM's Calendar tab (anyone who reads the pipeline); empty when none is set */
+  getCalendarEmbed: () => api.get<{ url: string; can_configure: boolean }>('/integrations/nextcloud/calendar/embed'),
+  /** reads the free times, writes one test event and removes it */
+  testCalendar: () => api.post<{ slots: string[]; write_checked: boolean; cleanup_failed?: boolean }>('/integrations/nextcloud/calendar/test'),
   files: (path: string) => api.get<{ path: string; entries: NextcloudEntry[] }>('/integrations/nextcloud/files', { params: { path } })
 }
 
@@ -1918,6 +1993,8 @@ export interface SalesOpportunity {
   interest?: string
   estimated_value?: number
   estimated_quantity?: number
+  next_task_at?: string
+  next_task_note?: string
   xprocess_num_pedido?: string
   xprocess_documento?: string
   unit_of_measure?: 'UN' | 'M' | 'M2' | 'KG' | 'PCT' | 'CX'
@@ -1935,6 +2012,12 @@ export interface SalesOpportunity {
   cancelled_at?: string
   sla_breached: boolean
   sla_breached_at?: string
+  /** opened by the AI agent after qualifying the customer */
+  created_by_ai?: boolean
+  /** the Meta ad that first brought the customer */
+  ad_origin?: { headline?: string; source_id?: string; clicks: number }
+  /** the customer's next booked meeting (AI agent, organization calendar) */
+  meeting?: { start: string; location?: string }
   // Populated only where the handler preloads the association: list
   // preloads both (assigned_user trimmed to id + name), get only contact.
   contact?: { id: string; profile_name?: string; phone_number?: string; cpf_cnpj?: string }
@@ -1995,7 +2078,7 @@ export const salesOpportunitiesService = {
     api.put<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/stage`, { stage }),
   changeDirecionamento: (id: string, direcionamento: SalesDirecionamento) =>
     api.put<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/direcionamento`, { direcionamento }),
-  updateDetails: (id: string, details: { interest?: string; estimated_value?: number; estimated_quantity?: number; unit_of_measure?: string; realized_value?: number; realized_quantity?: number }) =>
+  updateDetails: (id: string, details: { interest?: string; estimated_value?: number; estimated_quantity?: number; unit_of_measure?: string; realized_value?: number; realized_quantity?: number; next_task_at?: string; next_task_note?: string }) =>
     api.put<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/details`, details),
   convert: (id: string, realized?: { realized_value?: number; realized_quantity?: number }) =>
     api.post<ApiEnvelope<SalesOpportunity>>(`/sales-opportunities/${id}/convert`, realized),

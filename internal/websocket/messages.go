@@ -55,6 +55,8 @@ const (
 
 	// Occurrence types
 	TypeOccurrenceChanged      = "occurrence_changed"
+	// TypeOccurrenceAlert tells a client to refetch its protocol alerts
+	TypeOccurrenceAlert = "occurrence_alert"
 	TypeOccurrenceEventCreated = "occurrence_event_created"
 
 	// Conversation note types

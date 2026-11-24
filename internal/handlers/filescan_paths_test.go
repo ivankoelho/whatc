@@ -153,9 +153,12 @@ func TestScanIngress_RefusesInfectedAndUnscannedUploads(t *testing.T) {
 			assert.Equal(t, fasthttp.StatusServiceUnavailable, code, "engine down: %s", body)
 		})
 	}
-	var ingress int64
-	w.app.DB.Model(&models.AuditLog{}).Where("resource_type = ?", "file_scan_ingress").Count(&ingress)
-	assert.GreaterOrEqual(t, ingress, int64(len(paths)), "each infected upload is audited")
+	// the audit entry is written off the request path: wait for it instead of counting at once
+	assert.Eventually(t, func() bool {
+		var ingress int64
+		w.app.DB.Model(&models.AuditLog{}).Where("resource_type = ?", "file_scan_ingress").Count(&ingress)
+		return ingress >= int64(len(paths))
+	}, 5*time.Second, 50*time.Millisecond, "each infected upload is audited")
 }
 
 // A clean CSV is imported; a clean branding image is published together with its verdict and served.

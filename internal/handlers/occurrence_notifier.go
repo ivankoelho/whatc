@@ -191,6 +191,7 @@ func (a *App) sendNotification(ctx context.Context, n *models.OccurrenceNotifica
 	if err := a.DB.Where("organization_id = ? AND name = ?", n.OrganizationID, n.WhatsAppAccount).First(&account).Error; err != nil {
 		return notificationOutcome{status: models.NotificationFailed, reason: "account_not_found_in_organization", err: "the configured account does not exist in this organization"}
 	}
+	a.decryptAccountSecrets(&account) // loaded straight from the database: the token is still the stored cipher
 
 	// Eligibility: automatic messages are limited to the customer who wrote to us
 	// (an operational follow-up to their own request). A template classified as

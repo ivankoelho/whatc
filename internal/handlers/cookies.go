@@ -12,7 +12,27 @@ const (
 	cookieAccessName  = "whm_access"
 	cookieRefreshName = "whm_refresh"
 	cookieCSRFName    = "whm_csrf"
+	// cookieSessionName carries the stable session id (a random value that grants
+	// nothing) so logout can name the session: the refresh cookie is scoped to
+	// /api/auth/refresh and never reaches /api/auth/logout.
+	cookieSessionName = "whm_sid"
 )
+
+func (a *App) setSessionCookie(r *fastglue.Request, sid string) {
+	sc := fasthttp.AcquireCookie()
+	sc.SetKey(cookieSessionName)
+	sc.SetValue(sid)
+	sc.SetHTTPOnly(true)
+	sc.SetSecure(a.Config.Cookie.Secure)
+	sc.SetSameSite(fasthttp.CookieSameSiteLaxMode)
+	sc.SetPath(a.Config.Server.BasePath + "/api")
+	sc.SetMaxAge(a.Config.JWT.RefreshExpiryDays * 86400)
+	if d := a.Config.Cookie.Domain; d != "" {
+		sc.SetDomain(d)
+	}
+	r.RequestCtx.Response.Header.SetCookie(sc)
+	fasthttp.ReleaseCookie(sc)
+}
 
 // setAuthCookies sets httpOnly auth cookies and a JS-readable CSRF cookie.
 func (a *App) setAuthCookies(r *fastglue.Request, accessToken, refreshToken string) {
@@ -72,7 +92,7 @@ func (a *App) clearAuthCookies(r *fastglue.Request) {
 	domain := a.Config.Cookie.Domain
 
 	bp := a.Config.Server.BasePath
-	for _, name := range []string{cookieAccessName, cookieRefreshName, cookieCSRFName} {
+	for _, name := range []string{cookieAccessName, cookieRefreshName, cookieCSRFName, cookieSessionName} {
 		c := fasthttp.AcquireCookie()
 		c.SetKey(name)
 		c.SetValue("")
@@ -81,7 +101,7 @@ func (a *App) clearAuthCookies(r *fastglue.Request) {
 		c.SetSecure(a.Config.Cookie.Secure)
 		c.SetSameSite(fasthttp.CookieSameSiteLaxMode)
 		switch name {
-		case cookieAccessName:
+		case cookieAccessName, cookieSessionName:
 			c.SetPath(bp + "/api")
 		case cookieRefreshName:
 			c.SetPath(bp + "/api/auth/refresh")

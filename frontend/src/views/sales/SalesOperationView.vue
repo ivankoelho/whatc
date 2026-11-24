@@ -12,10 +12,10 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Skeleton } from '@/components/ui/skeleton'
 import { PageHeader, DataTable, ErrorState, DeleteConfirmDialog, DateRangePicker, type Column } from '@/components/shared'
-import { Plus, TrendingUp, Briefcase, Target, CheckCircle2, XCircle, Percent, AlertTriangle, Trash2, Pencil, Columns3, List, Store, UserRound, X, LayoutDashboard } from 'lucide-vue-next'
+import { Plus, TrendingUp, Briefcase, Target, CheckCircle2, XCircle, Percent, AlertTriangle, Trash2, Pencil, Columns3, List, Store, UserRound, X, LayoutDashboard, CalendarDays } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { useDateRange } from '@/composables/useDateRange'
-import { salesOpportunitiesService } from '@/services/api'
+import { salesOpportunitiesService, salesFeaturesService, nextcloudService } from '@/services/api'
 import type { SalesOpportunity, SalesScopeInfo, SalesSummary } from '@/services/api'
 import { getErrorMessage } from '@/lib/api-utils'
 import { formatDate } from '@/lib/utils'
@@ -35,6 +35,14 @@ const authStore = useAuthStore()
 // first; ?tab= keeps the choice shareable and survives a reload.
 type CrmTab = 'dashboard' | 'board' | 'list'
 const CRM_TABS: CrmTab[] = ['dashboard', 'board', 'list']
+
+// The office calendar (Nextcloud) opens in its own browser tab from a button in the top bar; no button until an
+// administrator has saved its address.
+const calendarUrl = ref('')
+nextcloudService.getCalendarEmbed().then(res => {
+  const d = res.data as { data?: { url?: string }; url?: string }
+  calendarUrl.value = d.data?.url ?? d.url ?? ''
+}).catch(() => {})
 const route = useRoute()
 const router = useRouter()
 const activeTab = computed<CrmTab>({
@@ -67,16 +75,29 @@ function onOpportunityCreated() {
 const scopeInfo = ref<SalesScopeInfo>({ scope: 'own', sellers: [], units: [] })
 const unitFilter = ref('all')
 const sellerFilter = ref('all')
+// Quick filters of the board: what the AI agent and the ads brought. Each one narrows the list, the board and
+// the indicators the same way (the server applies them to all three).
+type QuickKey = 'has_meeting' | 'from_ad' | 'ai' | 'unassigned' | 'task_overdue'
+const QUICK_FILTERS: { key: QuickKey; labelKey: string }[] = [
+  { key: 'has_meeting', labelKey: 'sales.quickHasMeeting' },
+  { key: 'from_ad', labelKey: 'sales.quickFromAd' },
+  { key: 'ai', labelKey: 'sales.quickAI' },
+  { key: 'unassigned', labelKey: 'sales.quickUnassigned' },
+  { key: 'task_overdue', labelKey: 'sales.quickTaskOverdue' },
+]
+const quick = ref<Record<QuickKey, boolean>>({ has_meeting: false, from_ad: false, ai: false, unassigned: false, task_overdue: false })
 const filterParams = computed(() => {
-  const p: { assigned_user_id?: string; unit_id?: string } = {}
+  const p: Record<string, string> = {}
   if (sellerFilter.value !== 'all') p.assigned_user_id = sellerFilter.value
   if (unitFilter.value !== 'all') p.unit_id = unitFilter.value
+  for (const k of QUICK_FILTERS) if (quick.value[k.key]) p[k.key] = 'true'
   return p
 })
-const hasFilters = computed(() => unitFilter.value !== 'all' || sellerFilter.value !== 'all')
+const hasFilters = computed(() => unitFilter.value !== 'all' || sellerFilter.value !== 'all' || QUICK_FILTERS.some(k => quick.value[k.key]))
 function clearFilters() {
   unitFilter.value = 'all'
   sellerFilter.value = 'all'
+  for (const k of QUICK_FILTERS) quick.value[k.key] = false
 }
 
 async function fetchScope() {
@@ -155,6 +176,10 @@ const statsLoading = computed(() => summary.value === null)
 
 // Painel KPI tiles. Tones are semantic (sky = volume, amber = early stage,
 // emerald = won, rose = lost, teal = rate, orange = needs action).
+// The "without direcionamento" tile only exists for organizations that use direcionamento.
+const usesDirecionamento = ref(true)
+salesFeaturesService.get().then(r => { usesDirecionamento.value = !!r.data.data.direcionamento }).catch(() => {})
+
 const kpis = computed(() => [
   { key: 'total', label: t('sales.statAttendances'), value: String(stats.value.total), icon: Briefcase, tone: 'bg-sky-500/15 text-sky-600 dark:text-sky-300' },
   { key: 'potencial', label: t('sales.statPotential'), value: String(stats.value.potencial), icon: Target, tone: 'bg-amber-500/15 text-amber-600 dark:text-amber-300' },
@@ -162,7 +187,7 @@ const kpis = computed(() => [
   { key: 'perdida', label: t('sales.statLost'), value: String(stats.value.perdida), icon: XCircle, tone: 'bg-rose-500/15 text-rose-600 dark:text-rose-300' },
   { key: 'conversion', label: t('sales.statConversion'), value: `${stats.value.conversionRate.toFixed(1)}%`, icon: Percent, tone: 'bg-teal-500/15 text-teal-600 dark:text-teal-300' },
   { key: 'semDirecionamento', label: t('sales.statNoDirecionamento'), value: String(stats.value.semDirecionamento), icon: AlertTriangle, tone: 'bg-orange-500/15 text-orange-600 dark:text-orange-300' },
-])
+].filter(k => k.key !== 'semDirecionamento' || usesDirecionamento.value))
 
 // Value distribution: 3 slices, so a donut fits; the legend beside it is a
 // table with value and share (the accessible view, and no need to hover).
@@ -417,6 +442,11 @@ onMounted(() => {
           <X class="mr-1 h-3.5 w-3.5" aria-hidden="true" />{{ $t('common.clear') }}
         </Button>
         </template>
+          <Button v-if="calendarUrl" as-child variant="outline" size="sm" class="h-9 text-[13px]">
+            <a :href="calendarUrl" target="_blank" rel="noopener noreferrer" data-testid="crm-calendar-open">
+              <CalendarDays class="mr-1 h-3.5 w-3.5" aria-hidden="true" />{{ $t('sales.tabCalendar') }}
+            </a>
+          </Button>
           <Button v-if="canCreateOpportunity" size="sm" class="h-9 text-[13px]" @click="pickContactOpen = true">
             <Plus class="mr-1 h-3.5 w-3.5" aria-hidden="true" />{{ $t('sales.newOpportunity') }}
           </Button>
@@ -503,8 +533,24 @@ onMounted(() => {
       </TabsContent>
 
       <!-- Quadro: the Kanban takes the whole area, like Protocolos -->
+      <!-- No display class on the TabsContent itself: an inactive tab is hidden by the [hidden] attribute, and a `flex`
+           class would override it and leave an empty block taking space on the other tabs. -->
       <TabsContent value="board" class="mt-0 min-h-0 flex-1">
-        <div class="h-full">
+        <div class="flex h-full min-h-0 flex-col">
+        <div class="flex shrink-0 flex-wrap items-center gap-2 px-4 pt-3" role="group" :aria-label="$t('sales.quickFilters')" data-testid="board-quick-filters">
+          <button
+            v-for="k in QUICK_FILTERS"
+            :key="k.key"
+            type="button"
+            :data-testid="`quick-${k.key}`"
+            :aria-pressed="quick[k.key]"
+            class="rounded-full border px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            :class="quick[k.key] ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card text-muted-foreground hover:text-foreground'"
+            @click="quick[k.key] = !quick[k.key]"
+          >{{ $t(k.labelKey) }}</button>
+          <button v-if="hasFilters" type="button" class="text-xs text-muted-foreground underline-offset-2 hover:underline" @click="clearFilters">{{ $t('common.clear') }}</button>
+        </div>
+        <div class="min-h-0 flex-1">
           <SalesOpportunityBoard
             ref="boardRef"
             :filters="filterParams"
@@ -515,6 +561,7 @@ onMounted(() => {
             @details-change="handleDetailsChange"
           />
         </div>
+      </div>
       </TabsContent>
 
       <!-- Lista: the full table -->
@@ -628,6 +675,7 @@ onMounted(() => {
           </div>
         </ScrollArea>
       </TabsContent>
+
       </div>
     </Tabs>
 

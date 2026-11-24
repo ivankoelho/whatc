@@ -149,7 +149,7 @@ func (a *App) CreateInternalTicket(r *fastglue.Request) error {
 		}
 		return &id, true
 	}
-	ok := true
+	var ok bool
 	var v *uuid.UUID
 	if v, ok = orgRef(req.UnitID, "unit_id", func(id uuid.UUID) error { _, e := findByIDAndOrg[models.Unit](a.DB, r, id, orgID, "Unit"); return e }); !ok {
 		return nil

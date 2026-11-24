@@ -87,6 +87,23 @@ type AIConfig struct {
 	SystemPrompt   string     `gorm:"column:ai_system_prompt;type:text" json:"ai_system_prompt"`
 	IncludeHistory bool       `gorm:"column:ai_include_history;default:true" json:"ai_include_history"`
 	HistoryLimit   int        `gorm:"column:ai_history_limit;default:4" json:"ai_history_limit"`
+
+	// DefaultAgentID is the organization's default AIAgent. ChatbotSettings is one row per
+	// organization in practice, so this does NOT say where the agent may act: that is the
+	// agent's own WhatsAppAccounts list (fail-closed; see AIAgent).
+	DefaultAgentID *uuid.UUID `gorm:"column:ai_default_agent_id;type:uuid" json:"ai_default_agent_id,omitempty"`
+	// MonthlyTokenLimit caps the AI tokens the organization's agent may use per calendar month.
+	// 0 = no cap.
+	MonthlyTokenLimit int64 `gorm:"column:ai_monthly_token_limit;not null;default:0" json:"ai_monthly_token_limit"`
+	// UnlimitedAck is the administrator's explicit, deliberate "I accept running the agent with no monthly
+	// token cap". Without a cap AND without this, the agent cannot be activated: an accidental activation
+	// with no limit must not be possible. Default false.
+	UnlimitedAck bool `gorm:"column:ai_unlimited_ack;not null;default:false" json:"ai_unlimited_ack"`
+	// AgentOnly makes the organization's chatbot run ONLY on numbers where an AI agent is authorized (see
+	// resolveAIAgent). Every other number keeps the behavior it has with the chatbot off (messages go to
+	// the human queue), so turning the chatbot on for a pilot number changes nothing for the rest of the
+	// organization. Default false: organizations that never set it behave exactly as before.
+	AgentOnly bool `gorm:"column:ai_agent_only;not null;default:false" json:"ai_agent_only"`
 }
 
 // PanelFieldConfig defines a field to display in the contact info panel

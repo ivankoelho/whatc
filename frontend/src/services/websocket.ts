@@ -75,6 +75,7 @@ const WS_TYPE_CAMPAIGN_STATS_UPDATE = 'campaign_stats_update'
 
 // Permission types
 const WS_TYPE_PERMISSIONS_UPDATED = 'permissions_updated'
+const WS_TYPE_OCCURRENCE_ALERT = 'occurrence_alert'
 
 // Call types
 const WS_TYPE_CALL_INCOMING = 'call_incoming'
@@ -326,6 +327,9 @@ class WebSocketService {
         case WS_TYPE_CAMPAIGN_STATS_UPDATE:
           this.handleCampaignStatsUpdate(message.payload)
           break
+        case WS_TYPE_OCCURRENCE_ALERT:
+          window.dispatchEvent(new CustomEvent('occurrence-alert'))
+          break
         case WS_TYPE_PERMISSIONS_UPDATED:
           this.handlePermissionsUpdated()
           break
@@ -417,6 +421,7 @@ class WebSocketService {
         // it — so dropping it here left every bubble unlabelled until reload.
         sent_by_user_id: payload.sent_by_user_id,
         sent_by_user_name: payload.sent_by_user_name,
+        sender_type: payload.sender_type,
         created_at: payload.created_at,
         updated_at: payload.updated_at
       })

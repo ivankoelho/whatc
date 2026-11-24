@@ -44,6 +44,7 @@ func (a *App) customerAccountOf(orgID uuid.UUID, occ *models.Occurrence) *models
 	if err := a.DB.Where("organization_id = ? AND name = ?", orgID, occ.Contact.WhatsAppAccount).First(&account).Error; err != nil {
 		return nil
 	}
+	a.decryptAccountSecrets(&account) // loaded straight from the database: the token is still the stored cipher
 	return &account
 }
 

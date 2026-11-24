@@ -498,6 +498,8 @@ func runServer(args []string) {
 	notifierCtx, notifierCancel := context.WithCancel(context.Background())
 	go app.StartOccurrenceNotifier(notifierCtx)
 	go app.StartSendIntentReconciler(notifierCtx)
+	// AI agent wait: answers customers once they paused; recovers waits left by a previous run
+	go app.StartAIWaitWorker(notifierCtx)
 
 	// Start presence reaper (sweeps every 10s; grace is 60s)
 	presenceCtx, presenceCancel := context.WithCancel(context.Background())
@@ -759,6 +761,9 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/branding/logo", app.ServeLogo)
 	g.POST("/api/branding/logo", app.UploadLogo)
 	g.DELETE("/api/branding/logo", app.DeleteLogo)
+	g.GET("/api/branding/wallpaper", app.ServeWallpaper)
+	g.POST("/api/branding/wallpaper", app.UploadWallpaper)
+	g.DELETE("/api/branding/wallpaper", app.DeleteWallpaper)
 
 	// Webhook routes (public - for Meta)
 	g.GET("/api/webhook", app.WebhookVerify)
@@ -785,7 +790,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 		// /api/branding/login-background and /api/branding/logo are public for
 		// GET (the login page loads them before any auth) but the POST/DELETE
 		// below require auth — only skip the middleware for the read.
-		if (path == "/api/branding/login-background" || path == "/api/branding/logo") &&
+		if (path == "/api/branding/login-background" || path == "/api/branding/logo" || path == "/api/branding/wallpaper") &&
 			string(r.RequestCtx.Method()) == "GET" {
 			return r
 		}
@@ -982,6 +987,10 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.PUT("/api/integrations/nextcloud/me", app.ConnectNextcloud)
 	g.DELETE("/api/integrations/nextcloud/me", app.DisconnectNextcloud)
 	g.GET("/api/integrations/nextcloud/files", app.ListNextcloudFiles)
+	g.GET("/api/integrations/nextcloud/calendar", app.GetNextcloudCalendar)
+	g.PUT("/api/integrations/nextcloud/calendar", app.PutNextcloudCalendar)
+	g.POST("/api/integrations/nextcloud/calendar/test", app.TestNextcloudCalendar)
+	g.GET("/api/integrations/nextcloud/calendar/embed", app.GetCalendarEmbed)
 	g.PUT("/api/team-chat/messages/{id}/poll-vote", app.VoteChatPoll)
 	g.PUT("/api/team-chat/messages/{id}/reactions/{code}", app.PutChatReaction)
 	g.DELETE("/api/team-chat/messages/{id}/reactions/{code}", app.DeleteChatReaction)
@@ -1003,6 +1012,10 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/occurrences/scope-audit/apply", app.ApplyOccurrenceScopeSuggestions)
 	g.PUT("/api/occurrences/{id}/scope", app.SetOccurrenceScope)
 	g.POST("/api/occurrences/{id}/reassign", app.ReassignOccurrence)
+	g.GET("/api/occurrence-alerts", app.ListOccurrenceAlerts)
+	g.PUT("/api/occurrence-alerts/seen", app.MarkOccurrenceAlertsSeen)
+	g.PUT("/api/occurrence-alerts/dismiss-all", app.DismissAllOccurrenceAlerts)
+	g.PUT("/api/occurrence-alerts/{id}/dismiss", app.DismissOccurrenceAlert)
 	g.GET("/api/occurrences/{id}/notifications", app.ListOccurrenceNotifications)
 	g.POST("/api/occurrences/{id}/notifications/{nid}/resolve", app.ResolveOccurrenceNotification)
 	g.GET("/api/occurrences/{id}/chat", app.GetOccurrenceChat)
@@ -1061,6 +1074,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.DELETE("/api/sales-opportunities/{id}", app.DeleteSalesOpportunity)
 
 	// CRM — integração X2 ERP
+	g.GET("/api/sales-features", app.GetSalesFeatures)
 	g.GET("/api/xprocess-integration", app.GetXProcessIntegration)
 	g.PUT("/api/xprocess-integration", app.UpsertXProcessIntegration)
 	g.POST("/api/xprocess-integration/test", app.TestXProcessIntegrationConnection)
@@ -1199,6 +1213,14 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.PUT("/api/chatbot/ai-contexts/{id}", app.UpdateAIContext)
 	g.DELETE("/api/chatbot/ai-contexts/{id}", app.DeleteAIContext)
 
+	// AI Agents
+	g.GET("/api/chatbot/ai-agents", app.ListAIAgents)
+	g.POST("/api/chatbot/ai-agents", app.CreateAIAgent)
+	g.GET("/api/chatbot/ai-agents/{id}", app.GetAIAgent)
+	g.PUT("/api/chatbot/ai-agents/{id}", app.UpdateAIAgent)
+	g.DELETE("/api/chatbot/ai-agents/{id}", app.DeleteAIAgent)
+	g.GET("/api/chatbot/ai-agents/{id}/readiness", app.GetAIAgentReadiness)
+
 	// Agent Transfers
 	g.GET("/api/chatbot/transfers", app.ListAgentTransfers)
 	g.POST("/api/chatbot/transfers", app.CreateAgentTransfer)
@@ -1243,6 +1265,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/analytics/agents/{id}", app.GetAgentDetails)
 	g.GET("/api/analytics/agents/comparison", app.GetAgentComparison)
 	g.GET("/api/analytics/agents/live", app.GetLiveAgents)
+	g.GET("/api/analytics/agents/attendance", app.GetAgentAttendance)
 
 	// Meta WhatsApp Analytics
 	// WhatsApp consumption (whatsapp_usage:read|write)

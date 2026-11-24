@@ -314,6 +314,7 @@ func TestClient_DownloadMedia(t *testing.T) {
 
 			log := testutil.NopLogger()
 			client := whatsapp.NewWithTimeout(log, 5*time.Second)
+			client.TrustHost(server.Listener.Addr().String()) // a local server stands in for Meta's CDN
 
 			ctx := testutil.TestContext(t)
 
@@ -393,6 +394,51 @@ func TestClient_MarkMessageRead(t *testing.T) {
 			require.NoError(t, err)
 		})
 	}
+}
+
+// The typing indicator is the validated call: a read receipt of a received message that also carries
+// typing_indicator, and the only type ever sent is "text" (the API refuses any other).
+func TestClient_SendTypingIndicator(t *testing.T) {
+	t.Parallel()
+
+	var got map[string]any
+	var path string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+	}))
+	defer server.Close()
+
+	client := whatsapp.NewWithTimeout(testutil.NopLogger(), 5*time.Second)
+	client.HTTPClient = &http.Client{Transport: &testServerTransport{serverURL: server.URL}}
+
+	require.NoError(t, client.SendTypingIndicator(testutil.TestContext(t), testAccount(server.URL), "wamid.in1"))
+	assert.Contains(t, path, "/messages")
+	assert.Equal(t, map[string]any{
+		"messaging_product": "whatsapp",
+		"status":            "read",
+		"message_id":        "wamid.in1",
+		"typing_indicator":  map[string]any{"type": "text"},
+	}, got, "exactly the body validated on a real number, type text only")
+}
+
+// An API refusal is returned as an error, without the access token in it.
+func TestClient_SendTypingIndicator_ErrorHasNoToken(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"(#131009) Parameter value is not valid","code":131009}}`))
+	}))
+	defer server.Close()
+
+	client := whatsapp.NewWithTimeout(testutil.NopLogger(), 5*time.Second)
+	client.HTTPClient = &http.Client{Transport: &testServerTransport{serverURL: server.URL}}
+	account := testAccount(server.URL)
+
+	err := client.SendTypingIndicator(testutil.TestContext(t), account, "wamid.bad")
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), account.AccessToken)
 }
 
 func TestClient_SendImageMessage(t *testing.T) {
