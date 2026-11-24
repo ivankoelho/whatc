@@ -261,12 +261,12 @@ watchDebounced(() => props.protocol, loadAll, { debounce: 300 })
 <template>
   <!-- Fills its container's height; each column scrolls on its own (same as
        the CRM board), so short columns don't stretch to the longest one. -->
-  <div id="occurrences-board" class="flex h-full gap-3 overflow-x-auto p-4">
+  <div id="occurrences-board" class="flex h-full gap-3 overflow-x-auto p-4 max-md:snap-x max-md:snap-mandatory max-md:px-3 max-md:scroll-px-3">
     <div
       v-for="col in columns"
       :key="col.stage.id"
       :data-board-column="col.stage.name"
-      class="flex min-h-0 w-[288px] shrink-0 flex-col gap-2"
+      class="flex min-h-0 w-[288px] max-md:w-[calc(100vw-7rem)] max-md:snap-start shrink-0 flex-col gap-2"
     >
       <!-- Stage band (Bitrix's coloured column header): a tint of the stage
            colour with a solid underline, so any stage colour stays legible
@@ -304,6 +304,8 @@ watchDebounced(() => props.protocol, loadAll, { debounce: 300 })
             :group="{ name: 'occurrences' }"
             :move="canMove"
             item-key="id"
+            :delay="180"
+            :delay-on-touch-only="true"
             data-board-dropzone
             class="flex min-h-16 flex-1 flex-col gap-2 p-2"
             @start="onDragStart(col, $event)"

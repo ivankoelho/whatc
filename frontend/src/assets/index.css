@@ -890,3 +890,62 @@
 .avatar-status-pulse::after {
   animation: badge-pulse 2s ease-in-out infinite;
 }
+
+/* ===== Mobile app-like behavior (phones only; desktop untouched) ===== */
+@media (max-width: 767px) {
+  html, body { overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; }
+  /* 16px inputs stop iOS Safari from zooming on focus */
+  input:not([type='checkbox']):not([type='radio']), textarea, select { font-size: 16px !important; }
+  /* comfortable touch targets */
+  button, [role='button'], a { touch-action: manipulation; }
+  /* dialogs become near full-screen sheets */
+  [role='dialog'][data-state] { max-width: calc(100vw - 1rem) !important; max-height: 92dvh; overflow-y: auto; }
+  /* toasts (vue-sonner) sit above the bottom tab bar */
+  [data-sonner-toaster] { bottom: calc(4rem + env(safe-area-inset-bottom)) !important; }
+}
+
+/* DataTable -> stacked cards on phones (rows become cards, cells get their column label) */
+@media (max-width: 767px) {
+  .dt-mobile table, .dt-mobile tbody, .dt-mobile tr, .dt-mobile td { display: block; width: 100%; }
+  .dt-mobile thead { display: none; }
+  .dt-mobile tbody tr {
+    margin: 0.5rem 0.75rem; width: auto; padding: 0.5rem 0.75rem;
+    border: 1px solid hsl(var(--border)) !important; border-radius: 0.75rem;
+  }
+  .dt-mobile td {
+    display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
+    padding: 0.35rem 0 !important; border: 0 !important; text-align: right !important; height: auto !important;
+    min-width: 0; overflow-wrap: anywhere;
+  }
+  .dt-mobile td[data-label]::before {
+    content: attr(data-label); flex: none; max-width: 40%; text-align: left;
+    font-size: 0.7rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.03em; opacity: 0.55;
+  }
+  .dt-mobile td:not([data-label]) { justify-content: flex-end; }
+  .dt-mobile td[colspan] { display: block; text-align: center !important; }
+  .dt-mobile tbody tr:has(td[colspan]) { border: 0 !important; }
+}
+
+/* Toolbars: search goes full-width on its own row, filters wrap below */
+@media (max-width: 767px) {
+  div:has(> [data-search-input]) { flex-wrap: wrap; width: 100%; }
+  [data-search-input] { width: 100% !important; flex: 1 1 100%; }
+}
+
+/* Phones: a vertical page rail (Protocols, Call transfers, Settings hubs...) becomes a
+   horizontal strip above the content instead of eating ~90px of a 390px screen. */
+@media (max-width: 767px) {
+  div:has(> [role="tablist"][aria-orientation="vertical"].page-rail) { flex-direction: column; }
+  [role="tablist"][aria-orientation="vertical"].page-rail {
+    flex-direction: row; width: auto; height: auto; flex-shrink: 0;
+    overflow-x: auto; overflow-y: hidden; padding: 6px 8px;
+    border-right: 0; border-bottom: 1px solid hsl(var(--border));
+  }
+  [aria-orientation="vertical"].page-rail .page-rail-item,
+  [aria-orientation="vertical"].page-rail .page-rail-item > span:not(.page-rail-label):not(.page-rail-badge) {
+    flex-direction: row; gap: 6px; white-space: nowrap;
+  }
+  [aria-orientation="vertical"].page-rail .page-rail-item { flex: none; padding: 8px 12px; }
+  [aria-orientation="vertical"].page-rail .page-rail-label { display: inline; }
+  [aria-orientation="vertical"].page-rail .page-rail-badge { position: static; margin-left: 2px; }
+}

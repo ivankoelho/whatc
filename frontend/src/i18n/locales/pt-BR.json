@@ -328,6 +328,7 @@
     "expandSidebar": "Expandir barra lateral",
     "collapseSidebar": "Recolher barra lateral",
     "toggleMenu": "Alternar menu",
+    "more": "Mais",
     "mainNavigation": "Navegação principal",
     "wallpaper": "Plano de fundo",
     "wallpaperCustomize": "Personalizar",
@@ -4116,6 +4117,7 @@
     }
   },
   "agentAnalytics": {
+    "agentFilter": "Agente",
     "attendance": {
       "title": "Presença",
       "description": "Logins, ausências e logouts por agente no período",
@@ -4292,6 +4294,10 @@
     "errorLoadingInsights": "Falha ao carregar os insights da Meta. Tente novamente."
   },
   "flowBuilder": {
+    "canvasZoomIn": "Aproximar",
+    "canvasZoomOut": "Afastar",
+    "canvasFitView": "Ajustar à tela",
+    "canvasToggleInteractive": "Bloquear ou desbloquear o canvas",
     "steps": "Etapas",
     "add": "Adicionar",
     "flowSettings": "Configurações do fluxo",
@@ -4606,6 +4612,8 @@
       "menuBadge": "menu"
     },
     "properties": {
+      "playAudio": "Reproduzir áudio",
+      "pauseAudio": "Pausar áudio",
       "label": "Rótulo",
       "audio": "Áudio",
       "upload": "Enviar",

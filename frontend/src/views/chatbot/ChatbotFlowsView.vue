@@ -177,7 +177,7 @@ async function confirmDeleteFlow() {
     />
 
     <ScrollArea class="flex-1">
-      <div class="p-6">
+      <div class="p-6 max-md:p-3">
         <div>
           <Card>
             <CardHeader>

@@ -71,7 +71,7 @@ const openedAt = computed(() => {
           :to="`/chat/${occurrence.contact_id}`"
           :title="t('chat.openConversation')"
           :aria-label="`${t('chat.openConversation')}: ${contactName}`"
-          class="mt-0.5 inline-flex max-w-full items-center gap-1 rounded-md text-xs text-muted-foreground transition-colors hover:text-emerald-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:hover:text-emerald-400"
+          class="mt-0.5 inline-flex max-w-full items-center gap-1 [@media(pointer:coarse)]:-my-3 [@media(pointer:coarse)]:py-3 rounded-md text-xs text-muted-foreground transition-colors hover:text-emerald-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:hover:text-emerald-400"
           @click.stop
         >
           <MessageCircle class="h-3 w-3 shrink-0 text-emerald-500" aria-hidden="true" />

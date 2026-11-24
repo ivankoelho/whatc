@@ -2081,6 +2081,7 @@ async function sendMediaMessage() {
                 variant="ghost"
                 size="icon"
                 class="h-8 w-8 shrink-0 relative"
+                :aria-label="$t('chat.filterByTags')"
                 :class="contactsStore.selectedTags.length > 0 ? 'text-emerald-400 bg-emerald-500/10' : 'text-white/40 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100'"
               >
                 <Filter class="h-4 w-4" />
@@ -2277,16 +2278,16 @@ async function sendMediaMessage() {
             />
             <Tooltip v-if="canAssignContacts">
               <TooltipTrigger as-child>
-                <Button variant="ghost" size="icon" class="h-8 w-8 text-white/50 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100" @click="isAssignDialogOpen = true">
-                  <UserPlus class="h-4 w-4" />
+                <Button variant="ghost" size="icon" class="h-8 w-8 text-white/50 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100" :aria-label="$t('chat.assignToAgent')" @click="isAssignDialogOpen = true">
+                  <UserPlus class="h-4 w-4" aria-hidden="true" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>{{ $t('chat.assignToAgent') }}</TooltipContent>
             </Tooltip>
             <Tooltip v-if="activeTransferId">
               <TooltipTrigger as-child>
-                <Button variant="ghost" size="icon" class="h-8 w-8 text-white/50 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100" :disabled="isResuming" @click="resumeChatbot">
-                  <Play class="h-4 w-4" />
+                <Button variant="ghost" size="icon" class="h-8 w-8 text-white/50 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100" :disabled="isResuming" :aria-label="$t('chat.resumeChatbot')" @click="resumeChatbot">
+                  <Play class="h-4 w-4" aria-hidden="true" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>{{ $t('chat.resumeChatbot') }}</TooltipContent>
@@ -2299,6 +2300,7 @@ async function sendMediaMessage() {
                   size="icon"
                   class="h-8 w-8 text-white/50 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100"
                   :disabled="executingActionId === action.id"
+                  :aria-label="action.name"
                   @click="executeCustomAction(action)"
                 >
                   <Loader2 v-if="executingActionId === action.id" class="h-4 w-4 animate-spin" />
@@ -2353,9 +2355,11 @@ async function sendMediaMessage() {
                   id="notes-button"
                   class="h-8 w-8 relative text-white/50 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100"
                   :class="isNotesPanelOpen && 'bg-amber-500/10 text-amber-400 light:bg-amber-50 light:text-amber-600'"
+                  :aria-label="$t('chat.internalNotes')"
+                  :aria-pressed="isNotesPanelOpen"
                   @click="isNotesPanelOpen = !isNotesPanelOpen"
                 >
-                  <StickyNote class="h-4 w-4" />
+                  <StickyNote class="h-4 w-4" aria-hidden="true" />
                   <span
                     v-if="notesStore.notes.length > 0 && !isNotesPanelOpen"
                     id="notes-badge"
@@ -2375,17 +2379,19 @@ async function sendMediaMessage() {
                   id="info-button"
                   class="h-8 w-8 text-white/50 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100"
                   :class="isInfoPanelOpen && 'bg-white/[0.08] text-white light:bg-gray-100 light:text-gray-900'"
+                  :aria-label="$t('chat.contactInfo')"
+                  :aria-pressed="isInfoPanelOpen"
                   @click="isInfoPanelOpen = !isInfoPanelOpen"
                 >
-                  <Info class="h-4 w-4" />
+                  <Info class="h-4 w-4" aria-hidden="true" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>{{ $t('chat.contactInfo') }}</TooltipContent>
             </Tooltip>
             <DropdownMenu>
               <DropdownMenuTrigger as-child>
-                <Button variant="ghost" size="icon" class="h-8 w-8 text-white/50 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100">
-                  <MoreVertical class="h-4 w-4" />
+                <Button variant="ghost" size="icon" class="h-8 w-8 text-white/50 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100" :aria-label="$t('chat.contactOptions')">
+                  <MoreVertical class="h-4 w-4" aria-hidden="true" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
@@ -2794,11 +2800,11 @@ async function sendMediaMessage() {
                 </span>
               </div>
               <!-- Action buttons for incoming messages -->
-              <div v-if="message.direction === 'incoming'" class="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity self-center ml-1">
+              <div v-if="message.direction === 'incoming'" class="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 [@media(hover:none)]:gap-0 transition-opacity self-center ml-1">
                 <Popover :open="reactionPickerMessageId === message.id" @update:open="(open: boolean) => reactionPickerMessageId = open ? message.id : null">
                   <PopoverTrigger as-child>
-                    <Button variant="ghost" size="icon" class="h-6 w-6">
-                      <SmilePlus class="h-3 w-3" />
+                    <Button variant="ghost" size="icon" class="h-6 w-6 [@media(pointer:coarse)]:h-7 [@media(pointer:coarse)]:w-7" :aria-label="$t('chat.addReaction')">
+                      <SmilePlus class="h-3 w-3" aria-hidden="true" />
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent side="top" class="w-auto p-2">
@@ -2817,18 +2823,19 @@ async function sendMediaMessage() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  class="h-6 w-6"
+                  class="h-6 w-6 [@media(pointer:coarse)]:h-7 [@media(pointer:coarse)]:w-7"
+                  :aria-label="$t('chat.reply')"
                   @click="replyToMessage(message)"
                 >
-                  <Reply class="h-3 w-3" />
+                  <Reply class="h-3 w-3" aria-hidden="true" />
                 </Button>
               </div>
               <!-- Reply button for outgoing messages (shown on hover) -->
-              <div v-if="message.direction === 'outgoing'" class="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity self-center ml-1">
+              <div v-if="message.direction === 'outgoing'" class="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 [@media(hover:none)]:gap-0 transition-opacity self-center ml-1">
                 <Popover :open="reactionPickerMessageId === message.id" @update:open="(open: boolean) => reactionPickerMessageId = open ? message.id : null">
                   <PopoverTrigger as-child>
-                    <Button variant="ghost" size="icon" class="h-6 w-6">
-                      <SmilePlus class="h-3 w-3" />
+                    <Button variant="ghost" size="icon" class="h-6 w-6 [@media(pointer:coarse)]:h-7 [@media(pointer:coarse)]:w-7" :aria-label="$t('chat.addReaction')">
+                      <SmilePlus class="h-3 w-3" aria-hidden="true" />
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent side="top" class="w-auto p-2">
@@ -2847,10 +2854,11 @@ async function sendMediaMessage() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  class="h-6 w-6"
+                  class="h-6 w-6 [@media(pointer:coarse)]:h-7 [@media(pointer:coarse)]:w-7"
+                  :aria-label="$t('chat.reply')"
                   @click="replyToMessage(message)"
                 >
-                  <Reply class="h-3 w-3" />
+                  <Reply class="h-3 w-3" aria-hidden="true" />
                 </Button>
                 <Button
                   v-if="message.status === 'failed' && message.message_type !== 'template'"
@@ -2923,7 +2931,7 @@ async function sendMediaMessage() {
                 <span>
                   <Popover v-model:open="emojiPickerOpen">
                     <PopoverTrigger as-child>
-                      <button type="button" class="w-9 h-9 rounded-lg hover:bg-white/[0.08] light:hover:bg-gray-200 flex items-center justify-center transition-colors">
+                      <button type="button" :aria-label="$t('chat.emojiPicker')" class="w-9 h-9 rounded-lg hover:bg-white/[0.08] light:hover:bg-gray-200 flex items-center justify-center transition-colors">
                         <Smile class="w-[18px] h-[18px] text-white/40 light:text-gray-500" />
                       </button>
                     </PopoverTrigger>
@@ -2966,7 +2974,7 @@ async function sendMediaMessage() {
             </Tooltip>
             <Tooltip>
               <TooltipTrigger as-child>
-                <button type="button" class="w-9 h-9 rounded-lg hover:bg-white/[0.08] light:hover:bg-gray-200 flex items-center justify-center transition-colors" @click="openFilePicker">
+                <button type="button" class="w-9 h-9 rounded-lg hover:bg-white/[0.08] light:hover:bg-gray-200 flex items-center justify-center transition-colors" :aria-label="$t('chat.attachFile')" @click="openFilePicker">
                   <Paperclip class="w-[18px] h-[18px] text-white/40 light:text-gray-500" />
                 </button>
               </TooltipTrigger>
@@ -2988,7 +2996,7 @@ async function sendMediaMessage() {
               @keydown.enter.exact.prevent="sendMessage"
               @input="handleComposerInput"
             />
-            <button type="submit" class="w-9 h-9 rounded-lg bg-emerald-600 hover:bg-emerald-500 light:bg-emerald-500 light:hover:bg-emerald-600 flex items-center justify-center transition-colors disabled:opacity-50" :disabled="!messageInput.trim() || isSending">
+            <button type="submit" :aria-label="$t('chat.send')" class="w-9 h-9 rounded-lg bg-emerald-600 hover:bg-emerald-500 light:bg-emerald-500 light:hover:bg-emerald-600 flex items-center justify-center transition-colors disabled:opacity-50" :disabled="!messageInput.trim() || isSending">
               <Send class="w-4 h-4 text-white" />
             </button>
           </form>

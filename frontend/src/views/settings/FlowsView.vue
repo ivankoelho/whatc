@@ -231,7 +231,7 @@ function sanitizeScreensForMeta(screens: any[]): any[] {
     />
 
     <ScrollArea v-else class="flex-1">
-      <div class="p-6">
+      <div class="p-6 max-md:p-3">
         <div class="max-w-6xl mx-auto">
           <Card>
             <CardHeader>

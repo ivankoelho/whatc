@@ -248,7 +248,7 @@ onMounted(() => {
     />
 
     <ScrollArea v-else class="flex-1">
-      <div class="p-6">
+      <div class="p-6 max-md:p-3">
         <div class="max-w-6xl mx-auto space-y-6">
         <!-- Info Card -->
         <Card class="bg-blue-950/30 light:bg-blue-50 border-blue-800 light:border-blue-200">

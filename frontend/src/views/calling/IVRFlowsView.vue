@@ -188,7 +188,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="p-6 space-y-6">
+  <div class="p-6 max-md:p-3 space-y-6">
     <div class="flex items-center justify-between">
       <div>
         <h1 class="text-2xl font-bold">{{ t('calling.ivrFlows') }}</h1>

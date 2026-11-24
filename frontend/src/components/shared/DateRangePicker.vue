@@ -39,7 +39,7 @@ const maxDate = today(getLocalTimeZone())
     :model-value="selectedRange"
     @update:model-value="emit('update:selectedRange', $event as TimeRangePreset)"
   >
-    <SelectTrigger class="w-[140px]">
+    <SelectTrigger class="w-[140px]" :aria-label="t('dateRange.selectRange', 'Date Range')">
       <SelectValue :placeholder="t('dateRange.selectRange', 'Date Range')" />
     </SelectTrigger>
     <SelectContent>

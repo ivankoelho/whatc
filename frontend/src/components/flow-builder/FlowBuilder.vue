@@ -673,6 +673,7 @@ defineExpose({
             <Label class="text-xs">{{ t('flows.builder.required') }}</Label>
             <Switch
               :checked="selectedComponent.required"
+              :aria-label="t('flows.builder.required')"
               @update:checked="updateComponentProperty('required', $event)"
             />
           </div>

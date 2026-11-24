@@ -71,7 +71,7 @@ async function changePassword() {
 
     <!-- Content -->
     <ScrollArea class="flex-1">
-      <div class="p-6 space-y-6 max-w-2xl mx-auto">
+      <div class="p-6 max-md:p-3 space-y-6 max-w-2xl mx-auto">
         <!-- User Info -->
         <Card>
           <CardHeader>
@@ -114,7 +114,9 @@ async function changePassword() {
                 />
                 <button
                   type="button"
-                  class="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  class="absolute right-3 top-1/2 -translate-y-1/2 [@media(pointer:coarse)]:-mr-3.5 [@media(pointer:coarse)]:p-3.5 text-muted-foreground hover:text-foreground"
+                  :aria-label="showCurrentPassword ? $t('auth.hidePassword') : $t('auth.showPassword')"
+                  :aria-pressed="showCurrentPassword"
                   @click="showCurrentPassword = !showCurrentPassword"
                 >
                   <Eye v-if="!showCurrentPassword" class="h-4 w-4" />
@@ -133,7 +135,9 @@ async function changePassword() {
                 />
                 <button
                   type="button"
-                  class="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  class="absolute right-3 top-1/2 -translate-y-1/2 [@media(pointer:coarse)]:-mr-3.5 [@media(pointer:coarse)]:p-3.5 text-muted-foreground hover:text-foreground"
+                  :aria-label="showNewPassword ? $t('auth.hidePassword') : $t('auth.showPassword')"
+                  :aria-pressed="showNewPassword"
                   @click="showNewPassword = !showNewPassword"
                 >
                   <Eye v-if="!showNewPassword" class="h-4 w-4" />
@@ -153,7 +157,9 @@ async function changePassword() {
                 />
                 <button
                   type="button"
-                  class="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  class="absolute right-3 top-1/2 -translate-y-1/2 [@media(pointer:coarse)]:-mr-3.5 [@media(pointer:coarse)]:p-3.5 text-muted-foreground hover:text-foreground"
+                  :aria-label="showConfirmPassword ? $t('auth.hidePassword') : $t('auth.showPassword')"
+                  :aria-pressed="showConfirmPassword"
                   @click="showConfirmPassword = !showConfirmPassword"
                 >
                   <Eye v-if="!showConfirmPassword" class="h-4 w-4" />

@@ -328,6 +328,7 @@
     "expandSidebar": "Expand sidebar",
     "collapseSidebar": "Collapse sidebar",
     "toggleMenu": "Toggle menu",
+    "more": "More",
     "mainNavigation": "Main navigation",
     "wallpaper": "Background",
     "wallpaperCustomize": "Customize",
@@ -4127,6 +4128,7 @@
     }
   },
   "agentAnalytics": {
+    "agentFilter": "Agent",
     "attendance": {
       "title": "Attendance",
       "description": "Logins, away time and logouts per agent in the period",
@@ -4303,6 +4305,10 @@
     "errorLoadingInsights": "Failed to load Meta insights. Please try again."
   },
   "flowBuilder": {
+    "canvasZoomIn": "Zoom in",
+    "canvasZoomOut": "Zoom out",
+    "canvasFitView": "Fit view",
+    "canvasToggleInteractive": "Lock or unlock the canvas",
     "steps": "Steps",
     "add": "Add",
     "flowSettings": "Flow Settings",
@@ -4617,6 +4623,8 @@
       "menuBadge": "menu"
     },
     "properties": {
+      "playAudio": "Play audio",
+      "pauseAudio": "Pause audio",
       "label": "Label",
       "audio": "Audio",
       "upload": "Upload",

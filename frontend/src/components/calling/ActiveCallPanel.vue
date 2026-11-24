@@ -82,12 +82,20 @@ async function handleAccept(id: string) {
   <Teleport to="body">
     <div
       v-if="showPanel"
-      class="fixed bottom-6 right-6 z-50 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl p-4 min-w-[260px]"
+      role="region"
+      :aria-label="t('callTransfers.title')"
+      class="fixed bottom-6 right-6 max-md:bottom-[calc(4.5rem+env(safe-area-inset-bottom))] max-md:left-3 max-md:right-3 max-md:min-w-0 z-50 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl p-4 min-w-[260px]"
     >
-      <!-- Caller info -->
-      <div class="flex items-center gap-3 mb-3">
+      <!-- Caller info. An incoming call is announced assertively (role=alert fires when the panel
+           appears); afterwards status changes (connected, on hold) are polite. -->
+      <div
+        class="flex items-center gap-3 mb-3"
+        :role="!store.isOnCall && firstWaiting ? 'alert' : 'status'"
+        aria-atomic="true"
+      >
         <div class="w-8 h-8 rounded-full flex items-center justify-center"
           :class="store.isOnCall ? 'bg-green-600/20' : 'bg-green-600/20'"
+          aria-hidden="true"
         >
           <PhoneIncoming v-if="!store.isOnCall && firstWaiting" class="h-4 w-4 text-green-400 animate-pulse" />
           <Phone v-else class="h-4 w-4 text-green-400" :class="{ 'animate-pulse': store.isConnecting }" />
@@ -102,7 +110,7 @@ async function handleAccept(id: string) {
 
       <!-- Timer (only when on active call) -->
       <div v-if="store.isOnCall" class="text-center mb-3">
-        <span class="text-2xl font-mono text-zinc-200">{{ formattedDuration }}</span>
+        <span class="text-2xl font-mono text-zinc-200" role="timer" aria-live="off">{{ formattedDuration }}</span>
       </div>
 
       <!-- Call controls -->
@@ -114,10 +122,12 @@ async function handleAccept(id: string) {
           variant="ghost"
           class="h-10 w-10 rounded-full p-0 border !text-zinc-300"
           :class="store.isMuted ? '!bg-red-900/30 !border-red-700 hover:!bg-red-900/50' : '!bg-zinc-800 !border-zinc-600 hover:!bg-zinc-700'"
+          :aria-label="store.isMuted ? t('callTransfers.unmute') : t('callTransfers.mute')"
+          :aria-pressed="store.isMuted"
           @click="store.toggleMute()"
         >
-          <MicOff v-if="store.isMuted" class="h-4 w-4 !text-red-400" />
-          <Mic v-else class="h-4 w-4" />
+          <MicOff v-if="store.isMuted" class="h-4 w-4 !text-red-400" aria-hidden="true" />
+          <Mic v-else class="h-4 w-4" aria-hidden="true" />
         </Button>
 
         <!-- Hold/Resume (only when on active call) -->
@@ -128,10 +138,11 @@ async function handleAccept(id: string) {
           class="h-10 w-10 rounded-full p-0 border !text-zinc-300"
           :class="store.isOnHold ? '!bg-amber-900/30 !border-amber-700 hover:!bg-amber-900/50' : '!bg-zinc-800 !border-zinc-600 hover:!bg-zinc-700'"
           :title="store.isOnHold ? t('calling.resume') : t('calling.hold')"
+          :aria-label="store.isOnHold ? t('calling.resume') : t('calling.hold')"
           @click="store.isOnHold ? store.resumeCall() : store.holdCall()"
         >
-          <Play v-if="store.isOnHold" class="h-4 w-4 !text-amber-400" />
-          <Pause v-else class="h-4 w-4" />
+          <Play v-if="store.isOnHold" class="h-4 w-4 !text-amber-400" aria-hidden="true" />
+          <Pause v-else class="h-4 w-4" aria-hidden="true" />
         </Button>
 
         <!-- Transfer (only when on active call) -->
@@ -141,9 +152,10 @@ async function handleAccept(id: string) {
           variant="ghost"
           class="h-10 w-10 rounded-full p-0 border !bg-zinc-800 !border-zinc-600 !text-zinc-300 hover:!bg-zinc-700"
           :title="t('callTransfers.transfer')"
+          :aria-label="t('callTransfers.transfer')"
           @click="showTransferPicker = true"
         >
-          <ArrowRightLeft class="h-4 w-4" />
+          <ArrowRightLeft class="h-4 w-4" aria-hidden="true" />
         </Button>
 
         <!-- Accept incoming transfer (green, only if not already on call) -->
@@ -153,9 +165,10 @@ async function handleAccept(id: string) {
           size="sm"
           class="h-10 w-10 rounded-full p-0 !bg-green-600 !text-white hover:!bg-green-500"
           :disabled="acceptingId === firstWaiting.id"
+          :aria-label="t('callTransfers.accept')"
           @click="handleAccept(firstWaiting.id)"
         >
-          <Phone class="h-4 w-4" />
+          <Phone class="h-4 w-4" aria-hidden="true" />
         </Button>
 
         <!-- Hangup / Decline (red) -->
@@ -164,9 +177,10 @@ async function handleAccept(id: string) {
           variant="ghost"
           size="sm"
           class="h-10 w-10 rounded-full p-0 !bg-red-600 !text-white hover:!bg-red-500"
+          :aria-label="t('callTransfers.hangup')"
           @click="store.endCall()"
         >
-          <PhoneOff class="h-4 w-4" />
+          <PhoneOff class="h-4 w-4" aria-hidden="true" />
         </Button>
       </div>
     </div>
